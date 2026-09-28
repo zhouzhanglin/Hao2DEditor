@@ -160,9 +160,9 @@ export function editKeys(
   return count
 }
 
-/** 删除选中的关键帧 */
+/** 删除选中的关键帧（含事件帧） */
 export function deleteKeys(doc: EditorDocument, animationName: string | null, selectors: readonly KeySelector[]): number {
-  return editKeys(doc, animationName, selectors, (subset, frames) => {
+  return editFrameTimes(doc, animationName, selectors, (subset, frames) => {
     for (const frame of subset) {
       const index = frames.indexOf(frame)
       if (index >= 0) frames.splice(index, 1)
@@ -170,7 +170,7 @@ export function deleteKeys(doc: EditorDocument, animationName: string | null, se
   })
 }
 
-/** 平移选中的关键帧（拖拽）：只改时间，保持排序 */
+/** 平移选中的关键帧（拖拽）：只改时间，保持排序；拖出原时长会自动延长动画 */
 export function moveKeys(
   doc: EditorDocument,
   animationName: string | null,
@@ -178,8 +178,8 @@ export function moveKeys(
   delta: number
 ): number {
   if (Math.abs(delta) < 1e-6) return 0
-  // 只限制不能为负：往后拖会自动延长动画时长（syncDuration 在 editKeys 内完成）
-  return editKeys(doc, animationName, selectors, (subset) => {
+  // 只限制不能为负：往后拖会自动延长动画时长
+  return editFrameTimes(doc, animationName, selectors, (subset) => {
     for (const frame of subset) frame.time = Math.max(0, frame.time + delta)
   })
 }
@@ -226,7 +226,7 @@ export function setKeysTimes(
   if (!animation) return 0
   let count = 0
   for (const entry of entries) {
-    const frames = resolveFrames(animation, entry.selector)
+    const frames = resolveTimeFrames(animation, entry.selector)
     if (!frames) continue
     const frame = frames.find((item) => Math.abs(item.time - entry.selector.time) < 1e-4)
     if (!frame) continue
@@ -234,6 +234,13 @@ export function setKeysTimes(
     count++
   }
   // 全部处理完再排序，保证 selector → frame 的匹配不被中途排序破坏
+  sortAllTracks(animation)
+  syncDuration(animation)
+  return count
+}
+
+/** 所有轨道的关键帧按时间重排（含事件轨） */
+function sortAllTracks(animation: AuthoringAnimData): void {
   for (const track of animation.bones) {
     sortFrames(track.rotate)
     sortFrames(track.translate)
@@ -246,8 +253,10 @@ export function setKeysTimes(
     sortFrames(track.visible)
   }
   for (const track of animation.deforms) sortFrames(track.frames)
-  syncDuration(animation)
-  return count
+  for (const track of animation.constraints) {
+    for (const list of Object.values(constraintFrames(track))) sortFrames(list)
+  }
+  sortFrames(animation.events)
 }
 
 export function setKeyEasing(
@@ -393,6 +402,48 @@ function constraintFrames(track: AuthoringAnimData['constraints'][number]): Reco
     rotateMix: track.rotateMix,
     translateMix: track.translateMix
   }
+}
+
+/**
+ * 时间类操作的定位：在 `resolveFrames` 基础上**额外支持事件轨**。
+ * 事件关键帧只有时间（没有 easing/curve），因此拖动 / 删除 / 重设时间都走这个入口。
+ */
+function resolveTimeFrames(animation: AuthoringAnimData, selector: KeySelector): Array<{ time: number }> | null {
+  if (selector.kind === 'event') return animation.events
+  return resolveFrames(animation, selector)
+}
+
+/** 时间类编辑的通用实现（移动 / 删除 / 重设时间），事件轨参与 */
+function editFrameTimes(
+  doc: EditorDocument,
+  animationName: string | null,
+  selectors: readonly KeySelector[],
+  mutate: (subset: Array<{ time: number }>, frames: Array<{ time: number }>) => void
+): number {
+  const animation = doc.animations.find((item) => item.name === animationName)
+  if (!animation) return 0
+  let count = 0
+  const grouped = new Map<string, KeySelector[]>()
+  for (const selector of selectors) {
+    const key = `${selector.kind}|${selector.target}|${selector.attachment}|${selector.channel}`
+    const list = grouped.get(key) ?? []
+    list.push(selector)
+    grouped.set(key, list)
+  }
+
+  for (const list of grouped.values()) {
+    const frames = resolveTimeFrames(animation, list[0])
+    if (!frames) continue
+    const subset = list
+      .map((selector) => frames.find((frame) => Math.abs(frame.time - selector.time) < 1e-4))
+      .filter((frame): frame is { time: number } => Boolean(frame))
+    if (subset.length === 0) continue
+    mutate(subset, frames)
+    count += subset.length
+  }
+  sortAllTracks(animation)
+  syncDuration(animation)
+  return count
 }
 
 function resolveFrames(

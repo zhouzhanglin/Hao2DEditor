@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Flag, Lock, ZoomIn } from 'lucide-react'
+import { ChevronDown, ChevronRight, Flag, Lock, ZoomIn } from 'lucide-react'
 import { TIMELINE_ZOOM_MAX, TIMELINE_ZOOM_MIN } from '@editor/store/timelineStore'
 import type { KeySelector, TimelineTrack } from '@editor/timeline/model'
 
@@ -54,6 +54,19 @@ const LEAD_RATIO = 0.022
 
 function toSelector(track: TimelineTrack, channel: string, target: string, attachment: string, time: number): KeySelector {
   return { kind: track.kind, target, attachment, channel, time }
+}
+
+/** 轨道在提示里的完整名称：子轨道要带上骨骼名，否则只看「旋转」不知道是谁的 */
+function rowLabel(track: TimelineTrack): string {
+  return track.depth > 0 ? `${track.group} · ${track.label}` : track.label
+}
+
+/** 骨骼通道子轨道的圆点配色，便于一眼区分位置 / 旋转 / 缩放 / 错切 */
+const CHANNEL_TONE: Record<string, string> = {
+  translate: 'bg-ok',
+  rotate: 'bg-accent',
+  scale: 'bg-warn',
+  shear: 'bg-accent-violet'
 }
 
 function sameSelector(a: KeySelector, b: KeySelector): boolean {
@@ -142,10 +155,26 @@ export default function DopeSheet(props: DopeSheetProps) {
 
   const isSelected = (selector: KeySelector): boolean => selectedKeys.some((item) => sameSelector(selector, item))
 
+  /** 折叠的骨骼分组（只影响显示，不动数据） */
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  const toggleCollapse = (id: string): void =>
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  /** 实际渲染的轨道：折叠的分组行下面的子轨道会被过滤掉 */
+  const visibleTracks = useMemo(
+    () => tracks.filter((track) => !track.parentId || !collapsed.has(track.parentId)),
+    [tracks, collapsed]
+  )
+
   /** 同一轨道同一时间点的多通道关键帧合并成一个标记 */
   const markersByTrack = useMemo(
     () =>
-      tracks.map((track) => {
+      visibleTracks.map((track) => {
         const byTime = new Map<number, KeySelector[]>()
         for (const key of track.keys) {
           const slot = Math.round(key.time * 1e4) / 1e4
@@ -157,7 +186,7 @@ export default function DopeSheet(props: DopeSheetProps) {
           .sort((a, b) => a[0] - b[0])
           .map(([slot, selectors]) => ({ slot, selectors, channels: selectors.map((s) => s.channel) }))
       }),
-    [tracks]
+    [visibleTracks]
   )
 
   /** 像素比例 → 时间（含左侧留白补偿） */
@@ -336,6 +365,7 @@ export default function DopeSheet(props: DopeSheetProps) {
     span > 0 ? (LEAD_RATIO + ((value - start) / span) * (1 - LEAD_RATIO)) * 100 : LEAD_RATIO * 100
   const frameToTime = (frame: number): number => (frameRate > 0 ? frame / frameRate : 0)
   const totalKeys = tracks.reduce((sum, track) => sum + track.keys.length, 0)
+  const channelCount = tracks.filter((track) => !track.isGroup).length
   const endPercent = percent(length)
   const playheadPercent = percent(time)
   const zoomed = Math.abs(zoom - 1) > 0.001
@@ -378,7 +408,7 @@ export default function DopeSheet(props: DopeSheetProps) {
         >
           <span className="text-3xs text-content-lo">轨道 / 对象</span>
           <span className="flex items-center gap-1 font-mono text-3xs text-content-lo/70">
-            {tracks.length} 轨 · {totalKeys} 关键帧
+            {channelCount} 轨 · {totalKeys} 关键帧
             {zoomed ? (
               <button
                 type="button"
@@ -462,23 +492,50 @@ export default function DopeSheet(props: DopeSheetProps) {
 
       <div className="min-h-0 flex-1 overflow-auto hao-scroll">
         <div className="flex min-h-full">
-          {/* 轨道名 */}
+          {/* 轨道名（骨骼是「分组行 + 通道子轨」两层结构） */}
           <div className="shrink-0 border-r border-line bg-ink-800/60" style={{ width: LABEL_WIDTH }}>
-            {tracks.map((track) => (
+            {visibleTracks.map((track) => (
               <button
                 key={track.id}
                 type="button"
-                className="flex w-full items-center gap-1 border-b border-line/40 px-2 text-left text-3xs text-content-mid hover:bg-ink-700 cursor-pointer"
-                style={{ height: ROW_HEIGHT }}
-                title={`${track.group} · 点击选中该对象`}
+                className={[
+                  'flex w-full items-center gap-1 border-b border-line/40 pr-1.5 text-left text-3xs hover:bg-ink-700 cursor-pointer',
+                  track.isGroup ? 'bg-ink-900/50 font-semibold text-content-hi' : 'text-content-mid'
+                ].join(' ')}
+                style={{ height: ROW_HEIGHT, paddingLeft: 5 + track.depth * 12 }}
+                title={
+                  track.isGroup
+                    ? `骨骼「${track.label}」的通道（点击选中该骨骼）`
+                    : `${track.group} · ${track.label} · 点击选中该对象`
+                }
                 onClick={() => props.onSelectTarget(track)}
               >
-                <Lock size={9} className="shrink-0 text-content-lo/0" />
+                {track.isGroup ? (
+                  <span
+                    role="presentation"
+                    className="flex h-[13px] w-[13px] shrink-0 items-center justify-center rounded text-content-lo hover:bg-ink-600 hover:text-content-hi"
+                    title="折叠 / 展开该骨骼的通道"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      toggleCollapse(track.id)
+                    }}
+                  >
+                    {collapsed.has(track.id) ? <ChevronRight size={10} /> : <ChevronDown size={10} />}
+                  </span>
+                ) : track.depth > 0 ? (
+                  <span className="flex h-[13px] w-[13px] shrink-0 items-center justify-center">
+                    <span className={['h-[5px] w-[5px] rounded-full', CHANNEL_TONE[track.channel ?? ''] ?? 'bg-content-lo'].join(' ')} />
+                  </span>
+                ) : (
+                  <Lock size={9} className="shrink-0 text-content-lo/0" />
+                )}
                 <span className="min-w-0 flex-1 truncate">{track.label}</span>
-                <span className="shrink-0 rounded bg-ink-600 px-1 text-content-lo">{track.keys.length}</span>
+                <span className="shrink-0 rounded bg-ink-600 px-1 text-content-lo">
+                  {track.isGroup ? track.keyCount ?? 0 : track.keys.length}
+                </span>
               </button>
             ))}
-            {tracks.length === 0 ? (
+            {visibleTracks.length === 0 ? (
               <div className="px-2 py-3 text-3xs text-content-lo">
                 没有轨道：在 Pose 状态调整骨骼/插槽后按 K 打关键帧
               </div>
@@ -504,10 +561,13 @@ export default function DopeSheet(props: DopeSheetProps) {
               </div>
             ) : null}
 
-            {tracks.map((track, trackIndex) => (
+            {visibleTracks.map((track, trackIndex) => (
               <div
                 key={track.id}
-                className="relative border-b border-line/40"
+                className={[
+                  'relative border-b border-line/40',
+                  track.isGroup ? 'bg-ink-900/30' : ''
+                ].join(' ')}
                 style={{ height: ROW_HEIGHT }}
                 onPointerDown={(event) => {
                   if (event.button !== 0) return
@@ -549,7 +609,7 @@ export default function DopeSheet(props: DopeSheetProps) {
                           : 'border-accent/70 bg-accent/40 hover:bg-accent/70'
                       ].join(' ')}
                       style={{ left: `${left}%` }}
-                      title={`${track.label} · ${marker.channels.join(' / ')} @ ${marker.slot.toFixed(3)}s（拖动整组改时间，Delete 删除）`}
+                      title={`${rowLabel(track)} · ${marker.channels.join(' / ')} @ ${marker.slot.toFixed(3)}s（拖动整组改时间，Delete 删除）`}
                       onPointerDown={(event) => startMarkerDrag(event, marker, selected)}
                     />
                   )

@@ -181,6 +181,38 @@ export function ToggleField({ label, value, onChange, disabled }: ToggleFieldPro
   )
 }
 
+export interface CheckboxFieldProps {
+  label: string
+  value: boolean
+  onChange: (value: boolean) => void
+  disabled?: boolean
+  /** 悬停提示 */
+  hint?: string
+}
+
+/** 复选框（原生 checkbox，仅用 accent-color 跟随主题） */
+export function CheckboxField({ label, value, onChange, disabled, hint }: CheckboxFieldProps) {
+  return (
+    <label
+      className={[
+        'flex items-center gap-1.5',
+        disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'
+      ].join(' ')}
+      title={hint}
+    >
+      <span className="hao-label w-[52px] shrink-0">{label}</span>
+      <input
+        type="checkbox"
+        checked={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="h-[13px] w-[13px] shrink-0 cursor-pointer accent-accent disabled:cursor-not-allowed"
+      />
+      {hint ? <span className="truncate text-3xs text-content-lo">{hint}</span> : null}
+    </label>
+  )
+}
+
 export interface SelectFieldProps {
   label: string
   value: string

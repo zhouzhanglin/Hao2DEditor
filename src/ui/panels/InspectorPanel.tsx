@@ -3,7 +3,16 @@ import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useToolStore } from '@editor/store/toolStore'
 import { convertRegionToMesh, deleteAttachment } from '@editor/commands/authoringCommands'
-import { ColorField, FieldGroup, NumberField, SelectField, TextField, ToggleField, Vector2Field } from '@ui/widgets/fields'
+import {
+  CheckboxField,
+  ColorField,
+  FieldGroup,
+  NumberField,
+  SelectField,
+  TextField,
+  ToggleField,
+  Vector2Field
+} from '@ui/widgets/fields'
 import { PanelEmpty } from '@ui/widgets/PanelShell'
 import { BLEND_OPTIONS, CONSTRAINT_LABEL } from '@ui/widgets/constants'
 
@@ -137,17 +146,14 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
               })
             }
           />
-          <SelectField
+          <CheckboxField
             label="画法"
-            value={bone.hollow ? 'hollow' : 'filled'}
-            options={[
-              { value: 'filled', label: '实心' },
-              { value: 'hollow', label: '空心' }
-            ]}
+            value={bone.hollow === true}
+            hint="空心（默认实心）"
             onChange={(value) =>
               update('修改骨骼画法', (draft) => {
                 const target = draft.bones.find((b) => b.name === bone.name)
-                if (target) target.hollow = value === 'hollow'
+                if (target) target.hollow = value
               })
             }
           />

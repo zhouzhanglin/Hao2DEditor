@@ -5,8 +5,8 @@ import { SkeletonView } from '@render/skeletonView'
 import type { TextureStore } from '@render/material'
 import { drawBoneOverlay, drawGhostBones } from '@render/overlays/boneOverlay'
 import { drawMeshOverlay } from '@render/overlays/meshOverlay'
-import { pickBone, pickVertex } from '@render/picking'
-import type { BoneHit, VertexHit } from '@render/picking'
+import { BONE_TIP_RADIUS, pickBone, pickBoneHandle, pickVertex } from '@render/picking'
+import type { BoneHandleHit, BoneHit, VertexHit } from '@render/picking'
 import type { MeshBuildResult } from '@core/skin/meshBuilder'
 import type { AttachmentData } from '@core/model/types'
 import type { EditorDocument } from '@core/model/authoring'
@@ -260,6 +260,22 @@ export class EditorScene {
   pickBoneAt(worldX: number, worldY: number): BoneHit | null {
     if (!this.bundle) return null
     return pickBone(this.bundle.skeleton, worldX, worldY, this.viewport.pixelsToWorld(8))
+  }
+
+  /**
+   * 骨骼手柄拾取（移动 / 缩放 / 旋转三区）。
+   * 原点圈与末端手柄是屏幕恒定大小，因此按 zoom 换算成世界半径再判定。
+   */
+  pickBoneHandleAt(worldX: number, worldY: number): BoneHandleHit | null {
+    if (!this.bundle) return null
+    return pickBoneHandle(
+      this.bundle.skeleton,
+      worldX,
+      worldY,
+      this.viewport.pixelsToWorld(8),
+      this.viewport.pixelsToWorld(BONE_TIP_RADIUS),
+      this.bundle.boneIndex[this.viewState.selectedBone] ?? -1
+    )
   }
 
   pickVertexAt(worldX: number, worldY: number): VertexHit | null {

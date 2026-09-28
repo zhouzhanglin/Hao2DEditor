@@ -206,7 +206,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         }
       }
       selection.selectBone(name)
-      onStatus(`选中骨骼「${name}」（拖动可旋转，Shift+拖动可移动）`)
+      onStatus(`选中骨骼「${name}」（骨骼体=旋转 / 原点圈=移动 / 末端方块=缩放）`)
     } else {
       selection.clear()
       onStatus('已取消选择')
@@ -230,9 +230,13 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       if (host) toolPointerMove(host, { world, shift: event.shiftKey, ctrl: event.ctrlKey, alt: event.altKey })
       return
     }
-    const hit = scene.pickBoneAt(world.x, world.y)
+    const hit = scene.pickBoneHandleAt(world.x, world.y)
     const name = hit && scene.runtime ? (scene.runtime.asset.bones[hit.boneIndex]?.name ?? '') : ''
     if (scene.state.hoveredBone !== name) scene.setViewState({ hoveredBone: name })
+    // 光标提示当前落在哪个手柄上：原点圈=移动、末端方块=缩放、骨骼体=旋转
+    const cursor =
+      hit?.zone === 'origin' ? 'move' : hit?.zone === 'tip' ? 'nwse-resize' : hit ? 'crosshair' : 'default'
+    if (event.currentTarget.style.cursor !== cursor) event.currentTarget.style.cursor = cursor
   }
 
   const releasePointer = (event: React.PointerEvent<HTMLDivElement>): void => {

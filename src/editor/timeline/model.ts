@@ -25,7 +25,25 @@ export interface TimelineTrack {
   target: string
   attachment: string
   keys: TimelineKey[]
+  /** 缩进层级：0 = 顶层（分组行 / 事件轨），1 = 骨骼通道等子轨道 */
+  depth: number
+  /** 分组行：只作标题与折叠入口，本身不含关键帧 */
+  isGroup?: boolean
+  /** 子轨道所属分组行 id（折叠时隐藏） */
+  parentId?: string
+  /** 分组行显示的关键帧总数 */
+  keyCount?: number
+  /** 子轨道对应的通道名（旋转 / 位置 / 缩放 / 错切） */
+  channel?: string
 }
+
+/** 骨骼子轨道的顺序与中文名（位置在前，符合 TRS 习惯） */
+const BONE_CHANNELS: Array<{ channel: 'translate' | 'rotate' | 'scale' | 'shear'; label: string }> = [
+  { channel: 'translate', label: '位置' },
+  { channel: 'rotate', label: '旋转' },
+  { channel: 'scale', label: '缩放' },
+  { channel: 'shear', label: '错切' }
+]
 
 export interface KeySelector {
   kind: KeyKind
@@ -48,13 +66,58 @@ export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrac
   if (!animation) return []
   const tracks: TimelineTrack[] = []
 
+  // 事件轨永远排在最上面（时间轴上最容易先看到）
+  if (animation.events.length > 0) {
+    const keys: TimelineKey[] = animation.events.map((event) => ({
+      id: `event:${event.time}:${event.name}`,
+      trackId: 'event',
+      kind: 'event' as const,
+      channel: event.name,
+      target: event.name,
+      attachment: '',
+      time: event.time,
+      easing: Easing.Stepped,
+      curve: null
+    }))
+    tracks.push(makeTrack('event', `事件（${animation.events.length}）`, '', 'event', keys))
+  }
+
+  // 骨骼：一行分组标题 + 每个有帧的通道各一行子轨道（位置 / 旋转 / 缩放 / 错切）
   for (const track of animation.bones) {
-    const keys: TimelineKey[] = []
-    pushKeys(keys, track.bone, '', 'bone', 'translate', track.translate)
-    pushKeys(keys, track.bone, '', 'bone', 'rotate', track.rotate)
-    pushKeys(keys, track.bone, '', 'bone', 'scale', track.scale)
-    pushKeys(keys, track.bone, '', 'bone', 'shear', track.shear)
-    if (keys.length > 0) tracks.push(makeTrack('bone', track.bone, '', track.bone, keys))
+    const children: TimelineTrack[] = []
+    let total = 0
+    for (const { channel, label } of BONE_CHANNELS) {
+      const keys: TimelineKey[] = []
+      pushKeys(keys, track.bone, '', 'bone', channel, track[channel])
+      if (keys.length === 0) continue
+      total += keys.length
+      children.push({
+        id: `bone:${track.bone}:${channel}`,
+        group: track.bone,
+        label,
+        kind: 'bone',
+        target: track.bone,
+        attachment: '',
+        keys,
+        depth: 1,
+        parentId: `bone:${track.bone}`,
+        channel
+      })
+    }
+    if (children.length === 0) continue
+    tracks.push({
+      id: `bone:${track.bone}`,
+      group: track.bone,
+      label: track.bone,
+      kind: 'bone',
+      target: track.bone,
+      attachment: '',
+      keys: [],
+      depth: 0,
+      isGroup: true,
+      keyCount: total
+    })
+    tracks.push(...children)
   }
 
   for (const track of animation.slots) {
@@ -91,33 +154,9 @@ export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrac
     if (keys.length > 0) tracks.push(makeTrack('constraint', track.constraint, '', track.constraint, keys))
   }
 
-  if (animation.events.length > 0) {
-    const keys: TimelineKey[] = animation.events.map((event) => ({
-      id: `event:${event.time}:${event.name}`,
-      trackId: 'event',
-      kind: 'event' as const,
-      channel: event.name,
-      target: event.name,
-      attachment: '',
-      time: event.time,
-      easing: Easing.Stepped,
-      curve: null
-    }))
-    tracks.push(makeTrack('event', `事件（${animation.events.length}）`, '', 'event', keys))
-  }
-
-  // 事件轨永远排在最上面（时间轴上最容易先看到），其余按 骨骼 → 插槽 → FFD → 约束 排列
-  return tracks.sort(
-    (a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.label.localeCompare(b.label)
-  )
-}
-
-const KIND_ORDER: Record<KeyKind, number> = {
-  event: 0,
-  bone: 1,
-  slot: 2,
-  deform: 3,
-  constraint: 4
+  // 顺序：事件 → 骨骼（分组行 + 通道子轨）→ 插槽 → FFD → 约束。
+  // 这里刻意不做二次排序：骨骼子轨道必须紧跟在自己的分组行后面，排序会打散这层结构。
+  return tracks
 }
 
 type MutableFrame = { time: number; easing: Easing; curve: number[] | null }
@@ -354,7 +393,8 @@ function makeTrack(kind: KeyKind, label: string, attachment: string, target: str
     kind,
     target,
     attachment,
-    keys: keys.sort((a, b) => a.time - b.time)
+    keys: keys.sort((a, b) => a.time - b.time),
+    depth: 0
   }
 }
 

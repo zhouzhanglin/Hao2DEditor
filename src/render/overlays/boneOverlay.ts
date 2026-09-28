@@ -1,6 +1,7 @@
 import { Graphics } from 'pixi.js'
 import type { Skeleton } from '@core/model/skeleton'
 import type { Constraint } from '@core/model/constraints'
+import { BONE_ORIGIN_RADIUS, BONE_TIP_RADIUS } from '@render/picking'
 
 export interface BoneOverlayOptions {
   /** 1 世界单位对应的屏幕像素的倒数（= 1 / zoom），用于保持描边视觉宽度恒定 */
@@ -56,6 +57,9 @@ export function drawGhostBones(
  * 描边与填充必须用**两个 Graphics**：pixi v8 中 stroke() 之后的路径仍会被后续
  * fill() 填充，混用会画出一整块覆盖角色的色斑。
  */
+/**
+ * 绘制骨骼体、原点圈与**末端缩放手柄**（仅选中骨骼绘制手柄，避免画面噪点）。
+ */
 export function drawBoneOverlay(
   strokes: Graphics,
   fills: Graphics,
@@ -110,10 +114,22 @@ export function drawBoneOverlay(
       const hollow = options.hollowBones?.has(skeleton.asset.bones[i].name) ?? false
       if (!hollow) fills.poly(quad).fill({ color, alpha: active ? 0.55 : 0.4 })
       strokes.poly(quad).stroke({ width: w * (isSelected ? 1.8 : 1.2), color, alpha: hollow ? 1 : 0.9 })
+
+      // 选中骨骼在末端画缩放手柄（方块，屏幕恒定大小），拖动它即可缩放
+      if (isSelected) {
+        const r = w * BONE_TIP_RADIUS
+        fills
+          .poly([tx - r, ty - r, tx + r, ty - r, tx + r, ty + r, tx - r, ty + r])
+          .fill({ color: COLOR_BONE_SELECTED, alpha: 0.3 })
+        strokes
+          .poly([tx - r, ty - r, tx + r, ty - r, tx + r, ty + r, tx - r, ty + r])
+          .stroke({ width: w * 1.6, color: COLOR_BONE_SELECTED, alpha: 1 })
+      }
     }
 
-    // 原点（骨骼头）画一个圈：空心环，根骨骼 / 选中骨骼用各自的强调色
-    const r = (isSelected ? 7 : 5.5) * w
+    // 原点（骨骼头）画一个圈：空心环，根骨骼 / 选中骨骼用各自的强调色。
+    // 半径与拾取用的 BONE_ORIGIN_RADIUS 一致（拖这个圈 = 移动骨骼）
+    const r = (isSelected ? BONE_ORIGIN_RADIUS + 1.5 : BONE_ORIGIN_RADIUS - 0.5) * w
     strokes
       .circle(x, y, r)
       .stroke({

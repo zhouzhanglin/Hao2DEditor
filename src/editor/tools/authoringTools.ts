@@ -32,13 +32,18 @@ export interface ToolHost {
   status: (text: string) => void
 }
 
+type DragKind = 'bone-rotate' | 'bone-translate' | 'bone-scale' | 'vertex' | 'paint' | 'none'
+
 interface DragSession {
-  kind: 'bone-rotate' | 'bone-translate' | 'vertex' | 'paint' | 'none'
+  kind: DragKind
   bone: string
-  /** 骨骼世界原点（旋转用） */
+  /** 骨骼世界原点（旋转 / 缩放的轴心） */
   origin: Vec2
   parentRotation: number
   inheritRotation: boolean
+  /** 缩放：按下时指针到轴心的距离与骨骼起始缩放 */
+  startDistance: number
+  startScale: Vec2
   /** 顶点拖拽 */
   slot: string
   attachment: string
@@ -56,6 +61,8 @@ const IDLE: DragSession = {
   origin: { x: 0, y: 0 },
   parentRotation: 0,
   inheritRotation: true,
+  startDistance: 0,
+  startScale: { x: 1, y: 1 },
   slot: '',
   attachment: '',
   vertex: -1,
@@ -120,7 +127,9 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   }
 
   // 选择 / 骨骼 / 插槽 / 约束：点中骨骼即开始拖拽
-  const hit = scene.pickBoneAt(info.world.x, info.world.y)
+  // 手柄分区：原点圈 = 移动、末端方块 = 缩放、骨骼体 = 旋转；
+  // Shift 仍可强制移动、Alt 强制缩放（与旧习惯兼容）。
+  const hit = scene.pickBoneHandleAt(info.world.x, info.world.y)
   if (!hit) return false
   const bone = scene.runtime.asset.bones[hit.boneIndex]
   if (!bone) return false
@@ -154,21 +163,33 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   const offset = hit.boneIndex * 16
   const origin: Vec2 = { x: scene.runtime.skeleton.world[offset + 12], y: scene.runtime.skeleton.world[offset + 13] }
   const parent = bone.parentIndex
+  const kind: DragKind = info.shift ? 'bone-translate' : info.alt ? 'bone-scale' : zoneToKind(hit.zone)
+  const authoring = useProjectStore.getState().document.bones.find((item) => item.name === bone.name)
+  const localScale = scene.runtime.skeleton.localScale
   drag = {
     ...IDLE,
-    kind: info.shift ? 'bone-translate' : 'bone-rotate',
+    kind,
     bone: bone.name,
     origin,
     parentRotation: parent >= 0 ? scene.runtime.skeleton.worldRot[parent] : 0,
-    inheritRotation: bone.inheritRotation
+    inheritRotation: bone.inheritRotation,
+    startDistance: Math.max(1e-4, Math.hypot(info.world.x - origin.x, info.world.y - origin.y)),
+    startScale: {
+      x: localScale ? localScale[hit.boneIndex * 2] : (authoring?.localScale.x ?? 1),
+      y: localScale ? localScale[hit.boneIndex * 2 + 1] : (authoring?.localScale.y ?? 1)
+    }
   }
-  storeHandler.begin(info.shift ? '移动骨骼' : '旋转骨骼')
-  host.status(
-    info.shift
-      ? `移动骨骼「${bone.name}」${host.mode === 'animate' ? '（写入关键帧）' : '（修改 setup）'}`
-      : `旋转骨骼「${bone.name}」${host.mode === 'animate' ? '（写入关键帧）' : '（修改 setup）'}`
-  )
+  const label = kind === 'bone-translate' ? '移动骨骼' : kind === 'bone-scale' ? '缩放骨骼' : '旋转骨骼'
+  storeHandler.begin(label)
+  const suffix = host.mode === 'animate' ? '（写入关键帧）' : '（修改 setup）'
+  host.status(`${label}「${bone.name}」${suffix} · 原点圈=移动 / 末端方块=缩放 / 骨骼体=旋转`)
   return true
+}
+
+function zoneToKind(zone: 'origin' | 'tip' | 'body'): DragKind {
+  if (zone === 'origin') return 'bone-translate'
+  if (zone === 'tip') return 'bone-scale'
+  return 'bone-rotate'
 }
 
 export function toolPointerMove(host: ToolHost, info: PointerInfo): void {
@@ -195,6 +216,14 @@ export function toolPointerMove(host: ToolHost, info: PointerInfo): void {
     const local = drag.inheritRotation ? angle - drag.parentRotation : angle
     store.updateSilent((draft) => {
       writeBoneValue(draft, animation, host.time, drag.bone, 'rotate', local)
+    })
+  } else if (drag.kind === 'bone-scale') {
+    // 以骨骼原点为轴心：指针到轴心的距离比 → 等比缩放
+    const distance = Math.hypot(info.world.x - drag.origin.x, info.world.y - drag.origin.y)
+    const factor = Math.max(0.01, distance / Math.max(1e-4, drag.startDistance))
+    const next = { x: drag.startScale.x * factor, y: drag.startScale.y * factor }
+    store.updateSilent((draft) => {
+      writeBoneValue(draft, animation, host.time, drag.bone, 'scale', next)
     })
   } else {
     const skeleton = scene.runtime.skeleton
@@ -276,7 +305,7 @@ function writeBoneValue(
   animation: string | null,
   time: number,
   bone: string,
-  channel: 'rotate' | 'translate',
+  channel: 'rotate' | 'translate' | 'scale',
   value: number | Vec2
 ): void {
   if (animation) {
@@ -289,7 +318,11 @@ function writeBoneValue(
   const boneData = draft.bones.find((item) => item.name === bone)
   if (!boneData) return
   if (channel === 'rotate') boneData.rotation = typeof value === 'number' ? value : 0
-  else if (typeof value !== 'number') boneData.localPosition = { x: value.x, y: value.y }
+  else if (channel === 'translate' && typeof value !== 'number') {
+    boneData.localPosition = { x: value.x, y: value.y }
+  } else if (channel === 'scale' && typeof value !== 'number') {
+    boneData.localScale = { x: value.x, y: value.y }
+  }
 }
 
 function currentAnimationName(host: ToolHost): string | null {

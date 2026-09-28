@@ -210,16 +210,55 @@ export function SelectField({ label, value, options, onChange }: SelectFieldProp
 export function TextField({
   label,
   value,
-  onChange
+  onChange,
+  commitOnBlur = false,
+  placeholder
 }: {
   label: string
   value: string
   onChange: (value: string) => void
+  /**
+   * true 时在失焦 / 回车才提交：避免每敲一个字符就产生一条撤销记录
+   * （编辑事件名、参数这类可写文本用这个模式）
+   */
+  commitOnBlur?: boolean
+  placeholder?: string
 }) {
+  const [text, setText] = useState(value)
+  const editing = useRef(false)
+
+  useEffect(() => {
+    if (!editing.current) setText(value)
+  }, [value])
+
   return (
     <label className="flex items-center gap-1.5">
       <span className="hao-label w-[52px] shrink-0">{label}</span>
-      <input className="hao-field" type="text" value={value} onChange={(e) => onChange(e.target.value)} />
+      <input
+        className="hao-field"
+        type="text"
+        placeholder={placeholder}
+        value={commitOnBlur ? text : value}
+        onFocus={() => {
+          if (commitOnBlur) editing.current = true
+        }}
+        onChange={(e) => {
+          if (!commitOnBlur) {
+            onChange(e.target.value)
+            return
+          }
+          editing.current = true
+          setText(e.target.value)
+        }}
+        onBlur={() => {
+          if (!commitOnBlur) return
+          editing.current = false
+          if (text !== value) onChange(text)
+        }}
+        onKeyDown={(e) => {
+          if (commitOnBlur && e.key === 'Enter') (e.target as HTMLInputElement).blur()
+        }}
+      />
     </label>
   )
 }

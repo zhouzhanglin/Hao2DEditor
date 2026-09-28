@@ -281,10 +281,11 @@ export class Viewport {
     this.destroyed = true
     this.hostObserver?.disconnect()
     if (this.ready) {
+      // 先自己释放棋盘格（含纹理），再从 stage 摘掉，避免 app.destroy 二次销毁
+      this.checker.destroy()
       this.app.destroy(true, { children: true })
       this.ready = false
     }
-    this.checker.destroy()
     if (this.canvas.parentElement === this.host) this.host.removeChild(this.canvas)
   }
 

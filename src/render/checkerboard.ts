@@ -53,7 +53,13 @@ export class Checkerboard {
     this.sprite.tilePosition.set(originX, originY)
   }
 
+  /**
+   * 释放 sprite 与纹理。
+   * 注意先从场景摘除：否则紧接着的 `app.destroy({ children: true })` 会对同一个
+   * sprite 再销毁一次，pixi 内部会在已释放的纹理源上抛 `reading 'clear'`。
+   */
   destroy(): void {
+    this.sprite.removeFromParent()
     this.sprite.destroy({ texture: true, textureSource: true })
   }
 }

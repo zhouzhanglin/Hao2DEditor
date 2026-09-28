@@ -4,6 +4,7 @@ import MenuBar from './layout/MenuBar'
 import Toolbar from './layout/Toolbar'
 import StatusBar from './panels/StatusBar'
 import InspectorPanel from './panels/InspectorPanel'
+import KeyframeCard from './panels/KeyframeCard'
 import AssetPanel from './panels/AssetPanel'
 import ToolOptionsPanel from './panels/ToolOptionsPanel'
 import TimelinePanel from './timeline/TimelinePanel'
@@ -360,7 +361,12 @@ export default function App() {
         }
         right={
           <>
-            <PanelShell title="属性检查器" grow>
+            <PanelShell
+              title="属性检查器"
+              grow
+              actions={timeline.selectedKeys.length > 0 ? <span className="text-3xs text-accent">关键帧</span> : null}
+            >
+              <KeyframeCard onStatus={flash} />
               <InspectorPanel onStatus={flash} />
             </PanelShell>
             <PanelShell title="工具选项" grow={false} bodyClassName="max-h-[300px]">

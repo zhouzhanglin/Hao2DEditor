@@ -405,12 +405,40 @@ function constraintFrames(track: AuthoringAnimData['constraints'][number]): Reco
 }
 
 /**
+ * 关键帧的宽松结构：不同通道的 `value` 类型不同（数值 / 二维 / 颜色 / 布尔），
+ * 事件帧则没有 value 而是 name + 三个参数。属性检查器按值形状分派编辑控件。
+ */
+export interface AnyKeyframe {
+  time: number
+  easing?: Easing
+  curve?: number[] | null
+  value?: unknown
+  name?: string
+  stringParam?: string
+  intParam?: number
+  floatParam?: number
+  offsets?: number[]
+  vertexOffset?: number
+}
+
+/**
  * 时间类操作的定位：在 `resolveFrames` 基础上**额外支持事件轨**。
  * 事件关键帧只有时间（没有 easing/curve），因此拖动 / 删除 / 重设时间都走这个入口。
  */
-function resolveTimeFrames(animation: AuthoringAnimData, selector: KeySelector): Array<{ time: number }> | null {
+function resolveTimeFrames(animation: AuthoringAnimData, selector: KeySelector): Array<AnyKeyframe> | null {
   if (selector.kind === 'event') return animation.events
   return resolveFrames(animation, selector)
+}
+
+/** 供属性检查器读取关键帧实体（找不到返回 null） */
+export function findKeyframe(
+  animation: AuthoringAnimData | null | undefined,
+  selector: KeySelector
+): AnyKeyframe | null {
+  if (!animation) return null
+  const frames = resolveTimeFrames(animation, selector)
+  if (!frames) return null
+  return frames.find((item) => Math.abs(item.time - selector.time) < 1e-4) ?? null
 }
 
 /** 时间类编辑的通用实现（移动 / 删除 / 重设时间），事件轨参与 */

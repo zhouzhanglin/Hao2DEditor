@@ -1,0 +1,310 @@
+import { Application, Container } from 'pixi.js'
+import { Checkerboard, pickCellSize } from './checkerboard'
+
+export interface ViewportBounds {
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+}
+
+/**
+ * 缩放范围。骨架单位 ≈ 100 像素，因此 zoom = 100 表示「1:1 源图尺寸」，
+ * 上限留到 800 才能看清小角色 / 局部细节。
+ */
+const MIN_ZOOM = 0.02
+const MAX_ZOOM = 800
+
+function clampZoom(zoom: number): number {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom))
+}
+
+export interface ViewportOptions {
+  background?: string
+  onZoomChange?: (zoom: number) => void
+}
+
+/**
+ * pixi Application + 相机。
+ *
+ * 世界容器使用 **scale.y = -zoom**（y 轴向上，与骨架数据一致），
+ * 因此在世界空间里画线/画点时坐标可以直接用骨骼/顶点的原始值。
+ * 关闭了自动 ticker：由编辑器按需调用 render()（脏标记驱动）。
+ */
+export class Viewport {
+  readonly app = new Application()
+  /** 角色与叠加层共用的世界容器（相机变换作用于此） */
+  readonly world = new Container()
+  readonly contentLayer = new Container()
+  readonly overlayLayer = new Container()
+
+  private offsetX = 0
+  private offsetY = 0
+  private zoomValue = 1
+  private ready = false
+  private destroyed = false
+
+  /** 坐标轴图层：位于棋盘格之上、角色之下 */
+  readonly axisLayer = new Container()
+
+  private readonly onZoomChange: (zoom: number) => void
+  private readonly canvas: HTMLCanvasElement
+  /** 铺满整块画布的棋盘格背景（世界锚定，随缩放/平移走） */
+  private readonly checker = new Checkerboard()
+  /**
+   * 宿主尺寸监听放在 Viewport 内部：编辑器挂载时宿主可能还没布局（尺寸为 0），
+   * 仅靠渲染层的 ResizeObserver 容易漏掉，导致画布停在 pixi 默认的 800×600 而没铺满面板。
+   */
+  private readonly hostObserver: ResizeObserver | null
+
+  /**
+   * canvas 由 Viewport 自己创建并挂到 host 上：
+   * 避免复用同一个 DOM 节点时（开发环境 StrictMode 双挂载 / HMR）出现两个 WebGL 上下文。
+   */
+  constructor(private readonly host: HTMLElement, options: ViewportOptions = {}) {
+    this.canvas = document.createElement('canvas')
+    this.canvas.style.display = 'block'
+    this.canvas.style.width = '100%'
+    this.canvas.style.height = '100%'
+    host.appendChild(this.canvas)
+    this.onZoomChange = options.onZoomChange ?? (() => undefined)
+    this.world.addChild(this.axisLayer, this.contentLayer, this.overlayLayer)
+    this.app.stage.addChild(this.world)
+    this.hostObserver =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(() => this.syncHostSize())
+    this.hostObserver?.observe(host)
+  }
+
+  /**
+   * 让画布始终与宿主（视口面板）等大。幂等、可每帧调用：
+   * 尺寸没变时只是一次 clientWidth 读取，尺寸变了就重建相机与背景。
+   *
+   * 之所以每帧兜底：面板尺寸变化可能发生在渲染层 ResizeObserver 之前/之外
+   * （Electron 窗口初始化、面板折叠、HMR 留下的旧实例……），漏一次就会看到
+   * 「画布/棋盘格比面板小」的残影。
+   */
+  syncHostSize(): boolean {
+    if (!this.isReady) return false
+    const width = this.host.clientWidth
+    const height = this.host.clientHeight
+    if (width <= 0 || height <= 0) return false
+    if (Math.abs(this.width - width) < 0.5 && Math.abs(this.height - height) < 0.5) return false
+    this.resize(width, height)
+    return true
+  }
+
+  /**
+   * 让棋盘格与当前相机/尺寸保持一致（幂等，可每帧调用）。
+   *
+   * 直接比对 Sprite 的**实际状态**而不是缓存一份期望值：这样任何原因导致的
+   * 尺寸/偏移不一致都会在下一帧被纠正，等于自带自愈能力。
+   */
+  syncBackground(): boolean {
+    if (!this.isReady) return false
+    const cell = Math.max(4, pickCellSize(this.zoomValue) * this.zoomValue)
+    const originX = this.width * 0.5 + this.offsetX
+    const originY = this.height * 0.5 + this.offsetY
+    const sprite = this.checker.sprite
+    const matches =
+      Math.abs(sprite.width - this.width) < 0.01 &&
+      Math.abs(sprite.height - this.height) < 0.01 &&
+      Math.abs(sprite.tileScale.x - cell) < 0.01 &&
+      Math.abs(sprite.tilePosition.x - originX) < 0.01 &&
+      Math.abs(sprite.tilePosition.y - originY) < 0.01
+    if (matches) return false
+    this.checker.layout(this.width, this.height, cell, originX, originY)
+    return true
+  }
+
+  async init(options: ViewportOptions = {}): Promise<void> {
+    await this.app.init({
+      canvas: this.canvas,
+      background: options.background ?? '#13131b',
+      antialias: true,
+      autoDensity: true,
+      resolution: Math.min(2, globalThis.devicePixelRatio || 1),
+      preference: 'webgl',
+      autoStart: false,
+      powerPreference: 'high-performance'
+    })
+    if (this.destroyed) {
+      this.app.destroy(true)
+      return
+    }
+    // 背景棋盘格在最底层，铺满整块画布
+    this.app.stage.addChildAt(this.checker.sprite, 0)
+    this.ready = true
+    // pixi 初始化时 renderer 是默认的 800×600，先按宿主真实尺寸对齐一次；
+    // 若此刻宿主还没布局（尺寸为 0），hostObserver 会在尺寸就绪时补上。
+    this.syncHostSize()
+    this.applyCamera()
+    this.render()
+  }
+
+  get isReady(): boolean {
+    return this.ready && !this.destroyed
+  }
+
+  get zoom(): number {
+    return this.zoomValue
+  }
+
+  /**
+   * 视口尺寸（逻辑 / CSS 像素）。
+   *
+   * 注意：pixi v8 的 `renderer.width` 已经是**逻辑尺寸**（内部 backing store 才是
+   * `逻辑尺寸 × resolution`），所以**不能**再除以 resolution——那样在 Retina
+   * （DPR=2）屏上会把视口算成一半，导致棋盘格/坐标轴只铺左上角一块、
+   * 且拾取坐标整体错位。这里统一用 `renderer.screen`。
+   * renderer 在 init 完成前不可用，先退回宿主元素尺寸，避免早期 fit / 拾取抛错。
+   */
+  get width(): number {
+    const screen = this.app.renderer?.screen
+    if (!screen) return this.host.clientWidth || 1
+    return screen.width
+  }
+
+  get height(): number {
+    const screen = this.app.renderer?.screen
+    if (!screen) return this.host.clientHeight || 1
+    return screen.height
+  }
+
+  /** 平移（屏幕像素增量） */
+  pan(dxScreen: number, dyScreen: number): void {
+    this.offsetX += dxScreen
+    this.offsetY += dyScreen
+    this.applyCamera()
+  }
+
+  /** 以屏幕上的某点为锚点缩放 */
+  zoomAt(factor: number, screenX: number, screenY: number): void {
+    const before = this.screenToWorld(screenX, screenY)
+    this.zoomValue = clampZoom(this.zoomValue * factor)
+    this.applyCamera()
+    const after = this.screenToWorld(screenX, screenY)
+    this.offsetX += (after.x - before.x) * this.zoomValue
+    this.offsetY -= (after.y - before.y) * this.zoomValue
+    this.applyCamera()
+    this.onZoomChange(this.zoomValue)
+  }
+
+  setZoom(zoom: number): void {
+    this.zoomValue = clampZoom(zoom)
+    this.applyCamera()
+    this.onZoomChange(this.zoomValue)
+  }
+
+  setOffset(x: number, y: number): void {
+    this.offsetX = x
+    this.offsetY = y
+    this.applyCamera()
+  }
+
+  get offset(): { x: number; y: number } {
+    return { x: this.offsetX, y: this.offsetY }
+  }
+
+  /**
+   * 适配视野：**世界原点固定在视口中心**，缩放到刚好能装下全部内容（留出 padding 像素）。
+   *
+   * 与「按内容包围盒居中」的区别：原点始终是屏幕中心这个稳定参照，
+   * 骨骼/网格都在原点附近建模时观感更符合直觉；缩放按内容相对原点的最大半径来算，
+   * 因此即使角色不完全对称也不会跑出视野。
+   */
+  fit(bounds: ViewportBounds | null, padding = 48): void {
+    const width = this.width
+    const height = this.height
+    // offset 归零 = 世界原点落在视口中心
+    this.offsetX = 0
+    this.offsetY = 0
+
+    const halfWidth = width * 0.5 - padding
+    const halfHeight = height * 0.5 - padding
+    const degenerate =
+      !bounds ||
+      bounds.maxX - bounds.minX < 1e-6 ||
+      bounds.maxY - bounds.minY < 1e-6 ||
+      halfWidth <= 1 ||
+      halfHeight <= 1
+
+    if (degenerate) {
+      this.zoomValue = 1
+      this.applyCamera()
+      this.onZoomChange(this.zoomValue)
+      return
+    }
+
+    // 内容相对原点向四方的最大延伸（原点居中时必须同时满足四个方向）
+    const reachX = Math.max(1e-6, Math.abs(bounds.minX), Math.abs(bounds.maxX))
+    const reachY = Math.max(1e-6, Math.abs(bounds.minY), Math.abs(bounds.maxY))
+    this.zoomValue = clampZoom(Math.min(halfWidth / reachX, halfHeight / reachY))
+    this.applyCamera()
+    this.onZoomChange(this.zoomValue)
+  }
+
+  screenToWorld(screenX: number, screenY: number): { x: number; y: number } {
+    return {
+      x: (screenX - this.width * 0.5 - this.offsetX) / this.zoomValue,
+      y: -(screenY - this.height * 0.5 - this.offsetY) / this.zoomValue
+    }
+  }
+
+  worldToScreen(worldX: number, worldY: number): { x: number; y: number } {
+    return {
+      x: worldX * this.zoomValue + this.width * 0.5 + this.offsetX,
+      y: -worldY * this.zoomValue + this.height * 0.5 + this.offsetY
+    }
+  }
+
+  /** 屏幕像素 → 世界长度（画线宽度用） */
+  pixelsToWorld(pixels: number): number {
+    return pixels / this.zoomValue
+  }
+
+  resize(width: number, height: number): void {
+    if (!this.isReady) return
+    if (width <= 0 || height <= 0) return
+    this.app.renderer.resize(width, height)
+    this.applyCamera()
+    this.render()
+  }
+
+  render(): void {
+    if (!this.isReady) return
+    this.app.render()
+  }
+
+  destroy(): void {
+    this.destroyed = true
+    this.hostObserver?.disconnect()
+    if (this.ready) {
+      this.app.destroy(true, { children: true })
+      this.ready = false
+    }
+    this.checker.destroy()
+    if (this.canvas.parentElement === this.host) this.host.removeChild(this.canvas)
+  }
+
+  private applyCamera(): void {
+    if (!this.isReady) return
+    const originX = this.width * 0.5 + this.offsetX
+    const originY = this.height * 0.5 + this.offsetY
+    this.world.scale.set(this.zoomValue, -this.zoomValue)
+    this.world.position.set(originX, originY)
+    // 棋盘格：铺满整块画布、格点对齐世界原点、格子屏幕边长锁在可选区间
+    this.syncBackground()
+  }
+
+  /**
+   * 每帧由场景调用：先兜底尺寸，再兜底背景（都是幂等的）。
+   * @returns 是否发生了变化（变化时调用方需要重绘，否则会留下空白/残影）
+   */
+  syncFrame(): boolean {
+    const sizeChanged = this.syncHostSize()
+    const backgroundChanged = this.syncBackground()
+    return sizeChanged || backgroundChanged
+  }
+}

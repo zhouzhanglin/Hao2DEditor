@@ -1,0 +1,9 @@
+node_modules/
+out/
+release/
+dist/
+*.tsbuildinfo
+.DS_Store
+.playwright-cli/
+.codebuddy
+tests

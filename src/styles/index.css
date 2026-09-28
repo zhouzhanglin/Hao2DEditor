@@ -1,0 +1,142 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    --hao-bg-0: #101018;
+    --hao-bg-1: #16161f;
+    --hao-bg-2: #1e1e28;
+    --hao-bg-3: #262632;
+    --hao-line: #2a2a38;
+    --hao-text-hi: #e8e8f2;
+    --hao-text-mid: #a0a0b8;
+    --hao-text-lo: #6b6b82;
+    --hao-accent: #22d3ee;
+    --hao-accent-deep: #0ea5e9;
+    --hao-violet: #8b5cf6;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: Inter, system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    font-size: 12px;
+    background: var(--hao-bg-0);
+    color: var(--hao-text-hi);
+    user-select: none;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: rgba(34, 211, 238, 0.28);
+  }
+}
+
+@layer components {
+  /* 面板通用外观：1px 描边 + 极弱明暗差分层 */
+  .hao-panel {
+    @apply flex flex-col min-h-0 min-w-0 bg-ink-800 border border-line;
+  }
+
+  .hao-panel-header {
+    @apply flex items-center justify-between h-[26px] px-2 shrink-0
+           bg-ink-700 border-b border-line;
+  }
+
+  .hao-panel-title {
+    @apply text-3xs uppercase tracking-[0.08em] text-content-lo font-semibold;
+  }
+
+  .hao-tool-button {
+    @apply flex items-center justify-center w-[26px] h-[22px] rounded text-content-mid
+           transition-colors duration-panel cursor-pointer
+           hover:bg-ink-600 hover:text-content-hi;
+  }
+
+  .hao-tool-button-active {
+    @apply bg-gradient-to-b from-accent/25 to-accent-deep/10 text-accent
+           ring-1 ring-accent/40 shadow-[0_0_10px_-2px_rgba(34,211,238,0.6)];
+  }
+
+  .hao-splitter-v {
+    @apply w-[3px] shrink-0 cursor-col-resize bg-transparent transition-colors duration-panel
+           hover:bg-accent/40 active:bg-accent/60;
+  }
+
+  .hao-splitter-h {
+    @apply h-[3px] shrink-0 cursor-row-resize bg-transparent transition-colors duration-panel
+           hover:bg-accent/40 active:bg-accent/60;
+  }
+
+  .hao-field {
+    @apply w-full h-[22px] px-1.5 rounded bg-ink-900/70 border border-line text-content-hi text-panel
+           outline-none transition-colors duration-panel
+           focus:border-accent/70 focus:bg-ink-900;
+  }
+
+  .hao-label {
+    @apply text-3xs uppercase tracking-[0.06em] text-content-lo;
+  }
+
+  .hao-btn {
+    @apply h-[22px] px-2 inline-flex items-center gap-1 rounded border border-line bg-ink-700
+           text-panel text-content-mid cursor-pointer transition-colors duration-panel
+           hover:bg-ink-600 hover:text-content-hi active:bg-ink-500;
+  }
+
+  .hao-btn-accent {
+    @apply border-accent/40 bg-accent/15 text-accent hover:bg-accent/25 hover:text-accent;
+  }
+}
+
+@layer utilities {
+  .hao-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #3a3a4a transparent;
+  }
+
+  .hao-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .hao-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .hao-scroll::-webkit-scrollbar-thumb {
+    background: #343444;
+    border-radius: 4px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  .hao-scroll::-webkit-scrollbar-thumb:hover {
+    background: #45455a;
+    background-clip: content-box;
+  }
+
+  /* 视口占位棋盘格：canvas 就绪前显示，色值/密度与渲染层的世界棋盘格保持一致 */
+  .hao-checkerboard {
+    background-image:
+      linear-gradient(45deg, #3a3a4a 25%, transparent 25%),
+      linear-gradient(-45deg, #3a3a4a 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #3a3a4a 75%),
+      linear-gradient(-45deg, transparent 75%, #3a3a4a 75%);
+    background-size: 48px 48px;
+    background-position:
+      0 0,
+      0 24px,
+      24px -24px,
+      -24px 0px;
+    background-color: #2c2c38;
+  }
+}

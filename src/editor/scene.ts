@@ -5,7 +5,7 @@ import { SkeletonView } from '@render/skeletonView'
 import type { TextureStore } from '@render/material'
 import { drawBoneOverlay, drawGhostBones } from '@render/overlays/boneOverlay'
 import { drawMeshOverlay } from '@render/overlays/meshOverlay'
-import { BONE_TIP_RADIUS, pickBone, pickBoneHandle, pickVertex } from '@render/picking'
+import { BONE_SIDE_HANDLE_GAP, BONE_TIP_RADIUS, pickBone, pickBoneHandle, pickVertex } from '@render/picking'
 import type { BoneHandleHit, BoneHit, VertexHit } from '@render/picking'
 import type { MeshBuildResult } from '@core/skin/meshBuilder'
 import type { AttachmentData } from '@core/model/types'
@@ -274,6 +274,7 @@ export class EditorScene {
       worldY,
       this.viewport.pixelsToWorld(8),
       this.viewport.pixelsToWorld(BONE_TIP_RADIUS),
+      this.viewport.pixelsToWorld(BONE_SIDE_HANDLE_GAP),
       this.bundle.boneIndex[this.viewState.selectedBone] ?? -1
     )
   }

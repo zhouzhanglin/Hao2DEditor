@@ -1,5 +1,6 @@
 import type { Vec2 } from '@core/math/matrix'
 import { invert, mulPoint, mulVector } from '@core/math/matrix'
+import { boneHandleGeometry } from '@render/picking'
 import type { EditorDocument } from '@core/model/authoring'
 import type { EditorScene } from '../scene'
 import type { Selection } from '../store/selectionStore'
@@ -44,6 +45,11 @@ interface DragSession {
   /** 缩放：按下时指针到轴心的距离与骨骼起始缩放 */
   startDistance: number
   startScale: Vec2
+  /** 缩放轴向（x 沿骨骼 / y 垂直骨骼 / both 等比）与抓取点在轴上的投影 */
+  scaleAxis: 'x' | 'y' | 'both'
+  axisDir: Vec2
+  axisPerp: Vec2
+  startProject: number
   /** 顶点拖拽 */
   slot: string
   attachment: string
@@ -63,6 +69,10 @@ const IDLE: DragSession = {
   inheritRotation: true,
   startDistance: 0,
   startScale: { x: 1, y: 1 },
+  scaleAxis: 'both',
+  axisDir: { x: 1, y: 0 },
+  axisPerp: { x: 0, y: 1 },
+  startProject: 0,
   slot: '',
   attachment: '',
   vertex: -1,
@@ -163,9 +173,15 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   const offset = hit.boneIndex * 16
   const origin: Vec2 = { x: scene.runtime.skeleton.world[offset + 12], y: scene.runtime.skeleton.world[offset + 13] }
   const parent = bone.parentIndex
-  const kind: DragKind = info.shift ? 'bone-translate' : info.alt ? 'bone-scale' : zoneToKind(hit.zone)
+  const kind: DragKind = info.shift ? 'bone-translate' : zoneToKind(hit.zone)
   const authoring = useProjectStore.getState().document.bones.find((item) => item.name === bone.name)
   const localScale = scene.runtime.skeleton.localScale
+  // 轴方向由手柄几何提供：x 沿骨骼轴、y 垂直骨骼轴（均含缩放朝向）
+  const geometry = boneHandleGeometry(scene.runtime.skeleton, hit.boneIndex, 0)
+  const axisDir: Vec2 = geometry ? { x: geometry.dx, y: geometry.dy } : { x: 1, y: 0 }
+  const axisPerp: Vec2 = geometry ? { x: geometry.px, y: geometry.py } : { x: 0, y: 1 }
+  const axis = info.alt ? 'both' : hit.axis ?? 'both'
+  const axisVector = axis === 'y' ? axisPerp : axisDir
   drag = {
     ...IDLE,
     kind,
@@ -177,13 +193,33 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     startScale: {
       x: localScale ? localScale[hit.boneIndex * 2] : (authoring?.localScale.x ?? 1),
       y: localScale ? localScale[hit.boneIndex * 2 + 1] : (authoring?.localScale.y ?? 1)
-    }
+    },
+    scaleAxis: axis,
+    axisDir,
+    axisPerp,
+    startProject:
+      (info.world.x - origin.x) * axisVector.x + (info.world.y - origin.y) * axisVector.y
   }
   const label = kind === 'bone-translate' ? '移动骨骼' : kind === 'bone-scale' ? '缩放骨骼' : '旋转骨骼'
   storeHandler.begin(label)
   const suffix = host.mode === 'animate' ? '（写入关键帧）' : '（修改 setup）'
-  host.status(`${label}「${bone.name}」${suffix} · 原点圈=移动 / 末端方块=缩放 / 骨骼体=旋转`)
+  host.status(
+    kind === 'bone-scale'
+      ? `缩放骨骼「${bone.name}」${suffix} · ${axis === 'x' ? '只改 X（骨骼方向）' : axis === 'y' ? '只改 Y（垂直方向）' : '等比缩放'} · Alt 等比`
+      : `${label}「${bone.name}」${suffix} · 原点圈=移动 / 末端方块=缩放 / 骨骼体=旋转`
+  )
   return true
+}
+
+/**
+ * 轴向缩放倍数：抓取点到轴心的投影距离之比。
+ * 允许拖过轴心变成负值（= 镜像翻转），但不允许停在 0 附近（骨骼会退化成看不见）。
+ */
+function axisFactor(current: number, start: number): number {
+  if (Math.abs(start) < 1e-4) return 1
+  const raw = current / start
+  if (Math.abs(raw) < 0.02) return raw < 0 ? -0.02 : 0.02
+  return raw
 }
 
 function zoneToKind(zone: 'origin' | 'tip' | 'body'): DragKind {
@@ -218,10 +254,19 @@ export function toolPointerMove(host: ToolHost, info: PointerInfo): void {
       writeBoneValue(draft, animation, host.time, drag.bone, 'rotate', local)
     })
   } else if (drag.kind === 'bone-scale') {
-    // 以骨骼原点为轴心：指针到轴心的距离比 → 等比缩放
-    const distance = Math.hypot(info.world.x - drag.origin.x, info.world.y - drag.origin.y)
-    const factor = Math.max(0.01, distance / Math.max(1e-4, drag.startDistance))
-    const next = { x: drag.startScale.x * factor, y: drag.startScale.y * factor }
+    // 以骨骼原点为轴心：轴向上的距离比 → 该轴缩放倍数（可分别改 X / Y）
+    const rx = info.world.x - drag.origin.x
+    const ry = info.world.y - drag.origin.y
+    const next = { x: drag.startScale.x, y: drag.startScale.y }
+    if (drag.scaleAxis === 'x') {
+      next.x = drag.startScale.x * axisFactor(rx * drag.axisDir.x + ry * drag.axisDir.y, drag.startProject)
+    } else if (drag.scaleAxis === 'y') {
+      next.y = drag.startScale.y * axisFactor(rx * drag.axisPerp.x + ry * drag.axisPerp.y, drag.startProject)
+    } else {
+      const factor = axisFactor(Math.hypot(rx, ry), drag.startDistance)
+      next.x = drag.startScale.x * factor
+      next.y = drag.startScale.y * factor
+    }
     store.updateSilent((draft) => {
       writeBoneValue(draft, animation, host.time, drag.bone, 'scale', next)
     })

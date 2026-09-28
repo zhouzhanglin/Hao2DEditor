@@ -8,6 +8,57 @@ import type { AttachmentData } from '@core/model/types'
  */
 export const BONE_ORIGIN_RADIUS = 6
 export const BONE_TIP_RADIUS = 7
+/**
+ * Y 缩放手柄相对骨骼末端的垂直偏出距离（px）。
+ * 必须大于 2×BONE_TIP_RADIUS，否则两个手柄的判定区会重叠。
+ */
+export const BONE_SIDE_HANDLE_GAP = 22
+
+/** 骨骼三个手柄的位置与局部轴向（渲染与拾取共用，避免各算一套导致对不上） */
+export interface BoneHandleGeometry {
+  /** 原点：拖动 = 移动 */
+  ox: number
+  oy: number
+  /** 末端：拖动 = 沿骨骼轴缩放 X */
+  tx: number
+  ty: number
+  /** 侧边：拖动 = 垂直骨骼缩放 Y */
+  sx: number
+  sy: number
+  /** 骨骼轴方向（单位向量，含缩放后的朝向） */
+  dx: number
+  dy: number
+  /** 垂直于骨骼轴的方向（单位向量） */
+  px: number
+  py: number
+}
+
+/**
+ * 计算骨骼手柄几何。末端位置含缩放（`world` 基向量长度即缩放倍数），
+ * 所以缩放后手柄会跟着骨骼长度一起走。
+ */
+export function boneHandleGeometry(
+  skeleton: Skeleton,
+  index: number,
+  sideGap: number
+): BoneHandleGeometry | null {
+  if (index < 0 || index >= skeleton.boneCount) return null
+  const o = index * 16
+  const ox = skeleton.world[o + 12]
+  const oy = skeleton.world[o + 13]
+  const ax = skeleton.world[o]
+  const ay = skeleton.world[o + 1]
+  const norm = Math.hypot(ax, ay)
+  const scale = norm > 1e-9 ? norm : 1
+  const dx = ax / scale
+  const dy = ay / scale
+  const px = -dy
+  const py = dx
+  const length = Math.max(0, skeleton.asset.bones[index].length) * scale
+  const tx = ox + dx * length
+  const ty = oy + dy * length
+  return { ox, oy, tx, ty, sx: tx + px * sideGap, sy: ty + py * sideGap, dx, dy, px, py }
+}
 
 export interface BoneHit {
   boneIndex: number
@@ -25,29 +76,31 @@ export type BoneHandleZone = 'origin' | 'tip' | 'body'
 export interface BoneHandleHit {
   boneIndex: number
   zone: BoneHandleZone
+  /** 缩放手柄的轴向：x = 沿骨骼、y = 垂直骨骼 */
+  axis?: 'x' | 'y'
   distance: number
 }
 
-/** 单根骨骼的手柄判定：原点圈优先于末端手柄（同一根上两者都不远时，移动更常用） */
+/** 单根骨骼的手柄判定：原点圈优先于两个缩放手柄（同一根上都不远时，移动更常用） */
 function handleZoneOf(
   skeleton: Skeleton,
   index: number,
   x: number,
   y: number,
-  handleRadius: number
+  handleRadius: number,
+  sideGap: number
 ): BoneHandleHit | null {
-  const o = index * 16
-  const bx = skeleton.world[o + 12]
-  const by = skeleton.world[o + 13]
-  const originDistance = Math.hypot(x - bx, y - by)
+  const geometry = boneHandleGeometry(skeleton, index, sideGap)
+  if (!geometry) return null
+
+  const originDistance = Math.hypot(x - geometry.ox, y - geometry.oy)
   if (originDistance <= handleRadius) return { boneIndex: index, zone: 'origin', distance: originDistance }
 
-  const length = skeleton.asset.bones[index].length
-  if (length < 1e-4) return null
-  const tx = skeleton.world[o] * length + bx
-  const ty = skeleton.world[o + 1] * length + by
-  const tipDistance = Math.hypot(x - tx, y - ty)
-  if (tipDistance <= handleRadius) return { boneIndex: index, zone: 'tip', distance: tipDistance }
+  const tipDistance = Math.hypot(x - geometry.tx, y - geometry.ty)
+  if (tipDistance <= handleRadius) return { boneIndex: index, zone: 'tip', axis: 'x', distance: tipDistance }
+
+  const sideDistance = Math.hypot(x - geometry.sx, y - geometry.sy)
+  if (sideDistance <= handleRadius) return { boneIndex: index, zone: 'tip', axis: 'y', distance: sideDistance }
   return null
 }
 
@@ -64,17 +117,18 @@ export function pickBoneHandle(
   y: number,
   tolerance: number,
   handleRadius: number,
+  sideGap: number,
   preferredBone = -1
 ): BoneHandleHit | null {
   if (preferredBone >= 0 && preferredBone < skeleton.boneCount) {
-    const preferred = handleZoneOf(skeleton, preferredBone, x, y, handleRadius)
+    const preferred = handleZoneOf(skeleton, preferredBone, x, y, handleRadius, sideGap)
     if (preferred) return preferred
   }
 
   let best: BoneHandleHit | null = null
   for (let i = 0; i < skeleton.boneCount; i++) {
     if (i === preferredBone) continue
-    const hit = handleZoneOf(skeleton, i, x, y, handleRadius)
+    const hit = handleZoneOf(skeleton, i, x, y, handleRadius, sideGap)
     if (hit && (!best || hit.distance < best.distance)) best = hit
   }
   if (best) return best

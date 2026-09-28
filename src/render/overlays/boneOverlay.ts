@@ -1,7 +1,7 @@
 import { Graphics } from 'pixi.js'
 import type { Skeleton } from '@core/model/skeleton'
 import type { Constraint } from '@core/model/constraints'
-import { BONE_ORIGIN_RADIUS, BONE_TIP_RADIUS } from '@render/picking'
+import { BONE_ORIGIN_RADIUS, BONE_SIDE_HANDLE_GAP, BONE_TIP_RADIUS, boneHandleGeometry } from '@render/picking'
 
 export interface BoneOverlayOptions {
   /** 1 世界单位对应的屏幕像素的倒数（= 1 / zoom），用于保持描边视觉宽度恒定 */
@@ -21,6 +21,8 @@ const COLOR_JOINT = 0xfbbf24
 const COLOR_ROOT = 0x8b5cf6
 const COLOR_CONSTRAINT = 0x34d399
 const COLOR_LINK = 0x6b6b82
+/** Y（垂直骨骼方向）缩放手柄 */
+const COLOR_HANDLE_Y = 0x8b5cf6
 
 /**
  * 洋葱皮：用**另一时刻**的世界矩阵画一套暗色骨骼作为参考。
@@ -115,15 +117,38 @@ export function drawBoneOverlay(
       if (!hollow) fills.poly(quad).fill({ color, alpha: active ? 0.55 : 0.4 })
       strokes.poly(quad).stroke({ width: w * (isSelected ? 1.8 : 1.2), color, alpha: hollow ? 1 : 0.9 })
 
-      // 选中骨骼在末端画缩放手柄（方块，屏幕恒定大小），拖动它即可缩放
+      // 选中骨骼画两个缩放手柄（屏幕恒定大小的方块）：
+      // 末端沿骨骼轴 = 缩放 X，末端偏出垂直方向 = 缩放 Y
       if (isSelected) {
-        const r = w * BONE_TIP_RADIUS
-        fills
-          .poly([tx - r, ty - r, tx + r, ty - r, tx + r, ty + r, tx - r, ty + r])
-          .fill({ color: COLOR_BONE_SELECTED, alpha: 0.3 })
-        strokes
-          .poly([tx - r, ty - r, tx + r, ty - r, tx + r, ty + r, tx - r, ty + r])
-          .stroke({ width: w * 1.6, color: COLOR_BONE_SELECTED, alpha: 1 })
+        const handle = boneHandleGeometry(skeleton, i, w * BONE_SIDE_HANDLE_GAP)
+        if (handle) {
+          const r = w * BONE_TIP_RADIUS
+          const box = (hx: number, hy: number): number[] => [
+            hx - r,
+            hy - r,
+            hx + r,
+            hy - r,
+            hx + r,
+            hy + r,
+            hx - r,
+            hy + r
+          ]
+          // Y 手柄与末端的连线，指明它是从哪根骨骼上"拉出来"的
+          strokes
+            .moveTo(handle.tx, handle.ty)
+            .lineTo(handle.sx, handle.sy)
+            .stroke({ width: w * 1.2, color: COLOR_HANDLE_Y, alpha: 0.7 })
+
+          fills.poly(box(handle.tx, handle.ty)).fill({ color: COLOR_BONE_SELECTED, alpha: 0.3 })
+          strokes
+            .poly(box(handle.tx, handle.ty))
+            .stroke({ width: w * 1.6, color: COLOR_BONE_SELECTED, alpha: 1 })
+
+          fills.poly(box(handle.sx, handle.sy)).fill({ color: COLOR_HANDLE_Y, alpha: 0.3 })
+          strokes
+            .poly(box(handle.sx, handle.sy))
+            .stroke({ width: w * 1.6, color: COLOR_HANDLE_Y, alpha: 1 })
+        }
       }
     }
 

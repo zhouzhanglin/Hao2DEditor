@@ -233,9 +233,17 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     const hit = scene.pickBoneHandleAt(world.x, world.y)
     const name = hit && scene.runtime ? (scene.runtime.asset.bones[hit.boneIndex]?.name ?? '') : ''
     if (scene.state.hoveredBone !== name) scene.setViewState({ hoveredBone: name })
-    // 光标提示当前落在哪个手柄上：原点圈=移动、末端方块=缩放、骨骼体=旋转
+    // 光标提示当前落在哪个手柄上：原点圈=移动、末端方块=缩放 X、侧边方块=缩放 Y、骨骼体=旋转
     const cursor =
-      hit?.zone === 'origin' ? 'move' : hit?.zone === 'tip' ? 'nwse-resize' : hit ? 'crosshair' : 'default'
+      hit?.zone === 'origin'
+        ? 'move'
+        : hit?.zone === 'tip'
+          ? hit.axis === 'y'
+            ? 'ns-resize'
+            : 'ew-resize'
+          : hit
+            ? 'crosshair'
+            : 'default'
     if (event.currentTarget.style.cursor !== cursor) event.currentTarget.style.cursor = cursor
   }
 

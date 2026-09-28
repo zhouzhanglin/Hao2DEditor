@@ -66,7 +66,7 @@ export default function CurveEditor({ selectedKeys, easing, curve, onChange }: C
   const path = `M ${p0.cx} ${p0.cy} C ${p1.cx} ${p1.cy}, ${p2.cx} ${p2.cy}, ${p3.cx} ${p3.cy}`
 
   return (
-    <div className="flex shrink-0 items-start gap-2 border-t border-line bg-ink-800/70 px-2 py-1.5">
+    <div className="flex shrink-0 items-start gap-2">
       <svg
         ref={svgRef}
         width={SIZE}

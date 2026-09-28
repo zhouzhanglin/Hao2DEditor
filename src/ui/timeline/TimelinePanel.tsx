@@ -11,6 +11,7 @@ import { keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
 import type { KeyKind, KeySelector, TimelineTrack } from '@editor/timeline/model'
 import DopeSheet from './DopeSheet'
 import CurveEditor from './CurveEditor'
+import KeyframeCard from '@ui/panels/KeyframeCard'
 
 export interface TimelinePanelProps {
   onStatus?: (text: string) => void
@@ -261,16 +262,20 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         }}
       />
 
-      <CurveEditor
-        selectedKeys={selectedKeys}
-        easing={activeKey?.easing ?? 0}
-        curve={activeKey?.curve ?? null}
-        onChange={(easing, curve) => {
-          update('修改缓动', (draft) => {
-            setKeyEasing(draft, animation?.name ?? null, selectedKeys, easing, curve)
-          })
-        }}
-      />
+      {/* 底部工具条：左边曲线编辑器，右边关键帧属性（选中关键帧时可编辑时间/缓动/值） */}
+      <div className="flex shrink-0 items-start gap-2 border-t border-line bg-ink-800/70 px-2 py-1.5">
+        <CurveEditor
+          selectedKeys={selectedKeys}
+          easing={activeKey?.easing ?? 0}
+          curve={activeKey?.curve ?? null}
+          onChange={(easing, curve) => {
+            update('修改缓动', (draft) => {
+              setKeyEasing(draft, animation?.name ?? null, selectedKeys, easing, curve)
+            })
+          }}
+        />
+        <KeyframeCard onStatus={onStatus} />
+      </div>
     </div>
   )
 }

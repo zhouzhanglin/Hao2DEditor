@@ -13,6 +13,7 @@ import ModeSwitch from './viewport/ModeSwitch'
 import ViewportTools from './viewport/ViewportTools'
 import PanelShell from './widgets/PanelShell'
 import { useModeStore } from '@editor/store/modeStore'
+import type { EditorMode } from '@editor/store/modeStore'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useToolStore } from '@editor/store/toolStore'
@@ -61,7 +62,7 @@ import { keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
 
 export default function App() {
   const mode = useModeStore((s) => s.mode)
-  const setMode = useModeStore((s) => s.setMode)
+  const setModeRaw = useModeStore((s) => s.setMode)
   const doc = useProjectStore((s) => s.document)
   const projectPath = useProjectStore((s) => s.projectPath)
   const dirty = useProjectStore((s) => s.dirty)
@@ -81,6 +82,23 @@ export default function App() {
     setHint(message)
     window.setTimeout(() => setHint(undefined), 2600)
   }, [])
+
+  /**
+   * 切换 Pose / Animate。绑骨骼 / 权重刷这些改的是绑定姿态，Animate 下视口面板不显示它们，
+   * 切过去时把工具收回「选择」，避免留下一个看不见却还在吃鼠标的工具。
+   * FFD 顶点在动画态是合法操作（写 deform 关键帧），不做回收。
+   */
+  const setMode = useCallback(
+    (next: EditorMode): void => {
+      setModeRaw(next)
+      const tool = useToolStore.getState().tool
+      if (next === 'animate' && tool !== 'select' && tool !== 'ffd') {
+        useToolStore.getState().setTool('select')
+        flash('Animate 状态已切回选择工具（FFD 顶点仍可用）')
+      }
+    },
+    [flash, setModeRaw]
+  )
 
   // 首次进入：载入内置示例，让视口有内容可看
   useEffect(() => {

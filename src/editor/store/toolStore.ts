@@ -61,7 +61,14 @@ export const useToolStore = create<ToolState>((set, get) => ({
   brush: { radius: 40, strength: 0.5, mode: 'add' },
   gridDivisions: 4,
 
-  setTool: (tool) => set({ tool }),
+  // 选中绘制类工具时顺手打开对应显示层，否则「工具选了但看不到能编辑的东西」
+  setTool: (tool) => {
+    const overlay = { ...get().overlay }
+    if (tool === 'weight') overlay.weight = true
+    if (tool === 'ffd') overlay.ffd = true
+    if (tool === 'mesh') overlay.mesh = true
+    set({ tool, overlay })
+  },
   /**
    * 选择变换工具时**自动退出绘制类工具**（权重刷 / FFD / 网格 / 插槽 / 约束）。
    * 否则鼠标会被绘制工具吃掉（点了「旋转」却在刷权重），变换看起来完全没反应。

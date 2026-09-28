@@ -1,5 +1,6 @@
 import { Bone, Boxes, MousePointer2, Move, MoveDiagonal2, RotateCw, Scaling, Spline } from 'lucide-react'
 import { GIZMO_ORDER, useToolStore } from '@editor/store/toolStore'
+import { useModeStore } from '@editor/store/modeStore'
 import type { EditorTool, GizmoMode } from '@editor/store/toolStore'
 
 /**
@@ -37,17 +38,24 @@ export interface ViewportToolsProps {
 }
 
 export default function ViewportTools({ onStatus = () => undefined }: ViewportToolsProps) {
+  const mode = useModeStore((s) => s.mode)
   const tool = useToolStore((s) => s.tool)
   const setTool = useToolStore((s) => s.setTool)
   const gizmo = useToolStore((s) => s.gizmo)
   const setGizmo = useToolStore((s) => s.setGizmo)
+  /**
+   * Animate 状态隐藏绑定期工具（绑骨骼 / 权重刷——它们改的是绑定姿态），
+   * 但 **FFD 顶点要保留**：动画态拖顶点写的是 deform 关键帧，是正当的动画编辑操作。
+   */
+  const editTools =
+    mode === 'animate' ? EDIT_TOOLS.filter((item) => item.id === 'select' || item.id === 'ffd') : EDIT_TOOLS
 
   const buttonClass =
     'flex h-[28px] w-[28px] items-center justify-center rounded-md border transition-all duration-panel cursor-pointer'
 
   return (
     <div className="pointer-events-auto absolute left-3 top-[58px] z-20 flex flex-col gap-0.5 rounded-lg border border-line bg-ink-900/85 p-1 shadow-lg shadow-black/40 backdrop-blur-sm">
-      {EDIT_TOOLS.map(({ id, label, key, icon: Icon }) => {
+      {editTools.map(({ id, label, key, icon: Icon }) => {
         const active = tool === id
         return (
           <button

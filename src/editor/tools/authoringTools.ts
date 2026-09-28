@@ -1,11 +1,14 @@
 import type { Vec2 } from '@core/math/matrix'
 import { invert, mulPoint, mulVector } from '@core/math/matrix'
-import { boneHandleGeometry } from '@render/picking'
+import { gizmoGeometry } from '@render/picking'
+import type { GizmoPart, ShearEdge } from '@render/picking'
+import { RAD2DEG } from '@core/math/utils'
 import type { EditorDocument } from '@core/model/authoring'
 import type { EditorScene } from '../scene'
 import type { Selection } from '../store/selectionStore'
 import type { ToolState } from '../store/toolStore'
 import type { EditorMode } from '../store/modeStore'
+import type { GizmoMode } from '../store/toolStore'
 import { useProjectStore } from '../store/projectStore'
 import { useSelectionStore } from '../store/selectionStore'
 import { keyBoneChannel, keyDeform } from '../commands/animationCommands'
@@ -33,7 +36,7 @@ export interface ToolHost {
   status: (text: string) => void
 }
 
-type DragKind = 'bone-rotate' | 'bone-translate' | 'bone-scale' | 'vertex' | 'paint' | 'none'
+type DragKind = 'bone-translate' | 'gizmo' | 'shear-box' | 'vertex' | 'paint' | 'none'
 
 interface DragSession {
   kind: DragKind
@@ -42,6 +45,19 @@ interface DragSession {
   origin: Vec2
   parentRotation: number
   inheritRotation: boolean
+  /** gizmo 拖拽：模式 + 抓到的部位（中心 / X 轴 / Y 轴），以及按下时的骨骼本地值 */
+  gizmoMode: GizmoMode
+  gizmoPart: GizmoPart
+  startLocal: { pos: Vec2; rot: number; scale: Vec2; shear: Vec2 }
+  parentWorld: Float32Array | null
+  /** 骨骼局部 X / Y 轴在**父骨骼局部空间**中的单位方向（平移要在这个空间里分解） */
+  localAxisX: Vec2
+  localAxisY: Vec2
+  /** 按下时指针在父骨骼局部空间的位置：平移要扣掉它，否则骨骼会先跳到指针下 */
+  startPointerLocal: Vec2
+  /** 斜切包围盒拖拽：命中的边 + 按下时的局部包围盒（决定该边的坐标） */
+  shearEdge: ShearEdge
+  shearBox: { minX: number; minY: number; maxX: number; maxY: number } | null
   /** 缩放：按下时指针到轴心的距离与骨骼起始缩放 */
   startDistance: number
   startScale: Vec2
@@ -69,6 +85,15 @@ const IDLE: DragSession = {
   inheritRotation: true,
   startDistance: 0,
   startScale: { x: 1, y: 1 },
+  gizmoMode: 'move',
+  gizmoPart: 'center',
+  startLocal: { pos: { x: 0, y: 0 }, rot: 0, scale: { x: 1, y: 1 }, shear: { x: 0, y: 0 } },
+  parentWorld: null,
+  localAxisX: { x: 1, y: 0 },
+  localAxisY: { x: 0, y: 1 },
+  startPointerLocal: { x: 0, y: 0 },
+  shearEdge: 'top',
+  shearBox: null,
   scaleAxis: 'both',
   axisDir: { x: 1, y: 0 },
   axisPerp: { x: 0, y: 1 },
@@ -136,6 +161,30 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     return true
   }
 
+  // 斜切模式：包围盒优先。鼠标落在包围盒的边上拖动 → 沿该方向掰轴
+  if ((tools.tool === 'select' || tools.tool === 'bone') && tools.gizmo === 'shear') {
+    const edge = scene.pickShearEdgeAt(info.world.x, info.world.y)
+    const selectedName = scene.state.selectedBone
+    if (edge && selectedName && !boneLocked(selectedName)) {
+      if (beginShearBoxDrag(host, selectedName, edge, info.world)) return true
+    }
+    if (edge && selectedName && boneLocked(selectedName)) {
+      host.status(`骨骼「${selectedName}」已锁定，先解锁再编辑`)
+      return true
+    }
+  }
+
+  // 小坐标轴优先：它是选中骨骼的操作器，点中就必须由它接管
+  if (tools.tool === 'select' || tools.tool === 'bone') {
+    const part = scene.pickGizmoAt(info.world.x, info.world.y)
+    const selectedName = scene.state.selectedBone
+    const selectedIndex = selectedName ? (scene.runtime.boneIndex[selectedName] ?? -1) : -1
+    if (part && selectedIndex >= 0) {
+      if (!beginGizmoDrag(host, selectedIndex, selectedName, part, info.world)) return true
+      return true
+    }
+  }
+
   // 选择 / 骨骼 / 插槽 / 约束：点中骨骼即开始拖拽
   // 手柄分区：原点圈 = 移动、末端方块 = 缩放、骨骼体 = 旋转；
   // Shift 仍可强制移动、Alt 强制缩放（与旧习惯兼容）。
@@ -173,41 +222,27 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   const offset = hit.boneIndex * 16
   const origin: Vec2 = { x: scene.runtime.skeleton.world[offset + 12], y: scene.runtime.skeleton.world[offset + 13] }
   const parent = bone.parentIndex
-  const kind: DragKind = info.shift ? 'bone-translate' : zoneToKind(hit.zone)
-  const authoring = useProjectStore.getState().document.bones.find((item) => item.name === bone.name)
-  const localScale = scene.runtime.skeleton.localScale
-  // 轴方向由手柄几何提供：x 沿骨骼轴、y 垂直骨骼轴（均含缩放朝向）
-  const geometry = boneHandleGeometry(scene.runtime.skeleton, hit.boneIndex, 0)
-  const axisDir: Vec2 = geometry ? { x: geometry.dx, y: geometry.dy } : { x: 1, y: 0 }
-  const axisPerp: Vec2 = geometry ? { x: geometry.px, y: geometry.py } : { x: 0, y: 1 }
-  const axis = info.alt ? 'both' : hit.axis ?? 'both'
-  const axisVector = axis === 'y' ? axisPerp : axisDir
+  // 骨骼**本体**上也直接响应当前变换模式（中心 = 整体：自由移动 / 旋转 / 等比缩放），
+  // 不用非得精准抓到小坐标轴的细手柄；斜切则提示去拖包围盒的边。
+  if (hit.zone !== 'origin') {
+    if (tools.gizmo === 'shear') {
+      host.status(`斜切骨骼「${bone.name}」：拖动斜切包围盒的边（上下边横向拖 / 左右边纵向拖）`)
+      return true
+    }
+    return beginGizmoDrag(host, hit.boneIndex, bone.name, 'center', info.world)
+  }
   drag = {
     ...IDLE,
-    kind,
+    kind: 'bone-translate',
     bone: bone.name,
     origin,
     parentRotation: parent >= 0 ? scene.runtime.skeleton.worldRot[parent] : 0,
     inheritRotation: bone.inheritRotation,
-    startDistance: Math.max(1e-4, Math.hypot(info.world.x - origin.x, info.world.y - origin.y)),
-    startScale: {
-      x: localScale ? localScale[hit.boneIndex * 2] : (authoring?.localScale.x ?? 1),
-      y: localScale ? localScale[hit.boneIndex * 2 + 1] : (authoring?.localScale.y ?? 1)
-    },
-    scaleAxis: axis,
-    axisDir,
-    axisPerp,
-    startProject:
-      (info.world.x - origin.x) * axisVector.x + (info.world.y - origin.y) * axisVector.y
+    startDistance: Math.max(1e-4, Math.hypot(info.world.x - origin.x, info.world.y - origin.y))
   }
-  const label = kind === 'bone-translate' ? '移动骨骼' : kind === 'bone-scale' ? '缩放骨骼' : '旋转骨骼'
-  storeHandler.begin(label)
+  storeHandler.begin('移动骨骼')
   const suffix = host.mode === 'animate' ? '（写入关键帧）' : '（修改 setup）'
-  host.status(
-    kind === 'bone-scale'
-      ? `缩放骨骼「${bone.name}」${suffix} · ${axis === 'x' ? '只改 X（骨骼方向）' : axis === 'y' ? '只改 Y（垂直方向）' : '等比缩放'} · Alt 等比`
-      : `${label}「${bone.name}」${suffix} · 原点圈=移动 / 末端方块=缩放 / 骨骼体=旋转`
-  )
+  host.status(`移动骨骼「${bone.name}」${suffix} · 拖动骨骼原点圆圈`)
   return true
 }
 
@@ -222,10 +257,240 @@ function axisFactor(current: number, start: number): number {
   return raw
 }
 
-function zoneToKind(zone: 'origin' | 'tip' | 'body'): DragKind {
-  if (zone === 'origin') return 'bone-translate'
-  if (zone === 'tip') return 'bone-scale'
-  return 'bone-rotate'
+/** 骨骼锁定时不允许通过小坐标轴改动（返回 false 表示被拦下） */
+function boneLocked(name: string): boolean {
+  const bone = useProjectStore.getState().document.bones.find((item) => item.name === name)
+  return bone?.locked === true
+}
+
+/**
+ * 按下小坐标轴：记录按下时的骨骼本地值（位移 / 旋转 / 缩放 / 斜切）与轴向，
+ * 之后每次移动都以**按下时的值**为基准重算，避免增量累积误差。
+ */
+function beginGizmoDrag(
+  host: ToolHost,
+  boneIndex: number,
+  boneName: string,
+  part: GizmoPart,
+  world: Vec2
+): boolean {
+  const scene = host.scene
+  const bundle = scene.runtime
+  if (!bundle) return true
+  if (boneLocked(boneName)) {
+    host.status(`骨骼「${boneName}」已锁定，先解锁再编辑`)
+    return true
+  }
+  const bone = bundle.asset.bones[boneIndex]
+  const skeleton = bundle.skeleton
+  const geometry = gizmoGeometry(skeleton, boneIndex, 0)
+  if (!bone || !geometry) return true
+
+  const origin: Vec2 = { x: geometry.ox, y: geometry.oy }
+  const mode = host.tools.gizmo
+  const axisVector = part === 'y' ? { x: geometry.px, y: geometry.py } : { x: geometry.dx, y: geometry.dy }
+  const parent = bone.parentIndex
+  const startLocal = {
+    pos: { x: skeleton.localPos[boneIndex * 2], y: skeleton.localPos[boneIndex * 2 + 1] },
+    rot: skeleton.localRot[boneIndex],
+    scale: { x: skeleton.localScale[boneIndex * 2], y: skeleton.localScale[boneIndex * 2 + 1] },
+    shear: { x: skeleton.localShear[boneIndex * 2], y: skeleton.localShear[boneIndex * 2 + 1] }
+  }
+  // 局部轴向（父空间）：与 core/math/fk.ts 的约定一致 —— X 轴角 = rot + shearX，Y 轴角 = rot + 90 + shearY
+  const toRad = (degrees: number): number => (degrees * Math.PI) / 180
+  const xAngle = toRad(startLocal.rot + startLocal.shear.x)
+  const yAngle = toRad(startLocal.rot + 90 + startLocal.shear.y)
+  /** 指针在父骨骼局部空间的按下位置（平移用；根骨骼没有父矩阵，就是世界坐标） */
+  const parentWorld = parent >= 0 ? skeleton.world.slice(parent * 16, parent * 16 + 16) : null
+  const startPointerLocal = parentWorld ? mulPoint(invert(parentWorld), world) : { x: world.x, y: world.y }
+  drag = {
+    ...IDLE,
+    kind: 'gizmo',
+    bone: boneName,
+    origin,
+    parentRotation: parent >= 0 ? skeleton.worldRot[parent] : 0,
+    inheritRotation: bone.inheritRotation,
+    gizmoMode: mode,
+    gizmoPart: part,
+    startLocal,
+    parentWorld,
+    localAxisX: { x: Math.cos(xAngle), y: Math.sin(xAngle) },
+    localAxisY: { x: Math.cos(yAngle), y: Math.sin(yAngle) },
+    startPointerLocal,
+    startDistance: Math.max(1e-4, Math.hypot(world.x - origin.x, world.y - origin.y)),
+    startProject: (world.x - origin.x) * axisVector.x + (world.y - origin.y) * axisVector.y,
+    axisDir: { x: geometry.dx, y: geometry.dy },
+    axisPerp: { x: geometry.px, y: geometry.py },
+    startScale: { x: skeleton.localScale[boneIndex * 2], y: skeleton.localScale[boneIndex * 2 + 1] },
+    scaleAxis: part === 'center' ? 'both' : part
+  }
+  const label = GIZMO_LABEL[mode]
+  storeHandler.begin(label)
+  const suffix = host.mode === 'animate' ? '（写入关键帧）' : '（修改 setup）'
+  const partLabel = part === 'center' ? '整体' : `${part.toUpperCase()} 轴`
+  host.status(`${label}骨骼「${boneName}」${suffix} · ${partLabel}`)
+  return true
+}
+
+/**
+ * 按下斜切包围盒的某条边：记录按下时的骨骼本地值、包围盒（该边的坐标）与指针位置。
+ *
+ * 斜切量的推导（父空间里，局部轴角 = rot + shearX / rot + 90 + shearY）：
+ * - 拖「上/下边」横向移动 Δ → 点 (0, h) 的横向位移 = -h·sin(shearY) → shearY = -Δ/h
+ * - 拖「左/右边」纵向移动 Δ → 点 (w, 0) 的纵向位移 =  w·sin(shearX) → shearX =  Δ/w
+ * 所以被拖的那条边会 1:1 跟着指针走，符合"拉框"的直觉。
+ */
+function beginShearBoxDrag(host: ToolHost, boneName: string, edge: ShearEdge, world: Vec2): boolean {
+  const scene = host.scene
+  const bundle = scene.runtime
+  const box = scene.shearBoxAt()
+  if (!bundle || !box) return false
+  const boneIndex = bundle.boneIndex[boneName] ?? -1
+  if (boneIndex < 0) return false
+  const bone = bundle.asset.bones[boneIndex]
+  const skeleton = bundle.skeleton
+  const parent = bone.parentIndex
+  const startLocal = {
+    pos: { x: skeleton.localPos[boneIndex * 2], y: skeleton.localPos[boneIndex * 2 + 1] },
+    rot: skeleton.localRot[boneIndex],
+    scale: { x: skeleton.localScale[boneIndex * 2], y: skeleton.localScale[boneIndex * 2 + 1] },
+    shear: { x: skeleton.localShear[boneIndex * 2], y: skeleton.localShear[boneIndex * 2 + 1] }
+  }
+  const toRad = (degrees: number): number => (degrees * Math.PI) / 180
+  const xAngle = toRad(startLocal.rot + startLocal.shear.x)
+  const yAngle = toRad(startLocal.rot + 90 + startLocal.shear.y)
+  const parentWorld = parent >= 0 ? skeleton.world.slice(parent * 16, parent * 16 + 16) : null
+  drag = {
+    ...IDLE,
+    kind: 'shear-box',
+    bone: boneName,
+    origin: { x: box.corners[0].x, y: box.corners[0].y },
+    parentRotation: parent >= 0 ? skeleton.worldRot[parent] : 0,
+    inheritRotation: bone.inheritRotation,
+    startLocal,
+    parentWorld,
+    localAxisX: { x: Math.cos(xAngle), y: Math.sin(xAngle) },
+    localAxisY: { x: Math.cos(yAngle), y: Math.sin(yAngle) },
+    startPointerLocal: parentWorld ? mulPoint(invert(parentWorld), world) : { x: world.x, y: world.y },
+    shearEdge: edge,
+    shearBox: { minX: box.minX, minY: box.minY, maxX: box.maxX, maxY: box.maxY }
+  }
+  storeHandler.begin('斜切骨骼')
+  const suffix = host.mode === 'animate' ? '（写入关键帧）' : '（修改 setup）'
+  const edgeLabel = edge === 'top' ? '上边' : edge === 'bottom' ? '下边' : edge === 'left' ? '左边' : '右边'
+  host.status(`斜切骨骼「${boneName}」${suffix} · 拖动包围盒${edgeLabel}`)
+  return true
+}
+
+/** 斜切包围盒拖拽：按被拖的边把位移折算成 shearX / shearY（度） */
+function dragShearBox(host: ToolHost, world: Vec2): void {
+  const scene = host.scene
+  const box = drag.shearBox
+  if (!box) return
+  const animation = host.mode === 'animate' ? currentAnimationName(host) : null
+  const pointerLocal = drag.parentWorld ? mulPoint(invert(drag.parentWorld), world) : { x: world.x, y: world.y }
+  const moved = {
+    x: pointerLocal.x - drag.startPointerLocal.x,
+    y: pointerLocal.y - drag.startPointerLocal.y
+  }
+  const next = { x: drag.startLocal.shear.x, y: drag.startLocal.shear.y }
+
+  // 分母下限 24px：包围盒很扁时（比如一条肢体）不能让灵敏度爆炸
+  const minScale = scene.viewport.pixelsToWorld(24)
+  if (drag.shearEdge === 'left' || drag.shearEdge === 'right') {
+    // 左右边纵向拖动 → 掰 X 轴（分母是该边的局部 x，符号自带方向）
+    const edgeX = drag.shearEdge === 'right' ? box.maxX : box.minX
+    const along = moved.x * drag.localAxisY.x + moved.y * drag.localAxisY.y
+    const denominator = Math.max(Math.abs(edgeX), minScale) * (edgeX < 0 ? -1 : 1)
+    next.x = clampShear(drag.startLocal.shear.x + (along / denominator) * RAD2DEG)
+  } else {
+    // 上下边横向拖动 → 掰 Y 轴
+    const edgeY = drag.shearEdge === 'top' ? box.maxY : box.minY
+    const along = moved.x * drag.localAxisX.x + moved.y * drag.localAxisX.y
+    const denominator = Math.max(Math.abs(edgeY), minScale) * (edgeY < 0 ? -1 : 1)
+    next.y = clampShear(drag.startLocal.shear.y - (along / denominator) * RAD2DEG)
+  }
+
+  useProjectStore.getState().updateSilent((draft) => {
+    writeBoneValue(draft, animation, host.time, drag.bone, 'shear', next)
+  })
+  const after = useProjectStore.getState()
+  scene.setDocument(after.document, host.selection.skin)
+  scene.refresh()
+}
+
+/**
+ * 斜切上限 ±85°：再往上两根局部轴会重合（矩阵退化，骨骼被压成一条线），
+ * 而且在手感上也没有意义。超过就停在边界，保持单调不翻面。
+ */
+function clampShear(degrees: number): number {
+  return Math.max(-85, Math.min(85, degrees))
+}
+
+const GIZMO_LABEL: Record<GizmoMode, string> = {
+  move: '移动',
+  rotate: '旋转',
+  scale: '缩放',
+  shear: '斜切'
+}
+
+/** 小坐标轴拖拽：按模式与轴向写入骨骼本地值 */
+function dragGizmo(host: ToolHost, world: Vec2): void {
+  const scene = host.scene
+  if (!scene.runtime) return
+  const store = useProjectStore.getState()
+  const animation = host.mode === 'animate' ? currentAnimationName(host) : null
+  const { gizmoMode: mode, gizmoPart: part } = drag
+  const rx = world.x - drag.origin.x
+  const ry = world.y - drag.origin.y
+  // 指针在父骨骼局部空间的位置，以及相对**按下点**的位移
+  // （父空间：位移与旋转都存这个空间；根骨骼没有父矩阵，就是世界坐标）
+  const pointerLocal = drag.parentWorld ? mulPoint(invert(drag.parentWorld), world) : { x: world.x, y: world.y }
+  const moved = {
+    x: pointerLocal.x - drag.startPointerLocal.x,
+    y: pointerLocal.y - drag.startPointerLocal.y
+  }
+
+  if (mode === 'rotate') {
+    const angle = Math.atan2(ry, rx) * (180 / Math.PI)
+    const local = drag.inheritRotation ? angle - drag.parentRotation : angle
+    store.updateSilent((draft) => {
+      writeBoneValue(draft, animation, host.time, drag.bone, 'rotate', local)
+    })
+  } else if (mode === 'move') {
+    // 位移存在**父骨骼局部空间**里，位移量相对按下点算（否则骨骼会先跳到指针底下）
+    // 拖 X 轴 = 沿骨骼方向平移，拖 Y 轴 = 沿垂直方向平移，拖中心 = 自由平移
+    const start = drag.startLocal.pos
+    let next = { x: start.x + moved.x, y: start.y + moved.y }
+    if (part !== 'center') {
+      // 只保留沿该轴的分量：拖 X 轴就只沿骨骼方向走，Y 方向完全不动
+      const axis = part === 'y' ? drag.localAxisY : drag.localAxisX
+      const along = moved.x * axis.x + moved.y * axis.y
+      next = { x: start.x + axis.x * along, y: start.y + axis.y * along }
+    }
+    store.updateSilent((draft) => {
+      writeBoneValue(draft, animation, host.time, drag.bone, 'translate', next)
+    })
+  } else {
+    // 缩放（斜切不走小坐标轴，由包围盒拖拽 dragShearBox 处理）
+    const next = { x: drag.startLocal.scale.x, y: drag.startLocal.scale.y }
+    if (part === 'x') {
+      next.x = drag.startLocal.scale.x * axisFactor(rx * drag.axisDir.x + ry * drag.axisDir.y, drag.startProject)
+    } else if (part === 'y') {
+      next.y = drag.startLocal.scale.y * axisFactor(rx * drag.axisPerp.x + ry * drag.axisPerp.y, drag.startProject)
+    } else {
+      const factor = axisFactor(Math.hypot(rx, ry), drag.startDistance)
+      next.x = drag.startLocal.scale.x * factor
+      next.y = drag.startLocal.scale.y * factor
+    }
+    store.updateSilent((draft) => {
+      writeBoneValue(draft, animation, host.time, drag.bone, 'scale', next)
+    })
+  }
+
+  const after = useProjectStore.getState()
+  scene.setDocument(after.document, host.selection.skin)
+  scene.refresh()
 }
 
 export function toolPointerMove(host: ToolHost, info: PointerInfo): void {
@@ -242,46 +507,31 @@ export function toolPointerMove(host: ToolHost, info: PointerInfo): void {
     return
   }
 
+  if (drag.kind === 'gizmo') {
+    dragGizmo(host, info.world)
+    return
+  }
+
+  if (drag.kind === 'shear-box') {
+    dragShearBox(host, info.world)
+    return
+  }
+
+  // 剩下只有「拖原点圈移动骨骼」这一种直接拖拽（旋转/缩放/斜切都走小坐标轴）
   const scene = host.scene
   if (!scene.runtime) return
   const store = useProjectStore.getState()
   const animation = host.mode === 'animate' ? currentAnimationName(host) : null
-
-  if (drag.kind === 'bone-rotate') {
-    const angle = Math.atan2(info.world.y - drag.origin.y, info.world.x - drag.origin.x) * (180 / Math.PI)
-    const local = drag.inheritRotation ? angle - drag.parentRotation : angle
-    store.updateSilent((draft) => {
-      writeBoneValue(draft, animation, host.time, drag.bone, 'rotate', local)
-    })
-  } else if (drag.kind === 'bone-scale') {
-    // 以骨骼原点为轴心：轴向上的距离比 → 该轴缩放倍数（可分别改 X / Y）
-    const rx = info.world.x - drag.origin.x
-    const ry = info.world.y - drag.origin.y
-    const next = { x: drag.startScale.x, y: drag.startScale.y }
-    if (drag.scaleAxis === 'x') {
-      next.x = drag.startScale.x * axisFactor(rx * drag.axisDir.x + ry * drag.axisDir.y, drag.startProject)
-    } else if (drag.scaleAxis === 'y') {
-      next.y = drag.startScale.y * axisFactor(rx * drag.axisPerp.x + ry * drag.axisPerp.y, drag.startProject)
-    } else {
-      const factor = axisFactor(Math.hypot(rx, ry), drag.startDistance)
-      next.x = drag.startScale.x * factor
-      next.y = drag.startScale.y * factor
-    }
-    store.updateSilent((draft) => {
-      writeBoneValue(draft, animation, host.time, drag.bone, 'scale', next)
-    })
-  } else {
-    const skeleton = scene.runtime.skeleton
-    const bone = scene.runtime.asset.bones.find((item) => item.name === drag.bone)
-    if (!bone) return
-    const parentOffset = bone.parentIndex * 16
-    const local = bone.parentIndex >= 0
-      ? mulPoint(invert(skeleton.world.slice(parentOffset, parentOffset + 16)), info.world)
-      : info.world
-    store.updateSilent((draft) => {
-      writeBoneValue(draft, animation, host.time, drag.bone, 'translate', local)
-    })
-  }
+  const skeleton = scene.runtime.skeleton
+  const bone = scene.runtime.asset.bones.find((item) => item.name === drag.bone)
+  if (!bone) return
+  const parentOffset = bone.parentIndex * 16
+  const local = bone.parentIndex >= 0
+    ? mulPoint(invert(skeleton.world.slice(parentOffset, parentOffset + 16)), info.world)
+    : info.world
+  store.updateSilent((draft) => {
+    writeBoneValue(draft, animation, host.time, drag.bone, 'translate', local)
+  })
 
   scene.setDocument(store.document, host.selection.skin)
   scene.refresh()
@@ -350,7 +600,7 @@ function writeBoneValue(
   animation: string | null,
   time: number,
   bone: string,
-  channel: 'rotate' | 'translate' | 'scale',
+  channel: 'rotate' | 'translate' | 'scale' | 'shear',
   value: number | Vec2
 ): void {
   if (animation) {
@@ -367,6 +617,8 @@ function writeBoneValue(
     boneData.localPosition = { x: value.x, y: value.y }
   } else if (channel === 'scale' && typeof value !== 'number') {
     boneData.localScale = { x: value.x, y: value.y }
+  } else if (channel === 'shear' && typeof value !== 'number') {
+    boneData.localShear = { x: value.x, y: value.y }
   }
 }
 

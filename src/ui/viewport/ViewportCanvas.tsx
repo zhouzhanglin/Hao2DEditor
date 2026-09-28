@@ -111,6 +111,9 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       const mode = useModeStore.getState().mode
       scene.setViewState({
         overlay: tools.overlay,
+        gizmo: tools.gizmo,
+        // 绘制类工具激活时骨骼操作器不可用，直接不画（否则是点不动的假手柄）
+        showGizmo: tools.tool === 'select' || tools.tool === 'bone',
         selectedBone: selection.kind === 'bone' ? selection.bone : '',
         weightBone: tools.overlay.weight ? selection.bone : '',
         selectedVertices: selection.vertices,
@@ -233,17 +236,37 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     const hit = scene.pickBoneHandleAt(world.x, world.y)
     const name = hit && scene.runtime ? (scene.runtime.asset.bones[hit.boneIndex]?.name ?? '') : ''
     if (scene.state.hoveredBone !== name) scene.setViewState({ hoveredBone: name })
-    // 光标提示当前落在哪个手柄上：原点圈=移动、末端方块=缩放 X、侧边方块=缩放 Y、骨骼体=旋转
-    const cursor =
-      hit?.zone === 'origin'
+
+    // 光标：斜切包围盒 > 小坐标轴 > 原点圈（移动）> 骨骼体（旋转）
+    const mode = useToolStore.getState().gizmo
+    const shearEdge = mode === 'shear' ? scene.pickShearEdgeAt(world.x, world.y) : null
+    const part = mode === 'shear' ? null : scene.pickGizmoAt(world.x, world.y)
+    const cursor = shearEdge
+      ? shearEdge === 'top' || shearEdge === 'bottom'
+        ? 'ew-resize'
+        : 'ns-resize'
+      : part
+      ? mode === 'move'
         ? 'move'
-        : hit?.zone === 'tip'
-          ? hit.axis === 'y'
-            ? 'ns-resize'
-            : 'ew-resize'
-          : hit
-            ? 'crosshair'
-            : 'default'
+        : mode === 'rotate'
+          ? 'grab'
+          : part === 'center'
+            ? 'col-resize'
+            : part === 'y'
+              ? 'ns-resize'
+              : 'ew-resize'
+      : hit?.zone === 'origin'
+        ? 'move'
+        : hit
+          ? // 落在骨骼本体上时按当前变换模式给光标（本体也能拖）
+            mode === 'move'
+            ? 'move'
+            : mode === 'rotate'
+              ? 'grab'
+              : mode === 'scale'
+                ? 'nwse-resize'
+                : 'crosshair'
+          : 'default'
     if (event.currentTarget.style.cursor !== cursor) event.currentTarget.style.cursor = cursor
   }
 

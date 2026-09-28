@@ -1,12 +1,40 @@
 import { Container, Graphics } from 'pixi.js'
-import { MAT4_LENGTH, mul, trs } from '@core/math/matrix'
+import { MAT4_LENGTH, mul, mulPoint, trs } from '@core/math/matrix'
+import type { Vec2 } from '@core/math/matrix'
 import { Viewport } from '@render/viewport'
 import { SkeletonView } from '@render/skeletonView'
 import type { TextureStore } from '@render/material'
-import { drawBoneOverlay, drawGhostBones } from '@render/overlays/boneOverlay'
+import {
+  GIZMO_AXIS_LENGTH,
+  GIZMO_CENTER_RADIUS,
+  GIZMO_RING_RADIUS,
+  SHEAR_EDGE_TOLERANCE,
+  drawBoneGizmo,
+  drawBoneOverlay,
+  drawGhostBones,
+  drawShearBox
+} from '@render/overlays/boneOverlay'
+import type { GizmoDrawMode } from '@render/overlays/boneOverlay'
 import { drawMeshOverlay } from '@render/overlays/meshOverlay'
-import { BONE_SIDE_HANDLE_GAP, BONE_TIP_RADIUS, pickBone, pickBoneHandle, pickVertex } from '@render/picking'
-import type { BoneHandleHit, BoneHit, VertexHit } from '@render/picking'
+import {
+  BONE_ORIGIN_RADIUS,
+  gizmoGeometry,
+  pickBone,
+  pickBoneHandle,
+  pickGizmo,
+  pickShearEdge,
+  pickVertex
+} from '@render/picking'
+import type { BoneHandleHit, BoneHit, GizmoPart, ShearEdge, VertexHit } from '@render/picking'
+
+/** 斜切包围盒：局部 AABB + 世界坐标四角（左上 → 右上 → 右下 → 左下） */
+export interface ShearBox {
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+  corners: Array<{ x: number; y: number }>
+}
 import type { MeshBuildResult } from '@core/skin/meshBuilder'
 import type { AttachmentData } from '@core/model/types'
 import type { EditorDocument } from '@core/model/authoring'
@@ -27,6 +55,10 @@ export interface SceneViewState {
   time: number
   /** 洋葱皮：用前后帧的骨骼姿态做参考 */
   onionSkin: boolean
+  /** 骨骼变换小坐标轴的操作模式（移动 / 旋转 / 缩放 / 斜切） */
+  gizmo: GizmoDrawMode
+  /** 是否绘制骨骼操作器：绘制类工具（权重刷 / FFD / 网格）激活时隐藏，避免出现点不动的假手柄 */
+  showGizmo: boolean
 }
 
 export interface EditorSceneOptions {
@@ -51,6 +83,9 @@ export class EditorScene {
   private readonly meshFill = new Graphics()
   private readonly boneStroke = new Graphics()
   private readonly boneFill = new Graphics()
+  /** 骨骼变换小坐标轴（描边 / 填充分开，同 pixi v8 的路径规则） */
+  private readonly gizmoStroke = new Graphics()
+  private readonly gizmoFill = new Graphics()
   /** 坐标轴：画在棋盘格之上、角色之下 */
   private readonly axes = new Graphics()
   /** 需要画成空心的骨骼名集合（编辑期模型才有 hollow 字段） */
@@ -72,13 +107,22 @@ export class EditorScene {
     speed: 1,
     loop: true,
     time: 0,
-    onionSkin: false
+    onionSkin: false,
+    gizmo: 'move',
+    showGizmo: true
   }
 
   constructor(options: EditorSceneOptions) {
     this.textures = options.textures
     this.viewport = new Viewport(options.host)
-    this.overlay.addChild(this.meshFill, this.meshStroke, this.boneFill, this.boneStroke)
+    this.overlay.addChild(
+      this.meshFill,
+      this.meshStroke,
+      this.boneFill,
+      this.boneStroke,
+      this.gizmoFill,
+      this.gizmoStroke
+    )
     this.viewport.overlayLayer.addChild(this.overlay)
     this.viewport.axisLayer.addChild(this.axes)
   }
@@ -263,8 +307,8 @@ export class EditorScene {
   }
 
   /**
-   * 骨骼手柄拾取（移动 / 缩放 / 旋转三区）。
-   * 原点圈与末端手柄是屏幕恒定大小，因此按 zoom 换算成世界半径再判定。
+   * 骨骼拾取：原点圈（移动）/ 骨骼体（旋转）。
+   * 原点圈是屏幕恒定大小，按 zoom 换算成世界半径再判定；缩放走小坐标轴。
    */
   pickBoneHandleAt(worldX: number, worldY: number): BoneHandleHit | null {
     if (!this.bundle) return null
@@ -273,9 +317,40 @@ export class EditorScene {
       worldX,
       worldY,
       this.viewport.pixelsToWorld(8),
-      this.viewport.pixelsToWorld(BONE_TIP_RADIUS),
-      this.viewport.pixelsToWorld(BONE_SIDE_HANDLE_GAP),
+      this.viewport.pixelsToWorld(BONE_ORIGIN_RADIUS),
       this.bundle.boneIndex[this.viewState.selectedBone] ?? -1
+    )
+  }
+
+  /**
+   * 小坐标轴拾取（中心 / X 轴 / Y 轴）。只在选中骨骼上判定——
+   * 它是当前对象的操作器，不应该因为鼠标划过别的骨骼就被抢走。
+   */
+  pickGizmoAt(worldX: number, worldY: number): GizmoPart | null {
+    const bundle = this.bundle
+    if (!bundle) return null
+    const index = bundle.boneIndex[this.viewState.selectedBone] ?? -1
+    if (index < 0) return null
+    if (this.viewState.gizmo === 'shear') return null
+    if (this.viewState.gizmo === 'rotate') {
+      // 旋转没有轴向：圆环与中心都算同一个「一起转」
+      const geometry = gizmoGeometry(bundle.skeleton, index, this.viewport.pixelsToWorld(GIZMO_AXIS_LENGTH))
+      if (!geometry) return null
+      const distance = Math.hypot(worldX - geometry.ox, worldY - geometry.oy)
+      const ring = this.viewport.pixelsToWorld(GIZMO_RING_RADIUS)
+      const tolerance = this.viewport.pixelsToWorld(10)
+      if (Math.abs(distance - ring) <= tolerance) return 'center'
+      if (distance <= this.viewport.pixelsToWorld(GIZMO_CENTER_RADIUS * 1.6)) return 'center'
+      return null
+    }
+    return pickGizmo(
+      bundle.skeleton,
+      index,
+      worldX,
+      worldY,
+      this.viewport.pixelsToWorld(GIZMO_AXIS_LENGTH),
+      this.viewport.pixelsToWorld(GIZMO_CENTER_RADIUS),
+      this.viewport.pixelsToWorld(7)
     )
   }
 
@@ -310,6 +385,94 @@ export class EditorScene {
       attachment.scale.y
     )
     return mul(boneWorld, local)
+  }
+
+  /**
+   * 选中骨骼的**斜切包围盒**：把挂在它下面的插槽附件（Mesh 顶点 / Region 尺寸）
+   * 换算进骨骼局部空间求 AABB，再变换成世界坐标四角。
+   *
+   * 之所以在骨骼局部空间求包围盒：shearX / shearY 作用在骨骼的局部轴上，
+   * 画的时候再乘骨骼世界矩阵，包围盒就会跟着斜切一起歪 —— 这正是用户要看到的反馈。
+   */
+  shearBoxAt(): ShearBox | null {
+    const bundle = this.bundle
+    if (!bundle) return null
+    const index = bundle.boneIndex[this.viewState.selectedBone] ?? -1
+    if (index < 0) return null
+    const local = this.shearBoxLocal(index)
+    if (!local) return null
+    const world = bundle.skeleton.world.slice(index * MAT4_LENGTH, index * MAT4_LENGTH + MAT4_LENGTH)
+    const corner = (x: number, y: number): Vec2 => mulPoint(world, { x, y })
+    return {
+      minX: local.minX,
+      minY: local.minY,
+      maxX: local.maxX,
+      maxY: local.maxY,
+      // 顺序与 pickShearEdge 的约定一致：左上 → 右上 → 右下 → 左下
+      corners: [
+        corner(local.minX, local.maxY),
+        corner(local.maxX, local.maxY),
+        corner(local.maxX, local.minY),
+        corner(local.minX, local.minY)
+      ]
+    }
+  }
+
+  /** 骨骼局部空间下的包围盒；骨骼没有任何可见附件时退回「骨骼长度」的窄框 */
+  private shearBoxLocal(boneIndex: number): { minX: number; minY: number; maxX: number; maxY: number } | null {
+    const bundle = this.bundle
+    if (!bundle) return null
+    let minX = Number.POSITIVE_INFINITY
+    let minY = Number.POSITIVE_INFINITY
+    let maxX = Number.NEGATIVE_INFINITY
+    let maxY = Number.NEGATIVE_INFINITY
+
+    const expand = (x: number, y: number): void => {
+      if (x < minX) minX = x
+      if (x > maxX) maxX = x
+      if (y < minY) minY = y
+      if (y > maxY) maxY = y
+    }
+
+    for (let slotIndex = 0; slotIndex < bundle.asset.slots.length; slotIndex++) {
+      if (bundle.asset.slots[slotIndex].boneIndex !== boneIndex) continue
+      const display = bundle.skeleton.slotDisplayIndex[slotIndex]
+      const attachment = this.attachmentAt(slotIndex, display)
+      if (!attachment) continue
+      const local = trs(
+        attachment.position.x,
+        attachment.position.y,
+        attachment.rotation,
+        attachment.scale.x,
+        attachment.scale.y
+      )
+      const push = (x: number, y: number): void => {
+        const p = mulPoint(local, { x, y })
+        expand(p.x, p.y)
+      }
+      const vertices = attachment.vertices
+      for (let i = 0; i + 1 < vertices.length; i += 2) push(vertices[i], vertices[i + 1])
+      if (attachment.size.x > 0 && attachment.size.y > 0) {
+        const hw = attachment.size.x * 0.5
+        const hh = attachment.size.y * 0.5
+        push(-hw, -hh)
+        push(hw, -hh)
+        push(hw, hh)
+        push(-hw, hh)
+      }
+    }
+
+    if (Number.isFinite(minX)) return { minX, minY, maxX, maxY }
+    // 兜底：光秃秃的骨骼也给一个可拖的框（沿骨骼长度方向）
+    const length = Math.max(0.05, bundle.asset.bones[boneIndex]?.length ?? 0.2)
+    return { minX: 0, minY: -length * 0.15, maxX: length, maxY: length * 0.15 }
+  }
+
+  /** 斜切包围盒的边拾取（世界坐标 + 屏幕像素容差） */
+  pickShearEdgeAt(worldX: number, worldY: number): ShearEdge | null {
+    const box = this.shearBoxAt()
+    if (!box) return null
+    return pickShearEdge(box.corners, worldX, worldY, this.viewport.pixelsToWorld(SHEAR_EDGE_TOLERANCE))
   }
 
   destroy(): void {
@@ -375,13 +538,14 @@ export class EditorScene {
     const unitPerPixel = this.viewport.pixelsToWorld(1)
 
     const showBones = (state.overlay.bones || state.overlay.constraints) && bundle !== null
+    const selectedIndex = bundle ? (bundle.boneIndex[state.selectedBone] ?? -1) : -1
     this.boneStroke.visible = showBones
     this.boneFill.visible = showBones
     if (showBones && bundle && state.onionSkin) this.drawOnionSkin(this.boneStroke, unitPerPixel)
     if (showBones && bundle) {
       drawBoneOverlay(this.boneStroke, this.boneFill, bundle.skeleton, bundle.asset.constraints, {
         unitsPerPixel: unitPerPixel,
-        selectedBone: bundle.boneIndex[state.selectedBone] ?? -1,
+        selectedBone: selectedIndex,
         hoveredBone: bundle.boneIndex[state.hoveredBone] ?? -1,
         showConstraints: state.overlay.constraints,
         showSlots: false,
@@ -390,6 +554,22 @@ export class EditorScene {
     } else {
       this.boneStroke.clear()
       this.boneFill.clear()
+    }
+
+    // 小坐标轴 / 斜切包围盒画在最上层（骨骼、网格之后），保证手柄始终可点可看
+    this.gizmoStroke.clear()
+    this.gizmoFill.clear()
+    const showGizmo = showBones && bundle !== null && selectedIndex >= 0 && state.showGizmo
+    this.gizmoStroke.visible = showGizmo
+    this.gizmoFill.visible = showGizmo
+    if (showGizmo && bundle) {
+      if (state.gizmo === 'shear') {
+        // 斜切不用小坐标轴，改成包围盒：鼠标在边上拖动即可变形
+        const box = this.shearBoxAt()
+        if (box) drawShearBox(this.gizmoStroke, this.gizmoFill, box.corners, unitPerPixel)
+      } else {
+        drawBoneGizmo(this.gizmoStroke, this.gizmoFill, bundle.skeleton, selectedIndex, state.gizmo, unitPerPixel)
+      }
     }
 
     const showMesh = (state.overlay.mesh || state.overlay.weight || state.overlay.ffd) && bundle !== null

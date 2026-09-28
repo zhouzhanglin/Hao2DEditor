@@ -1,7 +1,8 @@
 import { Graphics } from 'pixi.js'
 import type { Skeleton } from '@core/model/skeleton'
 import type { Constraint } from '@core/model/constraints'
-import { BONE_ORIGIN_RADIUS, BONE_SIDE_HANDLE_GAP, BONE_TIP_RADIUS, boneHandleGeometry } from '@render/picking'
+import { BONE_ORIGIN_RADIUS, gizmoGeometry } from '@render/picking'
+import { circlePolygon } from './shapes'
 
 export interface BoneOverlayOptions {
   /** 1 世界单位对应的屏幕像素的倒数（= 1 / zoom），用于保持描边视觉宽度恒定 */
@@ -21,8 +22,127 @@ const COLOR_JOINT = 0xfbbf24
 const COLOR_ROOT = 0x8b5cf6
 const COLOR_CONSTRAINT = 0x34d399
 const COLOR_LINK = 0x6b6b82
-/** Y（垂直骨骼方向）缩放手柄 */
-const COLOR_HANDLE_Y = 0x8b5cf6
+
+/** 小坐标轴：X 轴红、Y 轴绿、中心蓝（与参考图一致） */
+const COLOR_AXIS_X = 0xef4444
+const COLOR_AXIS_Y = 0x22c55e
+const COLOR_AXIS_CENTER = 0x60a5fa
+/** 斜切包围盒（紫） */
+const COLOR_SHEAR_BOX = 0xc084fc
+
+/** 小坐标轴的模式（与 editor/store/toolStore 的 GizmoMode 一致，避免循环依赖这里重复声明） */
+export type GizmoDrawMode = 'move' | 'rotate' | 'scale' | 'shear'
+
+function squarePath(x: number, y: number, r: number): number[] {
+  return [x - r, y - r, x + r, y - r, x + r, y + r, x - r, y + r]
+}
+
+/**
+ * 骨骼变换小坐标轴（gizmo）：中心 + 局部 X / Y 轴，按模式换外观。
+ *
+ * - move：箭头（X 红 / Y 绿）+ 中心方块（拖中心 = 两轴一起动）
+ * - rotate：圆环（拖环或中心都是旋转）
+ * - scale：轴末端方块（改长度 / 粗细）+ 中心方块（等比）
+ *
+ * 斜切不走小坐标轴，改画**包围盒**（见 `drawShearBox`）：在框的边上拖动即可斜切。
+ * 尺寸都用 `unitsPerPixel` 换算，保证屏幕上大小恒定。
+ */
+export function drawBoneGizmo(
+  stroke: Graphics,
+  fill: Graphics,
+  skeleton: Skeleton,
+  index: number,
+  mode: GizmoDrawMode,
+  unitsPerPixel: number
+): void {
+  const w = unitsPerPixel
+  const geometry = gizmoGeometry(skeleton, index, w * GIZMO_AXIS_LENGTH)
+  if (!geometry) return
+  const { ox, oy, tx, ty, sx, sy } = geometry
+  const handle = w * GIZMO_HANDLE_SIZE
+
+  stroke
+    .poly(circlePolygon(ox, oy, w * GIZMO_CENTER_RADIUS))
+    .stroke({ width: w * 1.6, color: COLOR_AXIS_CENTER, alpha: 0.95 })
+  fill
+    .poly(circlePolygon(ox, oy, w * GIZMO_CENTER_RADIUS * 0.6))
+    .fill({ color: COLOR_AXIS_CENTER, alpha: 0.9 })
+
+  if (mode === 'rotate') {
+    const r = w * GIZMO_RING_RADIUS
+    // 自己画多边形：Pixi 的 circle 会按世界半径退化成多边形（放大后尤其明显）
+    stroke.poly(circlePolygon(ox, oy, r)).stroke({ width: w * 2.4, color: COLOR_AXIS_CENTER, alpha: 0.85 })
+    // 四个刻度，强调「这是一个旋转环」
+    for (const angle of [0, Math.PI / 2, Math.PI, (Math.PI * 3) / 2]) {
+      const cx = ox + Math.cos(angle) * r
+      const cy = oy + Math.sin(angle) * r
+      stroke
+        .moveTo(ox + Math.cos(angle) * (r - w * 4), oy + Math.sin(angle) * (r - w * 4))
+        .lineTo(ox + Math.cos(angle) * (r + w * 4), oy + Math.sin(angle) * (r + w * 4))
+        .stroke({ width: w * 1.4, color: COLOR_AXIS_CENTER, alpha: 0.7 })
+    }
+    return
+  }
+
+  const drawAxis = (ex: number, ey: number, color: number): void => {
+    stroke.moveTo(ox, oy).lineTo(ex, ey).stroke({ width: w * 2, color, alpha: 1 })
+    if (mode === 'move') {
+      // 箭头：沿轴方向的三角形
+      const angle = Math.atan2(ey - oy, ex - ox)
+      const head = handle * 1.5
+      fill
+        .poly([
+          ex,
+          ey,
+          ex - Math.cos(angle - 0.4) * head,
+          ey - Math.sin(angle - 0.4) * head,
+          ex - Math.cos(angle + 0.4) * head,
+          ey - Math.sin(angle + 0.4) * head
+        ])
+        .fill({ color, alpha: 0.95 })
+      return
+    }
+    // scale：实心方块
+    fill.poly(squarePath(ex, ey, handle)).fill({ color, alpha: 0.5 })
+    stroke.poly(squarePath(ex, ey, handle)).stroke({ width: w * 1.6, color, alpha: 1 })
+  }
+
+  drawAxis(tx, ty, COLOR_AXIS_X)
+  drawAxis(sx, sy, COLOR_AXIS_Y)
+}
+
+/**
+ * 斜切包围盒：把选中骨骼（及其附件）框起来，鼠标落在边上拖动即可斜切。
+ * 四角顺序：左上 → 右上 → 右下 → 左下。
+ */
+export function drawShearBox(
+  stroke: Graphics,
+  fill: Graphics,
+  corners: ReadonlyArray<{ x: number; y: number }>,
+  unitsPerPixel: number
+): void {
+  if (corners.length < 4) return
+  const w = unitsPerPixel
+  const path = corners.flatMap((point) => [point.x, point.y])
+  fill.poly(path).fill({ color: COLOR_SHEAR_BOX, alpha: 0.1 })
+  stroke.poly(path).stroke({ width: w * 1.8, color: COLOR_SHEAR_BOX, alpha: 0.95 })
+  // 四角加小方块，让"这是一个可拖的框"更明确
+  for (const point of corners) {
+    const r = w * 3.5
+    const box = [point.x - r, point.y - r, point.x + r, point.y - r, point.x + r, point.y + r, point.x - r, point.y + r]
+    fill.poly(box).fill({ color: COLOR_SHEAR_BOX, alpha: 0.85 })
+    stroke.poly(box).stroke({ width: w * 1.2, color: COLOR_SHEAR_BOX, alpha: 1 })
+  }
+}
+
+/** 斜切包围盒边缘的拾取容差（px） */
+export const SHEAR_EDGE_TOLERANCE = 8
+
+/** 小坐标轴在屏幕上的尺寸（px） */
+export const GIZMO_AXIS_LENGTH = 62
+export const GIZMO_HANDLE_SIZE = 6
+export const GIZMO_CENTER_RADIUS = 8
+export const GIZMO_RING_RADIUS = 46
 
 /**
  * 洋葱皮：用**另一时刻**的世界矩阵画一套暗色骨骼作为参考。
@@ -117,46 +237,13 @@ export function drawBoneOverlay(
       if (!hollow) fills.poly(quad).fill({ color, alpha: active ? 0.55 : 0.4 })
       strokes.poly(quad).stroke({ width: w * (isSelected ? 1.8 : 1.2), color, alpha: hollow ? 1 : 0.9 })
 
-      // 选中骨骼画两个缩放手柄（屏幕恒定大小的方块）：
-      // 末端沿骨骼轴 = 缩放 X，末端偏出垂直方向 = 缩放 Y
-      if (isSelected) {
-        const handle = boneHandleGeometry(skeleton, i, w * BONE_SIDE_HANDLE_GAP)
-        if (handle) {
-          const r = w * BONE_TIP_RADIUS
-          const box = (hx: number, hy: number): number[] => [
-            hx - r,
-            hy - r,
-            hx + r,
-            hy - r,
-            hx + r,
-            hy + r,
-            hx - r,
-            hy + r
-          ]
-          // Y 手柄与末端的连线，指明它是从哪根骨骼上"拉出来"的
-          strokes
-            .moveTo(handle.tx, handle.ty)
-            .lineTo(handle.sx, handle.sy)
-            .stroke({ width: w * 1.2, color: COLOR_HANDLE_Y, alpha: 0.7 })
-
-          fills.poly(box(handle.tx, handle.ty)).fill({ color: COLOR_BONE_SELECTED, alpha: 0.3 })
-          strokes
-            .poly(box(handle.tx, handle.ty))
-            .stroke({ width: w * 1.6, color: COLOR_BONE_SELECTED, alpha: 1 })
-
-          fills.poly(box(handle.sx, handle.sy)).fill({ color: COLOR_HANDLE_Y, alpha: 0.3 })
-          strokes
-            .poly(box(handle.sx, handle.sy))
-            .stroke({ width: w * 1.6, color: COLOR_HANDLE_Y, alpha: 1 })
-        }
-      }
     }
 
     // 原点（骨骼头）画一个圈：空心环，根骨骼 / 选中骨骼用各自的强调色。
     // 半径与拾取用的 BONE_ORIGIN_RADIUS 一致（拖这个圈 = 移动骨骼）
     const r = (isSelected ? BONE_ORIGIN_RADIUS + 1.5 : BONE_ORIGIN_RADIUS - 0.5) * w
     strokes
-      .circle(x, y, r)
+      .poly(circlePolygon(x, y, r))
       .stroke({
         width: w * (isSelected ? 2.2 : 1.8),
         color: isRoot ? COLOR_ROOT : active ? COLOR_BONE_SELECTED : COLOR_JOINT,

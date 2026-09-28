@@ -2,6 +2,7 @@ import { Graphics } from 'pixi.js'
 import type { MeshBuildResult } from '@core/skin/meshBuilder'
 import type { AttachmentData } from '@core/model/types'
 import type { Skeleton } from '@core/model/skeleton'
+import { DOT_SEGMENTS, circlePolygon } from './shapes'
 
 export interface MeshOverlayOptions {
   unitsPerPixel: number
@@ -96,7 +97,7 @@ function drawWeightPoints(
     if (!attachment) continue
     const weight = attachment.weights.length > vertexIndex ? weightOf(attachment.weights[vertexIndex], boneIndex) : 0
     if (weight <= 0.001) continue
-    g.circle(result.positions[i * 2], result.positions[i * 2 + 1], 3.2 * w)
+    g.poly(circlePolygon(result.positions[i * 2], result.positions[i * 2 + 1], 3.2 * w, DOT_SEGMENTS))
     g.fill({ color: heatColor(weight), alpha: 0.95 })
   }
 }
@@ -172,7 +173,8 @@ function fillPoints(
 ): void {
   if (points.length === 0) return
   for (let i = 0; i < points.length; i += 2) {
-    g.circle(points[i], points[i + 1], radius)
+    // 自己画多边形：Pixi 的 circle 在缩放的容器里会变成明显的多边形
+    g.poly(circlePolygon(points[i], points[i + 1], radius, DOT_SEGMENTS))
   }
   g.fill({ color, alpha })
 }

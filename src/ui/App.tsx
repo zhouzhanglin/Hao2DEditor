@@ -10,12 +10,38 @@ import TimelinePanel from './timeline/TimelinePanel'
 import HierarchyTree from './tree/HierarchyTree'
 import ViewportCanvas from './viewport/ViewportCanvas'
 import ModeSwitch from './viewport/ModeSwitch'
+import ViewportTools from './viewport/ViewportTools'
 import PanelShell from './widgets/PanelShell'
 import { useModeStore } from '@editor/store/modeStore'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useToolStore } from '@editor/store/toolStore'
+import type { EditorTool, GizmoMode } from '@editor/store/toolStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
+
+/** Q/W/E/R → 骨骼变换工具（与小坐标轴工具条一致） */
+const GIZMO_KEYS: Record<string, GizmoMode> = { q: 'move', w: 'rotate', e: 'scale', r: 'shear' }
+const GIZMO_LABEL: Record<GizmoMode, string> = { move: '移动', rotate: '旋转', scale: '缩放', shear: '斜切' }
+
+/** V/B/S/M/G/D/C → 编辑工具（与顶部工具条、视口工具面板一致） */
+const TOOL_KEYS: Record<string, EditorTool> = {
+  v: 'select',
+  b: 'bone',
+  s: 'slot',
+  m: 'mesh',
+  g: 'weight',
+  d: 'ffd',
+  c: 'constraint'
+}
+const TOOL_LABEL: Record<EditorTool, string> = {
+  select: '选择',
+  bone: '绑骨骼',
+  slot: '插槽',
+  mesh: '网格',
+  weight: '权重刷',
+  ffd: 'FFD 顶点',
+  constraint: '约束'
+}
 import { getPlatform } from '@editor/platform'
 import { setActiveScene, getActiveScene } from '@editor/activeScene'
 import type { EditorScene } from '@editor/scene'
@@ -244,6 +270,18 @@ export default function App() {
         handleCommand('view:fitViewport')
       } else if (event.key === 'k' || event.key === 'K') {
         handleCommand('anim:keyframe')
+      } else if (!mod && TOOL_KEYS[event.key.toLowerCase()]) {
+        // V/B/S/M/G/D/C：切换编辑工具（与视口工具面板、顶部工具条一致）
+        const next = TOOL_KEYS[event.key.toLowerCase()]
+        useToolStore.getState().setTool(next)
+        flash(`工具：${TOOL_LABEL[next]}（${event.key.toUpperCase()}）`)
+      } else if (!mod && GIZMO_KEYS[event.key.toLowerCase()]) {
+        // Q/W/E/R：切换骨骼变换小坐标轴（移动 / 旋转 / 缩放 / 斜切）
+        const next = GIZMO_KEYS[event.key.toLowerCase()]
+        const before = useToolStore.getState().tool
+        useToolStore.getState().setGizmo(next)
+        const switched = useToolStore.getState().tool !== before
+        flash(`骨骼工具：${GIZMO_LABEL[next]}（${event.key.toUpperCase()}）${switched ? '· 已退出绘制工具' : ''}`)
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
         handleCommand('anim:deleteKeys')
       } else if (event.key === 'ArrowLeft') {
@@ -355,6 +393,7 @@ export default function App() {
             <div className="relative flex min-h-0 flex-1">
               <ViewportCanvas onSceneReady={onSceneReady} onStatus={flash} />
               <ModeSwitch mode={mode} onChange={setMode} />
+              <ViewportTools onStatus={flash} />
             </div>
           </div>
         }

@@ -3,61 +3,112 @@ import type { MeshBuildResult } from '@core/skin/meshBuilder'
 import type { AttachmentData } from '@core/model/types'
 
 /**
- * 骨骼手柄在屏幕上的半径（px）。渲染（boneOverlay）与拾取（pickBoneHandle）
- * 共用同一组数值，改一处即可保持一致。
+ * 骨骼原点圈在屏幕上的半径（px）。渲染（boneOverlay）与拾取（pickBoneHandle）
+ * 共用同一数值，改一处即可保持一致。
  */
 export const BONE_ORIGIN_RADIUS = 6
-export const BONE_TIP_RADIUS = 7
-/**
- * Y 缩放手柄相对骨骼末端的垂直偏出距离（px）。
- * 必须大于 2×BONE_TIP_RADIUS，否则两个手柄的判定区会重叠。
- */
-export const BONE_SIDE_HANDLE_GAP = 22
 
-/** 骨骼三个手柄的位置与局部轴向（渲染与拾取共用，避免各算一套导致对不上） */
-export interface BoneHandleGeometry {
-  /** 原点：拖动 = 移动 */
+/**
+ * 骨骼变换小坐标轴（gizmo）：中心 + 局部 X / Y 轴。
+ * 轴按屏幕恒定长度绘制，因此这里的轴向是世界单位向量，长度由调用方按 zoom 换算。
+ */
+export interface GizmoGeometry {
+  /** 中心（骨骼原点） */
   ox: number
   oy: number
-  /** 末端：拖动 = 沿骨骼轴缩放 X */
-  tx: number
-  ty: number
-  /** 侧边：拖动 = 垂直骨骼缩放 Y */
-  sx: number
-  sy: number
-  /** 骨骼轴方向（单位向量，含缩放后的朝向） */
+  /** 局部 X 轴方向（世界单位向量，含 shear/旋转/缩放朝向） */
   dx: number
   dy: number
-  /** 垂直于骨骼轴的方向（单位向量） */
+  /** 局部 Y 轴方向（世界单位向量） */
   px: number
   py: number
+  /** 轴长（世界单位） */
+  len: number
+  /** X 轴端点 */
+  tx: number
+  ty: number
+  /** Y 轴端点 */
+  sx: number
+  sy: number
 }
 
-/**
- * 计算骨骼手柄几何。末端位置含缩放（`world` 基向量长度即缩放倍数），
- * 所以缩放后手柄会跟着骨骼长度一起走。
- */
-export function boneHandleGeometry(
-  skeleton: Skeleton,
-  index: number,
-  sideGap: number
-): BoneHandleGeometry | null {
+export function gizmoGeometry(skeleton: Skeleton, index: number, axisLength: number): GizmoGeometry | null {
   if (index < 0 || index >= skeleton.boneCount) return null
   const o = index * 16
   const ox = skeleton.world[o + 12]
   const oy = skeleton.world[o + 13]
   const ax = skeleton.world[o]
   const ay = skeleton.world[o + 1]
-  const norm = Math.hypot(ax, ay)
-  const scale = norm > 1e-9 ? norm : 1
-  const dx = ax / scale
-  const dy = ay / scale
-  const px = -dy
-  const py = dx
-  const length = Math.max(0, skeleton.asset.bones[index].length) * scale
-  const tx = ox + dx * length
-  const ty = oy + dy * length
-  return { ox, oy, tx, ty, sx: tx + px * sideGap, sy: ty + py * sideGap, dx, dy, px, py }
+  const bx = skeleton.world[o + 4]
+  const by = skeleton.world[o + 5]
+  const normA = Math.hypot(ax, ay)
+  const normB = Math.hypot(bx, by)
+  // 局部轴退化（缩放为 0）时退回默认朝向，避免画不出来 / 除零
+  const dx = normA > 1e-9 ? ax / normA : 1
+  const dy = normA > 1e-9 ? ay / normA : 0
+  const px = normB > 1e-9 ? bx / normB : -dy
+  const py = normB > 1e-9 ? by / normB : dx
+  const len = Math.max(1e-6, axisLength)
+  return { ox, oy, dx, dy, px, py, len, tx: ox + dx * len, ty: oy + dy * len, sx: ox + px * len, sy: oy + py * len }
+}
+
+export type GizmoPart = 'center' | 'x' | 'y'
+
+/**
+ * 小坐标轴拾取：中心方块 → X 轴 → Y 轴。
+ * 中心优先，因为两个轴都从中心出发，重叠区应视为「一起变换」。
+ */
+export function pickGizmo(
+  skeleton: Skeleton,
+  index: number,
+  x: number,
+  y: number,
+  axisLength: number,
+  centerRadius: number,
+  axisTolerance: number
+): GizmoPart | null {
+  const g = gizmoGeometry(skeleton, index, axisLength)
+  if (!g) return null
+  if (Math.hypot(x - g.ox, y - g.oy) <= centerRadius) return 'center'
+  if (distanceToSegment(x, y, g.ox, g.oy, g.tx, g.ty) <= axisTolerance) return 'x'
+  if (distanceToSegment(x, y, g.ox, g.oy, g.sx, g.sy) <= axisTolerance) return 'y'
+  return null
+}
+
+/** 斜切包围盒的四条边 */
+export type ShearEdge = 'left' | 'right' | 'top' | 'bottom'
+
+/**
+ * 斜切包围盒的边拾取。四角按 `(minX,maxY) → (maxX,maxY) → (maxX,minY) → (minX,minY)`
+ * 的顺序传入（世界坐标），返回命中最近的一条边。
+ */
+export function pickShearEdge(
+  corners: readonly Vec2Like[],
+  x: number,
+  y: number,
+  tolerance: number
+): ShearEdge | null {
+  if (corners.length < 4) return null
+  const edges: Array<{ name: ShearEdge; a: number; b: number }> = [
+    { name: 'top', a: 0, b: 1 },
+    { name: 'right', a: 1, b: 2 },
+    { name: 'bottom', a: 2, b: 3 },
+    { name: 'left', a: 3, b: 0 }
+  ]
+  let best: { name: ShearEdge; distance: number } | null = null
+  for (const edge of edges) {
+    const p = corners[edge.a]
+    const q = corners[edge.b]
+    const distance = distanceToSegment(x, y, p.x, p.y, q.x, q.y)
+    if (distance > tolerance) continue
+    if (!best || distance < best.distance) best = { name: edge.name, distance }
+  }
+  return best?.name ?? null
+}
+
+export interface Vec2Like {
+  x: number
+  y: number
 }
 
 export interface BoneHit {
@@ -68,48 +119,24 @@ export interface BoneHit {
 /**
  * 骨骼上的操作区：
  * - `origin`：骨骼原点的关节圈（拖动 = 移动）
- * - `tip`：骨骼末端的手柄（拖动 = 缩放）
  * - `body`：骨骼本体（拖动 = 旋转）
+ *
+ * 缩放不再单独放手柄：交给选中骨骼上的小坐标轴（gizmo）的 X / Y 轴。
  */
-export type BoneHandleZone = 'origin' | 'tip' | 'body'
+export type BoneHandleZone = 'origin' | 'body'
 
 export interface BoneHandleHit {
   boneIndex: number
   zone: BoneHandleZone
-  /** 缩放手柄的轴向：x = 沿骨骼、y = 垂直骨骼 */
-  axis?: 'x' | 'y'
   distance: number
 }
 
-/** 单根骨骼的手柄判定：原点圈优先于两个缩放手柄（同一根上都不远时，移动更常用） */
-function handleZoneOf(
-  skeleton: Skeleton,
-  index: number,
-  x: number,
-  y: number,
-  handleRadius: number,
-  sideGap: number
-): BoneHandleHit | null {
-  const geometry = boneHandleGeometry(skeleton, index, sideGap)
-  if (!geometry) return null
-
-  const originDistance = Math.hypot(x - geometry.ox, y - geometry.oy)
-  if (originDistance <= handleRadius) return { boneIndex: index, zone: 'origin', distance: originDistance }
-
-  const tipDistance = Math.hypot(x - geometry.tx, y - geometry.ty)
-  if (tipDistance <= handleRadius) return { boneIndex: index, zone: 'tip', axis: 'x', distance: tipDistance }
-
-  const sideDistance = Math.hypot(x - geometry.sx, y - geometry.sy)
-  if (sideDistance <= handleRadius) return { boneIndex: index, zone: 'tip', axis: 'y', distance: sideDistance }
-  return null
-}
-
 /**
- * 骨骼手柄拾取：优先命中原点圈与末端手柄（两者都是屏幕恒定大小，
- * 由调用方按 zoom 换算成世界半径传入），都没有命中时回退到骨骼本体。
+ * 骨骼拾取：先看原点圈（移动，屏幕恒定大小，由调用方按 zoom 换算半径），
+ * 都没命中时回退到骨骼本体（旋转）。
  *
  * `preferredBone`（通常是当前选中骨骼）优先判定：骨骼是头尾相接的，
- * 父骨骼的末端手柄会与子骨骼的原点圈落在同一点，不区分就会误判到父骨骼。
+ * 父骨骼的末端与子骨骼的原点落在同一点，不区分就会误判到父骨骼。
  */
 export function pickBoneHandle(
   skeleton: Skeleton,
@@ -117,19 +144,25 @@ export function pickBoneHandle(
   y: number,
   tolerance: number,
   handleRadius: number,
-  sideGap: number,
   preferredBone = -1
 ): BoneHandleHit | null {
+  const distanceToOrigin = (index: number): number => {
+    const o = index * 16
+    return Math.hypot(x - skeleton.world[o + 12], y - skeleton.world[o + 13])
+  }
+
   if (preferredBone >= 0 && preferredBone < skeleton.boneCount) {
-    const preferred = handleZoneOf(skeleton, preferredBone, x, y, handleRadius, sideGap)
-    if (preferred) return preferred
+    const distance = distanceToOrigin(preferredBone)
+    if (distance <= handleRadius) return { boneIndex: preferredBone, zone: 'origin', distance }
   }
 
   let best: BoneHandleHit | null = null
   for (let i = 0; i < skeleton.boneCount; i++) {
     if (i === preferredBone) continue
-    const hit = handleZoneOf(skeleton, i, x, y, handleRadius, sideGap)
-    if (hit && (!best || hit.distance < best.distance)) best = hit
+    const distance = distanceToOrigin(i)
+    if (distance <= handleRadius && (!best || distance < best.distance)) {
+      best = { boneIndex: i, zone: 'origin', distance }
+    }
   }
   if (best) return best
 

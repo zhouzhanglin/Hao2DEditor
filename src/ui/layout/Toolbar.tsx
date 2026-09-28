@@ -30,13 +30,13 @@ export interface ToolbarProps {
 }
 
 const TOOLS: Array<{ id: EditorTool; label: string; icon: typeof MousePointer2 }> = [
-  { id: 'select', label: '选择 / 变换 (Q)', icon: MousePointer2 },
-  { id: 'bone', label: '骨骼 (B)', icon: Move3d },
-  { id: 'slot', label: '插槽 (S)', icon: Layers },
-  { id: 'mesh', label: '网格 (M)', icon: Grid3x3 },
-  { id: 'weight', label: '权重刷 (W)', icon: Spline },
-  { id: 'ffd', label: 'FFD 变形 (D)', icon: Boxes },
-  { id: 'constraint', label: '约束 (C)', icon: Link2 }
+  { id: 'select', label: '选择工具 (V)', icon: MousePointer2 },
+  { id: 'bone', label: '绑骨骼工具 (B)', icon: Move3d },
+  { id: 'slot', label: '插槽工具 (S)', icon: Layers },
+  { id: 'mesh', label: '网格工具 (M)', icon: Grid3x3 },
+  { id: 'weight', label: '权重刷工具 (G)', icon: Spline },
+  { id: 'ffd', label: 'FFD 顶点工具 (D)', icon: Boxes },
+  { id: 'constraint', label: '约束工具 (C)', icon: Link2 }
 ]
 
 const OVERLAYS: Array<{ key: keyof ToolbarProps['overlay']; label: string }> = [

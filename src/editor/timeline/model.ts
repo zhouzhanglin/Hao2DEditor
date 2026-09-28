@@ -106,7 +106,18 @@ export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrac
     tracks.push(makeTrack('event', `事件（${animation.events.length}）`, '', 'event', keys))
   }
 
-  return tracks.sort((a, b) => a.kind.localeCompare(b.kind) || a.label.localeCompare(b.label))
+  // 事件轨永远排在最上面（时间轴上最容易先看到），其余按 骨骼 → 插槽 → FFD → 约束 排列
+  return tracks.sort(
+    (a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.label.localeCompare(b.label)
+  )
+}
+
+const KIND_ORDER: Record<KeyKind, number> = {
+  event: 0,
+  bone: 1,
+  slot: 2,
+  deform: 3,
+  constraint: 4
 }
 
 type MutableFrame = { time: number; easing: Easing; curve: number[] | null }

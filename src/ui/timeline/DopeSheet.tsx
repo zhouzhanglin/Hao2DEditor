@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Lock, ZoomIn } from 'lucide-react'
+import { Flag, Lock, ZoomIn } from 'lucide-react'
 import { TIMELINE_ZOOM_MAX, TIMELINE_ZOOM_MIN } from '@editor/store/timelineStore'
 import type { KeySelector, TimelineTrack } from '@editor/timeline/model'
 
@@ -340,6 +340,34 @@ export default function DopeSheet(props: DopeSheetProps) {
   const playheadPercent = percent(time)
   const zoomed = Math.abs(zoom - 1) > 0.001
 
+  /** 标记（菱形关键帧 / 事件小红旗）的统一点击逻辑：选中 + 开始拖动 */
+  const startMarkerDrag = (
+    event: React.PointerEvent<HTMLButtonElement>,
+    marker: { slot: number; selectors: KeySelector[] },
+    selected: boolean
+  ): void => {
+    event.stopPropagation()
+    if (event.button !== 0) return
+    const additive = event.ctrlKey || event.metaKey
+    const next = additive
+      ? selected
+        ? selectedKeys.filter((item) => !marker.selectors.some((s) => sameSelector(s, item)))
+        : [...selectedKeys, ...marker.selectors.filter((s) => !isSelected(s))]
+      : selected
+        ? selectedKeys
+        : marker.selectors
+    props.onSelectKeys(next)
+    if (next.length === 0) return
+    props.onBeginDrag()
+    dragRef.current = {
+      selectors: next,
+      originTimes: next.map((item) => item.time),
+      startTime: timeAtClientX(event.clientX),
+      active: false,
+      map: { ...mapRef.current }
+    }
+  }
+
   return (
     <div ref={hostRef} className="flex min-h-0 flex-1 flex-col">
       {/* 表头：轨道信息 + 帧 / 时间刻度尺 */}
@@ -490,6 +518,26 @@ export default function DopeSheet(props: DopeSheetProps) {
                   const left = percent(marker.slot)
                   if (left < -1 || left > 101) return null
                   const selected = marker.selectors.every(isSelected)
+                  // 事件轨用小红旗（旗杆对准触发时刻），其余轨道用菱形关键帧
+                  if (track.kind === 'event') {
+                    return (
+                      <button
+                        key={marker.slot}
+                        type="button"
+                        className={[
+                          'absolute top-[4px] -translate-x-[1px] transition-transform duration-panel cursor-pointer',
+                          selected
+                            ? 'scale-125 text-danger drop-shadow-[0_0_6px_rgba(248,113,113,0.9)]'
+                            : 'text-danger/85 hover:text-danger'
+                        ].join(' ')}
+                        style={{ left: `${left}%` }}
+                        title={`${marker.channels[0]} @ ${marker.slot.toFixed(3)}s（事件；拖动改时间，Delete 删除）`}
+                        onPointerDown={(event) => startMarkerDrag(event, marker, selected)}
+                      >
+                        <Flag size={11} fill="currentColor" strokeWidth={2} />
+                      </button>
+                    )
+                  }
                   return (
                     <button
                       key={marker.slot}
@@ -502,28 +550,7 @@ export default function DopeSheet(props: DopeSheetProps) {
                       ].join(' ')}
                       style={{ left: `${left}%` }}
                       title={`${track.label} · ${marker.channels.join(' / ')} @ ${marker.slot.toFixed(3)}s（拖动整组改时间，Delete 删除）`}
-                      onPointerDown={(event) => {
-                        event.stopPropagation()
-                        if (event.button !== 0) return
-                        const additive = event.ctrlKey || event.metaKey
-                        const next = additive
-                          ? selected
-                            ? selectedKeys.filter((item) => !marker.selectors.some((s) => sameSelector(s, item)))
-                            : [...selectedKeys, ...marker.selectors.filter((s) => !isSelected(s))]
-                          : selected
-                            ? selectedKeys
-                            : marker.selectors
-                        props.onSelectKeys(next)
-                        if (next.length === 0) return
-                        props.onBeginDrag()
-                        dragRef.current = {
-                          selectors: next,
-                          originTimes: next.map((item) => item.time),
-                          startTime: timeAtClientX(event.clientX),
-                          active: false,
-                          map: { ...mapRef.current }
-                        }
-                      }}
+                      onPointerDown={(event) => startMarkerDrag(event, marker, selected)}
                     />
                   )
                 })}

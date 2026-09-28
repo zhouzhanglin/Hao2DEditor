@@ -9,6 +9,8 @@ export interface BoneOverlayOptions {
   hoveredBone: number
   showConstraints: boolean
   showSlots: boolean
+  /** 需要画成空心的骨骼名（来自编辑期模型的 hollow 选项，默认全是实心） */
+  hollowBones?: ReadonlySet<string>
 }
 
 const COLOR_BONE = 0xf97316
@@ -44,7 +46,12 @@ export function drawGhostBones(
 }
 
 /**
- * 骨骼线框 + 关节 + 约束目标连线（画在世界容器里，y 轴向上）。
+ * 骨骼绘制 + 关节 + 约束目标连线（画在世界容器里，y 轴向上）。
+ *
+ * 骨骼体是 Spine 风格的**风筝形四边形**：原点收成顶点 → 沿骨骼方向张开到两个肩点 →
+ * 再收成末端尖端；骨骼原点（关节处）画一个空心圆圈。
+ * 每个骨骼可以选实心（默认，半透明填充 + 描边）或空心（只描边），
+ * 空心标记来自编辑期模型的 `hollow`（按骨骼名匹配，运行时模型不带该字段）。
  *
  * 描边与填充必须用**两个 Graphics**：pixi v8 中 stroke() 之后的路径仍会被后续
  * fill() 填充，混用会画出一整块覆盖角色的色斑。
@@ -62,22 +69,59 @@ export function drawBoneOverlay(
   const w = options.unitsPerPixel
   const boneCount = skeleton.boneCount
 
-  const normal: number[] = []
-  const selected: number[] = []
+  // 骨骼体（四边形）+ 原点圈
   for (let i = 0; i < boneCount; i++) {
     const o = i * 16
     const x = skeleton.world[o + 12]
     const y = skeleton.world[o + 13]
-    const length = Math.max(skeleton.asset.bones[i].length, 0.0001)
-    const tx = skeleton.world[o] * length + x
-    const ty = skeleton.world[o + 1] * length + y
-    const target = i === options.selectedBone ? selected : i === options.hoveredBone ? selected : normal
-    target.push(x, y, tx, ty)
-  }
+    const length = skeleton.asset.bones[i].length
+    const isSelected = i === options.selectedBone
+    const isHovered = i === options.hoveredBone
+    const isRoot = skeleton.asset.bones[i].parentIndex < 0
+    const active = isSelected || isHovered
+    const color = active ? COLOR_BONE_SELECTED : COLOR_BONE
 
-  // 描边按视觉宽度分层：普通骨骼细、选中/悬停骨骼粗
-  strokeSegments(g, normal, w * 1.4, COLOR_BONE, 0.95)
-  strokeSegments(g, selected, w * 2.4, COLOR_BONE_SELECTED, 1)
+    const dx = skeleton.world[o] * length
+    const dy = skeleton.world[o + 1] * length
+    const norm = Math.hypot(dx, dy)
+
+    if (length >= 1e-4 && norm >= 1e-6) {
+      const tx = x + dx
+      const ty = y + dy
+      const dirX = dx / norm
+      const dirY = dy / norm
+      const px = -dirY
+      const py = dirX
+      // Spine 风格风筝形：原点收成顶点 → 沿骨骼方向张开到两个肩点 → 收成末端尖端
+      const shoulder = length * 0.09
+      const halfW = Math.min(Math.max(length * 0.05, w * 2.2), length * 0.4)
+      const sx = x + dirX * shoulder
+      const sy = y + dirY * shoulder
+      const quad = [
+        x,
+        y, // 顶点（骨骼原点，正对关节圈）
+        sx + px * halfW,
+        sy + py * halfW, // 左肩
+        tx,
+        ty, // 末端尖端
+        sx - px * halfW,
+        sy - py * halfW // 右肩
+      ]
+      const hollow = options.hollowBones?.has(skeleton.asset.bones[i].name) ?? false
+      if (!hollow) fills.poly(quad).fill({ color, alpha: active ? 0.55 : 0.4 })
+      strokes.poly(quad).stroke({ width: w * (isSelected ? 1.8 : 1.2), color, alpha: hollow ? 1 : 0.9 })
+    }
+
+    // 原点（骨骼头）画一个圈：空心环，根骨骼 / 选中骨骼用各自的强调色
+    const r = (isSelected ? 7 : 5.5) * w
+    strokes
+      .circle(x, y, r)
+      .stroke({
+        width: w * (isSelected ? 2.2 : 1.8),
+        color: isRoot ? COLOR_ROOT : active ? COLOR_BONE_SELECTED : COLOR_JOINT,
+        alpha: isRoot || active ? 1 : 0.9
+      })
+  }
 
   if (options.showSlots) {
     for (let i = 0; i < skeleton.slotCount; i++) {
@@ -91,21 +135,6 @@ export function drawBoneOverlay(
       g.moveTo(x, y - r).lineTo(x, y + r)
       g.stroke({ width: w * 1, color: COLOR_LINK, alpha: 0.6 })
     }
-  }
-
-  // 关节与根骨骼标记（画在填充层）
-  for (let i = 0; i < boneCount; i++) {
-    const o = i * 16
-    const x = skeleton.world[o + 12]
-    const y = skeleton.world[o + 13]
-    const isRoot = skeleton.asset.bones[i].parentIndex < 0
-    const isSelected = i === options.selectedBone
-    const r = (isSelected ? 4 : 2.6) * w
-    fills.circle(x, y, r)
-    fills.fill({
-      color: isRoot ? COLOR_ROOT : isSelected ? COLOR_BONE_SELECTED : COLOR_JOINT,
-      alpha: isRoot || isSelected ? 1 : 0.9
-    })
   }
 
   if (options.showConstraints) drawConstraintLinks(g, skeleton, constraints, w)
@@ -136,18 +165,4 @@ function drawConstraintLinks(
     g.moveTo(targetX, targetY - size).lineTo(targetX, targetY + size)
     g.stroke({ width: w * 1.2, color: COLOR_CONSTRAINT, alpha: 0.85 })
   }
-}
-
-function strokeSegments(
-  g: Graphics,
-  segments: number[],
-  width: number,
-  color: number,
-  alpha: number
-): void {
-  if (segments.length === 0) return
-  for (let i = 0; i < segments.length; i += 4) {
-    g.moveTo(segments[i], segments[i + 1]).lineTo(segments[i + 2], segments[i + 3])
-  }
-  g.stroke({ width, color, alpha })
 }

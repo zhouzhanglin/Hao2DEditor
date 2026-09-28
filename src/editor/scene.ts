@@ -53,6 +53,8 @@ export class EditorScene {
   private readonly boneFill = new Graphics()
   /** 坐标轴：画在棋盘格之上、角色之下 */
   private readonly axes = new Graphics()
+  /** 需要画成空心的骨骼名集合（编辑期模型才有 hollow 字段） */
+  private hollowBones = new Set<string>()
   private bundle: RuntimeBundle | null = null
   private view: SkeletonView | null = null
   private document: EditorDocument | null = null
@@ -104,6 +106,8 @@ export class EditorScene {
 
   setDocument(doc: EditorDocument, skinName: string): void {
     this.document = doc
+    // 空心骨骼只存在于编辑期模型：这里按名字收集一份给叠加层使用
+    this.hollowBones = new Set(doc.bones.filter((bone) => bone.hollow).map((bone) => bone.name))
     if (needsRebuild(this.bundle, doc, skinName)) {
       const previousAnimation = this.animationName
       const previousTime = this.viewState.time
@@ -363,7 +367,8 @@ export class EditorScene {
         selectedBone: bundle.boneIndex[state.selectedBone] ?? -1,
         hoveredBone: bundle.boneIndex[state.hoveredBone] ?? -1,
         showConstraints: state.overlay.constraints,
-        showSlots: false
+        showSlots: false,
+        hollowBones: this.hollowBones
       })
     } else {
       this.boneStroke.clear()

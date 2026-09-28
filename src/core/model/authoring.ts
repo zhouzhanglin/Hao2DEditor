@@ -46,6 +46,8 @@ export interface AuthoringBone {
   /** 编辑器辅助 */
   color: string
   locked: boolean
+  /** 骨骼显示为空心（只描边不填充），默认 false = 实心 */
+  hollow?: boolean
 }
 
 export interface AuthoringWeight {
@@ -244,6 +246,7 @@ export function createAuthoringBone(partial?: Partial<AuthoringBone>): Authoring
     length: 20,
     color: '#F97316',
     locked: false,
+    hollow: false,
     ...partial
   }
 }

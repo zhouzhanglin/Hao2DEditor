@@ -137,6 +137,20 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
               })
             }
           />
+          <SelectField
+            label="画法"
+            value={bone.hollow ? 'hollow' : 'filled'}
+            options={[
+              { value: 'filled', label: '实心' },
+              { value: 'hollow', label: '空心' }
+            ]}
+            onChange={(value) =>
+              update('修改骨骼画法', (draft) => {
+                const target = draft.bones.find((b) => b.name === bone.name)
+                if (target) target.hollow = value === 'hollow'
+              })
+            }
+          />
         </FieldGroup>
       </div>
     )

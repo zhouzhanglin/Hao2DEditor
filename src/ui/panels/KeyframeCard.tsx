@@ -4,7 +4,7 @@ import { hexToRgba, rgbaToHex } from '@core/util/color'
 import type { RGBA } from '@core/model/types'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
-import { deleteKeys, findKeyframe, setKeyEasing, setKeysTimes } from '@editor/timeline/model'
+import { deleteKeys, findKeyframe, setKeyEasing } from '@editor/timeline/model'
 import type { AnyKeyframe, KeySelector } from '@editor/timeline/model'
 import { ColorField, FieldGroup, NumberField, SelectField, TextField, ToggleField, Vector2Field } from '@ui/widgets/fields'
 
@@ -72,16 +72,6 @@ export default function KeyframeCard({ onStatus = () => undefined }: KeyframeCar
         if (hit) mutate(hit)
       }
     })
-  }
-
-  const setTime = (value: number): void => {
-    if (!single) return
-    const next = Math.max(0, Number(value.toFixed(4)))
-    update('修改关键帧时间', (draft) => {
-      setKeysTimes(draft, animationName, [{ selector: single, time: next }])
-    })
-    // 选择器时间同步，否则卡片与 dope sheet 会失去目标
-    setSelectedKeys([{ ...single, time: next }])
   }
 
   const remove = (): void => {
@@ -166,15 +156,8 @@ export default function KeyframeCard({ onStatus = () => undefined }: KeyframeCar
             <>
               <TextField label="目标" value={single.target || '（无）'} onChange={() => undefined} />
               <TextField label="通道" value={channels || single.channel} onChange={() => undefined} />
-              <NumberField
-                label="时间"
-                value={single.time}
-                step={document.frameRate > 0 ? 1 / document.frameRate : 0.033}
-                min={0}
-                precision={3}
-                suffix={`秒 · 第 ${frameIndex} 帧`}
-                onChange={setTime}
-              />
+              {/* 时间只读：改时间统一在时间轴上拖关键帧，避免两处入口 */}
+              <ReadonlyRow label="时间" value={`${single.time.toFixed(3)}s（第 ${frameIndex} 帧）`} />
               <SelectField label="缓动" value={String(easing)} options={EASING_OPTIONS} onChange={applyEasing} />
               {easing === Easing.Bezier ? (
                 <p className="text-3xs text-content-lo">

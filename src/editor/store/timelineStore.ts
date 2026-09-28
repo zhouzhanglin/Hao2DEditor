@@ -31,9 +31,15 @@ export interface TimelineState {
   setSelectedKeys: (keys: KeySelector[]) => void
 }
 
-/** 时间轴缩放范围：1 = 完整适配；上限用于逐帧精修 */
-export const TIMELINE_ZOOM_MIN = 1
-export const TIMELINE_ZOOM_MAX = 32
+/**
+ * 时间轴缩放范围。
+ * 1 = 完整适配动画长度；< 1 可以把时间轴压得更短（长动画一屏看完、帧距更小），
+ * 上限用于逐帧精修。
+ */
+export const TIMELINE_ZOOM_MIN = 0.5
+export const TIMELINE_ZOOM_MAX = 2
+/** 打开时间轴时的默认缩放（与上下限解耦，改范围不会连带改默认观感） */
+export const TIMELINE_ZOOM_DEFAULT = 1
 
 export const useTimelineStore = create<TimelineState>((set, get) => ({
   currentAnimation: null,
@@ -43,7 +49,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   speed: 1,
   onionSkin: false,
   snapToFrame: true,
-  zoom: TIMELINE_ZOOM_MIN,
+  zoom: TIMELINE_ZOOM_DEFAULT,
   selectedKeys: [],
 
   setAnimation: (name) => set({ currentAnimation: name, time: 0, selectedKeys: [] }),

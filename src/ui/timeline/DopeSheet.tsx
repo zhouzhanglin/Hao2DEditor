@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Lock, ZoomIn } from 'lucide-react'
+import { TIMELINE_ZOOM_MAX, TIMELINE_ZOOM_MIN } from '@editor/store/timelineStore'
 import type { KeySelector, TimelineTrack } from '@editor/timeline/model'
 
 export interface DopeSheetProps {
@@ -44,6 +45,12 @@ const RULER_HEIGHT = 30
 const MIN_TICK_GAP = 58
 const FRAME_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 240, 600]
 const ZOOM_SENSITIVITY = 0.0016
+/**
+ * 时间轴左侧留白（占帧区域宽度的比例）。
+ * 时间 0 不是贴着左边缘，第 0 帧的关键帧菱形就不会被裁掉；
+ * 右侧同理多出一点余量，整体观感更舒展。
+ */
+const LEAD_RATIO = 0.022
 
 function toSelector(track: TimelineTrack, channel: string, target: string, attachment: string, time: number): KeySelector {
   return { kind: track.kind, target, attachment, channel, time }
@@ -74,6 +81,8 @@ export default function DopeSheet(props: DopeSheetProps) {
   const areaRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<DragState | null>(null)
   const scrubRef = useRef(false)
+  /** 中键平移会话 */
+  const panRef = useRef<{ x: number; start: number } | null>(null)
   const [areaWidth, setAreaWidth] = useState(0)
 
   /**
@@ -111,6 +120,14 @@ export default function DopeSheet(props: DopeSheetProps) {
     return () => observer.disconnect()
   }, [])
 
+  // 外部（store / 其它入口）改变缩放时同步到本地视窗。
+  // 本地状态是连续滚轮事件的权威来源，这里只处理「外部值与本地上次写入不一致」的情况。
+  useEffect(() => {
+    if (Math.abs(props.zoom - viewRef.current.zoom) < 1e-6) return
+    applyView({ zoom: props.zoom })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.zoom])
+
   // 缩放后把播放头拉回可见范围（只跟随时间变化，避免破坏缩放锚点）
   const lastTimeRef = useRef(time)
   useEffect(() => {
@@ -143,13 +160,20 @@ export default function DopeSheet(props: DopeSheetProps) {
     [tracks]
   )
 
+  /** 像素比例 → 时间（含左侧留白补偿） */
+  const timeAtRatio = (ratio: number, map?: TimeMap): number => {
+    const { start: from, span: width } = map ?? mapRef.current
+    const usable = 1 - LEAD_RATIO
+    return from + ((ratio - LEAD_RATIO) / usable) * width
+  }
+
   /** 客户端 x → 时间；map 传入时使用该映射（拖拽期间冻结） */
   const timeAtClientX = (clientX: number, map?: TimeMap): number => {
     const rect = areaRef.current?.getBoundingClientRect()
-    const { start: from, span: width } = map ?? mapRef.current
+    const { start: from } = map ?? mapRef.current
     if (!rect || rect.width <= 0) return from
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
-    return from + ratio * width
+    return timeAtRatio(ratio, map)
   }
 
   const snap = (value: number): number => {
@@ -196,7 +220,10 @@ export default function DopeSheet(props: DopeSheetProps) {
 
       const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
       const anchorTime = from + ratio * currentSpan
-      const next = Math.max(1, currentZoom * Math.exp(-event.deltaY * ZOOM_SENSITIVITY))
+      const next = Math.max(
+        TIMELINE_ZOOM_MIN,
+        Math.min(TIMELINE_ZOOM_MAX, currentZoom * Math.exp(-event.deltaY * ZOOM_SENSITIVITY))
+      )
       const nextSpan = current.axis / next
       // 保持光标处的时间不动
       applyView({
@@ -210,9 +237,58 @@ export default function DopeSheet(props: DopeSheetProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  /**
+   * 中键按住拖动 = 左右平移时间轴（与滚轮缩放共用同一个可见窗口）。
+   * 顺带 preventDefault 掉 mousedown，避免浏览器触发中键自动滚动。
+   */
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    const onMiddleDown = (event: PointerEvent): void => {
+      if (event.button !== 1) return
+      event.preventDefault()
+      panRef.current = { x: event.clientX, start: viewRef.current.start }
+      host.style.cursor = 'grabbing'
+    }
+    const onMiddleMove = (event: PointerEvent): void => {
+      const pan = panRef.current
+      if (!pan) return
+      const rect = areaRef.current?.getBoundingClientRect()
+      if (!rect || rect.width <= 0) return
+      const current = propsRef.current
+      const { zoom: currentZoom } = viewRef.current
+      const currentSpan = currentZoom > 0 ? current.axis / currentZoom : current.axis
+      const maxStart = Math.max(0, current.axis - currentSpan)
+      // 换算要扣掉左侧留白占用的宽度，保证拖动与画面 1:1
+      const delta = ((event.clientX - pan.x) / (rect.width * (1 - LEAD_RATIO))) * currentSpan
+      applyView({ start: Math.max(0, Math.min(maxStart, pan.start - delta)) })
+    }
+    const onMiddleUp = (): void => {
+      if (!panRef.current) return
+      panRef.current = null
+      host.style.cursor = ''
+    }
+    // 捕获阶段拦下中键，避免被浏览器解释为自动滚动
+    const blockMiddle = (event: MouseEvent): void => {
+      if (event.button === 1) event.preventDefault()
+    }
+    host.addEventListener('pointerdown', onMiddleDown, true)
+    host.addEventListener('mousedown', blockMiddle, true)
+    window.addEventListener('pointermove', onMiddleMove)
+    window.addEventListener('pointerup', onMiddleUp)
+    return () => {
+      host.removeEventListener('pointerdown', onMiddleDown, true)
+      host.removeEventListener('mousedown', blockMiddle, true)
+      window.removeEventListener('pointermove', onMiddleMove)
+      window.removeEventListener('pointerup', onMiddleUp)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // 拖拽关键帧 / 拖动刻度尺：都在 window 上监听，避免指针移出面板后丢失事件
   useEffect(() => {
     const onMove = (event: PointerEvent): void => {
+      if (panRef.current) return
       if (scrubRef.current) {
         propsRef.current.onScrub(snapScrub(timeAtClientX(event.clientX)))
         return
@@ -246,21 +322,23 @@ export default function DopeSheet(props: DopeSheetProps) {
   // ---- 刻度（按可见窗口生成） ----
   const frameCount = Math.max(1, Math.round(axis * frameRate))
   const endFrame = Math.max(0, Math.round(length * frameRate))
-  const firstFrame = Math.max(0, Math.floor(start * frameRate))
   const lastFrame = Math.min(frameCount, Math.ceil((start + span) * frameRate))
   const pxPerFrame = areaWidth > 0 && span > 0 ? areaWidth / (span * frameRate) : 0
   const frameStep = FRAME_STEPS.find((step) => step * pxPerFrame >= MIN_TICK_GAP) ?? FRAME_STEPS[FRAME_STEPS.length - 1]
+  const firstFrame = Math.max(0, Math.floor((start - span * LEAD_RATIO) * frameRate))
   const majorFrames: number[] = []
   for (let frame = Math.ceil(firstFrame / frameStep) * frameStep; frame <= lastFrame; frame += frameStep) {
     majorFrames.push(frame)
   }
   const minorStep = frameStep >= 5 && (frameStep / 5) * pxPerFrame >= 5 ? frameStep / 5 : 0
-  const percent = (value: number): number => (span > 0 ? ((value - start) / span) * 100 : 0)
+  /** 时间 → 帧区域内的百分比（含左侧留白） */
+  const percent = (value: number): number =>
+    span > 0 ? (LEAD_RATIO + ((value - start) / span) * (1 - LEAD_RATIO)) * 100 : LEAD_RATIO * 100
   const frameToTime = (frame: number): number => (frameRate > 0 ? frame / frameRate : 0)
   const totalKeys = tracks.reduce((sum, track) => sum + track.keys.length, 0)
   const endPercent = percent(length)
   const playheadPercent = percent(time)
-  const zoomed = zoom > 1.001
+  const zoomed = Math.abs(zoom - 1) > 0.001
 
   return (
     <div ref={hostRef} className="flex min-h-0 flex-1 flex-col">

@@ -238,9 +238,14 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     }
   }
 
+  // 骨骼拾取先算出来：附件与骨骼重叠时**骨骼优先**（否则压在骨骼上的图片会把点击全吃掉，
+  // 想选骨骼只能绕开图片，很难点）
+  const hit = scene.pickBoneHandleAt(info.world.x, info.world.y)
+
   // 附件操作器 / 点选附件：选中附件后，小坐标轴画在附件上（中心橙色区分骨骼）
   if (tools.tool === 'select') {
     const sel = host.selection
+    // 已选中附件的操作器保持最高优先级（它是明确的操作意图，画在附件中心）
     if (sel.kind === 'attachment' && sel.slot && sel.attachment) {
       const part = scene.pickAttachmentGizmoAt(info.world.x, info.world.y)
       if (part) {
@@ -248,17 +253,18 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
         return true
       }
     }
-    const hit = scene.pickAttachmentAt(info.world.x, info.world.y)
-    if (hit) {
-      const isNew = hit.slot !== sel.slot || hit.attachment !== sel.attachment
-      if (isNew) useSelectionStore.getState().selectAttachment(hit.slot, hit.attachment)
+    // 骨骼命中时不抢选附件，交给下面的骨骼分支处理
+    const att = hit ? null : scene.pickAttachmentAt(info.world.x, info.world.y)
+    if (att) {
+      const isNew = att.slot !== sel.slot || att.attachment !== sel.attachment
+      if (isNew) useSelectionStore.getState().selectAttachment(att.slot, att.attachment)
       if (host.mode === 'pose') {
-        beginAttachmentGizmoDrag(host, hit.slot, hit.attachment, 'center', 'move', info.world)
-        if (isNew) host.status(`已选中附件「${hit.attachment}」（${hit.slot}），拖动即可移动`)
+        beginAttachmentGizmoDrag(host, att.slot, att.attachment, 'center', 'move', info.world)
+        if (isNew) host.status(`已选中附件「${att.attachment}」（${att.slot}），拖动即可移动`)
         return true
       }
       if (isNew) {
-        host.status(`已选中附件「${hit.attachment}」（${hit.slot}）：位置属于绑定数据，切到 Pose 态才能拖动`)
+        host.status(`已选中附件「${att.attachment}」（${att.slot}）：位置属于绑定数据，切到 Pose 态才能拖动`)
       }
       return true
     }
@@ -267,7 +273,6 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   // 选择 / 骨骼 / 插槽 / 约束：点中骨骼即开始拖拽
   // 手柄分区：原点圈 = 移动、末端方块 = 缩放、骨骼体 = 旋转；
   // Shift 仍可强制移动、Alt 强制缩放（与旧习惯兼容）。
-  const hit = scene.pickBoneHandleAt(info.world.x, info.world.y)
   if (!hit) return false
   const bone = scene.runtime.asset.bones[hit.boneIndex]
   if (!bone) return false

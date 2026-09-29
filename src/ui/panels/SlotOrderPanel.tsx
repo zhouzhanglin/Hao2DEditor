@@ -168,7 +168,7 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
                 slot.visible ? '' : 'opacity-55'
               ].join(' ')}
               onClick={() => selection.selectSlot(name)}
-              title={`${slot.name}（挂载于「${slot.bone}」）：拖动调整绘制顺序${animate ? '，Animate 态自动打帧' : ''}`}
+              title={`${slot.name}（挂载于「${slot.bone}」）：拖动调整绘制顺序${animate ? '，Animate 态自动打关键帧' : ''}`}
             >
               <GripVertical size={10} className="shrink-0 text-content-lo/70" />
               <button

@@ -206,7 +206,7 @@ export function rotationOf(m: Float32Array): number {
   return Math.atan2(m[1], m[0]) * RAD2DEG
 }
 
-/** 局部 TRS（含错切）参数，与 fk.ts 的矩阵构造约定互逆 */
+/** 局部 TRS（含斜切）参数，与 fk.ts 的矩阵构造约定互逆 */
 export interface TrsParts {
   x: number
   y: number
@@ -223,7 +223,7 @@ export interface TrsParts {
  *
  * 约定（见 fk.ts）：X 轴角 = rotation + shearX，Y 轴角 = rotation + 90 + shearY。
  * 分解时把整段 X 轴角归给 rotation（shearX = 0），只把两轴夹角之差写进 shearY ——
- * 这样没有错切的骨骼不会被动引入错切。镜像（行列式 < 0）统一归到 scaleY 取负，
+ * 这样没有斜切的骨骼不会被动引入斜切。镜像（行列式 < 0）统一归到 scaleY 取负，
  * 并补偿 Y 轴多转的 180°。
  */
 export function decomposeTrs(m: Float32Array): TrsParts {

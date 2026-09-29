@@ -33,7 +33,7 @@ export interface TimelineTrack {
   parentId?: string
   /** 分组行显示的关键帧总数 */
   keyCount?: number
-  /** 子轨道对应的通道名（旋转 / 位置 / 缩放 / 错切） */
+  /** 子轨道对应的通道名（旋转 / 位置 / 缩放 / 斜切） */
   channel?: string
 }
 
@@ -42,12 +42,17 @@ const BONE_CHANNELS: Array<{ channel: 'translate' | 'rotate' | 'scale' | 'shear'
   { channel: 'translate', label: '位置' },
   { channel: 'rotate', label: '旋转' },
   { channel: 'scale', label: '缩放' },
-  { channel: 'shear', label: '错切' }
+  { channel: 'shear', label: '斜切' }
 ]
 
-/** 插槽子轨道：显示（切 display）在最前，它是做换装动画最常用的通道 */
-const SLOT_CHANNELS: Array<{ channel: 'display' | 'color' | 'visible'; label: string }> = [
-  { channel: 'display', label: '显示' },
+/**
+ * 插槽子轨道：显示（切 display）在最前，它是做换装动画最常用的通道。
+ *
+ * `always`：没有关键帧时也把这一行留在时间轴上 —— 「显示」是换装动画的入口，
+ * 藏起来用户就找不到在哪儿切 display 了（右键该行可以选要显示的 display 并打关键帧）。
+ */
+const SLOT_CHANNELS: Array<{ channel: 'display' | 'color' | 'visible'; label: string; always?: boolean }> = [
+  { channel: 'display', label: '显示', always: true },
   { channel: 'color', label: '颜色' },
   { channel: 'visible', label: '可见性' }
 ]
@@ -89,7 +94,7 @@ export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrac
     tracks.push(makeTrack('event', `事件（${animation.events.length}）`, '', 'event', keys))
   }
 
-  // 骨骼：一行分组标题 + 每个有帧的通道各一行子轨道（位置 / 旋转 / 缩放 / 错切）
+  // 骨骼：一行分组标题 + 每个有帧的通道各一行子轨道（位置 / 旋转 / 缩放 / 斜切）
   for (const track of animation.bones) {
     pushGroupedTracks(
       tracks,
@@ -120,11 +125,11 @@ export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrac
       tracks,
       'slot',
       track.slot,
-      SLOT_CHANNELS.map(({ channel, label }) => {
-        if (channel === 'display') return { channel, label, keys: displayKeys }
+      SLOT_CHANNELS.map(({ channel, label, always }) => {
+        if (channel === 'display') return { channel, label, keys: displayKeys, always }
         const keys: TimelineKey[] = []
         pushKeys(keys, track.slot, '', 'slot', channel, track[channel])
-        return { channel, label, keys }
+        return { channel, label, keys, always }
       })
     )
   }
@@ -316,7 +321,7 @@ export function setKeyEasing(
 
 /**
  * 在当前时间点，为选中对象打关键帧（捕获当前姿态）。
- * 运行时姿态由 `pose` 提供（`skeleton.localRot` 等），因此打帧结果是所见即所得。
+ * 运行时姿态由 `pose` 提供（`skeleton.localRot` 等），因此打关键帧的结果是所见即所得。
  */
 export interface PoseSnapshot {
   localRot: Float32Array
@@ -394,12 +399,12 @@ function pushGroupedTracks(
   tracks: TimelineTrack[],
   kind: KeyKind,
   target: string,
-  channels: Array<{ channel: string; label: string; keys: TimelineKey[] }>
+  channels: Array<{ channel: string; label: string; keys: TimelineKey[]; always?: boolean }>
 ): void {
   const children: TimelineTrack[] = []
   let total = 0
   for (const item of channels) {
-    if (item.keys.length === 0) continue
+    if (item.keys.length === 0 && !item.always) continue
     total += item.keys.length
     children.push({
       id: `${kind}:${target}:${item.channel}`,

@@ -152,10 +152,10 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             }
           />
           <Vector2Field
-            label="错切"
+            label="斜切"
             value={bone.localShear}
             onChange={(value) =>
-              update('修改骨骼错切', (draft) => {
+              update('修改骨骼斜切', (draft) => {
                 const target = draft.bones.find((b) => b.name === bone.name)
                 if (target) target.localShear = value
               })
@@ -271,7 +271,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             }
           />
           <SelectField
-            label={animating ? '显示（打帧）' : 'setup 显示'}
+            label={animating ? '显示（关键帧）' : 'setup 显示'}
             value={slot.attachment}
             options={[{ value: '', label: '（不显示）' }, ...(skinSlot?.attachments ?? []).map((a) => ({ value: a.name, label: a.name }))]}
             onChange={(value) => {
@@ -285,8 +285,8 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                 })
                 onStatus(
                   value
-                    ? `已在 ${time.toFixed(3)}s 打帧：插槽「${slot.name}」显示「${value}」`
-                    : `已在 ${time.toFixed(3)}s 打帧：插槽「${slot.name}」不显示`
+                    ? `已在 ${time.toFixed(3)}s 打关键帧：插槽「${slot.name}」显示「${value}」`
+                    : `已在 ${time.toFixed(3)}s 打关键帧：插槽「${slot.name}」不显示`
                 )
                 return
               }
@@ -298,7 +298,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
           />
           <div className="flex items-center gap-1">
             <ToggleField
-              label={animating ? '可见（打帧）' : '可见'}
+              label={animating ? '可见（关键帧）' : '可见'}
               value={slot.visible}
               onChange={(value) =>
                 animating
@@ -546,7 +546,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
               ['mixY', 'Y 位移'],
               ['mixScaleX', 'X 缩放'],
               ['mixScaleY', 'Y 缩放'],
-              ['mixShearY', '错切']
+              ['mixShearY', '斜切']
             ] as const
           ).map(([key, label]) => (
             <NumberField

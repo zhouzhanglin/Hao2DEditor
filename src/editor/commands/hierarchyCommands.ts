@@ -1,5 +1,5 @@
 import type { EditorDocument } from '@core/model/authoring'
-import { decomposeTrs, invert, mul } from '@core/math/matrix'
+import { decomposeTrs, invert, mul, trs } from '@core/math/matrix'
 import { findSkinSlot } from './authoringCommands'
 
 /**
@@ -57,7 +57,7 @@ export function validateBoneMove(doc: EditorDocument, name: string, targetBone: 
 export interface MoveBoneOptions {
   /**
    * 取骨骼「当前世界矩阵」（列主序 16 个数，setup 姿态）的拷贝。
-   * 传入后重设父级会**保持被移动骨骼的全局位置 / 旋转 / 缩放 / 错切不变**；
+   * 传入后重设父级会**保持被移动骨骼的全局位置 / 旋转 / 缩放 / 斜切不变**；
    * 不传则只改父级（局部 TRS 原样保留，世界变换会跟着变）。
    */
   worldMatrixOf?: (boneName: string) => Float32Array | null
@@ -98,7 +98,7 @@ function preserveWorldTransform(
  * - `inside`：targetBone 为空串时变成根骨骼，否则成为它的子骨骼
  * - `above` / `below`：与 targetBone 同级，并排到它的前 / 后（数组顺序即树的显示顺序）
  *
- * 传入 `options.worldMatrixOf` 时保持骨骼的世界变换（全局位置 / 旋转 / 缩放 / 错切不变）。
+ * 传入 `options.worldMatrixOf` 时保持骨骼的世界变换（全局位置 / 旋转 / 缩放 / 斜切不变）。
  */
 export function moveBone(
   doc: EditorDocument,
@@ -145,21 +145,76 @@ export function validateSlotMove(doc: EditorDocument, name: string, targetBone: 
   return { ok: true, message: '' }
 }
 
+export interface MoveSlotOptions {
+  /**
+   * 取骨骼「当前世界矩阵」（列主序 16 个数，setup 姿态）的拷贝。
+   * 传入后换宿主骨骼会**保持插槽内容的全局位置 / 旋转 / 缩放**不变。
+   */
+  worldMatrixOf?: (boneName: string) => Float32Array | null
+}
+
+/**
+ * 换宿主骨骼时保持插槽内容的全局变换。
+ *
+ * 插槽本身没有变换，视觉姿态来自「宿主骨骼世界矩阵 × 附件局部 TRS」，
+ * 所以把该插槽在**每张皮肤**上的附件从旧骨骼空间换算到新骨骼空间：
+ *
+ *   新局部 = inverse(新骨骼世界) × 旧骨骼世界 × 旧局部
+ *
+ * 附件只有 position / rotation / scale（没有斜切），骨骼之间带斜切时会丢极小一点，
+ * 常规（骨骼无斜切）时逐元素精确保持。
+ */
+function preserveSlotContent(
+  doc: EditorDocument,
+  slotName: string,
+  fromBone: string,
+  toBone: string,
+  worldMatrixOf: (boneName: string) => Float32Array | null
+): void {
+  const fromWorld = fromBone ? worldMatrixOf(fromBone) : null
+  const toWorld = worldMatrixOf(toBone)
+  if (!fromWorld || !toWorld) return
+  const relative = mul(invert(toWorld), fromWorld)
+  for (const skin of doc.skins) {
+    const skinSlot = findSkinSlot(skin, slotName)
+    if (!skinSlot) continue
+    for (const attachment of skinSlot.attachments) {
+      const local = trs(
+        attachment.position.x,
+        attachment.position.y,
+        attachment.rotation,
+        attachment.scale.x,
+        attachment.scale.y
+      )
+      const parts = decomposeTrs(mul(relative, local))
+      attachment.position = { x: parts.x, y: parts.y }
+      attachment.rotation = parts.rotation
+      attachment.scale = { x: parts.scaleX, y: parts.scaleY }
+    }
+  }
+}
+
 /**
  * 移动插槽：换宿主骨骼 + 按绘制顺序重排 zOrder。
  * zOrder 是全局的（编译时按它统一排序绘制），所以这里整表重排一遍。
+ *
+ * 传入 `options.worldMatrixOf` 时保持插槽内容的全局变换（位置 / 旋转 / 缩放不变）。
  */
 export function moveSlot(
   doc: EditorDocument,
   name: string,
   targetBone: string,
-  anchor: MoveAnchor | null
+  anchor: MoveAnchor | null,
+  options?: MoveSlotOptions
 ): MoveResult {
   const check = validateSlotMove(doc, name, targetBone)
   if (!check.ok) return check
   const slot = doc.slots.find((item) => item.name === name)
   if (!slot) return check
 
+  if (options?.worldMatrixOf && slot.bone !== targetBone) {
+    preserveSlotContent(doc, name, slot.bone, targetBone, options.worldMatrixOf)
+  }
   slot.bone = targetBone
   const ordered = [...doc.slots].sort((left, right) => left.zOrder - right.zOrder).filter((item) => item.name !== name)
   let index = ordered.length

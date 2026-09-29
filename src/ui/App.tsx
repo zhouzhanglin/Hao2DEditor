@@ -467,11 +467,8 @@ export default function App() {
         }
         toolbar={
           <Toolbar
-            mode={mode}
-            tool={tools.tool}
             zoom={zoom}
             overlay={tools.overlay}
-            onToolChange={tools.setTool}
             onToggleOverlay={tools.toggleOverlay}
             onFitViewport={() => handleCommand('view:fitViewport')}
           />

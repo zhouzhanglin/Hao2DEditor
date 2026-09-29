@@ -11,7 +11,7 @@ export interface ActionResult {
   message: string
 }
 
-/** 把当前选中对象映射为可打帧的目标 */
+/** 把当前选中对象映射为可打关键帧的目标 */
 export function selectionTargets(selection: Selection): Array<{ kind: KeyKind; target: string; attachment: string }> {
   if (selection.kind === 'bone' && selection.bone) {
     return [{ kind: 'bone', target: selection.bone, attachment: '' }]
@@ -33,7 +33,7 @@ export function keyframeNow(): ActionResult {
   const scene = getActiveScene()
   if (!scene) return { ok: false, message: '视口尚未就绪' }
   const bundle = scene.runtime
-  if (!bundle) return { ok: false, message: '没有可打帧的骨架' }
+  if (!bundle) return { ok: false, message: '没有可打关键帧的骨架' }
   const timeline = useTimelineStore.getState()
   const animationName = timeline.currentAnimation
   if (!animationName) return { ok: false, message: '请先在时间轴选择动画' }
@@ -63,7 +63,7 @@ export function keyframeNow(): ActionResult {
 
   return count > 0
     ? { ok: true, message: `已在 ${timeline.time.toFixed(2)}s 打了 ${count} 处关键帧` }
-    : { ok: false, message: '当前对象没有可打帧的数据（FFD 需要先编辑过顶点）' }
+    : { ok: false, message: '当前对象没有可打关键帧的数据（FFD 需要先编辑过顶点）' }
 }
 
 /** 删除 dope sheet 里选中的关键帧 */

@@ -247,7 +247,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
           onClick={keyCurrent}
         >
           <KeyRound size={11} className="mr-1 inline" />
-          打帧
+          关键帧
         </button>
         <button
           type="button"
@@ -362,6 +362,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
           useProjectStore.getState().endTransaction()
           onStatus('关键帧时间已更新')
         }}
+        onStatus={onStatus}
       />
 
       {/* 底部工具条：左边曲线编辑器，右边关键帧属性（选中关键帧时可编辑时间/缓动/值） */}
@@ -382,7 +383,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
   )
 }
 
-/** 把当前选中对象映射为可打帧的目标 */
+/** 把当前选中对象映射为可打关键帧的目标 */
 function selectionTargets(selection: ReturnType<typeof useSelectionStore.getState>): Array<{
   kind: KeyKind
   target: string

@@ -131,7 +131,7 @@ export function keySlotColor(anim: AuthoringAnimData, slot: string, time: number
 
 /**
  * 打一帧**绘制顺序**关键帧：`order` 是完整的插槽名序列，**第 0 个最先画（最底层）**。
- * 同一时刻只保留一帧（离散帧，重复打帧即覆盖），打完按时间排序。
+ * 同一时刻只保留一帧（离散帧，重复打关键帧即覆盖），打完按时间排序。
  */
 export function keyDrawOrder(anim: AuthoringAnimData, time: number, order: readonly string[]): void {
   const frames = anim.drawOrder.filter((frame) => Math.abs(frame.time - time) > 1e-4)

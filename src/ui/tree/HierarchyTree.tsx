@@ -371,7 +371,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       let result: MoveResult = check
       update('调整插槽层级', (draft) => {
         const anchor = position === 'inside' ? null : boneSlotAnchor(document, target.name, position)
-        result = moveSlot(draft, payload.name, target.name, anchor)
+        // 传世界矩阵：换宿主骨骼后保持插槽内容的全局位置 / 旋转 / 缩放
+        result = moveSlot(draft, payload.name, target.name, anchor, { worldMatrixOf: worldMatrixOfBone })
       })
       if (result.message) onStatus?.(result.message)
       return
@@ -541,7 +542,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             {
               key: 'transform',
               label: '添加变换约束',
-              hint: '继承位移 / 旋转 / 缩放 / 错切',
+              hint: '继承位移 / 旋转 / 缩放 / 斜切',
               icon: <Maximize2 size={12} />,
               onSelect: () => addConstraint('transform', host)
             },
@@ -849,7 +850,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
               if (!first) return
               let result: MoveResult = { ok: false, message: '' }
               update('调整插槽层级', (draft) => {
-                result = moveSlot(draft, payload.name, first, null)
+                result = moveSlot(draft, payload.name, first, null, { worldMatrixOf: worldMatrixOfBone })
               })
               if (result.message) onStatus?.(result.message)
               return

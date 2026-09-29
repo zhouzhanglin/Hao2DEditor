@@ -24,7 +24,7 @@ const CHANNEL_LABEL: Record<string, string> = {
   rotate: '旋转',
   translate: '位移',
   scale: '缩放',
-  shear: '错切',
+  shear: '斜切',
   color: '颜色',
   display: '显示附件',
   displayIndex: '显示附件',

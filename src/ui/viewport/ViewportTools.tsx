@@ -1,4 +1,16 @@
-import { Bone, Boxes, MousePointer2, Move, MoveDiagonal2, RotateCw, Scaling, Spline } from 'lucide-react'
+import {
+  Bone,
+  Boxes,
+  Grid3x3,
+  Layers,
+  Link2,
+  MousePointer2,
+  Move,
+  MoveDiagonal2,
+  RotateCw,
+  Scaling,
+  Spline
+} from 'lucide-react'
 import { GIZMO_ORDER, useToolStore } from '@editor/store/toolStore'
 import { useModeStore } from '@editor/store/modeStore'
 import type { EditorTool, GizmoMode } from '@editor/store/toolStore'
@@ -6,11 +18,12 @@ import type { EditorTool, GizmoMode } from '@editor/store/toolStore'
 /**
  * 视口左上角（Pose / Animate 下方）的工具面板，分两组：
  *
- * - **编辑工具**：选择 / 绑骨骼 / 权重刷 / FFD 顶点（V / B / G / D）
+ * - **编辑工具**：选择 / 绑骨骼 / 插槽 / 网格 / 权重刷 / FFD 顶点 / 约束（V / B / S / M / G / D / C）
  * - **变换工具**：移动 / 旋转 / 缩放 / 斜切（Q / W / E / R）——决定骨骼小坐标轴的行为
  *
  * 两组语义不同：编辑工具决定「鼠标在视口里做什么」，变换工具决定「选中骨骼怎么动」，
  * 所以中间加一条分隔线，激活态也用不同色系（编辑=强调青色、变换=轴色）。
+ * 这里是编辑工具的唯一入口（顶部工具条不再放一份）。
  */
 const EDIT_TOOLS: Array<{
   id: EditorTool
@@ -19,7 +32,7 @@ const EDIT_TOOLS: Array<{
   icon: typeof MousePointer2
   hint?: string
 }> = [
-  { id: 'select', label: '选择工具', key: 'V', icon: MousePointer2, hint: '选中并变换骨骼 / 插槽' },
+  { id: 'select', label: '选择工具', key: 'V', icon: MousePointer2, hint: '选中并变换骨骼 / 插槽 / 附件' },
   {
     id: 'bone',
     label: '画骨骼工具',
@@ -27,6 +40,8 @@ const EDIT_TOOLS: Array<{
     icon: Bone,
     hint: '在视口拖拽画骨骼：起点落在骨骼上会吸附并以它为父，接着拖就能连成骨骼链（仅 Pose 态）'
   },
+  { id: 'slot', label: '插槽工具', key: 'S', icon: Layers, hint: '点骨骼选中它下面挂的插槽' },
+  { id: 'mesh', label: '网格工具', key: 'M', icon: Grid3x3, hint: '编辑网格顶点 / 三角面；网格内双击可插入顶点' },
   { id: 'weight', label: '权重刷工具', key: 'G', icon: Spline },
   {
     id: 'ffd',
@@ -34,7 +49,8 @@ const EDIT_TOOLS: Array<{
     key: 'D',
     icon: Boxes,
     hint: '拖顶点：Pose 改绑定网格，Animate 写 FFD 帧；网格内双击可插入顶点'
-  }
+  },
+  { id: 'constraint', label: '约束工具', key: 'C', icon: Link2, hint: '选中约束后点骨骼设置它的目标' }
 ]
 
 const GIZMO_ICONS: Record<GizmoMode, typeof Move> = {

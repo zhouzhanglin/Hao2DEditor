@@ -1,43 +1,11 @@
-import {
-  Boxes,
-  Crosshair,
-  Grid3x3,
-  Layers,
-  Link2,
-  MousePointer2,
-  Move3d,
-  Spline
-} from 'lucide-react'
-import type { EditorMode } from '@editor/store/modeStore'
-
-export type EditorTool =
-  | 'select'
-  | 'bone'
-  | 'slot'
-  | 'mesh'
-  | 'weight'
-  | 'ffd'
-  | 'constraint'
+import { Crosshair } from 'lucide-react'
 
 export interface ToolbarProps {
-  mode: EditorMode
-  tool: EditorTool
   zoom: number
   overlay: { bones: boolean; mesh: boolean; weight: boolean; ffd: boolean; constraints: boolean }
-  onToolChange: (tool: EditorTool) => void
   onToggleOverlay: (key: keyof ToolbarProps['overlay']) => void
   onFitViewport: () => void
 }
-
-const TOOLS: Array<{ id: EditorTool; label: string; icon: typeof MousePointer2 }> = [
-  { id: 'select', label: '选择工具 (V)', icon: MousePointer2 },
-  { id: 'bone', label: '画骨骼工具 (B)：拖拽画骨骼，从已有骨骼上起手可连成链', icon: Move3d },
-  { id: 'slot', label: '插槽工具 (S)', icon: Layers },
-  { id: 'mesh', label: '网格工具 (M)', icon: Grid3x3 },
-  { id: 'weight', label: '权重刷工具 (G)', icon: Spline },
-  { id: 'ffd', label: 'FFD 顶点工具 (D)', icon: Boxes },
-  { id: 'constraint', label: '约束工具 (C)', icon: Link2 }
-]
 
 const OVERLAYS: Array<{ key: keyof ToolbarProps['overlay']; label: string }> = [
   { key: 'bones', label: '骨骼' },
@@ -47,28 +15,16 @@ const OVERLAYS: Array<{ key: keyof ToolbarProps['overlay']; label: string }> = [
   { key: 'constraints', label: '约束' }
 ]
 
-/** 工具条：工具切换 + 叠加层开关 + 缩放信息（播放控制统一在时间轴上）。 */
+/**
+ * 工具条：叠加层开关 + 缩放信息（播放控制统一在时间轴上）。
+ *
+ * 编辑工具的切换放在视口左侧的面板里（ViewportTools），不再在这里重复一份。
+ */
 export default function Toolbar(props: ToolbarProps) {
-  const { tool, zoom, overlay } = props
+  const { zoom, overlay } = props
 
   return (
     <div className="flex h-[34px] items-center gap-2 border-b border-line bg-ink-700 px-2">
-      <div className="flex items-center gap-0.5 rounded border border-line/70 bg-ink-900/40 p-[2px]">
-        {TOOLS.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            title={label}
-            onClick={() => props.onToolChange(id)}
-            className={['hao-tool-button', tool === id ? 'hao-tool-button-active' : ''].join(' ')}
-          >
-            <Icon size={14} />
-          </button>
-        ))}
-      </div>
-
-      <div className="mx-1 h-[18px] w-px bg-line" />
-
       <div className="flex items-center gap-0.5">
         {OVERLAYS.map(({ key, label }) => (
           <button

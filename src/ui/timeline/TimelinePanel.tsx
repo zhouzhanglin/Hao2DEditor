@@ -6,13 +6,14 @@ import { useSelectionStore } from '@editor/store/selectionStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { animationDuration } from '@editor/runtime'
 import { getActiveScene } from '@editor/activeScene'
-import { buildTimeline, setKeyEasing, setKeysTimes } from '@editor/timeline/model'
+import { buildTimeline, lastKeyTime, setKeyEasing, setKeysTimes } from '@editor/timeline/model'
 import { uniqueName } from '@editor/commands/authoringCommands'
 import { keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
 import type { KeyKind, KeySelector, TimelineTrack } from '@editor/timeline/model'
 import DopeSheet from './DopeSheet'
 import CurveEditor from './CurveEditor'
 import KeyframeCard from '@ui/panels/KeyframeCard'
+import { CommitTextField } from '@ui/widgets/fields'
 
 export interface TimelinePanelProps {
   onStatus?: (text: string) => void
@@ -219,22 +220,37 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
 
         <label
           className="flex shrink-0 items-center gap-1 text-3xs text-content-lo"
-          title="动画时长（帧）。改大之后时间轴会变长，就能在后面继续加关键帧；把关键帧往后拖也会自动延长"
+          title="动画时长（帧）。失焦 / 回车生效；改大之后时间轴会变长，就能在后面继续加关键帧，关键帧往后拖也会自动延长动画时长"
         >
           时长
-          <input
-            type="number"
-            min={1}
-            step={1}
-            disabled={!animation}
-            value={totalFrames}
+          {/* 提交式输入：打字期间只改本地文本。逐字符提交会让时长在打字中途被写成中间态
+              （输入 90 时先变 9 帧），撤销也会退回中间态而不是改之前的值 */}
+          <CommitTextField
             className="hao-field h-[20px] w-[56px] bg-ink-900 text-right font-mono disabled:opacity-40"
-            onChange={(event) => {
-              const frames = Math.max(1, Math.round(Number(event.target.value) || 1))
+            disabled={!animation}
+            inputMode="numeric"
+            title="动画时长（帧）。失焦 / 回车生效"
+            value={String(totalFrames)}
+            sanitize={(raw) => {
+              const frames = Math.round(Number(raw))
+              return Number.isFinite(frames) ? String(Math.max(1, frames)) : null
+            }}
+            onCommit={(next) => {
+              const frames = Math.max(1, Math.round(Number(next)))
+              if (!animation) return
+              // 时长不能短于最后一个关键帧（否则末尾帧会被裁掉）。这里显式说明改成了什么，
+              // 而不是静默弹回，避免「我设的时长没生效」的困惑
+              const minFrames = Math.ceil(lastKeyTime(animation) * document.frameRate - 1e-6)
+              const finalFrames = Math.max(frames, minFrames)
               update('修改动画时长', (draft) => {
                 const target = draft.animations.find((item) => item.name === timeline.currentAnimation)
-                if (target) target.duration = frames / document.frameRate
+                if (target) target.duration = finalFrames / document.frameRate
               })
+              if (finalFrames !== frames) {
+                onStatus(
+                  `时长不能短于最后一个关键帧（${minFrames} 帧 / ${(minFrames / document.frameRate).toFixed(2)}s），已按 ${minFrames} 帧设置`
+                )
+              }
             }}
           />
           帧

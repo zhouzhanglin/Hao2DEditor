@@ -230,11 +230,11 @@ export function moveKeys(
 }
 
 /**
- * 动画时长跟随最晚的关键帧**只增不减**。
- * 关键帧被拖到原时长之后时自动延长动画，这样用户总能「往后面加帧」而不必先改时长。
+ * 动画里最晚的关键帧时间（只读，不改动数据）。
+ * 时长不能短于它，否则末尾的关键帧会被裁掉。
  */
-export function syncDuration(animation: AuthoringAnimData): number {
-  let max = animation.duration
+export function lastKeyTime(animation: AuthoringAnimData): number {
+  let max = 0
   const consider = (frames: ReadonlyArray<{ time: number }>): void => {
     for (const frame of frames) if (frame.time > max) max = frame.time
   }
@@ -254,8 +254,34 @@ export function syncDuration(animation: AuthoringAnimData): number {
     for (const list of Object.values(constraintFrames(track))) consider(list)
   }
   consider(animation.events)
+  return max
+}
+
+/**
+ * 动画时长跟随最晚的关键帧**只增不减**。
+ * 关键帧被拖到原时长之后时自动延长动画，这样用户总能「往后面加帧」而不必先改时长。
+ */
+export function syncDuration(animation: AuthoringAnimData): number {
+  const max = Math.max(animation.duration, lastKeyTime(animation))
   animation.duration = max
   return max
+}
+
+/**
+ * 打开工程 / 导入后的兜底修复：时长若被写坏到「小于最后一个关键帧」，
+ * 时间轴会裁掉末尾关键帧、播放只在极短区间里循环（看起来像「动画播放不了」）。
+ * 这里把这类动画的时长补齐到最后关键帧，返回修好的动画数量（供上层提示 / 标脏用）。
+ */
+export function repairAnimationDurations(doc: EditorDocument): number {
+  let repaired = 0
+  for (const animation of doc.animations) {
+    const min = lastKeyTime(animation)
+    if (animation.duration < min) {
+      animation.duration = min
+      repaired++
+    }
+  }
+  return repaired
 }
 
 /**

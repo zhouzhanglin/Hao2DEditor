@@ -171,27 +171,43 @@ function preserveSlotContent(
   toBone: string,
   worldMatrixOf: (boneName: string) => Float32Array | null
 ): void {
-  const fromWorld = fromBone ? worldMatrixOf(fromBone) : null
-  const toWorld = worldMatrixOf(toBone)
-  if (!fromWorld || !toWorld) return
-  const relative = mul(invert(toWorld), fromWorld)
+  const relative = boneSpaceDelta(fromBone, toBone, worldMatrixOf)
+  if (!relative) return
   for (const skin of doc.skins) {
     const skinSlot = findSkinSlot(skin, slotName)
     if (!skinSlot) continue
-    for (const attachment of skinSlot.attachments) {
-      const local = trs(
-        attachment.position.x,
-        attachment.position.y,
-        attachment.rotation,
-        attachment.scale.x,
-        attachment.scale.y
-      )
-      const parts = decomposeTrs(mul(relative, local))
-      attachment.position = { x: parts.x, y: parts.y }
-      attachment.rotation = parts.rotation
-      attachment.scale = { x: parts.scaleX, y: parts.scaleY }
-    }
+    for (const attachment of skinSlot.attachments) preserveAttachmentWorld(attachment, relative)
   }
+}
+
+/** 「旧骨骼空间 → 新骨骼空间」的相对变换；任一骨骼取不到世界矩阵时返回 null */
+function boneSpaceDelta(
+  fromBone: string,
+  toBone: string,
+  worldMatrixOf: (boneName: string) => Float32Array | null
+): Float32Array | null {
+  const fromWorld = fromBone ? worldMatrixOf(fromBone) : null
+  const toWorld = worldMatrixOf(toBone)
+  if (!fromWorld || !toWorld) return null
+  return mul(invert(toWorld), fromWorld)
+}
+
+/** 按相对变换把附件局部 TRS 从旧骨骼空间换算到新骨骼空间（附件没有斜切，取分解出的 TRS） */
+function preserveAttachmentWorld(
+  attachment: EditorDocument['skins'][number]['slots'][number]['attachments'][number],
+  relative: Float32Array
+): void {
+  const local = trs(
+    attachment.position.x,
+    attachment.position.y,
+    attachment.rotation,
+    attachment.scale.x,
+    attachment.scale.y
+  )
+  const parts = decomposeTrs(mul(relative, local))
+  attachment.position = { x: parts.x, y: parts.y }
+  attachment.rotation = parts.rotation
+  attachment.scale = { x: parts.scaleX, y: parts.scaleY }
 }
 
 /**
@@ -268,6 +284,9 @@ export function validateDisplayMove(
  * - 源插槽的「当前显示」若被搬走，顺延到剩下的第一个（没了就置空）
  * - 目标插槽原本没有显示项时，接住这个 display
  * - 最后按附件名重算相关插槽的 displayIndex 关键帧
+ *
+ * 传入 `options.worldMatrixOf` 且两个插槽的宿主骨骼不同时，附件的局部 TRS 会换算到
+ * 新宿主骨骼空间，**保持它的全局位置 / 旋转 / 缩放不变**（同插槽内排序不受影响）。
  */
 export function moveDisplay(
   doc: EditorDocument,
@@ -275,7 +294,8 @@ export function moveDisplay(
   name: string,
   toSlot: string,
   anchor: MoveAnchor | null,
-  skinName: string
+  skinName: string,
+  options?: MoveSlotOptions
 ): MoveResult {
   const check = validateDisplayMove(doc, fromSlot, name, toSlot, skinName)
   if (!check.ok) return check
@@ -290,6 +310,16 @@ export function moveDisplay(
   if (at < 0) return check
 
   const [moved] = source.attachments.splice(at, 1)
+
+  // 换插槽（宿主骨骼不同）时保持附件的世界变换
+  if (fromSlot !== toSlot && options?.worldMatrixOf && moved) {
+    const fromBone = doc.slots.find((item) => item.name === fromSlot)?.bone ?? ''
+    const toBone = doc.slots.find((item) => item.name === toSlot)?.bone ?? ''
+    if (fromBone !== toBone) {
+      const relative = boneSpaceDelta(fromBone, toBone, options.worldMatrixOf)
+      if (relative) preserveAttachmentWorld(moved, relative)
+    }
+  }
   let index = target.attachments.length
   if (anchor) {
     const found = target.attachments.findIndex((item) => item.name === anchor.name)

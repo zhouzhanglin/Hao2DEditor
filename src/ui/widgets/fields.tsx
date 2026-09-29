@@ -90,31 +90,73 @@ export interface Vector2FieldProps {
   step?: number
 }
 
+/**
+ * 数值输入框（无标签）：**编辑期间保留用户输入的原文**，失焦 / 回车才解析提交。
+ *
+ * 不能边打字边解析回写：输入 `1.` 时 `Number('1.')` 就是 1，值没变 → React 把输入框
+ * 重新渲染成 `1`，小数点当场被吃掉（小数根本打不进去）。留原文再提交就没这个问题。
+ */
+function VectorInput({
+  value,
+  onCommit,
+  step = 1
+}: {
+  value: number
+  onCommit: (next: number) => void
+  step?: number
+}) {
+  const [text, setText] = useState(format(value))
+  const editing = useRef(false)
+
+  // 外部改动（拖拽、撤销、选中别的对象）时同步显示；编辑期间不覆盖用户输入
+  useEffect(() => {
+    if (!editing.current) setText(format(value))
+  }, [value])
+
+  const commit = (raw: string): void => {
+    const parsed = Number(raw)
+    if (!Number.isFinite(parsed)) {
+      setText(format(value))
+      return
+    }
+    onCommit(parsed)
+    setText(format(parsed))
+  }
+
+  return (
+    <input
+      className="hao-field font-mono"
+      type="text"
+      inputMode="decimal"
+      value={text}
+      onChange={(event) => setText(event.target.value)}
+      onFocus={() => {
+        editing.current = true
+      }}
+      onBlur={(event) => {
+        editing.current = false
+        commit(event.target.value)
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          commit((event.target as HTMLInputElement).value)
+          ;(event.target as HTMLInputElement).blur()
+        } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+          event.preventDefault()
+          const delta = (event.key === 'ArrowUp' ? step : -step) * (event.shiftKey ? 10 : 1)
+          commit(String(value + delta))
+        }
+      }}
+    />
+  )
+}
+
 export function Vector2Field({ label, value, onChange, step = 1 }: Vector2FieldProps) {
   return (
     <div className="flex items-center gap-1.5">
       <span className="hao-label w-[52px] shrink-0">{label}</span>
-      <input
-        className="hao-field font-mono"
-        type="text"
-        inputMode="decimal"
-        value={format(value.x)}
-        onChange={(e) => {
-          const parsed = Number(e.target.value)
-          if (Number.isFinite(parsed)) onChange({ x: parsed, y: value.y })
-        }}
-      />
-      <input
-        className="hao-field font-mono"
-        type="text"
-        inputMode="decimal"
-        value={format(value.y)}
-        onChange={(e) => {
-          const parsed = Number(e.target.value)
-          if (Number.isFinite(parsed)) onChange({ x: value.x, y: parsed })
-        }}
-      />
-      <span className="sr-only">{step}</span>
+      <VectorInput value={value.x} step={step} onCommit={(x) => onChange({ x, y: value.y })} />
+      <VectorInput value={value.y} step={step} onCommit={(y) => onChange({ x: value.x, y })} />
     </div>
   )
 }
@@ -123,6 +165,93 @@ export interface ColorFieldProps {
   label: string
   value: string
   onChange: (value: string) => void
+}
+
+export interface CommitTextFieldProps {
+  value: string
+  /**
+   * 失焦 / 回车时对输入原文做校验，返回要提交的规范化文本；返回 null 视为非法，回退到 value。
+   * 不传时原样提交。
+   */
+  sanitize?: (raw: string) => string | null
+  onCommit: (value: string) => void
+  className?: string
+  title?: string
+  placeholder?: string
+  disabled?: boolean
+  inputMode?: 'none' | 'text' | 'decimal' | 'numeric'
+}
+
+/**
+ * 无标签的提交式文本输入：编辑期间只改本地文本，**失焦 / 回车才提交**。
+ *
+ * 用于「每敲一个字符就提交」会出问题的场合：
+ * - 中间态会被写进文档（输入 `90` 时先写成 `9`，时长瞬间变成 9 帧）
+ * - 每个字符一条撤销记录，撤销时会退回打字中间态而不是改之前的值
+ */
+export function CommitTextField({
+  value,
+  sanitize,
+  onCommit,
+  className,
+  title,
+  placeholder,
+  disabled,
+  inputMode
+}: CommitTextFieldProps) {
+  const [text, setText] = useState(value)
+  const editing = useRef(false)
+
+  useEffect(() => {
+    if (!editing.current) setText(value)
+  }, [value])
+
+  const commit = (raw: string): void => {
+    const next = sanitize ? sanitize(raw) : raw
+    if (next === null) {
+      setText(value)
+      return
+    }
+    if (next !== value) onCommit(next)
+    setText(next)
+  }
+
+  return (
+    <input
+      className={className}
+      type="text"
+      inputMode={inputMode}
+      title={title}
+      placeholder={placeholder}
+      disabled={disabled}
+      value={text}
+      onChange={(event) => setText(event.target.value)}
+      onFocus={() => {
+        editing.current = true
+      }}
+      onBlur={(event) => {
+        editing.current = false
+        commit(event.target.value)
+      }}
+      onKeyDown={(event) => {
+        const input = event.target as HTMLInputElement
+        if (event.key === 'Enter') {
+          commit(input.value)
+          input.blur()
+        } else if (event.key === 'Escape') {
+          setText(value)
+          input.blur()
+        }
+      }}
+    />
+  )
+}
+
+/** 十六进制颜色：#RGB / #RRGGBB / 可带两位 alpha */
+function parseHexColor(raw: string): string | null {
+  const digits = raw.trim().replace(/^#/, '')
+  if (!/^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(digits)) return null
+  return `#${digits.toUpperCase()}`
 }
 
 export function ColorField({ label, value, onChange }: ColorFieldProps) {
@@ -139,11 +268,11 @@ export function ColorField({ label, value, onChange }: ColorFieldProps) {
           onChange(`${e.target.value.toUpperCase()}${alpha}`)
         }}
       />
-      <input
+      <CommitTextField
         className="hao-field font-mono uppercase"
-        type="text"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        sanitize={parseHexColor}
+        onCommit={onChange}
       />
     </label>
   )

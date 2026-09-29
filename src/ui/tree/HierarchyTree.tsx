@@ -402,7 +402,10 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     }
     let result: MoveResult = check
     update('移动 display', (draft) => {
-      result = moveDisplay(draft, payload.slot, payload.name, toSlot, anchor, skinName)
+      // 传世界矩阵：换到别的插槽（宿主骨骼不同）时保持附件的全局位置 / 旋转 / 缩放
+      result = moveDisplay(draft, payload.slot, payload.name, toSlot, anchor, skinName, {
+        worldMatrixOf: worldMatrixOfBone
+      })
     })
     if (result.message) onStatus?.(result.message)
   }

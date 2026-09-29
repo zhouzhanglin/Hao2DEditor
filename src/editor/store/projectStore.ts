@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { EditorDocument } from '@core/model/authoring'
 import { createEmptyDocument } from '@core/model/authoring'
 import { History } from '../history'
+import { repairAnimationDurations } from '../timeline/model'
 
 export interface ProjectState {
   document: EditorDocument
@@ -59,10 +60,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setDocument: (document, projectPath, dirty = false) => {
     history.clear()
+    // 打开工程 / 导入时的兜底修复：时长小于最后一个关键帧的动画会被裁掉末尾帧、
+    // 播放只在极短区间循环（表现为「动画播放不了」）。修好后标记为未保存，方便写回。
+    const repaired = cloneDocument(document)
+    const repairedCount = repairAnimationDurations(repaired)
     set({
-      document,
+      document: repaired,
       projectPath: projectPath === undefined ? get().projectPath : projectPath,
-      dirty,
+      dirty: repairedCount > 0 || dirty,
       ...syncFlags(get())
     })
   },

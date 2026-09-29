@@ -175,7 +175,11 @@ export class EditorScene {
       this.animationName = previousAnimation && doc.animations.some((a) => a.name === previousAnimation) ? previousAnimation : null
       if (this.animationName) {
         this.bundle.player.play(this.animationName, this.viewState.loop)
-        this.bundle.player.time = previousTime
+        // 时长可能比恢复的时间短（末尾关键帧被删 / 拖动收缩），超出部分会被循环取模，
+        // 画面与实际时间就对不上（表现为「拖不动」）。统一收敛到时长内。
+        const resumed = Math.max(0, Math.min(previousTime, animationDuration(doc, this.animationName)))
+        this.viewState.time = resumed
+        this.bundle.player.time = resumed
       }
       this.markDirty()
     }
@@ -272,13 +276,14 @@ export class EditorScene {
       return
     }
 
-    const duration = this.duration
     if (this.animationName && this.viewState.playing) {
       this.bundle.player.loop = this.viewState.loop
       this.bundle.player.update(dtSeconds * this.viewState.speed)
       // 推进结果回写，供时间轴播放头与状态栏显示（外部改时间由 setViewState 处理）
       this.viewState.time = this.bundle.player.time
-      if (Math.abs(this.viewState.time - duration) < 1e-6 && !this.viewState.loop) {
+      // 非循环播完停在最后一帧：完成判定由播放器给出（它按最后一个关键帧算长度，
+      // 而不是按可编辑范围 duration —— 后者可能被留得更长）
+      if (this.bundle.player.completed && !this.viewState.loop) {
         this.viewState.playing = false
       }
       this.view.markDirty()

@@ -126,6 +126,40 @@ export interface AnimData {
 
 // ---------------- 工厂与工具 ----------------
 
+/**
+ * 动画里最晚的关键帧时间（秒，含事件 / 绘制顺序 / 约束轨道）。
+ *
+ * 播放长度按它计算：非循环播到最后一帧停下，循环则回到第一帧。
+ * 这样即使数据里的 duration 字段不准（旧文件 / 外部数据），也不会播到尾部的空白区。
+ */
+export function lastKeyframeTime(anim: AnimData): number {
+  let last = 0
+  const consider = (frames: ReadonlyArray<{ time: number }>): void => {
+    for (const frame of frames) if (frame.time > last) last = frame.time
+  }
+  for (const track of anim.bones) {
+    consider(track.translate)
+    consider(track.rotate)
+    consider(track.scale)
+    consider(track.shear)
+  }
+  for (const track of anim.slots) {
+    consider(track.color)
+    consider(track.displayIndex)
+    consider(track.visible)
+  }
+  for (const track of anim.deforms) consider(track.frames)
+  for (const track of anim.iks) consider(track.mix)
+  for (const track of anim.constraints) {
+    for (const list of Object.values(track)) {
+      if (Array.isArray(list)) consider(list as ReadonlyArray<{ time: number }>)
+    }
+  }
+  consider(anim.drawOrder)
+  consider(anim.events)
+  return last
+}
+
 export function emptyFloatKeyframe(time = 0, value = 0): FloatKeyframe {
   return { time, value, easing: Easing.Linear, curve: null }
 }

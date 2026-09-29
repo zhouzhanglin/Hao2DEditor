@@ -14,6 +14,7 @@ import {
   createTransformConstraint
 } from '../model/constraints'
 import { hexToRgba } from '../util/color'
+import { lastKeyTime } from '../model/authoring'
 import type { AuthoringAnimData, AuthoringAttachment, AuthoringBone, AuthoringConstraint, EditorDocument } from '../model/authoring'
 
 export interface CompileResult {
@@ -406,9 +407,12 @@ function compileAnimations(
     }
   }
 
+  // 运行时 / 导出的长度按最后一个关键帧算：duration 字段是编辑期的「可编辑范围」，
+  // 可能被用户留得更长（方便往后加帧），不应带进播放与导出
+  const keyTime = lastKeyTime(anim)
   return {
     name: anim.name,
-    duration: anim.duration,
+    duration: keyTime > 0 ? keyTime : anim.duration,
     bones,
     slots,
     deforms,

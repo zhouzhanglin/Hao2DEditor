@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { KeyRound, Pause, Play, Repeat, SkipBack, SkipForward, Square, Timer, Trash2, Zap } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
@@ -36,6 +36,13 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
    */
   const axis = Math.max(duration * 1.08, duration + 0.2)
   const tracks = useMemo(() => buildTimeline(animation), [animation])
+
+  // 时长会因为关键帧收缩而变小；播放头若停在旧的末尾之外，会与播放器按循环取模后的时间
+  // 不一致（此时拖动骨骼写的关键帧不在画面上，看起来像「拖不动」）。收敛到时长内。
+  const currentTime = timeline.time
+  useEffect(() => {
+    if (currentTime > duration + 1e-6) useTimelineStore.getState().setTime(duration)
+  }, [duration, currentTime])
 
   const frame = Math.round(timeline.time * document.frameRate)
   const totalFrames = Math.max(1, Math.round(duration * document.frameRate))
@@ -220,7 +227,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
 
         <label
           className="flex shrink-0 items-center gap-1 text-3xs text-content-lo"
-          title="动画时长（帧）。失焦 / 回车生效；改大之后时间轴会变长，就能在后面继续加关键帧，关键帧往后拖也会自动延长动画时长"
+          title="动画时长（帧）。这是可编辑范围（改大就能在后面继续加帧）；播放与导出按最后一个关键帧算"
         >
           时长
           {/* 提交式输入：打字期间只改本地文本。逐字符提交会让时长在打字中途被写成中间态
@@ -229,7 +236,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
             className="hao-field h-[20px] w-[56px] bg-ink-900 text-right font-mono disabled:opacity-40"
             disabled={!animation}
             inputMode="numeric"
-            title="动画时长（帧）。失焦 / 回车生效"
+            title="动画时长（帧）。失焦 / 回车生效；播放按最后一个关键帧算"
             value={String(totalFrames)}
             sanitize={(raw) => {
               const frames = Math.round(Number(raw))
@@ -238,7 +245,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
             onCommit={(next) => {
               const frames = Math.max(1, Math.round(Number(next)))
               if (!animation) return
-              // 时长不能短于最后一个关键帧（否则末尾帧会被裁掉）。这里显式说明改成了什么，
+              // 不能短于最后一个关键帧（否则末尾帧会被裁掉，也擦洗不到）。显式说明改成了什么，
               // 而不是静默弹回，避免「我设的时长没生效」的困惑
               const minFrames = Math.ceil(lastKeyTime(animation) * document.frameRate - 1e-6)
               const finalFrames = Math.max(frames, minFrames)
@@ -370,8 +377,15 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
           useProjectStore.getState().updateSilent((draft) => {
             setKeysTimes(draft, name, entries)
           })
+          // 播放头跟着被拖的帧走：视口实时显示这个时机下的姿态，便于对帧
+          const anchor = entries[0]?.time
+          if (anchor !== undefined) {
+            timeline.setTime(Math.max(0, Math.min(duration, anchor)))
+          }
         }}
         onBeginDrag={() => {
+          // 拖动关键帧时先停播：否则播放头一边被推进一边被拖拽跟随，画面会来回跳
+          timeline.setPlaying(false)
           useProjectStore.getState().beginTransaction('移动关键帧')
         }}
         onEndDrag={() => {

@@ -292,6 +292,39 @@ export function createAuthoringAttachment(partial?: Partial<AuthoringAttachment>
   }
 }
 
+/**
+ * 动画里最晚的关键帧时间（只读，不改动数据）：骨骼 / 插槽 / deform / 约束 / 绘制顺序 / 事件。
+ *
+ * **播放长度与导出时长都按它算**（见 AnimationPlayer / compileAnimations）；
+ * `duration` 字段是「可编辑范围」（留着往后继续加帧），不能短于它，否则末尾帧会被裁掉。
+ */
+export function lastKeyTime(animation: AuthoringAnimData): number {
+  let last = 0
+  const consider = (frames: ReadonlyArray<{ time: number }>): void => {
+    for (const frame of frames) if (frame.time > last) last = frame.time
+  }
+  for (const track of animation.bones) {
+    consider(track.translate)
+    consider(track.rotate)
+    consider(track.scale)
+    consider(track.shear)
+  }
+  for (const track of animation.slots) {
+    consider(track.color)
+    consider(track.displayIndex)
+    consider(track.visible)
+  }
+  for (const track of animation.deforms) consider(track.frames)
+  for (const track of animation.constraints) {
+    for (const list of Object.values(track)) {
+      if (Array.isArray(list)) consider(list as ReadonlyArray<{ time: number }>)
+    }
+  }
+  consider(animation.drawOrder)
+  consider(animation.events)
+  return last
+}
+
 export function createAuthoringAnim(name: string, duration = 1): AuthoringAnimData {
   return {
     name,

@@ -1,4 +1,5 @@
 import { Easing } from '@core/model/animation'
+import { lastKeyTime } from '@core/model/authoring'
 import type { AuthoringAnimData, EditorDocument } from '@core/model/authoring'
 import { keyBoneChannel, keyDeform, keySlotColor, pruneEmptyTracks } from '../commands/animationCommands'
 
@@ -229,37 +230,14 @@ export function moveKeys(
   })
 }
 
-/**
- * 动画里最晚的关键帧时间（只读，不改动数据）。
- * 时长不能短于它，否则末尾的关键帧会被裁掉。
- */
-export function lastKeyTime(animation: AuthoringAnimData): number {
-  let max = 0
-  const consider = (frames: ReadonlyArray<{ time: number }>): void => {
-    for (const frame of frames) if (frame.time > max) max = frame.time
-  }
-  for (const track of animation.bones) {
-    consider(track.rotate)
-    consider(track.translate)
-    consider(track.scale)
-    consider(track.shear)
-  }
-  for (const track of animation.slots) {
-    consider(track.color)
-    consider(track.displayIndex)
-    consider(track.visible)
-  }
-  for (const track of animation.deforms) consider(track.frames)
-  for (const track of animation.constraints) {
-    for (const list of Object.values(constraintFrames(track))) consider(list)
-  }
-  consider(animation.events)
-  return max
-}
+/** 最晚关键帧时间：实现下沉到 core（导出 / 播放也要用），这里透出给编辑器 UI */
+export { lastKeyTime } from '@core/model/authoring'
 
 /**
- * 动画时长跟随最晚的关键帧**只增不减**。
- * 关键帧被拖到原时长之后时自动延长动画，这样用户总能「往后面加帧」而不必先改时长。
+ * 动画时长跟随最晚的关键帧**只增不减**（时长是「可编辑范围」，供往后继续加帧）。
+ *
+ * 关键帧被拖到原时长之外时自动延长；用户手动设大的时长会保留。
+ * 「播放到哪算完」不在这里决定 —— 那是播放时按最后一个关键帧算的（见 AnimationPlayer）。
  */
 export function syncDuration(animation: AuthoringAnimData): number {
   const max = Math.max(animation.duration, lastKeyTime(animation))
@@ -268,9 +246,9 @@ export function syncDuration(animation: AuthoringAnimData): number {
 }
 
 /**
- * 打开工程 / 导入后的兜底修复：时长若被写坏到「小于最后一个关键帧」，
- * 时间轴会裁掉末尾关键帧、播放只在极短区间里循环（看起来像「动画播放不了」）。
- * 这里把这类动画的时长补齐到最后关键帧，返回修好的动画数量（供上层提示 / 标脏用）。
+ * 打开工程 / 导入后的兜底修复：时长若小于最后一个关键帧（末尾帧会被裁掉、播放只在
+ * 极短区间循环），补齐到最后关键帧。**不收缩**（时长是留给用户继续加帧的编辑范围）。
+ * 返回修好的动画数量（供上层标脏用）。
  */
 export function repairAnimationDurations(doc: EditorDocument): number {
   let repaired = 0

@@ -5,6 +5,7 @@ import type { RuntimeAsset, RuntimeMaps } from '@core/model/asset'
 import type { EditorDocument } from '@core/model/authoring'
 import { compileDocument } from '@core/codec/compile'
 import type { CompileResult } from '@core/codec/compile'
+import { lastKeyTime } from './timeline/model'
 
 export interface RuntimeBundle {
   asset: RuntimeAsset
@@ -55,9 +56,16 @@ function dedupe(list: readonly string[]): string[] {
   return [...new Set(list)]
 }
 
-/** 动画时长（秒），未找到时返回 1 */
+/**
+ * 动画的可编辑范围（秒）＝ 时长与最后一个关键帧的较大者。
+ *
+ * 这是「时间轴能擦洗到哪 / 播放头能放到哪」的上限，用于往后继续加帧；
+ * **不是播放长度** —— 播放到哪算完由 AnimationPlayer 按最后一个关键帧算。
+ */
 export function animationDuration(doc: EditorDocument, name: string | null): number {
   if (!name) return 1
   const found = doc.animations.find((a) => a.name === name)
-  return found && found.duration > 0 ? found.duration : 1
+  if (!found) return 1
+  const stored = found.duration > 0 ? found.duration : 1
+  return Math.max(stored, lastKeyTime(found))
 }

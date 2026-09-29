@@ -1,4 +1,5 @@
 import { clamp01, lerpAngle } from '../math/utils'
+import { lastKeyframeTime } from '../model/animation'
 import type { AnimData, ConstraintAnim, EventKeyframe, FloatKeyframe, SlotAnim } from '../model/animation'
 import { curvePercent, sampleAngle, sampleColor, sampleDeformIndex, sampleDrawOrderIndex, sampleInt, sampleNumber, sampleVec2 } from './interpolation'
 import type { RuntimeAsset } from '../model/asset'
@@ -56,6 +57,8 @@ export class AnimationPlayer {
   private readonly bufA: PoseBuffer
   private readonly bufB: PoseBuffer
   private readonly deformBuffers = new Map<string, number[]>()
+  /** 每个动画对象算好的播放长度（见 durationOf），asset 不可变所以按对象缓存安全 */
+  private readonly durationCache = new WeakMap<AnimData, number>()
 
   private cur: AnimData | null = null
   private prev: AnimData | null = null
@@ -152,8 +155,11 @@ export class AnimationPlayer {
     }
     const dur = this.durationOf(anim)
     let next = seconds
-    if (this.loopFlag) next = ((next % dur) + dur) % dur
-    else next = Math.max(0, Math.min(dur, next))
+    if (this.loopFlag) {
+      // 正好落在时长上时停在末尾，不取模成 0：否则「时间轴在末尾、画面却是开头」，
+      // 此时拖动骨骼写下的关键帧会落在画面之外，看起来像「拖不动」
+      next = Math.abs(seconds - dur) < 1e-6 ? dur : ((next % dur) + dur) % dur
+    } else next = Math.max(0, Math.min(dur, next))
     this.timeValue = next
     this.lastTime = next
     this.fading = false
@@ -248,8 +254,22 @@ export class AnimationPlayer {
     return this.asset.animations.findIndex((a) => a.name === name)
   }
 
+  /**
+   * 播放长度：按**最后一个关键帧**计算（秒）。
+   *
+   * 非循环时播到最后一帧停下；循环时到最后一帧后回到第一帧。
+   * 数据里的 duration 只在「完全没有关键帧」时兜底，避免播到尾部的空白区。
+   *
+   * 每帧都会调用，按动画对象缓存（asset 不可变，数据变化时是重建出的新对象，
+   * 旧缓存由 WeakMap 自动回收）。
+   */
   private durationOf(anim: AnimData): number {
-    return anim.duration > 0 ? anim.duration : 1
+    const cached = this.durationCache.get(anim)
+    if (cached !== undefined) return cached
+    const last = lastKeyframeTime(anim)
+    const value = last > 0 ? last : anim.duration > 0 ? anim.duration : 1
+    this.durationCache.set(anim, value)
+    return value
   }
 
   private step(dt: number): void {

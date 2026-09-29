@@ -74,30 +74,30 @@ export function curvePercent(easing: Easing, curve: number[] | null, percent: nu
 export function sampleNumber(keys: readonly FloatKeyframe[], time: number): number | null {
   const n = keys.length
   if (n === 0) return null
-  if (time < keys[0].time) return null
-  const i = firstIndexAtOrAfter(keys, time)
-  if (i >= n) return keys[n - 1].value
-  if (i === 0) return keys[0].value
-  const a = keys[i - 1]
-  const b = keys[i]
-  const span = b.time - a.time
-  const t = span <= 0 ? 1 : (time - a.time) / span
-  return a.value + (b.value - a.value) * curvePercent(a.easing, a.curve, t)
+  // 帧时刻起该帧的值立即生效（闭区间左端）：这样播放到 / 停在最后一帧时，
+  // 取到的就是最后关键帧的值，而不是它前一帧的值
+  const a = lastIndexAtOrBefore(keys, time)
+  if (a < 0) return null
+  if (a >= n - 1) return keys[n - 1].value
+  const from = keys[a]
+  const to = keys[a + 1]
+  const span = to.time - from.time
+  const t = span <= 0 ? 1 : (time - from.time) / span
+  return from.value + (to.value - from.value) * curvePercent(from.easing, from.curve, t)
 }
 
 /** 角度采样（沿最短弧插值） */
 export function sampleAngle(keys: readonly FloatKeyframe[], time: number): number | null {
   const n = keys.length
   if (n === 0) return null
-  if (time < keys[0].time) return null
-  const i = firstIndexAtOrAfter(keys, time)
-  if (i >= n) return keys[n - 1].value
-  if (i === 0) return keys[0].value
-  const a = keys[i - 1]
-  const b = keys[i]
-  const span = b.time - a.time
-  const t = span <= 0 ? 1 : (time - a.time) / span
-  return lerpAngle(a.value, b.value, curvePercent(a.easing, a.curve, t))
+  const a = lastIndexAtOrBefore(keys, time)
+  if (a < 0) return null
+  if (a >= n - 1) return keys[n - 1].value
+  const from = keys[a]
+  const to = keys[a + 1]
+  const span = to.time - from.time
+  const t = span <= 0 ? 1 : (time - from.time) / span
+  return lerpAngle(from.value, to.value, curvePercent(from.easing, from.curve, t))
 }
 
 /** 二维向量采样，写入 out 的指定偏移；返回 false 表示保持不变 */
@@ -109,21 +109,20 @@ export function sampleVec2(
 ): boolean {
   const n = keys.length
   if (n === 0) return false
-  if (time < keys[0].time) return false
-  const i = firstIndexAtOrAfter(keys, time)
-
-  if (i >= n || i === 0) {
-    const v = keys[i >= n ? n - 1 : 0].value
+  const a = lastIndexAtOrBefore(keys, time)
+  if (a < 0) return false
+  if (a >= n - 1) {
+    const v = keys[n - 1].value
     out[offset] = v.x
     out[offset + 1] = v.y
     return true
   }
-  const a = keys[i - 1]
-  const b = keys[i]
-  const span = b.time - a.time
-  const t = curvePercent(a.easing, a.curve, span <= 0 ? 1 : (time - a.time) / span)
-  out[offset] = a.value.x + (b.value.x - a.value.x) * t
-  out[offset + 1] = a.value.y + (b.value.y - a.value.y) * t
+  const from = keys[a]
+  const to = keys[a + 1]
+  const span = to.time - from.time
+  const t = curvePercent(from.easing, from.curve, span <= 0 ? 1 : (time - from.time) / span)
+  out[offset] = from.value.x + (to.value.x - from.value.x) * t
+  out[offset + 1] = from.value.y + (to.value.y - from.value.y) * t
   return true
 }
 
@@ -131,25 +130,24 @@ export function sampleVec2(
 export function sampleColor(keys: readonly ColorKeyframe[], time: number, out: RGBA): boolean {
   const n = keys.length
   if (n === 0) return false
-  if (time < keys[0].time) return false
-  const i = firstIndexAtOrAfter(keys, time)
-
-  if (i >= n || i === 0) {
-    const v = keys[i >= n ? n - 1 : 0].value
+  const a = lastIndexAtOrBefore(keys, time)
+  if (a < 0) return false
+  if (a >= n - 1) {
+    const v = keys[n - 1].value
     out.r = v.r
     out.g = v.g
     out.b = v.b
     out.a = v.a
     return true
   }
-  const a = keys[i - 1]
-  const b = keys[i]
-  const span = b.time - a.time
-  const t = curvePercent(a.easing, a.curve, span <= 0 ? 1 : (time - a.time) / span)
-  out.r = a.value.r + (b.value.r - a.value.r) * t
-  out.g = a.value.g + (b.value.g - a.value.g) * t
-  out.b = a.value.b + (b.value.b - a.value.b) * t
-  out.a = a.value.a + (b.value.a - a.value.a) * t
+  const from = keys[a]
+  const to = keys[a + 1]
+  const span = to.time - from.time
+  const t = curvePercent(from.easing, from.curve, span <= 0 ? 1 : (time - from.time) / span)
+  out.r = from.value.r + (to.value.r - from.value.r) * t
+  out.g = from.value.g + (to.value.g - from.value.g) * t
+  out.b = from.value.b + (to.value.b - from.value.b) * t
+  out.a = from.value.a + (to.value.a - from.value.a) * t
   return true
 }
 

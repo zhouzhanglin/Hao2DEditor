@@ -14,6 +14,8 @@ export interface ViewportBounds {
  */
 const MIN_ZOOM = 0.02
 const MAX_ZOOM = 800
+/** 空场景（无内容可适配）时的默认缩放：PPU，1 单位 = 100px */
+const EMPTY_SCENE_ZOOM = 100
 
 function clampZoom(zoom: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom))
@@ -210,18 +212,6 @@ export class Viewport {
     this.applyCamera()
   }
 
-  /**
-   * 把世界某点移到视口中心，可选同时设置缩放。
-   * 与 fit() 的「原点居中」不同，这个用于内容不在原点附近时（如拖图落点）直接对准它。
-   */
-  focusOn(worldX: number, worldY: number, zoom?: number): void {
-    if (zoom !== undefined) this.zoomValue = clampZoom(zoom)
-    this.offsetX = -worldX * this.zoomValue
-    this.offsetY = worldY * this.zoomValue
-    this.applyCamera()
-    this.onZoomChange(this.zoomValue)
-  }
-
   get offset(): { x: number; y: number } {
     return { x: this.offsetX, y: this.offsetY }
   }
@@ -250,7 +240,10 @@ export class Viewport {
       halfHeight <= 1
 
     if (degenerate) {
-      this.zoomValue = 1
+      // 空场景的默认尺度取 PPU（1 单位 = 100px，与附件尺寸折算一致）：
+      // 这个比例下屏幕像素与原图像素一一对应，拖图落点数值也符合直觉
+      // （zoom=1 时屏幕 1px 的误差会 1:1 写进 position，看起来像「坐标错了」）
+      this.zoomValue = EMPTY_SCENE_ZOOM
       this.applyCamera()
       this.onZoomChange(this.zoomValue)
       return

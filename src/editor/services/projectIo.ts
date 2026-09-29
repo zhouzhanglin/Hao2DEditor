@@ -1,7 +1,7 @@
 import { getPlatform, baseName, dirName, joinPath, stripExtension } from '../platform'
 import { parseDocument, serializeDocument, PROJECT_EXTENSION } from '@core/codec/projectJson'
 import { decompileAsset } from '@core/codec/decompile'
-import { createEmptyDocument } from '@core/model/authoring'
+import { createAuthoringBone, createEmptyDocument } from '@core/model/authoring'
 import type { EditorDocument } from '@core/model/authoring'
 import { importSpine } from '@importers/spine'
 import { importDragonBones } from '@importers/dragonBones'
@@ -71,9 +71,12 @@ async function resolvePageImages(
 }
 
 export function newProject(): IoResult {
-  useProjectStore.getState().setDocument(createEmptyDocument(), null, false)
+  const doc = createEmptyDocument()
+  // 新工程默认给一根根骨骼：插槽必须挂在骨骼上，有个 root 拖图 / 建插槽都能直接开工
+  doc.bones.push({ ...createAuthoringBone({ name: 'root', length: 0.4 }) })
+  useProjectStore.getState().setDocument(doc, null, false)
   useProjectStore.getState().setWarnings([])
-  return { ok: true, message: '已新建空白工程' }
+  return { ok: true, message: '已新建工程（含根骨骼 root）' }
 }
 
 /**

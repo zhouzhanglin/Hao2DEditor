@@ -329,15 +329,17 @@ export class EditorScene {
   }
 
   /**
-   * 把世界某点对准视口中心，并按内容尺寸选一个合适的缩放。
-   * 拖图到空白场景时用它：图片正好出现在松手位置、大小占视口约四成。
+   * 空场景首次拖入图片后的视角适配：把缩放调到内容占视口约四成，
+   * 但**以落点为缩放锚点**——落点的屏幕位置保持不变，图片就停在用户松手的地方
+   * （之前的实现把落点搬到视口中心，用户会觉得「图片不在松手的位置」）。
    */
   focusOnContent(worldX: number, worldY: number, contentW: number, contentH: number): void {
     const fitZoom = Math.min(
       (this.viewport.width * 0.5) / Math.max(1e-6, contentW),
       (this.viewport.height * 0.5) / Math.max(1e-6, contentH)
     )
-    this.viewport.focusOn(worldX, worldY, fitZoom * 0.75)
+    const anchor = this.viewport.worldToScreen(worldX, worldY)
+    this.viewport.zoomAt((fitZoom * 0.75) / this.viewport.zoom, anchor.x, anchor.y)
     this.markDirty()
     this.viewport.render()
   }

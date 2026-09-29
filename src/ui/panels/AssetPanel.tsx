@@ -4,7 +4,7 @@ import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { PanelEmpty } from '@ui/widgets/PanelShell'
 import { createRegionFromImage } from '@editor/commands/authoringCommands'
-import { setImageDragData } from '@ui/widgets/dragDrop'
+import { setDraggingImage, setImageDragData } from '@ui/widgets/dragDrop'
 import { ImageHoverPreview, ImageThumb } from './ImageThumb'
 import type { AuthoringImage } from '@core/model/authoring'
 
@@ -87,17 +87,7 @@ export default function AssetPanel() {
                 className="flex cursor-grab items-center gap-1.5 rounded border border-line/60 bg-ink-900/40 px-1.5 py-1 hover:border-accent/40 active:cursor-grabbing"
                 onDragStart={(event) => {
                   setImageDragData(event.dataTransfer, image.name)
-                  // 默认拖影是整行快照，光标在快照里的位置取决于按下点，
-                  // 用户按「快照中心」对准目标时实际落点会偏掉快照偏移那么多。
-                  // 用缩略图做拖影并让它以光标为中心：看到哪对准哪，落点就在哪。
-                  const thumb = event.currentTarget.querySelector('img')
-                  if (thumb) {
-                    try {
-                      event.dataTransfer.setDragImage(thumb, thumb.width / 2, thumb.height / 2)
-                    } catch {
-                      // 某些环境（未加载完成 / 隐藏元素）会抛错，退回默认拖影
-                    }
-                  }
+                  setDraggingImage(event.dataTransfer, event.currentTarget.querySelector('img'))
                   setHovered(null)
                 }}
                 onMouseEnter={(event) => setHovered({ image, row: event.currentTarget })}

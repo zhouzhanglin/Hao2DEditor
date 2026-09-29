@@ -58,3 +58,65 @@ export function readTreeDrag(transfer: DataTransfer): TreeDragPayload | null {
     return null
   }
 }
+
+/**
+ * 自定义拖影：让拖影**严格以光标为中心**。
+ *
+ * 默认拖影是「整行元素的快照」，热点取决于按下时刻光标在行内的位置 ——
+ * 用户按拖影中心对准目标松手时，实际落点（= 光标位置）会偏掉「快照中心到光标」那段距离，
+ * 表现为「图片没落在我拖到的位置」。
+ *
+ * 这里自绘一张固定尺寸的 canvas（按短边裁成正方形 + 白框），并把热点设为几何中心：
+ * 看到哪对准哪，落点就在哪。
+ */
+export function setDraggingImage(transfer: DataTransfer, source: HTMLImageElement | null): void {
+  const SIZE = 32
+  const canvas = document.createElement('canvas')
+  canvas.width = SIZE
+  canvas.height = SIZE
+  const ctx = canvas.getContext('2d')
+  if (ctx) {
+    ctx.globalAlpha = 0.92
+    if (source && source.naturalWidth > 0 && source.naturalHeight > 0) {
+      const side = Math.min(source.naturalWidth, source.naturalHeight)
+      ctx.drawImage(
+        source,
+        (source.naturalWidth - side) / 2,
+        (source.naturalHeight - side) / 2,
+        side,
+        side,
+        0,
+        0,
+        SIZE,
+        SIZE
+      )
+    } else {
+      ctx.fillStyle = '#3b82f6'
+      ctx.beginPath()
+      ctx.arc(SIZE / 2, SIZE / 2, 10, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.globalAlpha = 1
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)'
+    ctx.lineWidth = 2
+    ctx.strokeRect(1, 1, SIZE - 2, SIZE - 2)
+  }
+
+  // 规范要求 drag image 的元素已在文档中渲染：临时挂到屏幕外，拖拽结束摘掉
+  canvas.style.position = 'fixed'
+  canvas.style.left = '-1000px'
+  canvas.style.top = '-1000px'
+  document.body.appendChild(canvas)
+  try {
+    transfer.setDragImage(canvas, SIZE / 2, SIZE / 2)
+  } catch {
+    // 少数环境不支持自定义拖影时退回默认行为
+    canvas.remove()
+    return
+  }
+  const cleanup = (): void => canvas.remove()
+  window.addEventListener('dragend', cleanup, { once: true })
+  // 兜底：异常路径（拖拽被取消且没派发 dragend）下避免节点残留
+  window.setTimeout(() => window.removeEventListener('dragend', cleanup), 30000)
+  window.setTimeout(cleanup, 30000)
+}

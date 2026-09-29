@@ -9,9 +9,11 @@ import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { isDragging, toolPointerDown, toolPointerMove, toolPointerUp } from '@editor/tools/authoringTools'
 import type { ToolHost } from '@editor/tools/authoringTools'
-import { createRegionFromImage, insertMeshVertex, PPU, uniqueName } from '@editor/commands/authoringCommands'
-import { createAuthoringBone } from '@core/model/authoring'
+import { createRegionFromImage, insertMeshVertex, PPU } from '@editor/commands/authoringCommands'
 import { hasImageDrag, readImageDrag } from '@ui/widgets/dragDrop'
+
+/** 临时诊断：拖放链路日志累积（定位「第一次拖图坐标不对」后移除） */
+const dropDebugLines: string[] = []
 
 export interface ViewportCanvasProps {
   onSceneReady: (scene: EditorScene) => void
@@ -351,19 +353,16 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     let host = (hit && scene.runtime ? scene.runtime.asset.bones[hit.boneIndex]?.name : '') ?? ''
     if (!host) host = selection.kind === 'bone' ? selection.bone : ''
     if (!host) host = store.document.bones[0]?.name ?? ''
+    if (!host) {
+      onStatus('场景里还没有骨骼：先用「绑骨骼 (B)」画一根骨骼，再把图片拖进来')
+      return
+    }
 
     let created: { slot: string; attachment: string } | null = null
+    let local: { x: number; y: number } = { x: world.x, y: world.y }
     store.update('拖入图片创建插槽', (draft) => {
-      if (!host) {
-        const bone = createAuthoringBone({
-          name: uniqueName(draft.bones.map((item) => item.name), 'root'),
-          length: 0.4
-        })
-        draft.bones.push(bone)
-        host = bone.name
-      }
-      // 落点 → 骨骼局部坐标；新建的根骨骼位于原点，局部坐标就等于世界坐标
-      const local = scene.worldToBoneLocal(host, world.x, world.y) ?? { x: world.x, y: world.y }
+      // 落点 → 骨骼局部坐标（宿主骨骼当前姿态下的显示空间）
+      local = scene.worldToBoneLocal(host, world.x, world.y) ?? { x: world.x, y: world.y }
       created = createRegionFromImage(draft, {
         image: image.name,
         bone: host,
@@ -383,6 +382,30 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     if (emptyScene) {
       scene.autoFitDone = true
       scene.focusOnContent(world.x, world.y, image.width / PPU, image.height / PPU)
+    }
+    // 临时诊断：把拖放链路的关键数值写日志（定位「第一次拖图坐标不对」用）
+    {
+      const after = scene.viewport.worldToScreen(local.x, local.y)
+      const info = {
+        screen: [Math.round(event.clientX - rect.left), Math.round(event.clientY - rect.top)],
+        rect: [Math.round(rect.x), Math.round(rect.y), Math.round(rect.width), Math.round(rect.height)],
+        dpr: window.devicePixelRatio,
+        cameraBefore: { zoom: scene.viewport.zoom, offset: scene.viewport.offset },
+        world: { x: world.x, y: world.y },
+        emptyScene,
+        host,
+        hitBone: hit ? hit.boneIndex : null,
+        bones: store.document.bones.map((b) => b.name),
+        local: { x: local.x, y: local.y },
+        posScreenAfter: { x: Math.round(after.x), y: Math.round(after.y) },
+        cameraAfter: { zoom: scene.viewport.zoom, offset: scene.viewport.offset }
+      }
+      const line = `[drop-debug] ${new Date().toISOString()} ${JSON.stringify(info)}\n`
+      console.log(line.trim())
+      dropDebugLines.push(line)
+      void getPlatform()
+        .writeText('/tmp/hao2d-drop-debug.txt', dropDebugLines.join(''))
+        .catch(() => undefined)
     }
     onStatus(`已创建插槽「${result.slot}」：图片「${image.name}」作为 display 挂到骨骼「${host}」下`)
   }

@@ -1,4 +1,57 @@
 import { useEffect, useRef, useState } from 'react'
+import { useProjectStore } from '@editor/store/projectStore'
+
+/** 中键拖动调值的步长：整数用 1、浮点用 0.1（按拖动开始时的值判断，拖动期间固定，避免半路变步长） */
+function scrubStepFor(value: number): number {
+  return Number.isInteger(value) ? 1 : 0.1
+}
+
+/**
+ * 左键左右拖动调值（DCC 手感）：向左减小、向右增大，每移动 1 像素变化一个步长。
+ *
+ * - 拖动开始先退出文本编辑态；中键默认的自动滚动会被拦掉
+ * - 整段拖动用一条事务包住，只留一条撤销记录（否则每像素一条，撤销会疯掉）
+ */
+function useScrubDrag(
+  value: number,
+  onChange: (next: number) => void,
+  options?: { enabled?: boolean; min?: number; max?: number }
+): { onPointerDown: (event: React.PointerEvent<HTMLInputElement>) => void } {
+  const enabled = options?.enabled ?? true
+  return {
+    onPointerDown: (event: React.PointerEvent<HTMLInputElement>) => {
+      if (!enabled || event.button !== 0) return
+      event.preventDefault()
+      const target = event.currentTarget
+      target.blur()
+      const startX = event.clientX
+      const start = value
+      const step = scrubStepFor(start)
+      const digits = step < 1 ? 1 : 0
+      const clamp = (next: number): number => {
+        let out = next
+        if (options?.min !== undefined) out = Math.max(options.min, out)
+        if (options?.max !== undefined) out = Math.min(options.max, out)
+        return out
+      }
+      useProjectStore.getState().beginTransaction('调整数值')
+      let last = start
+      const move = (ev: PointerEvent): void => {
+        const next = clamp(Number((start + (ev.clientX - startX) * step).toFixed(digits)))
+        if (next === last) return
+        last = next
+        onChange(next)
+      }
+      const finish = (): void => {
+        window.removeEventListener('pointermove', move)
+        window.removeEventListener('pointerup', finish)
+        useProjectStore.getState().endTransaction()
+      }
+      window.addEventListener('pointermove', move)
+      window.addEventListener('pointerup', finish)
+    }
+  }
+}
 
 export interface NumberFieldProps {
   label: string
@@ -44,11 +97,18 @@ export function NumberField({
     setText(format(next, precision))
   }
 
+  // 中键左右拖动调值：整数每次 ±1、浮点每次 ±0.1
+  const scrub = useScrubDrag(value, (next) => commit(String(next)), {
+    enabled: !disabled,
+    min,
+    max
+  })
+
   return (
     <label className="flex items-center gap-1.5">
       <span className="hao-label w-[52px] shrink-0">{label}</span>
       <input
-        className="hao-field font-mono"
+        className="hao-field cursor-ew-resize font-mono"
         type="text"
         inputMode="decimal"
         disabled={disabled}
@@ -71,6 +131,7 @@ export function NumberField({
             commit(String(value + delta))
           }
         }}
+        {...scrub}
       />
       {suffix ? <span className="text-3xs text-content-lo">{suffix}</span> : null}
     </label>
@@ -123,9 +184,15 @@ function VectorInput({
     setText(format(parsed))
   }
 
+  // 中键左右拖动调值：整数每次 ±1、浮点每次 ±0.1
+  const scrub = useScrubDrag(value, (next) => {
+    onCommit(next)
+    setText(format(next))
+  })
+
   return (
     <input
-      className="hao-field font-mono"
+      className="hao-field cursor-ew-resize font-mono"
       type="text"
       inputMode="decimal"
       value={text}
@@ -147,6 +214,7 @@ function VectorInput({
           commit(String(value + delta))
         }
       }}
+      {...scrub}
     />
   )
 }
@@ -180,6 +248,8 @@ export interface CommitTextFieldProps {
   placeholder?: string
   disabled?: boolean
   inputMode?: 'none' | 'text' | 'decimal' | 'numeric'
+  /** 内容是数值时开启中键左右拖动调值（整数每次 ±1、浮点每次 ±0.1） */
+  scrub?: boolean
 }
 
 /**
@@ -197,10 +267,16 @@ export function CommitTextField({
   title,
   placeholder,
   disabled,
-  inputMode
+  inputMode,
+  scrub
 }: CommitTextFieldProps) {
   const [text, setText] = useState(value)
   const editing = useRef(false)
+  const numeric = Number(value)
+  // 数值内容才启用中键拖动（颜色这类文本内容不启用）
+  const scrubHandlers = useScrubDrag(numeric, (next) => onCommit(String(next)), {
+    enabled: !!scrub && Number.isFinite(numeric) && !disabled
+  })
 
   useEffect(() => {
     if (!editing.current) setText(value)
@@ -218,7 +294,7 @@ export function CommitTextField({
 
   return (
     <input
-      className={className}
+      className={scrub ? `${className ?? ''} cursor-ew-resize` : className}
       type="text"
       inputMode={inputMode}
       title={title}
@@ -243,6 +319,7 @@ export function CommitTextField({
           input.blur()
         }
       }}
+      {...scrubHandlers}
     />
   )
 }

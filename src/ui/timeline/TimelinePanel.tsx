@@ -236,7 +236,8 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
             className="hao-field h-[20px] w-[56px] bg-ink-900 text-right font-mono disabled:opacity-40"
             disabled={!animation}
             inputMode="numeric"
-            title="动画时长（帧）。失焦 / 回车生效；播放按最后一个关键帧算"
+            scrub
+            title="动画时长（帧）。失焦 / 回车生效；中键左右拖动可调；播放按最后一个关键帧算"
             value={String(totalFrames)}
             sanitize={(raw) => {
               const frames = Math.round(Number(raw))

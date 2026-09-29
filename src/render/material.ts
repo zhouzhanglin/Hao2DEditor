@@ -1,7 +1,8 @@
-import { Assets, Texture } from 'pixi.js'
+import { ImageSource, Texture } from 'pixi.js'
 import type { BLEND_MODES } from 'pixi.js'
 import { BlendMode } from '@core/model/types'
 import type { RGBA } from '@core/model/types'
+import { loadImageElement } from '@render/imageLoader'
 
 export interface BlendModeResolution {
   /** pixi 混合模式名 */
@@ -44,6 +45,13 @@ export function rgbaToHexNumber(color: RGBA): number {
   return (r << 16) | (g << 8) | b
 }
 
+/** 用 <img> 加载图片并转成纹理（为什么要绕开 Assets.load，见 imageLoader 的说明） */
+async function loadTextureFromUrl(url: string): Promise<Texture> {
+  const image = await loadImageElement(url)
+  const source = new ImageSource({ resource: image, alphaMode: 'premultiply-alpha-on-upload' })
+  return new Texture({ source })
+}
+
 /**
  * 图集页纹理仓库。名称 = asset.textureNames 里的 png 名。
  * 未加载到纹理时返回 Texture.WHITE，保证几何仍然可见（便于排查 UV/网格问题）。
@@ -83,7 +91,7 @@ export class TextureStore {
   async load(name: string, url: string): Promise<Texture> {
     if (this.textures.has(name) || this.loading.has(name) || !url) return this.get(name)
     this.loading.add(name)
-    const texture = await Assets.load<Texture>(url).catch((error: unknown) => {
+    const texture = await loadTextureFromUrl(url).catch((error: unknown) => {
       console.error(`[hao2d] 纹理加载失败：${name}`, error)
       return null
     })

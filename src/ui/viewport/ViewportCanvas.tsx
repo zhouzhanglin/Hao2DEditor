@@ -9,6 +9,9 @@ import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { isDragging, toolPointerDown, toolPointerMove, toolPointerUp } from '@editor/tools/authoringTools'
 import type { ToolHost } from '@editor/tools/authoringTools'
+import { createRegionFromImage, uniqueName } from '@editor/commands/authoringCommands'
+import { createAuthoringBone } from '@core/model/authoring'
+import { hasImageDrag, readImageDrag } from '@ui/widgets/dragDrop'
 
 export interface ViewportCanvasProps {
   onSceneReady: (scene: EditorScene) => void
@@ -288,6 +291,69 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     scene.markDirty()
   }
 
+  /**
+   * 资源面板拖进来的图片：在落点建「插槽 + Region display」。
+   *
+   * 宿主骨骼优先取鼠标下的那根，其次当前选中骨骼，再退回第一根；
+   * 一根骨骼都没有（空白工程）时先补一根根骨骼，这样直接拖图就能开工。
+   * 只在 Pose 态建档：插槽 / 附件属于绑定数据，Animate 态改 setup 会污染动画基线。
+   */
+  const onImageDrop = (event: React.DragEvent<HTMLDivElement>): void => {
+    const scene = sceneRef.current
+    const imageName = readImageDrag(event.dataTransfer)
+    if (!scene || !imageName) return
+
+    if (useModeStore.getState().mode !== 'pose') {
+      onStatus('切到 Pose 状态才能把图片放进场景：插槽 / 附件属于绑定数据')
+      return
+    }
+
+    const store = useProjectStore.getState()
+    const image = store.document.images.find((item) => item.name === imageName)
+    if (!image) {
+      onStatus(`找不到图片「${imageName}」（可能已被移除）`)
+      return
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect()
+    const world = scene.viewport.screenToWorld(event.clientX - rect.left, event.clientY - rect.top)
+    const hit = scene.pickBoneAt(world.x, world.y)
+    const selection = useSelectionStore.getState()
+    let host = (hit && scene.runtime ? scene.runtime.asset.bones[hit.boneIndex]?.name : '') ?? ''
+    if (!host) host = selection.kind === 'bone' ? selection.bone : ''
+    if (!host) host = store.document.bones[0]?.name ?? ''
+
+    let created: { slot: string; attachment: string } | null = null
+    store.update('拖入图片创建插槽', (draft) => {
+      if (!host) {
+        const bone = createAuthoringBone({
+          name: uniqueName(draft.bones.map((item) => item.name), 'root'),
+          length: 0.4
+        })
+        draft.bones.push(bone)
+        host = bone.name
+      }
+      // 落点 → 骨骼局部坐标；新建的根骨骼位于原点，局部坐标就等于世界坐标
+      const local = scene.worldToBoneLocal(host, world.x, world.y) ?? { x: world.x, y: world.y }
+      created = createRegionFromImage(draft, {
+        image: image.name,
+        bone: host,
+        width: image.width,
+        height: image.height,
+        position: local,
+        skin: useSelectionStore.getState().skin
+      })
+    })
+
+    if (!created) {
+      onStatus(`无法用「${image.name}」创建插槽`)
+      return
+    }
+    const result: { slot: string; attachment: string } = created
+    useSelectionStore.getState().selectAttachment(result.slot, result.attachment)
+    onStatus(`已创建插槽「${result.slot}」：图片「${image.name}」作为 display 挂到骨骼「${host}」下`)
+  }
+
   return (
     <div
       ref={hostRef}
@@ -297,6 +363,19 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       onPointerUp={releasePointer}
       onPointerCancel={releasePointer}
       onWheel={onWheel}
+      onDragOver={(event) => {
+        if (!hasImageDrag(event.dataTransfer)) return
+        // 内部图片拖拽在视口里处理完就停下，别冒泡去触发整窗的「拖入文件导入」覆盖层
+        event.preventDefault()
+        event.stopPropagation()
+        event.dataTransfer.dropEffect = 'copy'
+      }}
+      onDrop={(event) => {
+        if (!hasImageDrag(event.dataTransfer)) return
+        event.preventDefault()
+        event.stopPropagation()
+        onImageDrop(event)
+      }}
       onDoubleClick={() => {
         sceneRef.current?.fit()
         onStatus('已适配视野')
@@ -313,7 +392,8 @@ async function loadTextures(store: TextureStore | null, document: ReturnType<typ
   const platform = getPlatform()
   for (const image of document.images) {
     if (store.has(image.name)) continue
-    const url = platform.fileUrl(image.path)
+    // imageUrl：Electron 会读文件字节给同源 blob:（协议 URL 跨源，WebGL 用不了）
+    const url = await platform.imageUrl(image.path)
     if (!url) continue
     await store.load(image.name, url)
   }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   Activity,
   Bone,
@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Eye,
   EyeOff,
+  Image as ImageIcon,
   Link2,
   Lock,
   Maximize2,
@@ -17,11 +18,14 @@ import {
 } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
+import { useModeStore } from '@editor/store/modeStore'
 import { createIkConstraint, createPathConstraint, createTransformConstraint } from '@core/model/constraints'
 import type { AuthoringBone, AuthoringConstraint, EditorDocument } from '@core/model/authoring'
 import { createAuthoringBone, createAuthoringSlot } from '@core/model/authoring'
+import { addImageDisplay, createRegionFromImage, deleteAttachment } from '@editor/commands/authoringCommands'
 import ContextMenu from '@ui/widgets/ContextMenu'
 import type { ContextMenuItem } from '@ui/widgets/ContextMenu'
+import { hasImageDrag, readImageDrag } from '@ui/widgets/dragDrop'
 
 /** 右键菜单的目标：root = 空白处 */
 interface MenuTarget {
@@ -44,6 +48,10 @@ interface TreeRowProps {
   onSelect: () => void
   onDelete?: () => void
   onContextMenu?: (event: React.MouseEvent) => void
+  /** 接收资源面板拖来的图片（插槽行用它追加 display） */
+  onDropImage?: (imageName: string) => void
+  /** 该行归属的插槽名：既用于兜底判定「拖到插槽下面」，也让 display 行归到宿主插槽 */
+  dataSlot?: string
 }
 
 function TreeRow({
@@ -58,17 +66,47 @@ function TreeRow({
   onToggle,
   onSelect,
   onDelete,
-  onContextMenu
+  onContextMenu,
+  onDropImage,
+  dataSlot
 }: TreeRowProps) {
+  const [dropActive, setDropActive] = useState(false)
+
   return (
     <div
       className={[
         'group relative flex h-[22px] items-center gap-1 pr-1 text-panel transition-colors duration-panel cursor-pointer',
-        active ? 'bg-accent/12 text-content-hi' : 'text-content-mid hover:bg-ink-700'
+        active ? 'bg-accent/12 text-content-hi' : 'text-content-mid hover:bg-ink-700',
+        dropActive ? 'ring-1 ring-inset ring-accent/70 bg-accent/10 text-content-hi' : ''
       ].join(' ')}
       style={{ paddingLeft: 4 + depth * 12 }}
+      data-slot={dataSlot}
       onClick={onSelect}
       onContextMenu={onContextMenu}
+      onDragOver={
+        onDropImage
+          ? (event) => {
+              if (!hasImageDrag(event.dataTransfer)) return
+              event.preventDefault()
+              event.stopPropagation()
+              event.dataTransfer.dropEffect = 'copy'
+              if (!dropActive) setDropActive(true)
+            }
+          : undefined
+      }
+      onDragLeave={onDropImage ? () => setDropActive(false) : undefined}
+      onDrop={
+        onDropImage
+          ? (event) => {
+              if (!hasImageDrag(event.dataTransfer)) return
+              event.preventDefault()
+              event.stopPropagation()
+              setDropActive(false)
+              const imageName = readImageDrag(event.dataTransfer)
+              if (imageName) onDropImage(imageName)
+            }
+          : undefined
+      }
     >
       {active ? <span className="absolute left-0 top-0 h-full w-[2px] bg-accent" /> : null}
       {expandable ? (
@@ -121,19 +159,26 @@ const CONSTRAINT_KIND: Record<AuthoringConstraint['type'], string> = {
   physics: '物理'
 }
 
+export interface HierarchyTreeProps {
+  /** 状态栏提示（Animate 态拒绝改绑定数据时说明原因） */
+  onStatus?: (text: string) => void
+}
+
 /**
  * 层级树：骨骼、插槽、约束（含 IK）合并为**一棵树**，用图标区分类型。
  *
  * 组织结构：
  * - 根骨骼挂在顶层，子骨骼递归缩进（还原真实父子层级）
- * - 插槽作为其宿主骨骼的子节点（缩进一级）
+ * - 插槽作为其宿主骨骼的子节点（缩进一级），展开后列出它的 display
  * - 约束作为驱动骨骼（`bones[0]`）的子节点，图标按 IK / 变换 / 路径区分
  */
-export default function HierarchyTree() {
+export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   const document = useProjectStore((s) => s.document)
   const update = useProjectStore((s) => s.update)
   const selection = useSelectionStore()
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
+  /** 树列表容器：拖放兜底判定要用它量各行的位置 */
+  const listRef = useRef<HTMLDivElement | null>(null)
 
   const bonesByParent = useMemo(() => groupBones(document.bones), [document.bones])
   const slotsByBone = useMemo(() => groupByKey(document.slots, (slot) => slot.bone), [document.slots])
@@ -149,6 +194,107 @@ export default function HierarchyTree() {
       else next.add(name)
       return next
     })
+  }
+
+  /** display 清单来自当前皮肤（空则 default），与属性面板的取法保持一致 */
+  const activeSkin = useMemo(() => {
+    const named = selection.skin ? document.skins.find((item) => item.name === selection.skin) : null
+    return named ?? document.skins[0] ?? null
+  }, [document.skins, selection.skin])
+
+  const displaysOf = (slotName: string): EditorDocument['skins'][number]['slots'][number]['attachments'] =>
+    activeSkin?.slots.find((item) => item.slot === slotName)?.attachments ?? []
+
+  /**
+   * 切换插槽当前显示的 display：一个插槽可以挂多个，但同时只显示 `slot.attachment` 这一个。
+   */
+  const selectDisplay = (slotName: string, attachmentName: string): void => {
+    update('切换显示的 display', (draft) => {
+      const target = draft.slots.find((item) => item.name === slotName)
+      if (target) target.attachment = attachmentName
+    })
+    selection.selectAttachment(slotName, attachmentName)
+  }
+
+  /** 插槽 / display 都是绑定数据：Animate 态拒绝修改，避免污染动画基线 */
+  const canEditBinding = (): boolean => {
+    if (useModeStore.getState().mode === 'pose') return true
+    onStatus?.('切到 Pose 状态才能改插槽的 display：插槽 / 附件属于绑定数据')
+    return false
+  }
+
+  /** 资源面板拖进来的图片：作为新的 display 追加到该插槽，并立即切换显示 */
+  const addDisplay = (slotName: string, imageName: string): void => {
+    if (!canEditBinding()) return
+    const image = document.images.find((item) => item.name === imageName)
+    if (!image) return
+    let created: { slot: string; attachment: string } | null = null
+    update('拖入图片添加 display', (draft) => {
+      created = addImageDisplay(draft, {
+        image: image.name,
+        slot: slotName,
+        width: image.width,
+        height: image.height,
+        skin: selection.skin
+      })
+    })
+    if (created) {
+      const result: { slot: string; attachment: string } = created
+      selection.selectAttachment(result.slot, result.attachment)
+      // 插槽行可能被折叠着，展开宿主骨骼让新 display 可见
+      expandBone(boneOfSlot(slotName))
+    }
+  }
+
+  /** 资源面板拖到骨骼行：在该骨骼下新建插槽，图片作为它的第一个 display */
+  const addSlotFromImage = (boneName: string, imageName: string): void => {
+    if (!canEditBinding()) return
+    const image = document.images.find((item) => item.name === imageName)
+    if (!image) return
+    let created: { slot: string; attachment: string } | null = null
+    update('拖入图片新建插槽', (draft) => {
+      created = createRegionFromImage(draft, {
+        image: image.name,
+        bone: boneName,
+        width: image.width,
+        height: image.height,
+        skin: selection.skin
+      })
+    })
+    if (created) {
+      const result: { slot: string; attachment: string } = created
+      selection.selectAttachment(result.slot, result.attachment)
+      expandBone(boneName)
+    }
+  }
+
+  /** 展开某根骨骼（新建子对象后自动展开，避免「加了却看不见」） */
+  const expandBone = (boneName: string): void => {
+    if (!boneName) return
+    setCollapsed((prev) => (prev.has(boneName) ? new Set([...prev].filter((name) => name !== boneName)) : prev))
+  }
+
+  /** 插槽挂在哪根骨骼上（拖放后展开宿主用） */
+  const boneOfSlot = (slotName: string): string =>
+    document.slots.find((item) => item.name === slotName)?.bone ?? ''
+
+  /**
+   * 拖到「插槽下面」的区域（行与行之间的缝隙、插槽子行的下沿等）时，
+   * 按 Y 坐标找鼠标上方最近的那个插槽行，把这次拖拽算到它头上。
+   */
+  const slotUnderPointer = (clientY: number): string => {
+    const list = listRef.current
+    if (!list) return ''
+    let found = ''
+    let top = Number.NEGATIVE_INFINITY
+    for (const row of Array.from(list.querySelectorAll<HTMLElement>('[data-slot]'))) {
+      const rect = row.getBoundingClientRect()
+      if (rect.top <= clientY && rect.top > top) {
+        top = rect.top
+        found = row.dataset.slot ?? ''
+      }
+    }
+    return found
   }
 
   /** 当前选中的骨骼（工具栏「+」按钮用它作为挂载目标） */
@@ -299,6 +445,8 @@ export default function HierarchyTree() {
         expanded={expanded}
         onToggle={() => toggle(bone.name)}
         onSelect={() => selection.selectBone(bone.name)}
+        // 拖到骨骼行 = 在这根骨骼下新建一个插槽
+        onDropImage={(imageName) => addSlotFromImage(bone.name, imageName)}
         onContextMenu={(event) => openMenu(event, { kind: 'bone', name: bone.name, bone: bone.parent })}
         trailing={
           <button
@@ -331,48 +479,97 @@ export default function HierarchyTree() {
 
     if (!expanded) return
     for (const child of children) pushBone(child, depth + 1)
-    for (const slot of slots) rows.push(renderSlot(slot, depth + 1))
+    for (const slot of slots) pushSlot(slot, depth + 1)
     for (const constraint of constraints) rows.push(renderConstraint(constraint, depth + 1))
   }
 
-  const renderSlot = (slot: EditorDocument['slots'][number], depth: number): React.ReactNode => (
-    <TreeRow
-      key={`slot:${slot.name}`}
-      depth={depth}
-      label={slot.name}
-      active={selection.kind === 'slot' && selection.slot === slot.name}
-      icon={
-        <span
-          className="h-[10px] w-[10px] rounded-sm border border-line"
-          style={{ background: toCss(slot.color) }}
-        />
-      }
-      onSelect={() => selection.selectSlot(slot.name)}
-      onContextMenu={(event) => openMenu(event, { kind: 'slot', name: slot.name, bone: slot.bone })}
-      trailing={
-        <button
-          type="button"
-          title={slot.visible ? '隐藏插槽' : '显示插槽'}
-          className="flex h-[16px] w-[16px] items-center justify-center rounded text-content-lo hover:bg-ink-600 hover:text-content-hi"
-          onClick={(e) => {
-            e.stopPropagation()
-            update('切换插槽可见性', (draft) => {
-              const target = draft.slots.find((s) => s.name === slot.name)
-              if (target) target.visible = !target.visible
-            })
-          }}
-        >
-          {slot.visible ? <Eye size={11} /> : <EyeOff size={11} />}
-        </button>
-      }
-      onDelete={() =>
-        update('删除插槽', (draft) => {
-          draft.slots = draft.slots.filter((s) => s.name !== slot.name)
-          for (const skin of draft.skins) skin.slots = skin.slots.filter((s) => s.slot !== slot.name)
-        })
-      }
-    />
-  )
+  /** 插槽下的一个 display（附件）行：点它 = 切到这个 display（同一时刻只显示一个） */
+  const renderDisplay = (
+    slot: EditorDocument['slots'][number],
+    attachment: EditorDocument['skins'][number]['slots'][number]['attachments'][number],
+    depth: number
+  ): React.ReactNode => {
+    const showing = slot.attachment === attachment.name
+    return (
+      <TreeRow
+        key={`display:${slot.name}:${attachment.name}`}
+        depth={depth}
+        label={attachment.name}
+        active={
+          selection.kind === 'attachment' &&
+          selection.slot === slot.name &&
+          selection.attachment === attachment.name
+        }
+        icon={
+          <ImageIcon
+            size={11}
+            className={showing ? 'text-accent' : 'text-content-lo/60'}
+          />
+        }
+        meta={showing ? '显示中' : undefined}
+        // display 行也算宿主插槽的地盘：拖到插槽下面（含子行）都是「给这个插槽加 display」
+        dataSlot={slot.name}
+        onDropImage={(imageName) => addDisplay(slot.name, imageName)}
+        onSelect={() => selectDisplay(slot.name, attachment.name)}
+        onDelete={() =>
+          update('删除 display', (draft) => deleteAttachment(draft, slot.name, attachment.name))
+        }
+      />
+    )
+  }
+
+  const pushSlot = (slot: EditorDocument['slots'][number], depth: number): void => {
+    const displays = displaysOf(slot.name)
+    const expanded = !collapsed.has(`slot:${slot.name}`)
+    rows.push(
+      <TreeRow
+        key={`slot:${slot.name}`}
+        depth={depth}
+        label={slot.name}
+        active={selection.kind === 'slot' && selection.slot === slot.name}
+        icon={
+          <span
+            className="h-[10px] w-[10px] rounded-sm border border-line"
+            style={{ background: toCss(slot.color) }}
+          />
+        }
+        // 行尾显示当前显示的 display 名，不用展开也知道显示的是哪一个
+        meta={slot.attachment || (displays.length > 0 ? `${displays.length} 个 display` : undefined)}
+        expandable={displays.length > 0}
+        expanded={expanded}
+        dataSlot={slot.name}
+        onToggle={() => toggle(`slot:${slot.name}`)}
+        onSelect={() => selection.selectSlot(slot.name)}
+        onDropImage={(imageName) => addDisplay(slot.name, imageName)}
+        onContextMenu={(event) => openMenu(event, { kind: 'slot', name: slot.name, bone: slot.bone })}
+        trailing={
+          <button
+            type="button"
+            title={slot.visible ? '隐藏插槽' : '显示插槽'}
+            className="flex h-[16px] w-[16px] items-center justify-center rounded text-content-lo hover:bg-ink-600 hover:text-content-hi"
+            onClick={(e) => {
+              e.stopPropagation()
+              update('切换插槽可见性', (draft) => {
+                const target = draft.slots.find((s) => s.name === slot.name)
+                if (target) target.visible = !target.visible
+              })
+            }}
+          >
+            {slot.visible ? <Eye size={11} /> : <EyeOff size={11} />}
+          </button>
+        }
+        onDelete={() =>
+          update('删除插槽', (draft) => {
+            draft.slots = draft.slots.filter((s) => s.name !== slot.name)
+            for (const skin of draft.skins) skin.slots = skin.slots.filter((s) => s.slot !== slot.name)
+          })
+        }
+      />
+    )
+
+    if (!expanded) return
+    for (const attachment of displays) rows.push(renderDisplay(slot, attachment, depth + 1))
+  }
 
   const renderConstraint = (constraint: AuthoringConstraint, depth: number): React.ReactNode => (
     <TreeRow
@@ -394,7 +591,7 @@ export default function HierarchyTree() {
 
   // 兜底：骨骼不存在时（异常数据）把插槽 / 约束挂到根层，避免对象彻底消失
   const boneNames = new Set(document.bones.map((b) => b.name))
-  for (const slot of document.slots) if (!boneNames.has(slot.bone)) rows.push(renderSlot(slot, 0))
+  for (const slot of document.slots) if (!boneNames.has(slot.bone)) pushSlot(slot, 0)
   for (const constraint of document.constraints) {
     if (!constraint.bones[0] || !boneNames.has(constraint.bones[0])) rows.push(renderConstraint(constraint, 0))
   }
@@ -437,9 +634,25 @@ export default function HierarchyTree() {
         <span className="ml-auto font-mono text-3xs text-content-lo">{rows.length}</span>
       </div>
       <div
+        ref={listRef}
         className="min-h-0 flex-1 overflow-auto hao-scroll pb-1"
-        title="右键可添加骨骼 / 插槽 / 约束"
+        title="右键可添加骨骼 / 插槽 / 约束；把资源面板的图片拖到插槽上（或它下面）= 给该插槽加 display"
         onContextMenu={(event) => openMenu(event, { kind: 'root', name: '', bone: '' })}
+        onDragOver={(event) => {
+          if (!hasImageDrag(event.dataTransfer)) return
+          // 行本身没接住时（行间缝隙 / 插槽下方）在这里兜底，同时别冒泡去触发整窗导入覆盖层
+          event.preventDefault()
+          event.stopPropagation()
+          event.dataTransfer.dropEffect = 'copy'
+        }}
+        onDrop={(event) => {
+          if (!hasImageDrag(event.dataTransfer)) return
+          event.preventDefault()
+          event.stopPropagation()
+          const imageName = readImageDrag(event.dataTransfer)
+          const slotName = slotUnderPointer(event.clientY)
+          if (imageName && slotName) addDisplay(slotName, imageName)
+        }}
       >
         {rows}
       </div>

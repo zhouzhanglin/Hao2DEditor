@@ -22,7 +22,8 @@ import type {
 } from '../model/authoring'
 import { CURRENT_SCHEMA_VERSION, createDefaultMeta, createEmptyDocument } from '../model/authoring'
 
-export const PROJECT_EXTENSION = 'hao2dproj'
+/** 工程文件后缀（含点，落盘文件名形如 `hero.hao2d.proj`） */
+export const PROJECT_EXTENSION = 'hao2d.proj'
 
 export interface ParseDocumentResult {
   document: EditorDocument

@@ -48,19 +48,36 @@ function isInsideRoots(target: string): boolean {
   return false
 }
 
+/**
+ * 给响应补上 CORS 头。
+ *
+ * 渲染层用 `<img crossorigin="anonymous">` 加载图片后要把像素传给 WebGL，
+ * 而 hao2d-file:// / hao2d-asset:// 与页面（dev 是 http://localhost，打包后是 file://）不同源，
+ * 没有这个头浏览器会拒绝把图片上传成纹理（表现为纹理为空、模型画成白色）。
+ */
+function withCors(response: Response): Response {
+  const headers = new Headers(response.headers)
+  headers.set('Access-Control-Allow-Origin', '*')
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  })
+}
+
 export function registerProtocolHandlers(): void {
-  protocol.handle(FILE_SCHEME, (request) => {
+  protocol.handle(FILE_SCHEME, async (request) => {
     const target = decodePath(request.url)
     if (!isInsideRoots(target)) {
       log.warn(`拒绝访问资源根之外的路径：${target}`)
       return new Response('forbidden', { status: 403 })
     }
-    return net.fetch(pathToFileURL(target).toString())
+    return withCors(await net.fetch(pathToFileURL(target).toString()))
   })
 
-  protocol.handle(ASSET_SCHEME, (request) => {
+  protocol.handle(ASSET_SCHEME, async (request) => {
     const target = decodePath(request.url.replace(ASSET_SCHEME, FILE_SCHEME))
     registerAssetRootFor(path.dirname(target))
-    return net.fetch(pathToFileURL(target).toString())
+    return withCors(await net.fetch(pathToFileURL(target).toString()))
   })
 }

@@ -1,5 +1,5 @@
 import { Container, Graphics } from 'pixi.js'
-import { MAT4_LENGTH, mul, mulPoint, trs } from '@core/math/matrix'
+import { MAT4_LENGTH, invert, mul, mulPoint, trs } from '@core/math/matrix'
 import type { Vec2 } from '@core/math/matrix'
 import { Viewport } from '@render/viewport'
 import { SkeletonView } from '@render/skeletonView'
@@ -320,6 +320,20 @@ export class EditorScene {
       this.viewport.pixelsToWorld(BONE_ORIGIN_RADIUS),
       this.bundle.boneIndex[this.viewState.selectedBone] ?? -1
     )
+  }
+
+  /**
+   * 世界坐标 → 骨骼局部坐标（附件显示空间）。
+   * 把图片拖到场景里时，用落点算出附件的 position 就靠这个换算。
+   * 用的是骨骼**当前**世界矩阵：Pose 状态下即 setup 姿态。
+   */
+  worldToBoneLocal(boneName: string, worldX: number, worldY: number): Vec2 | null {
+    const bundle = this.bundle
+    if (!bundle) return null
+    const index = bundle.boneIndex[boneName]
+    if (index === undefined) return null
+    const inverse = invert(bundle.skeleton.world.subarray(index * 16, index * 16 + 16))
+    return mulPoint(inverse, { x: worldX, y: worldY })
   }
 
   /**

@@ -9,11 +9,14 @@ import {
 import type { AuthoringAnimData, AuthoringAttachment, AuthoringVertex, EditorDocument } from './model/authoring'
 
 /**
- * 内置示例工程：躯干（带权重蒙皮）+ 头 + 双臂 + 双腿的简笔角色。
+ * 示例工程 fixture：躯干（带权重蒙皮）+ 头 + 双臂 + 双腿的简笔角色。
+ *
+ * 注意：**不再在启动时自动载入**（启动改为自动打开上次的工程），
+ * 现在只作为单元测试 / 冒烟验证的数据来源。
  *
  * 约定：附件顶点一律写在**骨骼局部空间**，沿骨骼的 +X 方向延伸，
  * 这样骨骼旋转后肢体方向自然正确（这也是编辑器新建网格时的默认约定）。
- * 不依赖任何外部图片：图集页为空时渲染为纯色块，便于首次打开就验证视口 / 骨架 / 蒙皮 / 时间轴。
+ * 不依赖任何外部图片：图集页为空时渲染为纯色块。
  */
 export function createSampleDocument(): EditorDocument {
   const doc = createEmptyDocument('sample-hero')

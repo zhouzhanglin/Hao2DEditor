@@ -10,6 +10,8 @@ export interface PanelShellProps {
   grow?: boolean
   className?: string
   bodyClassName?: string
+  /** 面板整体的内联样式（例如由分隔条拖出的固定高度） */
+  style?: React.CSSProperties
   collapsible?: boolean
   defaultCollapsed?: boolean
 }
@@ -22,6 +24,7 @@ export default function PanelShell({
   grow = true,
   className,
   bodyClassName,
+  style,
   collapsible = true,
   defaultCollapsed = false
 }: PanelShellProps) {
@@ -30,7 +33,7 @@ export default function PanelShell({
   return (
     <section
       className={['hao-panel', grow ? 'flex-1' : 'shrink-0', className ?? ''].join(' ')}
-      style={grow ? undefined : undefined}
+      style={style}
     >
       <header className="hao-panel-header">
         <div className="flex min-w-0 items-center gap-1">

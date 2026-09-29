@@ -1,14 +1,20 @@
-import { Image as ImageIcon, Layers, Package, Plus } from 'lucide-react'
+import { useState } from 'react'
+import { Layers, Package, Plus } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { PanelEmpty } from '@ui/widgets/PanelShell'
 import { createRegionFromImage } from '@editor/commands/authoringCommands'
+import { setImageDragData } from '@ui/widgets/dragDrop'
+import { ImageHoverPreview, ImageThumb } from './ImageThumb'
+import type { AuthoringImage } from '@core/model/authoring'
 
 /** 皮肤与图集面板：切换当前皮肤、查看图片清单（导出时打包为图集） */
 export default function AssetPanel() {
   const document = useProjectStore((s) => s.document)
   const update = useProjectStore((s) => s.update)
   const selection = useSelectionStore()
+  /** 悬停的图片 + 所在行元素（预览浮层贴在行旁边） */
+  const [hovered, setHovered] = useState<{ image: AuthoringImage; row: HTMLElement } | null>(null)
 
   const activeSkin = selection.skin && document.skins.some((s) => s.name === selection.skin) ? selection.skin : ''
   // 新附件的挂载骨骼：优先用当前选中的骨骼，否则退回第一根骨骼
@@ -76,9 +82,19 @@ export default function AssetPanel() {
             {document.images.map((image) => (
               <li
                 key={image.name}
-                className="flex items-center gap-1.5 rounded border border-line/60 bg-ink-900/40 px-1.5 py-1"
+                draggable
+                title="拖到视口 = 在落点新建插槽；拖到层级树的插槽行 = 给该插槽加一个 display"
+                className="flex cursor-grab items-center gap-1.5 rounded border border-line/60 bg-ink-900/40 px-1.5 py-1 hover:border-accent/40 active:cursor-grabbing"
+                onDragStart={(event) => {
+                  setImageDragData(event.dataTransfer, image.name)
+                  setHovered(null)
+                }}
+                onMouseEnter={(event) => setHovered({ image, row: event.currentTarget })}
+                onMouseLeave={() =>
+                  setHovered((current) => (current?.image.name === image.name ? null : current))
+                }
               >
-                <ImageIcon size={11} className="shrink-0 text-content-lo" />
+                <ImageThumb path={image.path} size={22} />
                 <span className="min-w-0 flex-1 truncate">{image.name}</span>
                 <span className="shrink-0 font-mono text-3xs text-content-lo">
                   {image.width}×{image.height}
@@ -92,7 +108,7 @@ export default function AssetPanel() {
                   type="button"
                   title={
                     bone
-                      ? `用这张图片创建 Region 附件（挂在骨骼「${bone}」上）`
+                      ? `在骨骼「${bone}」下新建插槽，并用这张图片作为它的 display（也可以直接把图片拖进场景）`
                       : '先新建一根骨骼，再用图片创建附件'
                   }
                   disabled={!bone}
@@ -110,7 +126,9 @@ export default function AssetPanel() {
                         image: image.name,
                         bone,
                         width: image.width,
-                        height: image.height
+                        height: image.height,
+                        // 附件落到当前皮肤，和拖放建插槽保持一致
+                        skin: activeSkin
                       })
                     })
                     if (created) {
@@ -126,6 +144,15 @@ export default function AssetPanel() {
           </ul>
         )}
       </div>
+
+      {/* 悬停大图预览：portal 到 body，不会被面板滚动区裁剪。
+          每次都从文档里取最新记录（图片可能被改名 / 重新导入，旧引用会指向失效路径） */}
+      {hovered && document.images.some((item) => item.name === hovered.image.name) ? (
+        <ImageHoverPreview
+          image={document.images.find((item) => item.name === hovered.image.name) ?? hovered.image}
+          anchor={hovered.row}
+        />
+      ) : null}
     </div>
   )
 }

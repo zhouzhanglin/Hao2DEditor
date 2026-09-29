@@ -3,7 +3,6 @@ import { parseDocument, serializeDocument, PROJECT_EXTENSION } from '@core/codec
 import { decompileAsset } from '@core/codec/decompile'
 import { createEmptyDocument } from '@core/model/authoring'
 import type { EditorDocument } from '@core/model/authoring'
-import { createSampleDocument } from '@core/sample'
 import { importSpine } from '@importers/spine'
 import { importDragonBones } from '@importers/dragonBones'
 import { parseSpineAtlas } from '@importers/atlasSpine'
@@ -19,7 +18,17 @@ export interface IoResult {
   warnings?: string[]
 }
 
-const PROJECT_FILTER = [{ name: 'Hao2D 工程', extensions: [PROJECT_EXTENSION, 'json'] }]
+/**
+ * 工程文件过滤器。除了新后缀 `.hao2d.proj`，也放开旧的 `.hao2dproj` 与 `.json`，
+ * 这样早期存下来的工程仍然能在文件对话框里选到（解析只看内容，不看后缀）。
+ */
+const PROJECT_FILTER = [{ name: 'Hao2D 工程', extensions: [PROJECT_EXTENSION, 'hao2dproj', 'json'] }]
+
+/** 保存对话框里的默认文件名：优先用骨架名，为空时用 project */
+function defaultFileName(armatureName: string): string {
+  const name = armatureName.trim()
+  return `${name.length > 0 ? name : 'project'}.${PROJECT_EXTENSION}`
+}
 
 function fail(message: string): IoResult {
   console.error(`[hao2d] ${message}`)
@@ -67,9 +76,15 @@ export function newProject(): IoResult {
   return { ok: true, message: '已新建空白工程' }
 }
 
-export function loadSample(): IoResult {
-  useProjectStore.getState().setDocument(createSampleDocument(), null, true)
-  return { ok: true, message: '已载入内置示例角色' }
+/**
+ * 上次打开的工程：取最近列表第一条，并确认文件仍然存在。
+ * 返回 null 表示没有历史记录、或文件已被移动 / 删除（此时保持空白工程）。
+ */
+export async function lastProject(): Promise<string | null> {
+  const platform = getPlatform()
+  const [latest] = await platform.recentList()
+  if (!latest) return null
+  return (await platform.exists(latest)) ? latest : null
 }
 
 export async function openProject(): Promise<IoResult> {
@@ -90,7 +105,13 @@ export async function openProjectAt(path: string): Promise<IoResult> {
   const text = await platform.readText(path)
   if (!text) return fail(`无法读取工程文件：${path}`)
 
-  const parsed = parseDocument(text)
+  // 解析失败也要走 fail 分支：启动时自动打开上次工程，坏文件不能把启动流程带崩
+  let parsed: ReturnType<typeof parseDocument>
+  try {
+    parsed = parseDocument(text)
+  } catch (error) {
+    return fail(`工程文件解析失败：${error instanceof Error ? error.message : String(error)}`)
+  }
   useProjectStore.getState().setDocument(parsed.document, path, false)
   useProjectStore.getState().setWarnings(parsed.warnings)
   await platform.recentAdd(path)
@@ -108,11 +129,16 @@ export async function saveProject(saveAs: boolean): Promise<IoResult> {
   let path = saveAs ? null : store.projectPath
   if (!path) {
     path = await platform.pickSavePath({
-      defaultPath: `${store.document.armatureName}.${PROJECT_EXTENSION}`,
+      defaultPath: defaultFileName(store.document.armatureName),
       filters: PROJECT_FILTER
     })
   }
   if (!path) return { ok: false, message: '已取消' }
+  // 统一成 .hao2d.proj：没写后缀就补上，写了别的后缀（.json 除外，兼容老工程）就替换掉。
+  // 复合后缀必须整串判断——`path.extname('a.hao2d.proj')` 只会给出 `.proj`。
+  if (!new RegExp(`\\.(${PROJECT_EXTENSION.replace(/\./g, '\\.')}|json)$`, 'i').test(path)) {
+    path = `${path.replace(/\.[^./\\]+$/, '')}.${PROJECT_EXTENSION}`
+  }
 
   await platform.writeText(path, serializeDocument(store.document))
   store.markSaved(path)
@@ -290,6 +316,11 @@ export async function importImagesFlow(paths?: readonly string[]): Promise<IoRes
 /** 拖入窗口的文件：按内容分派到对应导入流程 */
 export async function importDroppedPaths(paths: readonly string[]): Promise<IoResult> {
   const platform = getPlatform()
+
+  // 拖入工程文件 = 打开工程
+  const project = paths.find((p) => /\.(hao2d\.proj|hao2dproj)$/i.test(p))
+  if (project) return openProjectAt(project)
+
   const images = paths.filter((p) => /\.(png|jpg|jpeg|webp|gif|bmp)$/i.test(p))
   const jsons = paths.filter((p) => /\.json$/i.test(p))
   const atlases = paths.filter((p) => /\.atlas(\.txt)?$/i.test(p))

@@ -191,7 +191,8 @@ export async function exportRuntimeData(): Promise<ExportResult> {
   const pngs = await encodeAtlasPages(packed.plans, async (name) => {
     if (bitmaps.has(name)) return bitmaps.get(name) ?? null
     const image = doc.images.find((entry) => entry.name === name)
-    const bitmap = image ? await loadImageBitmap(platform.fileUrl(image.path)) : null
+    // imageUrl：Electron 下是同源 blob:，fetch / createImageBitmap 都不会被 CSP 拦
+    const bitmap = image ? await loadImageBitmap(await platform.imageUrl(image.path)) : null
     bitmaps.set(name, bitmap)
     return bitmap
   })

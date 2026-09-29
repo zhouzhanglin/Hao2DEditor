@@ -1,3 +1,5 @@
+import { loadImageElement } from '@render/imageLoader'
+
 export interface PageBlit {
   /** 源图名（= ImageRef.name） */
   name: string
@@ -72,16 +74,20 @@ async function encodeCanvas(canvas: HTMLCanvasElement | OffscreenCanvas): Promis
   return new Uint8Array(await blob.arrayBuffer())
 }
 
-/** 加载一张图片为 ImageBitmap（Electron 用 hao2d-file://，浏览器用 blob:） */
+/**
+ * 加载一张图片为 ImageBitmap。
+ *
+ * 走 `<img>` 而不是 fetch：图片 URL 是 blob: / hao2d-file://，这两个 scheme 不在 CSP 的
+ * connect-src 白名单里（img-src 里有），fetch 会被直接拦掉。
+ */
 export async function loadImageBitmap(url: string): Promise<ImageBitmap | null> {
   if (!url) return null
-  const response = await fetch(url).catch((error: unknown) => {
+  const image = await loadImageElement(url).catch((error: unknown) => {
     console.error(`[hao2d] 读取图片失败：${url}`, error)
     return null
   })
-  if (!response || !response.ok) return null
-  const blob = await response.blob()
-  return createImageBitmap(blob).catch((error: unknown) => {
+  if (!image) return null
+  return createImageBitmap(image).catch((error: unknown) => {
     console.error('[hao2d] 解码图片失败', error)
     return null
   })

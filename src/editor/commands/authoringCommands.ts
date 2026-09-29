@@ -1,5 +1,11 @@
 import { createAuthoringAttachment, createAuthoringSlot } from '@core/model/authoring'
-import type { AuthoringAttachment, AuthoringSkinSlot, EditorDocument } from '@core/model/authoring'
+import type {
+  AuthoringAttachment,
+  AuthoringSkin,
+  AuthoringSkinSlot,
+  EditorDocument
+} from '@core/model/authoring'
+import type { Vec2 } from '@core/math/matrix'
 import { createGridMesh } from '@core/mesh/triangulate'
 import type { MeshGeometry } from '@core/mesh/triangulate'
 
@@ -42,13 +48,63 @@ export function findAttachment(
   return null
 }
 
+/** 附件清单要落到哪个皮肤：优先指定皮肤，找不到就退回第一个（default） */
+function targetSkin(doc: EditorDocument, name?: string): AuthoringSkin {
+  if (doc.skins.length === 0) doc.skins.push({ name: 'default', slots: [] })
+  if (name) {
+    const found = doc.skins.find((item) => item.name === name)
+    if (found) return found
+  }
+  return doc.skins[0]
+}
+
+/** 取（不存在则新建）皮肤里某个插槽的附件清单 */
+function ensureSkinSlot(skin: AuthoringSkin, slotName: string): AuthoringSkinSlot {
+  let skinSlot = findSkinSlot(skin, slotName)
+  if (!skinSlot) {
+    skinSlot = { slot: slotName, attachments: [] }
+    skin.slots.push(skinSlot)
+  }
+  return skinSlot
+}
+
+/** 图片 → Region 附件：尺寸按 PPU 折算，UV 铺满整张图，位置为附件显示空间偏移 */
+function regionAttachmentFromImage(
+  image: string,
+  name: string,
+  width: number,
+  height: number,
+  position?: Vec2
+): AuthoringAttachment {
+  return createAuthoringAttachment({
+    name,
+    type: 'region',
+    image,
+    size: { x: width, y: height },
+    position: position ? { x: position.x, y: position.y } : { x: 0, y: 0 },
+    uvs: [0, 0, 1, 0, 1, 1, 0, 1]
+  })
+}
+
 /**
- * 用一张图片创建「插槽 + Region 附件」。
- * 尺寸按 PPU 折算到骨架单位，位置放在骨骼原点（视觉上以骨骼为锚点居中）。
+ * 用一张图片创建「插槽 + Region 附件」（拖进场景 / 面板里的「+」都走这里）。
+ * 尺寸按 PPU 折算到骨架单位；`position` 是附件显示空间（骨骼局部）的偏移，
+ * 空着就落在骨骼原点，拖放时由落点换算后传入。
  */
 export function createRegionFromImage(
   doc: EditorDocument,
-  options: { image: string; bone: string; width: number; height: number; slotName?: string; attachmentName?: string }
+  options: {
+    image: string
+    bone: string
+    width: number
+    height: number
+    slotName?: string
+    attachmentName?: string
+    /** 附件位置（骨骼局部），拖放到场景时用落点换算 */
+    position?: Vec2
+    /** 目标皮肤，默认 default */
+    skin?: string
+  }
 ): { slot: string; attachment: string } | null {
   if (!options.bone) return null
   const imageName = options.image
@@ -70,24 +126,42 @@ export function createRegionFromImage(
       attachment: attachmentName
     })
   )
-  const skin = doc.skins[0] ?? { name: 'default', slots: [] }
-  if (doc.skins.length === 0) doc.skins.push(skin)
-  let skinSlot = findSkinSlot(skin, slotName)
-  if (!skinSlot) {
-    skinSlot = { slot: slotName, attachments: [] }
-    skin.slots.push(skinSlot)
-  }
-  skinSlot.attachments.push(
-    createAuthoringAttachment({
-      name: attachmentName,
-      type: 'region',
-      image: imageName,
-      size: { x: width, y: height },
-      position: { x: 0, y: 0 },
-      uvs: [0, 0, 1, 0, 1, 1, 0, 1]
-    })
+  ensureSkinSlot(targetSkin(doc, options.skin), slotName).attachments.push(
+    regionAttachmentFromImage(imageName, attachmentName, width, height, options.position)
   )
   return { slot: slotName, attachment: attachmentName }
+}
+
+/**
+ * 往**已有插槽**追加一个 display（附件），并把它切换为当前显示的项。
+ *
+ * 一个插槽可以挂多个 display，但同一时刻只显示 `slot.attachment` 指向的那一个，
+ * 所以在追加时把 slot.attachment 指过去，符合「加进去就能看到」的直觉。
+ * 原来的 display 仍然留在附件清单里，随时可以在层级树 / 属性面板里切回来。
+ */
+export function addImageDisplay(
+  doc: EditorDocument,
+  options: { image: string; slot: string; width: number; height: number; position?: Vec2; name?: string; skin?: string }
+): { slot: string; attachment: string } | null {
+  const slot = doc.slots.find((item) => item.name === options.slot)
+  if (!slot || !options.image) return null
+
+  const skinSlot = ensureSkinSlot(targetSkin(doc, options.skin), slot.name)
+  const name = uniqueName(
+    skinSlot.attachments.map((item) => item.name),
+    options.name ?? stripExtension(options.image)
+  )
+  skinSlot.attachments.push(
+    regionAttachmentFromImage(
+      options.image,
+      name,
+      Math.max(1, options.width) / PPU,
+      Math.max(1, options.height) / PPU,
+      options.position
+    )
+  )
+  slot.attachment = name
+  return { slot: slot.name, attachment: name }
 }
 
 /**

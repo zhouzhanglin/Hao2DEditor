@@ -130,7 +130,14 @@ export class Viewport {
       powerPreference: 'high-performance'
     })
     if (this.destroyed) {
-      this.app.destroy(true)
+      // 销毁时**不要**传 true：`destroy(true)` 等价于 releaseGlobalResources，
+      // 会清空 Pixi 的**模块级全局批处理池**（GlobalResourceRegistry 里把所有
+      // 池内 Batch 都 destroy 掉，textures 被置 null）。池是跨渲染器共享的，
+      // 清掉之后另一个还活着的渲染器会从池里拿到已销毁的 Batch，
+      // 表现为 `Batcher.break` 里抛 "Cannot read properties of null (reading 'clear')"。
+      // React StrictMode 下「挂载 → 卸载 → 再挂载」时，第一次 init 未完成就走这里，
+      // 正好会踩中。这里只想释放自己的 renderer，不动全局池。
+      this.app.destroy({ removeView: false })
       return
     }
     // 背景棋盘格在最底层，铺满整块画布
@@ -283,7 +290,8 @@ export class Viewport {
     if (this.ready) {
       // 先自己释放棋盘格（含纹理），再从 stage 摘掉，避免 app.destroy 二次销毁
       this.checker.destroy()
-      this.app.destroy(true, { children: true })
+      // 同样不传 true：见 init() 里对 releaseGlobalResources 的说明
+      this.app.destroy({ removeView: false }, { children: true })
       this.ready = false
     }
     if (this.canvas.parentElement === this.host) this.host.removeChild(this.canvas)

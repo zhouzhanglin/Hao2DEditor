@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import DockLayout from './layout/DockLayout'
+import Splitter from './layout/Splitter'
 import MenuBar from './layout/MenuBar'
 import Toolbar from './layout/Toolbar'
 import StatusBar from './panels/StatusBar'
@@ -43,6 +44,19 @@ const TOOL_LABEL: Record<EditorTool, string> = {
   ffd: 'FFD 顶点',
   constraint: '约束'
 }
+
+/** 左下「资源与皮肤」面板的初始高度与拖拽范围（高度可拖长，图片多时不用只靠滚动） */
+const ASSET_PANEL_HEIGHT = 190
+const ASSET_PANEL_MIN = 120
+const ASSET_PANEL_MAX = 520
+const ASSET_PANEL_KEY = 'hao2d:asset-panel-height'
+
+function loadAssetPanelHeight(): number {
+  if (typeof localStorage === 'undefined') return ASSET_PANEL_HEIGHT
+  const stored = Number(localStorage.getItem(ASSET_PANEL_KEY))
+  if (!Number.isFinite(stored) || stored <= 0) return ASSET_PANEL_HEIGHT
+  return Math.min(ASSET_PANEL_MAX, Math.max(ASSET_PANEL_MIN, stored))
+}
 import { getPlatform } from '@editor/platform'
 import { setActiveScene, getActiveScene } from '@editor/activeScene'
 import type { EditorScene } from '@editor/scene'
@@ -51,7 +65,7 @@ import {
   importDroppedPaths,
   importImagesFlow,
   importSpineFlow,
-  loadSample,
+  lastProject,
   newProject,
   openProject,
   openProjectAt,
@@ -74,13 +88,38 @@ export default function App() {
   const [hint, setHint] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState<string | null>(null)
   const [zoom, setZoom] = useState(100)
-  const [stats, setStats] = useState({ bones: 0, slots: 0, constraints: 0, vertices: 0, triangles: 0 })
+  const [stats, setStats] = useState({
+    bones: 0,
+    slots: 0,
+    constraints: 0,
+    vertices: 0,
+    triangles: 0,
+    texturesLoaded: 0,
+    texturesTotal: 0
+  })
   const [dragging, setDragging] = useState(false)
+  const [assetHeight, setAssetHeight] = useState(loadAssetPanelHeight)
   const booted = useRef(false)
 
   const flash = useCallback((message: string) => {
     setHint(message)
     window.setTimeout(() => setHint(undefined), 2600)
+  }, [])
+
+  /** 拖拽左侧分隔条：向上拖（delta < 0）把「资源与皮肤」拉高，并记住高度 */
+  const resizeAssetPanel = useCallback((delta: number) => {
+    setAssetHeight((previous) => {
+      const next = Math.min(ASSET_PANEL_MAX, Math.max(ASSET_PANEL_MIN, previous - delta))
+      if (typeof localStorage !== 'undefined') localStorage.setItem(ASSET_PANEL_KEY, String(Math.round(next)))
+      return next
+    })
+  }, [])
+
+  // 「重置布局」把面板高度一并复位，和其它分栏保持一致
+  useEffect(() => {
+    const reset = (): void => setAssetHeight(ASSET_PANEL_HEIGHT)
+    window.addEventListener('hao2d:reset-layout', reset)
+    return () => window.removeEventListener('hao2d:reset-layout', reset)
   }, [])
 
   /**
@@ -100,15 +139,24 @@ export default function App() {
     [flash, setModeRaw]
   )
 
-  // 首次进入：载入内置示例，让视口有内容可看
+  /**
+   * 首次进入：不再载入内置示例，而是**自动打开上次的工程**。
+   * 最近列表由主进程持久化（打开与保存都会写入），这里只取第一条并确认文件还在；
+   * 没有历史、或文件已被移动/删除时保持空白工程，用户从「新建 / 打开 / 导入」开始。
+   */
   useEffect(() => {
     if (booted.current) return
     booted.current = true
-    if (doc.bones.length === 0 && doc.images.length === 0) {
-      loadSample()
-      flash('已载入内置示例角色，可从这里开始编辑或导入自己的资源')
-    }
-  }, [doc.bones.length, doc.images.length, flash])
+    void (async () => {
+      const path = await lastProject()
+      if (!path) {
+        flash('新建空白工程：可导入图片或 Spine / DragonBones 资源开始')
+        return
+      }
+      const result = await openProjectAt(path)
+      flash(result.ok ? `已打开上次的工程：${result.message.replace(/^已打开\s*/, '')}` : result.message)
+    })()
+  }, [flash])
 
   const onSceneReady = useCallback(
     (scene: EditorScene) => {
@@ -124,12 +172,17 @@ export default function App() {
       const scene = getActiveScene()
       if (!scene) return
       const mesh = scene.meshResult
+      const images = useProjectStore.getState().document.images
       setStats({
         bones: scene.runtime?.asset.bones.length ?? 0,
         slots: scene.runtime?.asset.slots.length ?? 0,
         constraints: scene.runtime?.asset.constraints.length ?? 0,
         vertices: mesh?.vertexCount ?? 0,
-        triangles: mesh ? Math.floor(mesh.groups.reduce((sum, g) => sum + g.indexCount, 0) / 3) : 0
+        triangles: mesh ? Math.floor(mesh.groups.reduce((sum, g) => sum + g.indexCount, 0) / 3) : 0,
+        // 纹理就绪度：缺图时视口会把附件画成白色，这里直接暴露出来
+        // （只统计工程里的图片，仓库里可能还留着已删图或探针加载的纹理）
+        texturesLoaded: images.filter((image) => scene.textures.has(image.name)).length,
+        texturesTotal: images.length
       })
       setZoom(Math.round(scene.viewport.zoom * 100))
     }, 250)
@@ -393,9 +446,16 @@ export default function App() {
               grow
               actions={<span className="text-3xs text-content-lo" title="单棵树：插槽挂在宿主骨骼下，约束挂在驱动骨骼下">图标区分类型</span>}
             >
-              <HierarchyTree />
+              <HierarchyTree onStatus={flash} />
             </PanelShell>
-            <PanelShell title="资源与皮肤" grow={false} bodyClassName="h-[190px]">
+            {/* 分隔条：向上拖把「资源与皮肤」拉长（高度会记住） */}
+            <Splitter direction="vertical" onResize={resizeAssetPanel} />
+            <PanelShell
+              title="资源与皮肤"
+              grow={false}
+              style={{ height: assetHeight }}
+              actions={<span className="text-3xs text-content-lo">拖动上方分隔条调高</span>}
+            >
               <AssetPanel />
             </PanelShell>
           </>
@@ -412,6 +472,15 @@ export default function App() {
               <ViewportCanvas onSceneReady={onSceneReady} onStatus={flash} />
               <ModeSwitch mode={mode} onChange={setMode} />
               <ViewportTools onStatus={flash} />
+              {/* 空白工程提示：不再自带示例角色，首次启动给个上手指引 */}
+              {doc.bones.length === 0 && doc.images.length === 0 ? (
+                <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 text-center">
+                  <span className="text-panel text-content-lo">空白工程</span>
+                  <span className="text-3xs text-content-lo/70">
+                    顶部菜单「导入图片 / 导入 Spine / 导入 DragonBones」开始，或「打开」已有工程
+                  </span>
+                </div>
+              ) : null}
             </div>
           </div>
         }

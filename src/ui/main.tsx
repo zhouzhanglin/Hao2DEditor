@@ -7,10 +7,13 @@ import { useSelectionStore } from '@editor/store/selectionStore'
 import { useToolStore } from '@editor/store/toolStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { useModeStore } from '@editor/store/modeStore'
+import { getPlatform } from '@editor/platform'
+import { lastProject, newProject, openProject, openProjectAt, saveProject } from '@editor/services/projectIo'
 
 /**
- * 调试钩子：把几个 store 挂到全局，便于在浏览器控制台 / 自动化脚本里检查编辑器状态。
- * （只读检查用，业务代码不要依赖它。）
+ * 调试钩子：把 store、平台层与工程 IO 挂到全局，
+ * 便于在浏览器控制台 / 自动化脚本里检查状态、跑通「保存 → 下次启动自动打开」这类流程。
+ * （只读检查与自动化用，业务代码不要依赖它。）
  */
 const debugTarget = globalThis as unknown as {
   __haoStores?: {
@@ -20,6 +23,14 @@ const debugTarget = globalThis as unknown as {
     timeline: typeof useTimelineStore
     mode: typeof useModeStore
   }
+  __haoPlatform?: ReturnType<typeof getPlatform>
+  __haoProject?: {
+    lastProject: typeof lastProject
+    newProject: typeof newProject
+    openProject: typeof openProject
+    openProjectAt: typeof openProjectAt
+    saveProject: typeof saveProject
+  }
 }
 debugTarget.__haoStores = {
   project: useProjectStore,
@@ -28,6 +39,8 @@ debugTarget.__haoStores = {
   timeline: useTimelineStore,
   mode: useModeStore
 }
+debugTarget.__haoPlatform = getPlatform()
+debugTarget.__haoProject = { lastProject, newProject, openProject, openProjectAt, saveProject }
 
 const container = document.getElementById('root')
 if (!container) {

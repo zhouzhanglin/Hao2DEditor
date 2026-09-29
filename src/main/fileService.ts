@@ -13,8 +13,24 @@ import type {
 
 const log = createLogger('fs')
 
-/** 允许读写的文本扩展名（导入/导出与工程文件） */
-const TEXT_EXT = new Set(['.json', '.txt', '.atlas', '.skel', '.hao2d.json', '.ls', '.eskip'])
+/**
+ * 允许读写的文本扩展名（导入/导出与工程文件）。
+ *
+ * 注意工程文件用的是**复合后缀** `.hao2d.proj`，而 `path.extname()` 只会返回最后一段
+ * （`.proj`），所以这里既要放 `.proj`，也要保留旧的 `.hao2dproj`，
+ * 否则工程文件的读写会被这道白名单拦掉。
+ */
+const TEXT_EXT = new Set([
+  '.json',
+  '.txt',
+  '.atlas',
+  '.skel',
+  '.hao2d.json',
+  '.ls',
+  '.eskip',
+  '.proj',
+  '.hao2dproj'
+])
 /** 允许读写的图片扩展名 */
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'])
 

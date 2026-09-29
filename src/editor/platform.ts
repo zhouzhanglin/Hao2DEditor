@@ -32,6 +32,13 @@ export interface Platform {
   revealInFolder(path: string): Promise<void>
   setTitle(title: string): Promise<void>
   fileUrl(path: string): string
+  /**
+   * 渲染层用来把图片变成纹理的 URL。
+   *
+   * Electron 下会读文件字节做成 `blob:`（与页面同源）——协议 URL 虽然也能显示，
+   * 但它与页面跨源，上传 WebGL 时会被判定成「被污染的图片」，实际渲染成白块。
+   */
+  imageUrl(path: string): Promise<string>
   /** 从系统拖入的 File 取绝对路径；浏览器模式返回内存路径 */
   pathForDroppedFile(file: File): Promise<string>
   onMenuCommand(cb: (command: string) => void): () => void
@@ -46,6 +53,8 @@ function unwrap<T>(result: IpcResult<T>, fallback: T): T {
 class ElectronPlatform implements Platform {
   readonly isElectron = true
   readonly platform: string
+  /** path → blob: URL（图片纹理用），避免同一张图反复走 IPC */
+  private readonly imageUrls = new Map<string, string>()
 
   constructor(private readonly bridge: HaoBridge) {
     this.platform = bridge.platform
@@ -115,6 +124,18 @@ class ElectronPlatform implements Platform {
     return this.bridge.fileUrl(path)
   }
 
+  /** 读文件字节 → 同源 blob:（缓存，同一张图只读一次） */
+  async imageUrl(path: string): Promise<string> {
+    const cached = this.imageUrls.get(path)
+    if (cached) return cached
+    const bytes = await this.readBinary(path)
+    if (!bytes || bytes.length === 0) return ''
+    const blob = new Blob([bytes as unknown as BlobPart], { type: imageMimeOf(path) })
+    const url = URL.createObjectURL(blob)
+    this.imageUrls.set(path, url)
+    return url
+  }
+
   async pathForDroppedFile(file: File): Promise<string> {
     return this.bridge.getPathForFile(file)
   }
@@ -159,7 +180,7 @@ class MemoryPlatform implements Platform {
   }
 
   async pickSavePath(options?: { defaultPath?: string }): Promise<string | null> {
-    const suggested = options?.defaultPath ?? 'project.hao2dproj'
+    const suggested = options?.defaultPath ?? 'project.hao2d.proj'
     const value = typeof window === 'undefined' ? null : window.prompt('保存到（内存路径）', suggested)
     return value && value.length > 0 ? value : null
   }
@@ -242,6 +263,11 @@ class MemoryPlatform implements Platform {
     return url
   }
 
+  /** 浏览器模式的内存文件本来就是 blob:，与展示用的 URL 是同一份 */
+  async imageUrl(path: string): Promise<string> {
+    return this.fileUrl(path)
+  }
+
   async pathForDroppedFile(file: File): Promise<string> {
     return this.storeFile(file)
   }
@@ -295,4 +321,24 @@ export function baseName(p: string): string {
 export function stripExtension(name: string): string {
   const idx = name.lastIndexOf('.')
   return idx <= 0 ? name : name.slice(0, idx)
+}
+
+/** 图片扩展名 → MIME（做 blob: 时给上类型，浏览器才好按图片解码） */
+function imageMimeOf(path: string): string {
+  const name = baseName(path)
+  const dot = name.lastIndexOf('.')
+  const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : ''
+  switch (ext) {
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg'
+    case 'webp':
+      return 'image/webp'
+    case 'avif':
+      return 'image/avif'
+    case 'gif':
+      return 'image/gif'
+    default:
+      return 'image/png'
+  }
 }

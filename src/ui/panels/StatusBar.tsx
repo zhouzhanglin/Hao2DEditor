@@ -1,5 +1,14 @@
 export interface StatusBarProps {
-  stats: { bones: number; slots: number; constraints: number; vertices: number; triangles: number }
+  stats: {
+    bones: number
+    slots: number
+    constraints: number
+    vertices: number
+    triangles: number
+    /** 已载入的图片纹理数 / 工程里的图片总数：不相等说明有图没加载出来（视口会画成白色） */
+    texturesLoaded: number
+    texturesTotal: number
+  }
   selection: string
   animationName: string | null
   time: number
@@ -28,6 +37,22 @@ export default function StatusBar({
         <Stat label="约束" value={stats.constraints} />
         <Stat label="顶点" value={stats.vertices} />
         <Stat label="三角面" value={stats.triangles} />
+        {stats.texturesTotal > 0 ? (
+          // 只在缺图时标红：一眼看出「模型画成白块」是纹理没加载，而不是几何有问题
+          <span
+            className={stats.texturesLoaded < stats.texturesTotal ? 'flex items-baseline gap-1 text-warn' : 'flex items-baseline gap-1'}
+            title={
+              stats.texturesLoaded < stats.texturesTotal
+                ? `有 ${stats.texturesTotal - stats.texturesLoaded} 张图片没加载出纹理，视口里会显示为白块`
+                : '图片纹理全部就绪'
+            }
+          >
+            <span className="text-content-lo">纹理</span>
+            <span className="text-content-mid">
+              {stats.texturesLoaded}/{stats.texturesTotal}
+            </span>
+          </span>
+        ) : null}
       </span>
 
       <span className="h-[12px] w-px bg-line" />

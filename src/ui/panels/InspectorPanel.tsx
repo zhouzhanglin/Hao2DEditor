@@ -9,7 +9,8 @@ import {
   convertMeshToRegion,
   convertRegionToMesh,
   deleteAttachment,
-  deleteMeshVertex
+  deleteMeshVertex,
+  patchAttachment
 } from '@editor/commands/authoringCommands'
 import {
   CheckboxField,
@@ -540,18 +541,4 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
       ) : null}
     </div>
   )
-}
-
-function patchAttachment(
-  draft: ReturnType<typeof useProjectStore.getState>['document'],
-  slotName: string,
-  attachmentName: string,
-  patch: (attachment: import('@core/model/authoring').AuthoringAttachment) => void
-): void {
-  for (const skin of draft.skins) {
-    const skinSlot = skin.slots.find((s) => s.slot === slotName)
-    if (!skinSlot) continue
-    const attachment = skinSlot.attachments.find((a) => a.name === attachmentName)
-    if (attachment) patch(attachment)
-  }
 }

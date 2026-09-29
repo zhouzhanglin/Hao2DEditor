@@ -87,6 +87,18 @@ export default function DockLayout(props: DockLayoutProps) {
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {props.center}
+          {/* 时间轴只占中列宽度：在视口下面，不侵占左右两侧的面板 */}
+          {props.timeline !== null ? (
+            <>
+              <Splitter direction="vertical" onResize={resizeTimeline} />
+              <div
+                className="animate-slide-up mx-[3px] mb-[3px] shrink-0 overflow-hidden"
+                style={{ height: sizes.timeline }}
+              >
+                {props.timeline}
+              </div>
+            </>
+          ) : null}
         </main>
 
         <Splitter direction="horizontal" onResize={resizeRight} />
@@ -97,15 +109,6 @@ export default function DockLayout(props: DockLayoutProps) {
           {props.right}
         </aside>
       </div>
-
-      {props.timeline !== null ? (
-        <div className="flex shrink-0 flex-col">
-          <Splitter direction="vertical" onResize={resizeTimeline} />
-          <div className="animate-slide-up overflow-hidden" style={{ height: sizes.timeline }}>
-            {props.timeline}
-          </div>
-        </div>
-      ) : null}
 
       <div className="z-20 shrink-0">{props.statusBar}</div>
     </div>

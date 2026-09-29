@@ -112,7 +112,7 @@ function TreeRow({
     <div
       className={[
         'group relative flex h-[22px] items-center gap-1 pr-1 text-panel transition-colors duration-panel cursor-pointer',
-        active ? 'bg-accent/12 text-content-hi' : 'text-content-mid hover:bg-ink-700',
+        active ? 'bg-accent/12 text-yellow-400' : 'text-content-mid hover:bg-ink-700',
         dropActive ? 'ring-1 ring-inset ring-accent/70 bg-accent/10 text-content-hi' : '',
         nodeHint === 'inside' ? 'bg-accent/20 text-content-hi' : '',
         nodeHint === 'above' ? 'shadow-[inset_0_2px_0_0_rgba(34,211,238,0.9)]' : '',
@@ -325,34 +325,6 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     }
   }
 
-  /**
-   * 调整插槽层级（= 绘制顺序）：只重排 zOrder，不动 slots 数组本身。
-   * 上层后绘制、会盖住下层；「上移」就是和上面那个换位。要显示在更前面就把 zOrder 调大。
-   */
-  const nudgeSlotOrder = (slotName: string, direction: 'up' | 'down' | 'top' | 'bottom'): void => {
-    const label =
-      direction === 'up' ? '上移一层' : direction === 'down' ? '下移一层' : direction === 'top' ? '置顶' : '置底'
-    update(`插槽${label}`, (draft) => {
-      const ordered = [...draft.slots].sort((left, right) => left.zOrder - right.zOrder)
-      const index = ordered.findIndex((item) => item.name === slotName)
-      if (index < 0) return
-      const [moved] = ordered.splice(index, 1)
-      // ordered 是 zOrder 升序（越靠后画得越晚 = 显示在越前面），所以「上移」= 往后挪一位
-      const target =
-        direction === 'up'
-          ? index + 1
-          : direction === 'down'
-            ? index - 1
-            : direction === 'top'
-              ? ordered.length
-              : 0
-      ordered.splice(Math.max(0, Math.min(ordered.length, target)), 0, moved)
-      ordered.forEach((item, order) => {
-        item.zOrder = order
-      })
-    })
-  }
-
   /** 树内拖放的统一入口：按「拖的是什么 / 落到哪种行」分派，并挡掉不允许的组合 */
   const handleNodeDrop = (
     payload: TreeDragPayload,
@@ -548,48 +520,34 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         icon: <Plus size={12} />,
         onSelect: () => addSlot(host)
       },
-      { key: 'sep1', label: '', separator: true },
-      {
-        key: 'ik',
-        label: '添加 IK 约束',
-        hint: host ? `驱动骨骼：「${host}」` : '未指定驱动骨骼',
-        icon: <Target size={12} />,
-        onSelect: () => addConstraint('ik', host)
-      },
-      {
-        key: 'transform',
-        label: '添加变换约束',
-        hint: '继承位移 / 旋转 / 缩放 / 错切',
-        icon: <Maximize2 size={12} />,
-        onSelect: () => addConstraint('transform', host)
-      },
-      {
-        key: 'path',
-        label: '添加路径约束',
-        hint: '骨骼沿路径曲线排布',
-        icon: <Route size={12} />,
-        onSelect: () => addConstraint('path', host)
-      }
+      // 约束驱动的是骨骼，挂在插槽下没有意义，只在骨骼行 / 根层提供
+      ...(target.kind === 'bone' || target.kind === 'root'
+        ? [
+            { key: 'sep1', label: '', separator: true },
+            {
+              key: 'ik',
+              label: '添加 IK 约束',
+              hint: host ? `驱动骨骼：「${host}」` : '未指定驱动骨骼',
+              icon: <Target size={12} />,
+              onSelect: () => addConstraint('ik', host)
+            },
+            {
+              key: 'transform',
+              label: '添加变换约束',
+              hint: '继承位移 / 旋转 / 缩放 / 错切',
+              icon: <Maximize2 size={12} />,
+              onSelect: () => addConstraint('transform', host)
+            },
+            {
+              key: 'path',
+              label: '添加路径约束',
+              hint: '骨骼沿路径曲线排布',
+              icon: <Route size={12} />,
+              onSelect: () => addConstraint('path', host)
+            }
+          ]
+        : [])
     ]
-    if (target.kind === 'slot') {
-      items.push(
-        { key: 'sep-order', label: '', separator: true },
-        {
-          key: 'slot-up',
-          label: '上移一层',
-          hint: '更晚绘制，会盖住下面的插槽',
-          onSelect: () => nudgeSlotOrder(target.name, 'up')
-        },
-        {
-          key: 'slot-down',
-          label: '下移一层',
-          hint: '更早绘制，被上面的插槽盖住',
-          onSelect: () => nudgeSlotOrder(target.name, 'down')
-        },
-        { key: 'slot-top', label: '置顶', hint: '画在所有插槽之上', onSelect: () => nudgeSlotOrder(target.name, 'top') },
-        { key: 'slot-bottom', label: '置底', hint: '画在所有插槽之下', onSelect: () => nudgeSlotOrder(target.name, 'bottom') }
-      )
-    }
     if (target.kind !== 'root') {
       items.push(
         { key: 'sep2', label: '', separator: true },

@@ -9,7 +9,7 @@ import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { isDragging, toolPointerDown, toolPointerMove, toolPointerUp } from '@editor/tools/authoringTools'
 import type { ToolHost } from '@editor/tools/authoringTools'
-import { createRegionFromImage, insertMeshVertex, uniqueName } from '@editor/commands/authoringCommands'
+import { createRegionFromImage, insertMeshVertex, PPU, uniqueName } from '@editor/commands/authoringCommands'
 import { createAuthoringBone } from '@core/model/authoring'
 import { hasImageDrag, readImageDrag } from '@ui/widgets/dragDrop'
 
@@ -49,16 +49,15 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
 
     let raf = 0
     let last = performance.now()
-    let fitted = false
     const loop = (now: number): void => {
       const dt = Math.min(0.1, (now - last) / 1000)
       last = now
       scene.update(dt)
-      // 首次拿到有效几何后自动适配视野
-      if (!fitted) {
+      // 首次拿到有效几何后自动适配视野（拖图会提前置 autoFitDone，见 onImageDrop）
+      if (!scene.autoFitDone) {
         const bounds = scene.meshResult?.bounds
         if (bounds && bounds.maxX - bounds.minX > 1e-4 && bounds.maxY - bounds.minY > 1e-4) {
-          fitted = true
+          scene.autoFitDone = true
           scene.fit()
         }
       }
@@ -112,14 +111,38 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       const tools = useToolStore.getState()
       const timeline = useTimelineStore.getState()
       const mode = useModeStore.getState().mode
+      // 选中附件的操作器（仅 Pose 态 + 选择工具）：中心 = 附件 position，轴 = 附件旋转叠加骨骼
+      let selectedAttachment: {
+        boneIndex: number
+        position: { x: number; y: number }
+        rotation: number
+      } | null = null
+      if (tools.tool === 'select' && mode === 'pose' && selection.kind === 'attachment' && scene.runtime) {
+        const doc = useProjectStore.getState().document
+        const slot = doc.slots.find((item) => item.name === selection.slot)
+        const boneIndex = slot ? (scene.runtime.boneIndex[slot.bone] ?? -1) : -1
+        const skin =
+          doc.skins.find((item) => item.name === selection.skin) ?? doc.skins[0]
+        const attachment = skin?.slots
+          .find((item) => item.slot === selection.slot)
+          ?.attachments.find((item) => item.name === selection.attachment)
+        if (slot && boneIndex >= 0 && attachment) {
+          selectedAttachment = {
+            boneIndex,
+            position: { ...attachment.position },
+            rotation: attachment.rotation
+          }
+        }
+      }
       scene.setViewState({
         overlay: tools.overlay,
         gizmo: tools.gizmo,
-        // 绘制类工具激活时骨骼操作器不可用，直接不画（否则是点不动的假手柄）
-        showGizmo: tools.tool === 'select' || tools.tool === 'bone',
+        // 绘制类工具激活时操作器不可用，直接不画（否则是点不动的假手柄）
+        showGizmo: tools.tool === 'select',
         selectedBone: selection.kind === 'bone' ? selection.bone : '',
         weightBone: tools.overlay.weight ? selection.bone : '',
         selectedVertices: selection.vertices,
+        selectedAttachment,
         playing: mode === 'animate' && timeline.playing,
         speed: timeline.speed,
         loop: timeline.loop,
@@ -129,6 +152,9 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     }
     push()
     const unsubscribers = [
+      // projectStore 也要推：附件操作器的位置来自文档（拖动附件时 updateSilent 只改文档，
+      // 不推的话 selectedAttachment 停在按下时的旧位置，小坐标轴不会跟着附件走）
+      useProjectStore.subscribe(push),
       useSelectionStore.subscribe(push),
       useToolStore.subscribe(push),
       useTimelineStore.subscribe(push),
@@ -317,6 +343,9 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
 
     const rect = event.currentTarget.getBoundingClientRect()
     const world = scene.viewport.screenToWorld(event.clientX - rect.left, event.clientY - rect.top)
+    // 场景此前没有可见内容（如新建工程的第一次拖入）：落点聚焦 + 适配缩放，
+    // 并阻止渲染循环随后又自动 fit 把视角拉走（表现为图片「不在鼠标位置」）
+    const emptyScene = !scene.hasVisibleContent
     const hit = scene.pickBoneAt(world.x, world.y)
     const selection = useSelectionStore.getState()
     let host = (hit && scene.runtime ? scene.runtime.asset.bones[hit.boneIndex]?.name : '') ?? ''
@@ -351,6 +380,10 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     }
     const result: { slot: string; attachment: string } = created
     useSelectionStore.getState().selectAttachment(result.slot, result.attachment)
+    if (emptyScene) {
+      scene.autoFitDone = true
+      scene.focusOnContent(world.x, world.y, image.width / PPU, image.height / PPU)
+    }
     onStatus(`已创建插槽「${result.slot}」：图片「${image.name}」作为 display 挂到骨骼「${host}」下`)
   }
 

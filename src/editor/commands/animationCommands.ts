@@ -12,6 +12,7 @@ import type {
   AuthoringBoneAnim,
   AuthoringConstraintAnim,
   AuthoringDeformAnim,
+  AuthoringDrawOrderKeyframe,
   AuthoringSlotAnim
 } from '@core/model/authoring'
 import type { RGBA } from '@core/model/types'
@@ -126,6 +127,29 @@ export function removeBoneKeyframe(
 export function keySlotColor(anim: AuthoringAnimData, slot: string, time: number, color: RGBA): void {
   const track = ensureSlotAnim(anim, slot)
   upsertKeyframe(track.color, emptyColorKeyframe(time, color))
+}
+
+/**
+ * 打一帧**绘制顺序**关键帧：`order` 是完整的插槽名序列，**第 0 个最先画（最底层）**。
+ * 同一时刻只保留一帧（离散帧，重复打帧即覆盖），打完按时间排序。
+ */
+export function keyDrawOrder(anim: AuthoringAnimData, time: number, order: readonly string[]): void {
+  const frames = anim.drawOrder.filter((frame) => Math.abs(frame.time - time) > 1e-4)
+  frames.push({ time, order: [...order] })
+  frames.sort((left, right) => left.time - right.time)
+  anim.drawOrder = frames
+}
+
+/** 取当前时刻生效的绘制顺序帧（最后一个 time <= t 的帧）；没有则返回 null（用 setup 顺序） */
+export function drawOrderFrameAt(
+  anim: AuthoringAnimData,
+  time: number
+): AuthoringDrawOrderKeyframe | null {
+  let found: AuthoringDrawOrderKeyframe | null = null
+  for (const frame of anim.drawOrder) {
+    if (frame.time <= time + 1e-6) found = frame
+  }
+  return found
 }
 
 export function keySlotDisplay(

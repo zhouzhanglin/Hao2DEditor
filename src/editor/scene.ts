@@ -9,6 +9,7 @@ import {
   GIZMO_CENTER_RADIUS,
   GIZMO_RING_RADIUS,
   SHEAR_EDGE_TOLERANCE,
+  drawAttachmentGizmo,
   drawBoneGizmo,
   drawBoneOverlay,
   drawGhostBones,
@@ -18,10 +19,13 @@ import type { GizmoDrawMode } from '@render/overlays/boneOverlay'
 import { drawMeshOverlay } from '@render/overlays/meshOverlay'
 import {
   BONE_ORIGIN_RADIUS,
+  attachmentGizmoFrame,
   gizmoGeometry,
+  pickAttachmentAt,
   pickBone,
   pickBoneHandle,
   pickGizmo,
+  pickGizmoFrame,
   pickShearEdge,
   pickVertex
 } from '@render/picking'
@@ -61,6 +65,11 @@ export interface SceneViewState {
   showGizmo: boolean
   /** 正在拖拽新建骨骼时的预览（世界坐标的两端），松开即生成 */
   pendingBone: { x1: number; y1: number; x2: number; y2: number } | null
+  /**
+   * 选中的附件操作器（Pose 态）：中心 = 附件 position 的世界位置，
+   * 轴 = 附件自身旋转叠加宿主骨骼；null = 不显示（未选附件 / Animate 态 / 绘制工具）。
+   */
+  selectedAttachment: { boneIndex: number; position: { x: number; y: number }; rotation: number } | null
 }
 
 export interface EditorSceneOptions {
@@ -112,7 +121,8 @@ export class EditorScene {
     onionSkin: false,
     gizmo: 'move',
     showGizmo: true,
-    pendingBone: null
+    pendingBone: null,
+    selectedAttachment: null
   }
 
   constructor(options: EditorSceneOptions) {
@@ -304,6 +314,34 @@ export class EditorScene {
     this.viewport.render()
   }
 
+  /**
+   * 场景首次出现有效内容后，挂载时的自动适配只做一次（ViewportCanvas 的渲染循环检查此标志）。
+   * 拖图创建内容前把它置 true，避免刚建好的内容又被自动 fit 拉走视角。
+   */
+  autoFitDone = false
+
+  /** 场景当前是否有可见内容（拖图时判断要不要把视角对准落点） */
+  get hasVisibleContent(): boolean {
+    const result = this.meshResult
+    if (!result || result.vertexCount === 0) return false
+    const b = result.bounds
+    return b.maxX - b.minX > 1e-4 && b.maxY - b.minY > 1e-4
+  }
+
+  /**
+   * 把世界某点对准视口中心，并按内容尺寸选一个合适的缩放。
+   * 拖图到空白场景时用它：图片正好出现在松手位置、大小占视口约四成。
+   */
+  focusOnContent(worldX: number, worldY: number, contentW: number, contentH: number): void {
+    const fitZoom = Math.min(
+      (this.viewport.width * 0.5) / Math.max(1e-6, contentW),
+      (this.viewport.height * 0.5) / Math.max(1e-6, contentH)
+    )
+    this.viewport.focusOn(worldX, worldY, fitZoom * 0.75)
+    this.markDirty()
+    this.viewport.render()
+  }
+
   pickBoneAt(worldX: number, worldY: number): BoneHit | null {
     if (!this.bundle) return null
     return pickBone(this.bundle.skeleton, worldX, worldY, this.viewport.pixelsToWorld(8))
@@ -408,6 +446,48 @@ export class EditorScene {
   pickVertexAt(worldX: number, worldY: number): VertexHit | null {
     if (!this.bundle) return null
     return pickVertex(this.meshResult, worldX, worldY, this.viewport.pixelsToWorld(9))
+  }
+
+  /** 附件操作器拾取：旋转环 / 中心 / X-Y 轴（与骨骼 gizmo 同一套判定，尺寸相同） */
+  pickAttachmentGizmoAt(worldX: number, worldY: number): GizmoPart | null {
+    const state = this.viewState.selectedAttachment
+    if (!state || !this.bundle) return null
+    if (this.viewState.gizmo === 'shear') return null
+    const frame = attachmentGizmoFrame(
+      this.bundle.skeleton,
+      state.boneIndex,
+      state.position,
+      state.rotation,
+      this.viewport.pixelsToWorld(GIZMO_AXIS_LENGTH)
+    )
+    if (!frame) return null
+    if (this.viewState.gizmo === 'rotate') {
+      const distance = Math.hypot(worldX - frame.ox, worldY - frame.oy)
+      const ring = this.viewport.pixelsToWorld(GIZMO_RING_RADIUS)
+      if (Math.abs(distance - ring) <= this.viewport.pixelsToWorld(10)) return 'center'
+      if (distance <= this.viewport.pixelsToWorld(GIZMO_CENTER_RADIUS * 1.6)) return 'center'
+      return null
+    }
+    return pickGizmoFrame(
+      frame,
+      worldX,
+      worldY,
+      this.viewport.pixelsToWorld(GIZMO_CENTER_RADIUS),
+      this.viewport.pixelsToWorld(7)
+    )
+  }
+
+  /** 点选附件本体：mesh 里当前显示的附件，按包围盒命中（小图叠大图时优先小图） */
+  pickAttachmentAt(worldX: number, worldY: number): { slot: string; attachment: string } | null {
+    const bundle = this.bundle
+    if (!bundle) return null
+    const hit = pickAttachmentAt(this.meshResult, worldX, worldY, this.viewport.pixelsToWorld(6))
+    if (!hit) return null
+    const slot = bundle.asset.slots[hit.slotIndex]
+    const displayIndex = bundle.skeleton.slotDisplayIndex[hit.slotIndex]
+    const attachment = this.attachmentAt(hit.slotIndex, displayIndex)
+    if (!slot || !attachment) return null
+    return { slot: slot.name, attachment: attachment.name }
   }
 
   /** 顶点对应的附件（权重显示与拾取共用） */
@@ -609,14 +689,30 @@ export class EditorScene {
       this.boneFill.clear()
     }
 
-    // 小坐标轴 / 斜切包围盒画在最上层（骨骼、网格之后），保证手柄始终可点可看
+    // 小坐标轴 / 斜切包围盒 / 附件操作器画在最上层（骨骼、网格之后），保证手柄始终可点可看
     this.gizmoStroke.clear()
     this.gizmoFill.clear()
-    const showGizmo = showBones && bundle !== null && selectedIndex >= 0 && state.showGizmo
+    const attachmentGizmo = state.selectedAttachment
+    const showGizmo =
+      showBones && bundle !== null && state.showGizmo && (selectedIndex >= 0 || attachmentGizmo !== null)
     this.gizmoStroke.visible = showGizmo
     this.gizmoFill.visible = showGizmo
     if (showGizmo && bundle) {
-      if (state.gizmo === 'shear') {
+      if (attachmentGizmo) {
+        // 附件操作器：斜切不支持附件，其余模式照常（中心橙色区分骨骼）
+        if (state.gizmo !== 'shear') {
+          const frame = attachmentGizmoFrame(
+            bundle.skeleton,
+            attachmentGizmo.boneIndex,
+            attachmentGizmo.position,
+            attachmentGizmo.rotation,
+            unitPerPixel * GIZMO_AXIS_LENGTH
+          )
+          if (frame) {
+            drawAttachmentGizmo(this.gizmoStroke, this.gizmoFill, frame, state.gizmo, unitPerPixel)
+          }
+        }
+      } else if (state.gizmo === 'shear') {
         // 斜切不用小坐标轴，改成包围盒：鼠标在边上拖动即可变形
         const box = this.shearBoxAt()
         if (box) drawShearBox(this.gizmoStroke, this.gizmoFill, box.corners, unitPerPixel)

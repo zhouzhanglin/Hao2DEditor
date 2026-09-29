@@ -239,3 +239,20 @@ export function remapDisplayIndices(
 export function orderSlots(slots: readonly Slots[number][]): Slots[number][] {
   return [...slots].sort((left, right) => left.zOrder - right.zOrder)
 }
+
+/**
+ * 按 UI 列表顺序重排插槽 zOrder：`names[0]` = 最上层（最后绘制）。
+ * 只改 zOrder，不动 slots 数组本身。
+ */
+export function applySlotOrder(doc: EditorDocument, names: readonly string[]): void {
+  const total = doc.slots.length
+  names.forEach((name, index) => {
+    const slot = doc.slots.find((item) => item.name === name)
+    if (slot) slot.zOrder = total - 1 - index
+  })
+}
+
+/** setup 绘制顺序（slot 名，第 0 个最先画 = 最底层） */
+export function drawOrderOf(doc: EditorDocument): string[] {
+  return orderSlots(doc.slots).map((slot) => slot.name)
+}

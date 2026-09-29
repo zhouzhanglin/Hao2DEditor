@@ -1,7 +1,8 @@
 import { Graphics } from 'pixi.js'
 import type { Skeleton } from '@core/model/skeleton'
 import type { Constraint } from '@core/model/constraints'
-import { BONE_ORIGIN_RADIUS, gizmoGeometry } from '@render/picking'
+import { BONE_ORIGIN_RADIUS, attachmentGizmoFrame, gizmoGeometry } from '@render/picking'
+import type { GizmoGeometry } from '@render/picking'
 import { circlePolygon } from './shapes'
 
 export interface BoneOverlayOptions {
@@ -15,6 +16,8 @@ export interface BoneOverlayOptions {
   hollowBones?: ReadonlySet<string>
   /** 拖拽新建骨骼时的预览（世界坐标两点） */
   pendingBone?: { x1: number; y1: number; x2: number; y2: number } | null
+  /** 选中的附件操作器（Pose 态）：中心 = 附件 position，轴 = 附件旋转叠加宿主骨骼 */
+  attachmentGizmo?: { boneIndex: number; position: { x: number; y: number }; rotation: number } | null
 }
 
 const COLOR_BONE = 0xf97316
@@ -62,20 +65,36 @@ export function drawBoneGizmo(
   const w = unitsPerPixel
   const geometry = gizmoGeometry(skeleton, index, w * GIZMO_AXIS_LENGTH)
   if (!geometry) return
-  const { ox, oy, tx, ty, sx, sy } = geometry
+  drawGizmoFrame(stroke, fill, geometry, mode, w)
+}
+
+/**
+ * gizmo 通用绘制（骨骼与附件操作器共用）：中心圆 + 轴，按模式换外观。
+ * 骨骼用蓝色中心，附件用橙色中心（`centerColor`）区分。
+ */
+export function drawGizmoFrame(
+  stroke: Graphics,
+  fill: Graphics,
+  frame: GizmoGeometry,
+  mode: GizmoDrawMode,
+  unitsPerPixel: number,
+  centerColor = COLOR_AXIS_CENTER
+): void {
+  const w = unitsPerPixel
+  const { ox, oy, tx, ty, sx, sy } = frame
   const handle = w * GIZMO_HANDLE_SIZE
 
   stroke
     .poly(circlePolygon(ox, oy, w * GIZMO_CENTER_RADIUS))
-    .stroke({ width: w * 1.6, color: COLOR_AXIS_CENTER, alpha: 0.95 })
+    .stroke({ width: w * 1.6, color: centerColor, alpha: 0.95 })
   fill
     .poly(circlePolygon(ox, oy, w * GIZMO_CENTER_RADIUS * 0.6))
-    .fill({ color: COLOR_AXIS_CENTER, alpha: 0.9 })
+    .fill({ color: centerColor, alpha: 0.9 })
 
   if (mode === 'rotate') {
     const r = w * GIZMO_RING_RADIUS
     // 自己画多边形：Pixi 的 circle 会按世界半径退化成多边形（放大后尤其明显）
-    stroke.poly(circlePolygon(ox, oy, r)).stroke({ width: w * 2.4, color: COLOR_AXIS_CENTER, alpha: 0.85 })
+    stroke.poly(circlePolygon(ox, oy, r)).stroke({ width: w * 2.4, color: centerColor, alpha: 0.85 })
     // 四个刻度，强调「这是一个旋转环」
     for (const angle of [0, Math.PI / 2, Math.PI, (Math.PI * 3) / 2]) {
       const cx = ox + Math.cos(angle) * r
@@ -83,7 +102,7 @@ export function drawBoneGizmo(
       stroke
         .moveTo(ox + Math.cos(angle) * (r - w * 4), oy + Math.sin(angle) * (r - w * 4))
         .lineTo(ox + Math.cos(angle) * (r + w * 4), oy + Math.sin(angle) * (r + w * 4))
-        .stroke({ width: w * 1.4, color: COLOR_AXIS_CENTER, alpha: 0.7 })
+        .stroke({ width: w * 1.4, color: centerColor, alpha: 0.7 })
     }
     return
   }
@@ -113,6 +132,20 @@ export function drawBoneGizmo(
 
   drawAxis(tx, ty, COLOR_AXIS_X)
   drawAxis(sx, sy, COLOR_AXIS_Y)
+}
+
+/**
+ * 附件操作器：与骨骼 gizmo 同一套外观，中心用**橙色**区分（骨骼是蓝色）。
+ * 中心 = 附件 position 的世界位置，轴 = 附件自身旋转叠加骨骼朝向。
+ */
+export function drawAttachmentGizmo(
+  stroke: Graphics,
+  fill: Graphics,
+  frame: GizmoGeometry,
+  mode: GizmoDrawMode,
+  unitsPerPixel: number
+): void {
+  drawGizmoFrame(stroke, fill, frame, mode, unitsPerPixel, 0xfbbf24)
 }
 
 /**

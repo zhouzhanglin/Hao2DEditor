@@ -210,6 +210,18 @@ export class Viewport {
     this.applyCamera()
   }
 
+  /**
+   * 把世界某点移到视口中心，可选同时设置缩放。
+   * 与 fit() 的「原点居中」不同，这个用于内容不在原点附近时（如拖图落点）直接对准它。
+   */
+  focusOn(worldX: number, worldY: number, zoom?: number): void {
+    if (zoom !== undefined) this.zoomValue = clampZoom(zoom)
+    this.offsetX = -worldX * this.zoomValue
+    this.offsetY = worldY * this.zoomValue
+    this.applyCamera()
+    this.onZoomChange(this.zoomValue)
+  }
+
   get offset(): { x: number; y: number } {
     return { x: this.offsetX, y: this.offsetY }
   }

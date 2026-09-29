@@ -6,6 +6,7 @@ import Toolbar from './layout/Toolbar'
 import StatusBar from './panels/StatusBar'
 import InspectorPanel from './panels/InspectorPanel'
 import AssetPanel from './panels/AssetPanel'
+import SlotOrderPanel from './panels/SlotOrderPanel'
 import ToolOptionsPanel from './panels/ToolOptionsPanel'
 import TimelinePanel from './timeline/TimelinePanel'
 import HierarchyTree from './tree/HierarchyTree'
@@ -51,11 +52,17 @@ const ASSET_PANEL_MIN = 120
 const ASSET_PANEL_MAX = 520
 const ASSET_PANEL_KEY = 'hao2d:asset-panel-height'
 
-function loadAssetPanelHeight(): number {
-  if (typeof localStorage === 'undefined') return ASSET_PANEL_HEIGHT
-  const stored = Number(localStorage.getItem(ASSET_PANEL_KEY))
-  if (!Number.isFinite(stored) || stored <= 0) return ASSET_PANEL_HEIGHT
-  return Math.min(ASSET_PANEL_MAX, Math.max(ASSET_PANEL_MIN, stored))
+/** 「slot 层级」面板高度（显示 / 调整插槽绘制顺序，Animate 态写绘制顺序帧） */
+const SLOT_ORDER_HEIGHT = 170
+const SLOT_ORDER_MIN = 90
+const SLOT_ORDER_MAX = 420
+const SLOT_ORDER_KEY = 'hao2d:slot-order-height'
+
+function loadPanelHeight(key: string, fallback: number, min: number, max: number): number {
+  if (typeof localStorage === 'undefined') return fallback
+  const stored = Number(localStorage.getItem(key))
+  if (!Number.isFinite(stored) || stored <= 0) return fallback
+  return Math.min(max, Math.max(min, stored))
 }
 import { getPlatform } from '@editor/platform'
 import { setActiveScene, getActiveScene } from '@editor/activeScene'
@@ -98,7 +105,8 @@ export default function App() {
     texturesTotal: 0
   })
   const [dragging, setDragging] = useState(false)
-  const [assetHeight, setAssetHeight] = useState(loadAssetPanelHeight)
+  const [assetHeight, setAssetHeight] = useState(() => loadPanelHeight(ASSET_PANEL_KEY, ASSET_PANEL_HEIGHT, ASSET_PANEL_MIN, ASSET_PANEL_MAX))
+  const [slotOrderHeight, setSlotOrderHeight] = useState(() => loadPanelHeight(SLOT_ORDER_KEY, SLOT_ORDER_HEIGHT, SLOT_ORDER_MIN, SLOT_ORDER_MAX))
   const booted = useRef(false)
 
   const flash = useCallback((message: string) => {
@@ -106,7 +114,7 @@ export default function App() {
     window.setTimeout(() => setHint(undefined), 2600)
   }, [])
 
-  /** 拖拽左侧分隔条：向上拖（delta < 0）把「资源与皮肤」拉高，并记住高度 */
+  /** 拖拽左侧分隔条：向上拖（delta < 0）把面板拉高，并记住高度 */
   const resizeAssetPanel = useCallback((delta: number) => {
     setAssetHeight((previous) => {
       const next = Math.min(ASSET_PANEL_MAX, Math.max(ASSET_PANEL_MIN, previous - delta))
@@ -115,9 +123,20 @@ export default function App() {
     })
   }, [])
 
+  const resizeSlotOrderPanel = useCallback((delta: number) => {
+    setSlotOrderHeight((previous) => {
+      const next = Math.min(SLOT_ORDER_MAX, Math.max(SLOT_ORDER_MIN, previous - delta))
+      if (typeof localStorage !== 'undefined') localStorage.setItem(SLOT_ORDER_KEY, String(Math.round(next)))
+      return next
+    })
+  }, [])
+
   // 「重置布局」把面板高度一并复位，和其它分栏保持一致
   useEffect(() => {
-    const reset = (): void => setAssetHeight(ASSET_PANEL_HEIGHT)
+    const reset = (): void => {
+      setAssetHeight(ASSET_PANEL_HEIGHT)
+      setSlotOrderHeight(SLOT_ORDER_HEIGHT)
+    }
     window.addEventListener('hao2d:reset-layout', reset)
     return () => window.removeEventListener('hao2d:reset-layout', reset)
   }, [])
@@ -447,6 +466,20 @@ export default function App() {
               actions={<span className="text-3xs text-content-lo" title="单棵树：插槽挂在宿主骨骼下，约束挂在驱动骨骼下">图标区分类型</span>}
             >
               <HierarchyTree onStatus={flash} />
+            </PanelShell>
+            {/* 分隔条：向上拖把「slot 层级」拉高（高度会记住） */}
+            <Splitter direction="vertical" onResize={resizeSlotOrderPanel} />
+            <PanelShell
+              title="slot 层级"
+              grow={false}
+              style={{ height: slotOrderHeight }}
+              actions={
+                <span className="text-3xs text-content-lo">
+                  {mode === 'animate' ? '调整会写入绘制顺序帧' : '绘制顺序（setup）'}
+                </span>
+              }
+            >
+              <SlotOrderPanel onStatus={flash} />
             </PanelShell>
             {/* 分隔条：向上拖把「资源与皮肤」拉长（高度会记住） */}
             <Splitter direction="vertical" onResize={resizeAssetPanel} />

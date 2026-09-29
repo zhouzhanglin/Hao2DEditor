@@ -1,7 +1,8 @@
 import type { Vec2 } from '@core/math/matrix'
 import { invert, mulPoint, mulVector } from '@core/math/matrix'
-import { gizmoGeometry } from '@render/picking'
+import { attachmentGizmoFrame, gizmoGeometry } from '@render/picking'
 import type { GizmoPart, ShearEdge } from '@render/picking'
+import { GIZMO_AXIS_LENGTH } from '@render/overlays/boneOverlay'
 import { RAD2DEG } from '@core/math/utils'
 import type { EditorDocument } from '@core/model/authoring'
 import { createAuthoringBone } from '@core/model/authoring'
@@ -19,6 +20,7 @@ import {
   insertMeshVertex,
   meshVertexSamples,
   paintWeights,
+  patchAttachment,
   uniqueName
 } from '../commands/authoringCommands'
 import type { BrushMode, VertexSample } from '../commands/authoringCommands'
@@ -39,7 +41,7 @@ export interface ToolHost {
   status: (text: string) => void
 }
 
-type DragKind = 'bone-translate' | 'bone-create' | 'gizmo' | 'shear-box' | 'vertex' | 'paint' | 'none'
+type DragKind = 'bone-translate' | 'bone-create' | 'gizmo' | 'shear-box' | 'vertex' | 'paint' | 'attachment' | 'none'
 
 interface DragSession {
   kind: DragKind
@@ -82,6 +84,13 @@ interface DragSession {
   createStart: Vec2
   createEnd: Vec2
   createParent: string
+  /** 附件操作器：宿主骨骼索引 + 按下时的 setup 值 + 被拖轴的局部 / 世界方向 */
+  attBoneIndex: number
+  attStart: { position: Vec2; rotation: number; scale: Vec2 }
+  attAxisLocal: Vec2
+  attAxisWorld: Vec2
+  attAxisScale: number
+  attStartAngle: number
 }
 
 const IDLE: DragSession = {
@@ -114,7 +123,13 @@ const IDLE: DragSession = {
   moved: false,
   createStart: { x: 0, y: 0 },
   createEnd: { x: 0, y: 0 },
-  createParent: ''
+  createParent: '',
+  attBoneIndex: -1,
+  attStart: { position: { x: 0, y: 0 }, rotation: 0, scale: { x: 1, y: 1 } },
+  attAxisLocal: { x: 1, y: 0 },
+  attAxisWorld: { x: 1, y: 0 },
+  attAxisScale: 1,
+  attStartAngle: 0
 }
 
 let drag: DragSession = { ...IDLE }
@@ -219,6 +234,32 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     const selectedIndex = selectedName ? (scene.runtime.boneIndex[selectedName] ?? -1) : -1
     if (part && selectedIndex >= 0) {
       if (!beginGizmoDrag(host, selectedIndex, selectedName, part, info.world)) return true
+      return true
+    }
+  }
+
+  // 附件操作器 / 点选附件：选中附件后，小坐标轴画在附件上（中心橙色区分骨骼）
+  if (tools.tool === 'select') {
+    const sel = host.selection
+    if (sel.kind === 'attachment' && sel.slot && sel.attachment) {
+      const part = scene.pickAttachmentGizmoAt(info.world.x, info.world.y)
+      if (part) {
+        beginAttachmentGizmoDrag(host, sel.slot, sel.attachment, part, host.tools.gizmo, info.world)
+        return true
+      }
+    }
+    const hit = scene.pickAttachmentAt(info.world.x, info.world.y)
+    if (hit) {
+      const isNew = hit.slot !== sel.slot || hit.attachment !== sel.attachment
+      if (isNew) useSelectionStore.getState().selectAttachment(hit.slot, hit.attachment)
+      if (host.mode === 'pose') {
+        beginAttachmentGizmoDrag(host, hit.slot, hit.attachment, 'center', 'move', info.world)
+        if (isNew) host.status(`已选中附件「${hit.attachment}」（${hit.slot}），拖动即可移动`)
+        return true
+      }
+      if (isNew) {
+        host.status(`已选中附件「${hit.attachment}」（${hit.slot}）：位置属于绑定数据，切到 Pose 态才能拖动`)
+      }
       return true
     }
   }
@@ -531,6 +572,134 @@ function dragGizmo(host: ToolHost, world: Vec2): void {
   scene.refresh()
 }
 
+/**
+ * 按下附件操作器：记录按下时的 setup 值（position / rotation / scale）与被拖轴，
+ * 之后每次移动都以**按下时的值**为基准重算（与骨骼 gizmo 一致，避免增量累积误差）。
+ */
+function beginAttachmentGizmoDrag(
+  host: ToolHost,
+  slotName: string,
+  attachmentName: string,
+  part: GizmoPart,
+  mode: GizmoMode,
+  world: Vec2
+): boolean {
+  const scene = host.scene
+  const bundle = scene.runtime
+  if (!bundle) return false
+  const doc = useProjectStore.getState().document
+  const slot = doc.slots.find((item) => item.name === slotName)
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!slot || !attachment) return false
+  const boneIndex = bundle.boneIndex[slot.bone] ?? -1
+  if (boneIndex < 0) return false
+
+  const frame = attachmentGizmoFrame(
+    bundle.skeleton,
+    boneIndex,
+    attachment.position,
+    attachment.rotation,
+    scene.viewport.pixelsToWorld(GIZMO_AXIS_LENGTH)
+  )
+  if (!frame) return false
+
+  const radians = (attachment.rotation * Math.PI) / 180
+  // 被拖轴在**骨骼局部空间**的单位方向（position 就存在这个空间里）
+  const axisLocal =
+    part === 'y'
+      ? { x: -Math.sin(radians), y: Math.cos(radians) }
+      : { x: Math.cos(radians), y: Math.sin(radians) }
+  // 同一轴的世界方向 + 该方向上的综合缩放（把世界距离换算回局部距离）
+  const axisWorld = part === 'y' ? { x: frame.px, y: frame.py } : { x: frame.dx, y: frame.dy }
+  const axisScale = part === 'y' ? frame.axisScaleB : frame.axisScaleA
+
+  drag = {
+    ...IDLE,
+    kind: 'attachment',
+    slot: slotName,
+    attachment: attachmentName,
+    origin: { x: frame.ox, y: frame.oy },
+    startWorld: { ...world },
+    gizmoMode: mode,
+    gizmoPart: part,
+    attBoneIndex: boneIndex,
+    attStart: {
+      position: { ...attachment.position },
+      rotation: attachment.rotation,
+      scale: { ...attachment.scale }
+    },
+    attAxisLocal: axisLocal,
+    attAxisWorld: axisWorld,
+    attAxisScale: Math.max(1e-6, axisScale),
+    attStartAngle: (Math.atan2(world.y - frame.oy, world.x - frame.ox) * 180) / Math.PI,
+    startProject: (world.x - frame.ox) * axisWorld.x + (world.y - frame.oy) * axisWorld.y,
+    startDistance: Math.hypot(world.x - frame.ox, world.y - frame.oy)
+  }
+  storeHandler.begin(mode === 'rotate' ? '旋转附件' : mode === 'scale' ? '缩放附件' : '移动附件')
+  return true
+}
+
+/** 附件操作器拖拽：把指针变化写回附件的 setup 值（position / rotation / scale，相对宿主骨骼） */
+function dragAttachmentGizmo(host: ToolHost, world: Vec2): void {
+  const scene = host.scene
+  const bundle = scene.runtime
+  if (!bundle) return
+  const rx = world.x - drag.origin.x
+  const ry = world.y - drag.origin.y
+  const mode = drag.gizmoMode
+  const part = drag.gizmoPart
+  const start = drag.attStart
+
+  let position = start.position
+  let rotation = start.rotation
+  let scale = start.scale
+
+  if (mode === 'rotate') {
+    const angle = (Math.atan2(ry, rx) * 180) / Math.PI
+    rotation = start.rotation + (angle - drag.attStartAngle)
+  } else if (mode === 'scale') {
+    scale = { x: start.scale.x, y: start.scale.y }
+    const project = rx * drag.attAxisWorld.x + ry * drag.attAxisWorld.y
+    if (part === 'x') {
+      scale.x = start.scale.x * axisFactor(project, drag.startProject)
+    } else if (part === 'y') {
+      scale.y = start.scale.y * axisFactor(project, drag.startProject)
+    } else {
+      const factor = axisFactor(Math.hypot(rx, ry), drag.startDistance)
+      scale.x = start.scale.x * factor
+      scale.y = start.scale.y * factor
+    }
+  } else {
+    // 位置存在**宿主骨骼局部空间**里；拖中心 = 自由移动，拖轴 = 只沿该轴
+    const boneWorld = bundle.skeleton.world.slice(drag.attBoneIndex * 16, drag.attBoneIndex * 16 + 16)
+    if (part === 'center') {
+      const delta = mulVector(invert(boneWorld), {
+        x: world.x - drag.startWorld.x,
+        y: world.y - drag.startWorld.y
+      })
+      position = { x: start.position.x + delta.x, y: start.position.y + delta.y }
+    } else {
+      const project = rx * drag.attAxisWorld.x + ry * drag.attAxisWorld.y
+      const along = (project - drag.startProject) / drag.attAxisScale
+      position = {
+        x: start.position.x + drag.attAxisLocal.x * along,
+        y: start.position.y + drag.attAxisLocal.y * along
+      }
+    }
+  }
+
+  useProjectStore.getState().updateSilent((draft) => {
+    patchAttachment(draft, drag.slot, drag.attachment, (attachment) => {
+      attachment.position = position
+      attachment.rotation = rotation
+      attachment.scale = scale
+    })
+  })
+  const after = useProjectStore.getState()
+  scene.setDocument(after.document, host.selection.skin)
+  scene.refresh()
+}
+
 export function toolPointerMove(host: ToolHost, info: PointerInfo): void {
   if (drag.kind === 'none') return
   drag.moved = true
@@ -557,6 +726,11 @@ export function toolPointerMove(host: ToolHost, info: PointerInfo): void {
 
   if (drag.kind === 'gizmo') {
     dragGizmo(host, info.world)
+    return
+  }
+
+  if (drag.kind === 'attachment') {
+    dragAttachmentGizmo(host, info.world)
     return
   }
 

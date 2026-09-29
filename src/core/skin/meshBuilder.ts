@@ -330,7 +330,9 @@ export class MeshBuilder {
     positions[i * 2] = x
     positions[i * 2 + 1] = y
     uvs[i * 2] = u
-    uvs[i * 2 + 1] = v
+    // 数据约定 v=0 是图像**底部**（左下原点，与 Spine / DragonBones 导入一致），
+    // 而 Pixi 纹理上传不翻转（v=0 是图像顶部），采样前翻回来
+    uvs[i * 2 + 1] = 1 - v
     colors[i * 4] = color.r
     colors[i * 4 + 1] = color.g
     colors[i * 4 + 2] = color.b

@@ -32,6 +32,20 @@ export interface GizmoGeometry {
   sy: number
 }
 
+/** 用显式的中心与轴向组装 gizmo 几何（骨骼与附件操作器共用） */
+export function gizmoFrameAt(
+  ox: number,
+  oy: number,
+  dx: number,
+  dy: number,
+  px: number,
+  py: number,
+  axisLength: number
+): GizmoGeometry {
+  const len = Math.max(1e-6, axisLength)
+  return { ox, oy, dx, dy, px, py, len, tx: ox + dx * len, ty: oy + dy * len, sx: ox + px * len, sy: oy + py * len }
+}
+
 export function gizmoGeometry(skeleton: Skeleton, index: number, axisLength: number): GizmoGeometry | null {
   if (index < 0 || index >= skeleton.boneCount) return null
   const o = index * 16
@@ -48,8 +62,62 @@ export function gizmoGeometry(skeleton: Skeleton, index: number, axisLength: num
   const dy = normA > 1e-9 ? ay / normA : 0
   const px = normB > 1e-9 ? bx / normB : -dy
   const py = normB > 1e-9 ? by / normB : dx
-  const len = Math.max(1e-6, axisLength)
-  return { ox, oy, dx, dy, px, py, len, tx: ox + dx * len, ty: oy + dy * len, sx: ox + px * len, sy: oy + py * len }
+  return gizmoFrameAt(ox, oy, dx, dy, px, py, axisLength)
+}
+
+/** 附件操作器几何：gizmo 几何 + 两个轴向的「世界长度」（骨骼×附件缩放，拖动换算用） */
+export interface AttachmentGizmoGeometry extends GizmoGeometry {
+  axisScaleA: number
+  axisScaleB: number
+}
+
+/**
+ * 附件操作器的几何：中心 = 附件 position 的世界位置，
+ * 轴向 = 附件自身旋转叠加在宿主骨骼的世界基向量上。
+ * 调用方按 zoom 把屏幕尺寸换算成 `axisLength`（世界单位）。
+ */
+export function attachmentGizmoFrame(
+  skeleton: Skeleton,
+  boneIndex: number,
+  position: { x: number; y: number },
+  rotation: number,
+  axisLength: number
+): AttachmentGizmoGeometry | null {
+  if (boneIndex < 0 || boneIndex >= skeleton.boneCount) return null
+  const o = boneIndex * 16
+  const radians = (rotation * Math.PI) / 180
+  const cos = Math.cos(radians)
+  const sin = Math.sin(radians)
+  // 附件原点：骨骼世界矩阵 · position
+  const ox = skeleton.world[o] * position.x + skeleton.world[o + 4] * position.y + skeleton.world[o + 12]
+  const oy = skeleton.world[o + 1] * position.x + skeleton.world[o + 5] * position.y + skeleton.world[o + 13]
+  // 附件局部轴（骨骼空间里旋转 rotation 后的 X/Y）变换到世界
+  const ax = skeleton.world[o] * cos + skeleton.world[o + 4] * sin
+  const ay = skeleton.world[o + 1] * cos + skeleton.world[o + 5] * sin
+  const bx = -skeleton.world[o] * sin + skeleton.world[o + 4] * cos
+  const by = -skeleton.world[o + 1] * sin + skeleton.world[o + 5] * cos
+  const normA = Math.hypot(ax, ay)
+  const normB = Math.hypot(bx, by)
+  const dx = normA > 1e-9 ? ax / normA : 1
+  const dy = normA > 1e-9 ? ay / normA : 0
+  const px = normB > 1e-9 ? bx / normB : -dy
+  const py = normB > 1e-9 ? by / normB : dx
+  const frame = gizmoFrameAt(ox, oy, dx, dy, px, py, axisLength)
+  return { ...frame, axisScaleA: normA, axisScaleB: normB }
+}
+
+/** 通用 gizmo 拾取（骨骼与附件操作器共用） */
+export function pickGizmoFrame(
+  frame: GizmoGeometry,
+  x: number,
+  y: number,
+  centerRadius: number,
+  axisTolerance: number
+): GizmoPart | null {
+  if (Math.hypot(x - frame.ox, y - frame.oy) <= centerRadius) return 'center'
+  if (distanceToSegment(x, y, frame.ox, frame.oy, frame.tx, frame.ty) <= axisTolerance) return 'x'
+  if (distanceToSegment(x, y, frame.ox, frame.oy, frame.sx, frame.sy) <= axisTolerance) return 'y'
+  return null
 }
 
 export type GizmoPart = 'center' | 'x' | 'y'
@@ -226,6 +294,49 @@ export function attachmentOfVertex(
   const slotIndex = result.sourceSlot[vertexIndex]
   if (slotIndex < 0 || slotIndex >= skeleton.slotCount) return null
   return resolve(slotIndex, skeleton.slotDisplayIndex[slotIndex])
+}
+
+export interface AttachmentHit {
+  slotIndex: number
+  /** 命中的包围盒面积（越小 = 越「贴脸」，叠放时优先选它） */
+  area: number
+}
+
+/**
+ * 点选附件：用 mesh 的世界顶点按插槽分组做包围盒测试（含 `tolerance` 外扩），
+ * 命中多个时取包围盒**面积最小**的 —— 小图叠在大图上时优先选到小图。
+ * mesh 只包含「当前显示」的附件，所以不可见的 display 不会被点到。
+ */
+export function pickAttachmentAt(
+  result: MeshBuildResult | null,
+  x: number,
+  y: number,
+  tolerance: number
+): AttachmentHit | null {
+  if (!result || result.vertexCount === 0) return null
+  const boxes = new Map<number, { minX: number; minY: number; maxX: number; maxY: number }>()
+  for (let i = 0; i < result.vertexCount; i++) {
+    const slot = result.sourceSlot[i]
+    const px = result.positions[i * 2]
+    const py = result.positions[i * 2 + 1]
+    const box = boxes.get(slot)
+    if (box) {
+      if (px < box.minX) box.minX = px
+      if (py < box.minY) box.minY = py
+      if (px > box.maxX) box.maxX = px
+      if (py > box.maxY) box.maxY = py
+    } else {
+      boxes.set(slot, { minX: px, minY: py, maxX: px, maxY: py })
+    }
+  }
+  let best: AttachmentHit | null = null
+  for (const [slotIndex, box] of boxes) {
+    if (x < box.minX - tolerance || x > box.maxX + tolerance) continue
+    if (y < box.minY - tolerance || y > box.maxY + tolerance) continue
+    const area = Math.max(0, box.maxX - box.minX) * Math.max(0, box.maxY - box.minY)
+    if (!best || area < best.area) best = { slotIndex, area }
+  }
+  return best
 }
 
 export function distanceToSegment(

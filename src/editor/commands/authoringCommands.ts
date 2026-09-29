@@ -407,6 +407,24 @@ function vertexBounds(vertices: readonly { x: number; y: number }[]): { x: numbe
   return { x: maxX - minX, y: maxY - minY }
 }
 
+/**
+ * 对（所有皮肤里的）同名附件做就地修改：位置 / 旋转 / 缩放 / 颜色等编辑的统一入口。
+ * draft 必须是 immer 的可变文档。
+ */
+export function patchAttachment(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  patch: (attachment: AuthoringAttachment) => void
+): void {
+  for (const skin of doc.skins) {
+    const skinSlot = findSkinSlot(skin, slotName)
+    if (!skinSlot) continue
+    const attachment = skinSlot.attachments.find((item) => item.name === attachmentName)
+    if (attachment) patch(attachment)
+  }
+}
+
 export function deleteAttachment(doc: EditorDocument, slotName: string, attachmentName: string): void {
   for (const skin of doc.skins) {
     const skinSlot = findSkinSlot(skin, slotName)

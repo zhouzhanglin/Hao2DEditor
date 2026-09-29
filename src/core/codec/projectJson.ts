@@ -190,7 +190,17 @@ function normalizeAttachment(raw: Record<string, unknown>): AuthoringAttachment 
     hull: Math.round(num(raw.hull)),
     ffdInBoneSpace: bool(raw.ffdInBoneSpace),
     linkedMeshSkin: str(raw.linkedMeshSkin),
-    linkedMeshAttachment: str(raw.linkedMeshAttachment)
+    linkedMeshAttachment: str(raw.linkedMeshAttachment),
+    // 由 Region 转来的网格会带一份源 Region 快照，读回来才能「还原为 Region」
+    regionSnapshot: normalizeRegionSnapshot(raw.regionSnapshot)
+  }
+}
+
+function normalizeRegionSnapshot(raw: unknown): { size: { x: number; y: number }; uvs: number[] } | undefined {
+  if (!isRecord(raw)) return undefined
+  return {
+    size: vec2(raw.size, 100, 100),
+    uvs: arr(raw.uvs).map((value) => num(value))
   }
 }
 

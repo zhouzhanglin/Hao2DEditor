@@ -91,6 +91,11 @@ export interface AuthoringAttachment {
   ffdInBoneSpace: boolean
   linkedMeshSkin: string
   linkedMeshAttachment: string
+  /**
+   * 由 Region 转来的 Mesh 会保留源 Region 的显示信息，
+   * 「还原为 Region」靠它恢复原尺寸与原 UV；没有快照（如导入的网格）只能按顶点包围盒近似。
+   */
+  regionSnapshot?: { size: Vec2; uvs: number[] }
 }
 
 export interface AuthoringSkinSlot {

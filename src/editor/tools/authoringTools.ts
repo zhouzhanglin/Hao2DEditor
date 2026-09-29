@@ -4,6 +4,7 @@ import { gizmoGeometry } from '@render/picking'
 import type { GizmoPart, ShearEdge } from '@render/picking'
 import { RAD2DEG } from '@core/math/utils'
 import type { EditorDocument } from '@core/model/authoring'
+import { createAuthoringBone } from '@core/model/authoring'
 import type { EditorScene } from '../scene'
 import type { Selection } from '../store/selectionStore'
 import type { ToolState } from '../store/toolStore'
@@ -15,8 +16,10 @@ import { keyBoneChannel, keyDeform } from '../commands/animationCommands'
 import {
   autoWeights,
   findAttachment,
+  insertMeshVertex,
   meshVertexSamples,
-  paintWeights
+  paintWeights,
+  uniqueName
 } from '../commands/authoringCommands'
 import type { BrushMode, VertexSample } from '../commands/authoringCommands'
 
@@ -36,7 +39,7 @@ export interface ToolHost {
   status: (text: string) => void
 }
 
-type DragKind = 'bone-translate' | 'gizmo' | 'shear-box' | 'vertex' | 'paint' | 'none'
+type DragKind = 'bone-translate' | 'bone-create' | 'gizmo' | 'shear-box' | 'vertex' | 'paint' | 'none'
 
 interface DragSession {
   kind: DragKind
@@ -75,6 +78,10 @@ interface DragSession {
   totalDelta: Vec2
   paintMode: BrushMode
   moved: boolean
+  /** 新建骨骼：起点（已吸附）、当前终点与父骨骼名，松开时按起点→终点生成 */
+  createStart: Vec2
+  createEnd: Vec2
+  createParent: string
 }
 
 const IDLE: DragSession = {
@@ -104,7 +111,10 @@ const IDLE: DragSession = {
   startWorld: { x: 0, y: 0 },
   totalDelta: { x: 0, y: 0 },
   paintMode: 'replace',
-  moved: false
+  moved: false,
+  createStart: { x: 0, y: 0 },
+  createEnd: { x: 0, y: 0 },
+  createParent: ''
 }
 
 let drag: DragSession = { ...IDLE }
@@ -131,6 +141,33 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     drag = { ...IDLE, kind: 'paint', bone, paintMode: tools.brush.mode }
     storeHandler.begin('权重刷')
     paintAt(host, info.world)
+    return true
+  }
+
+  // 绑骨骼工具：在视口里拖拽「画」骨骼（连续绑定）。
+  // 起点落在已有骨骼上就吸附到它的轴线并以它为父；落在空白处则接在当前选中骨骼下面，
+  // 于是拖完一根接着拖下一根，自然就接成一条骨骼链。
+  if (tools.tool === 'bone') {
+    if (host.mode !== 'pose') {
+      host.status('骨骼属于绑定数据：切到 Pose 状态再画')
+      return true
+    }
+    const parent = resolveCreateParent(host, info.world)
+    const start = snapToBoneAxis(host, info.world)
+    drag = {
+      ...IDLE,
+      kind: 'bone-create',
+      createParent: parent,
+      createStart: start,
+      createEnd: start
+    }
+    scene.setViewState({ pendingBone: { x1: start.x, y1: start.y, x2: start.x, y2: start.y } })
+    storeHandler.begin('新建骨骼')
+    host.status(
+      parent
+        ? `从「${parent}」接着画：拖动决定长度与方向，松开生成（可以一根接一根拖成骨骼链）`
+        : '拖动决定长度与方向，松开生成骨骼'
+    )
     return true
   }
 
@@ -162,7 +199,8 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   }
 
   // 斜切模式：包围盒优先。鼠标落在包围盒的边上拖动 → 沿该方向掰轴
-  if ((tools.tool === 'select' || tools.tool === 'bone') && tools.gizmo === 'shear') {
+  // （bone 工具已经在上面按「画骨骼」处理并 return，走到这里的只剩选择工具）
+  if (tools.tool === 'select' && tools.gizmo === 'shear') {
     const edge = scene.pickShearEdgeAt(info.world.x, info.world.y)
     const selectedName = scene.state.selectedBone
     if (edge && selectedName && !boneLocked(selectedName)) {
@@ -175,7 +213,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   }
 
   // 小坐标轴优先：它是选中骨骼的操作器，点中就必须由它接管
-  if (tools.tool === 'select' || tools.tool === 'bone') {
+  if (tools.tool === 'select') {
     const part = scene.pickGizmoAt(info.world.x, info.world.y)
     const selectedName = scene.state.selectedBone
     const selectedIndex = selectedName ? (scene.runtime.boneIndex[selectedName] ?? -1) : -1
@@ -502,6 +540,16 @@ export function toolPointerMove(host: ToolHost, info: PointerInfo): void {
     return
   }
 
+  if (drag.kind === 'bone-create') {
+    const end = snapToBoneAxis(host, info.world)
+    drag.createEnd = end
+    host.scene.setViewState({
+      pendingBone: { x1: drag.createStart.x, y1: drag.createStart.y, x2: end.x, y2: end.y }
+    })
+    host.scene.markDirty()
+    return
+  }
+
   if (drag.kind === 'vertex') {
     dragVertex(host, info.world)
     return
@@ -538,6 +586,16 @@ export function toolPointerMove(host: ToolHost, info: PointerInfo): void {
 }
 
 export function toolPointerUp(host: ToolHost): void {
+  // 画骨骼：松开即生成（长度 / 角度按拖拽的两点算），并把新骨骼选中，方便接着拖下一根
+  if (drag.kind === 'bone-create') {
+    const session = drag
+    drag = { ...IDLE }
+    host.scene.setViewState({ pendingBone: null })
+    storeHandler.end()
+    createBoneFromDrag(host, session.createStart, session.createEnd, session.createParent)
+    return
+  }
+
   if (drag.kind !== 'none') {
     storeHandler.end()
     if (drag.moved && drag.kind !== 'paint') {
@@ -547,6 +605,89 @@ export function toolPointerUp(host: ToolHost): void {
     }
   }
   drag = { ...IDLE }
+}
+
+/**
+ * 起点落在骨骼上就吸附到它的轴线（把点投影到骨骼线段并夹在两端之间），
+ * 这样从某根骨骼身上拉出来的新骨骼一定和它连在一起，而不是浮在旁边的空中。
+ */
+function snapToBoneAxis(host: ToolHost, world: Vec2): Vec2 {
+  const bundle = host.scene.runtime
+  if (!bundle) return { ...world }
+  const hit = host.scene.pickBoneAt(world.x, world.y)
+  if (!hit) return { ...world }
+  const offset = hit.boneIndex * 16
+  const skeleton = bundle.skeleton
+  const ox = skeleton.world[offset + 12]
+  const oy = skeleton.world[offset + 13]
+  const ax = skeleton.world[offset]
+  const ay = skeleton.world[offset + 1]
+  const length2 = ax * ax + ay * ay
+  if (length2 < 1e-9) return { ...world }
+  const t = ((world.x - ox) * ax + (world.y - oy) * ay) / length2
+  const clamped = Math.max(0, Math.min(1, t))
+  return { x: ox + ax * clamped, y: oy + ay * clamped }
+}
+
+/** 新骨骼的父级：起点命中的骨骼 > 当前选中骨骼 > 根骨骼 */
+function resolveCreateParent(host: ToolHost, world: Vec2): string {
+  const bundle = host.scene.runtime
+  const hit = host.scene.pickBoneAt(world.x, world.y)
+  if (hit && bundle) {
+    const name = bundle.asset.bones[hit.boneIndex]?.name ?? ''
+    if (name) return name
+  }
+  return host.selection.kind === 'bone' ? host.selection.bone : ''
+}
+
+/**
+ * 按拖拽的两点生成骨骼：起点转换成父骨骼局部坐标、长度取两点距离、
+ * 角度取连线方向再扣掉父骨骼的世界旋转（对应 inheritRotation / inheritScale 的语义）。
+ */
+function createBoneFromDrag(host: ToolHost, start: Vec2, end: Vec2, parent: string): void {
+  const scene = host.scene
+  const bundle = scene.runtime
+  if (!bundle) return
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  const distance = Math.hypot(dx, dy)
+  if (distance < 1e-3) {
+    host.status('拖动距离太短，未生成骨骼')
+    return
+  }
+
+  const parentIndex = parent ? bundle.boneIndex[parent] ?? -1 : -1
+  const parentRotation = parentIndex >= 0 ? bundle.skeleton.worldRot[parentIndex] : 0
+  const parentScale = parentIndex >= 0
+    ? Math.hypot(bundle.skeleton.world[parentIndex * 16], bundle.skeleton.world[parentIndex * 16 + 1])
+    : 1
+  const localStart = parent
+    ? scene.worldToBoneLocal(parent, start.x, start.y) ?? { x: start.x, y: start.y }
+    : { x: start.x, y: start.y }
+  const worldAngle = (Math.atan2(dy, dx) * 180) / Math.PI
+  const length = Math.max(0.02, distance / (parentScale > 1e-6 ? parentScale : 1))
+
+  let created = ''
+  useProjectStore.getState().update('新建骨骼', (draft) => {
+    created = uniqueName(draft.bones.map((item) => item.name), 'bone')
+    draft.bones.push(
+      createAuthoringBone({
+        name: created,
+        parent,
+        localPosition: localStart,
+        rotation: worldAngle - parentRotation,
+        length
+      })
+    )
+  })
+  if (!created) return
+
+  useSelectionStore.getState().selectBone(created)
+  scene.setDocument(useProjectStore.getState().document, host.selection.skin)
+  scene.refresh()
+  host.status(
+    `已新建骨骼「${created}」${parent ? `，挂在「${parent}」下` : '（根骨骼）'} · 长度 ${length.toFixed(2)}`
+  )
 }
 
 /** 自动权重（工具选项面板按钮调用）：需要先选中骨骼与附件 */

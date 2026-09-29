@@ -23,9 +23,26 @@ import { createIkConstraint, createPathConstraint, createTransformConstraint } f
 import type { AuthoringBone, AuthoringConstraint, EditorDocument } from '@core/model/authoring'
 import { createAuthoringBone, createAuthoringSlot } from '@core/model/authoring'
 import { addImageDisplay, createRegionFromImage, deleteAttachment } from '@editor/commands/authoringCommands'
+import {
+  boneSlotAnchor,
+  moveBone,
+  moveDisplay,
+  moveSlot,
+  validateBoneMove,
+  validateDisplayMove,
+  validateSlotMove
+} from '@editor/commands/hierarchyCommands'
+import type { MoveAnchor, MoveResult } from '@editor/commands/hierarchyCommands'
 import ContextMenu from '@ui/widgets/ContextMenu'
 import type { ContextMenuItem } from '@ui/widgets/ContextMenu'
-import { hasImageDrag, readImageDrag } from '@ui/widgets/dragDrop'
+import {
+  hasImageDrag,
+  hasTreeDrag,
+  readImageDrag,
+  readTreeDrag,
+  setTreeDragData
+} from '@ui/widgets/dragDrop'
+import type { TreeDragPayload, TreeDropPosition } from '@ui/widgets/dragDrop'
 
 /** 右键菜单的目标：root = 空白处 */
 interface MenuTarget {
@@ -52,6 +69,19 @@ interface TreeRowProps {
   onDropImage?: (imageName: string) => void
   /** 该行归属的插槽名：既用于兜底判定「拖到插槽下面」，也让 display 行归到宿主插槽 */
   dataSlot?: string
+  /** 树内拖动：该行本身可拖时给出负载（骨骼 / 插槽 / display） */
+  dragPayload?: TreeDragPayload
+  /** 接收树内拖动的节点；position 区分「放进这一行」与「排到上/下沿」 */
+  onDropNode?: (payload: TreeDragPayload, position: TreeDropPosition) => void
+}
+
+/** 指针落在行的哪一段：上沿 / 中间（放进这一层）/ 下沿 */
+function dropPositionOf(event: React.DragEvent<HTMLDivElement>): TreeDropPosition {
+  const rect = event.currentTarget.getBoundingClientRect()
+  const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5
+  if (ratio < 0.28) return 'above'
+  if (ratio > 0.72) return 'below'
+  return 'inside'
 }
 
 function TreeRow({
@@ -68,42 +98,85 @@ function TreeRow({
   onDelete,
   onContextMenu,
   onDropImage,
-  dataSlot
+  dataSlot,
+  dragPayload,
+  onDropNode
 }: TreeRowProps) {
   const [dropActive, setDropActive] = useState(false)
+  /** 树内拖动时的高亮：放进行内 or 贴在上/下沿 */
+  const [nodeHint, setNodeHint] = useState<TreeDropPosition | null>(null)
+
+  const acceptsDrop = Boolean(onDropImage || onDropNode)
 
   return (
     <div
       className={[
         'group relative flex h-[22px] items-center gap-1 pr-1 text-panel transition-colors duration-panel cursor-pointer',
         active ? 'bg-accent/12 text-content-hi' : 'text-content-mid hover:bg-ink-700',
-        dropActive ? 'ring-1 ring-inset ring-accent/70 bg-accent/10 text-content-hi' : ''
+        dropActive ? 'ring-1 ring-inset ring-accent/70 bg-accent/10 text-content-hi' : '',
+        nodeHint === 'inside' ? 'bg-accent/20 text-content-hi' : '',
+        nodeHint === 'above' ? 'shadow-[inset_0_2px_0_0_rgba(34,211,238,0.9)]' : '',
+        nodeHint === 'below' ? 'shadow-[inset_0_-2px_0_0_rgba(34,211,238,0.9)]' : '',
+        dragPayload ? 'cursor-grab active:cursor-grabbing' : ''
       ].join(' ')}
       style={{ paddingLeft: 4 + depth * 12 }}
       data-slot={dataSlot}
       onClick={onSelect}
       onContextMenu={onContextMenu}
-      onDragOver={
-        onDropImage
+      draggable={dragPayload ? true : undefined}
+      onDragStart={
+        dragPayload
           ? (event) => {
-              if (!hasImageDrag(event.dataTransfer)) return
-              event.preventDefault()
+              setTreeDragData(event.dataTransfer, dragPayload)
               event.stopPropagation()
-              event.dataTransfer.dropEffect = 'copy'
-              if (!dropActive) setDropActive(true)
             }
           : undefined
       }
-      onDragLeave={onDropImage ? () => setDropActive(false) : undefined}
-      onDrop={
-        onDropImage
+      onDragEnd={dragPayload ? () => setNodeHint(null) : undefined}
+      onDragOver={
+        acceptsDrop
           ? (event) => {
-              if (!hasImageDrag(event.dataTransfer)) return
+              const tree = hasTreeDrag(event.dataTransfer)
+              if (!hasImageDrag(event.dataTransfer) && !tree) return
+              event.preventDefault()
+              event.stopPropagation()
+              if (tree) {
+                if (!onDropNode) return
+                event.dataTransfer.dropEffect = 'move'
+                const hint = dropPositionOf(event)
+                if (nodeHint !== hint) setNodeHint(hint)
+              } else {
+                event.dataTransfer.dropEffect = 'copy'
+                if (!dropActive) setDropActive(true)
+              }
+            }
+          : undefined
+      }
+      onDragLeave={
+        acceptsDrop
+          ? () => {
+              setDropActive(false)
+              setNodeHint(null)
+            }
+          : undefined
+      }
+      onDrop={
+        acceptsDrop
+          ? (event) => {
+              const tree = hasTreeDrag(event.dataTransfer)
+              if (!hasImageDrag(event.dataTransfer) && !tree) return
               event.preventDefault()
               event.stopPropagation()
               setDropActive(false)
+              setNodeHint(null)
+              if (tree) {
+                if (!onDropNode) return
+                const payload = readTreeDrag(event.dataTransfer)
+                if (payload) onDropNode(payload, dropPositionOf(event))
+                return
+              }
               const imageName = readImageDrag(event.dataTransfer)
-              if (imageName) onDropImage(imageName)
+              if (imageName) onDropImage?.(imageName)
             }
           : undefined
       }
@@ -181,7 +254,13 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   const listRef = useRef<HTMLDivElement | null>(null)
 
   const bonesByParent = useMemo(() => groupBones(document.bones), [document.bones])
-  const slotsByBone = useMemo(() => groupByKey(document.slots, (slot) => slot.bone), [document.slots])
+  // 插槽按 zOrder 倒序排：列表**上面的行画在更前面**（与 Photoshop / Figma 的图层列表一致），
+  // 「上移一层」就是视觉上浮起来（zOrder 变大），不会出现列表方向与画面相反的别扭感。
+  const slotsByBone = useMemo(() => {
+    const grouped = groupByKey(document.slots, (slot) => slot.bone)
+    for (const list of grouped.values()) list.sort((left, right) => right.zOrder - left.zOrder)
+    return grouped
+  }, [document.slots])
   const constraintsByBone = useMemo(
     () => groupByKey(document.constraints, (constraint) => constraint.bones[0] ?? ''),
     [document.constraints]
@@ -244,6 +323,108 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       // 插槽行可能被折叠着，展开宿主骨骼让新 display 可见
       expandBone(boneOfSlot(slotName))
     }
+  }
+
+  /**
+   * 调整插槽层级（= 绘制顺序）：只重排 zOrder，不动 slots 数组本身。
+   * 上层后绘制、会盖住下层；「上移」就是和上面那个换位。要显示在更前面就把 zOrder 调大。
+   */
+  const nudgeSlotOrder = (slotName: string, direction: 'up' | 'down' | 'top' | 'bottom'): void => {
+    const label =
+      direction === 'up' ? '上移一层' : direction === 'down' ? '下移一层' : direction === 'top' ? '置顶' : '置底'
+    update(`插槽${label}`, (draft) => {
+      const ordered = [...draft.slots].sort((left, right) => left.zOrder - right.zOrder)
+      const index = ordered.findIndex((item) => item.name === slotName)
+      if (index < 0) return
+      const [moved] = ordered.splice(index, 1)
+      // ordered 是 zOrder 升序（越靠后画得越晚 = 显示在越前面），所以「上移」= 往后挪一位
+      const target =
+        direction === 'up'
+          ? index + 1
+          : direction === 'down'
+            ? index - 1
+            : direction === 'top'
+              ? ordered.length
+              : 0
+      ordered.splice(Math.max(0, Math.min(ordered.length, target)), 0, moved)
+      ordered.forEach((item, order) => {
+        item.zOrder = order
+      })
+    })
+  }
+
+  /** 树内拖放的统一入口：按「拖的是什么 / 落到哪种行」分派，并挡掉不允许的组合 */
+  const handleNodeDrop = (
+    payload: TreeDragPayload,
+    target: { kind: 'bone' | 'slot' | 'display'; name: string; slot?: string },
+    position: TreeDropPosition
+  ): void => {
+    if (!canEditBinding()) return
+
+    if (payload.kind === 'bone') {
+      if (target.kind !== 'bone') {
+        onStatus?.('骨骼只能放到骨骼下面（或拖到列表空白处成为根骨骼）')
+        return
+      }
+      const check = validateBoneMove(document, payload.name, target.name)
+      if (!check.ok) {
+        onStatus?.(check.message)
+        return
+      }
+      let result: MoveResult = check
+      update('调整骨骼层级', (draft) => {
+        result = moveBone(draft, payload.name, target.name, position)
+      })
+      if (result.message) onStatus?.(result.message)
+      return
+    }
+
+    if (payload.kind === 'slot') {
+      if (target.kind !== 'bone') {
+        onStatus?.('插槽只能放到骨骼下面（不能挂到插槽或 display 之下）')
+        return
+      }
+      const check = validateSlotMove(document, payload.name, target.name)
+      if (!check.ok) {
+        onStatus?.(check.message)
+        return
+      }
+      let result: MoveResult = check
+      update('调整插槽层级', (draft) => {
+        const anchor = position === 'inside' ? null : boneSlotAnchor(document, target.name, position)
+        result = moveSlot(draft, payload.name, target.name, anchor)
+      })
+      if (result.message) onStatus?.(result.message)
+      return
+    }
+
+    // display：只能待在插槽下面；落到 display 行上表示在同一插槽内排序
+    if (target.kind === 'slot') {
+      runDisplayMove(payload, target.name, null)
+      return
+    }
+    if (target.kind === 'display' && target.slot) {
+      const before = position === 'below' ? 'after' : 'before'
+      runDisplayMove(payload, target.slot, { name: target.name, side: before })
+      return
+    }
+    onStatus?.('display 只能放到插槽下面')
+  }
+
+  /** display 的移动/排序统一走这里：先校验再落历史，落点提示交给命令层的返回消息 */
+  const runDisplayMove = (payload: TreeDragPayload, toSlot: string, anchor: MoveAnchor | null): void => {
+    if (payload.kind !== 'display') return
+    const skinName = activeSkin?.name ?? 'default'
+    const check = validateDisplayMove(document, payload.slot, payload.name, toSlot, skinName)
+    if (!check.ok) {
+      onStatus?.(check.message)
+      return
+    }
+    let result: MoveResult = check
+    update('移动 display', (draft) => {
+      result = moveDisplay(draft, payload.slot, payload.name, toSlot, anchor, skinName)
+    })
+    if (result.message) onStatus?.(result.message)
   }
 
   /** 资源面板拖到骨骼行：在该骨骼下新建插槽，图片作为它的第一个 display */
@@ -390,6 +571,25 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         onSelect: () => addConstraint('path', host)
       }
     ]
+    if (target.kind === 'slot') {
+      items.push(
+        { key: 'sep-order', label: '', separator: true },
+        {
+          key: 'slot-up',
+          label: '上移一层',
+          hint: '更晚绘制，会盖住下面的插槽',
+          onSelect: () => nudgeSlotOrder(target.name, 'up')
+        },
+        {
+          key: 'slot-down',
+          label: '下移一层',
+          hint: '更早绘制，被上面的插槽盖住',
+          onSelect: () => nudgeSlotOrder(target.name, 'down')
+        },
+        { key: 'slot-top', label: '置顶', hint: '画在所有插槽之上', onSelect: () => nudgeSlotOrder(target.name, 'top') },
+        { key: 'slot-bottom', label: '置底', hint: '画在所有插槽之下', onSelect: () => nudgeSlotOrder(target.name, 'bottom') }
+      )
+    }
     if (target.kind !== 'root') {
       items.push(
         { key: 'sep2', label: '', separator: true },
@@ -436,6 +636,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     rows.push(
       <TreeRow
         key={`bone:${bone.name}`}
+        dragPayload={{ kind: 'bone', name: bone.name }}
+        onDropNode={(payload, position) => handleNodeDrop(payload, { kind: 'bone', name: bone.name }, position)}
         depth={depth}
         label={bone.name}
         active={selection.kind === 'bone' && selection.bone === bone.name}
@@ -493,6 +695,10 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     return (
       <TreeRow
         key={`display:${slot.name}:${attachment.name}`}
+        dragPayload={{ kind: 'display', slot: slot.name, name: attachment.name }}
+        onDropNode={(payload, position) =>
+          handleNodeDrop(payload, { kind: 'display', name: attachment.name, slot: slot.name }, position)
+        }
         depth={depth}
         label={attachment.name}
         active={
@@ -518,12 +724,18 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     )
   }
 
+  const pushedSlots = new Set<string>()
   const pushSlot = (slot: EditorDocument['slots'][number], depth: number): void => {
+    // 同名插槽只渲染一次：异常数据（重名）或热更新残留时也不至于把树撑重复
+    if (pushedSlots.has(slot.name)) return
+    pushedSlots.add(slot.name)
     const displays = displaysOf(slot.name)
     const expanded = !collapsed.has(`slot:${slot.name}`)
     rows.push(
       <TreeRow
         key={`slot:${slot.name}`}
+        dragPayload={{ kind: 'slot', name: slot.name }}
+        onDropNode={(payload, position) => handleNodeDrop(payload, { kind: 'slot', name: slot.name }, position)}
         depth={depth}
         label={slot.name}
         active={selection.kind === 'slot' && selection.slot === slot.name}
@@ -636,19 +848,50 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       <div
         ref={listRef}
         className="min-h-0 flex-1 overflow-auto hao-scroll pb-1"
-        title="右键可添加骨骼 / 插槽 / 约束；把资源面板的图片拖到插槽上（或它下面）= 给该插槽加 display"
+        title={
+          '右键可添加骨骼 / 插槽 / 约束\n' +
+          '拖动行来调整层级：骨骼 → 骨骼下（或空白处成为根骨骼）、插槽 → 骨骼下、display → 插槽下\n' +
+          '拖动行的上/下沿可以排序；把资源面板的图片拖到插槽行 = 给该插槽加一个 display'
+        }
         onContextMenu={(event) => openMenu(event, { kind: 'root', name: '', bone: '' })}
         onDragOver={(event) => {
-          if (!hasImageDrag(event.dataTransfer)) return
+          const tree = hasTreeDrag(event.dataTransfer)
+          if (!hasImageDrag(event.dataTransfer) && !tree) return
           // 行本身没接住时（行间缝隙 / 插槽下方）在这里兜底，同时别冒泡去触发整窗导入覆盖层
           event.preventDefault()
           event.stopPropagation()
-          event.dataTransfer.dropEffect = 'copy'
+          event.dataTransfer.dropEffect = tree ? 'move' : 'copy'
         }}
         onDrop={(event) => {
-          if (!hasImageDrag(event.dataTransfer)) return
+          const tree = hasTreeDrag(event.dataTransfer)
+          if (!hasImageDrag(event.dataTransfer) && !tree) return
           event.preventDefault()
           event.stopPropagation()
+          if (tree) {
+            // 落到列表空白处：骨骼变根骨骼、插槽挂到第一根骨骼；display 不在这里收
+            const payload = readTreeDrag(event.dataTransfer)
+            if (!payload) return
+            if (payload.kind === 'bone') {
+              let result: MoveResult = { ok: false, message: '' }
+              update('调整骨骼层级', (draft) => {
+                result = moveBone(draft, payload.name, '', 'inside')
+              })
+              if (result.message) onStatus?.(result.message)
+              return
+            }
+            if (payload.kind === 'slot') {
+              const first = document.bones[0]?.name ?? ''
+              if (!first) return
+              let result: MoveResult = { ok: false, message: '' }
+              update('调整插槽层级', (draft) => {
+                result = moveSlot(draft, payload.name, first, null)
+              })
+              if (result.message) onStatus?.(result.message)
+              return
+            }
+            onStatus?.('display 只能放到插槽下面')
+            return
+          }
           const imageName = readImageDrag(event.dataTransfer)
           const slotName = slotUnderPointer(event.clientY)
           if (imageName && slotName) addDisplay(slotName, imageName)

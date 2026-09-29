@@ -22,3 +22,39 @@ export function readImageDrag(transfer: DataTransfer): string {
   const value = transfer.getData(IMAGE_MIME)
   return typeof value === 'string' ? value : ''
 }
+
+/**
+ * 层级树内部的树节点拖拽（骨骼 / 插槽 / display）。
+ *
+ * 与「资源面板拖图片」用不同的 MIME 分开：前者是移动已有节点、后者是新建，
+ * 落到同一行上时按类型走不同分支。
+ */
+export const TREE_MIME = 'application/x-hao2d-tree'
+
+export type TreeDragPayload =
+  | { kind: 'bone'; name: string }
+  | { kind: 'slot'; name: string }
+  | { kind: 'display'; slot: string; name: string }
+
+/** 放置位置：行内部（成为子节点）/ 行的上沿 / 下沿（同级排序） */
+export type TreeDropPosition = 'inside' | 'above' | 'below'
+
+export function setTreeDragData(transfer: DataTransfer, payload: TreeDragPayload): void {
+  transfer.setData(TREE_MIME, JSON.stringify(payload))
+  transfer.effectAllowed = 'move'
+}
+
+export function hasTreeDrag(transfer: DataTransfer | null): boolean {
+  if (!transfer) return false
+  return Array.from(transfer.types).includes(TREE_MIME)
+}
+
+export function readTreeDrag(transfer: DataTransfer): TreeDragPayload | null {
+  const raw = transfer.getData(TREE_MIME)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as TreeDragPayload
+  } catch {
+    return null
+  }
+}

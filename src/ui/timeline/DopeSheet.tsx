@@ -61,12 +61,15 @@ function rowLabel(track: TimelineTrack): string {
   return track.depth > 0 ? `${track.group} · ${track.label}` : track.label
 }
 
-/** 骨骼通道子轨道的圆点配色，便于一眼区分位置 / 旋转 / 缩放 / 错切 */
+/** 通道子轨道的圆点配色，便于一眼区分位置 / 旋转 / 缩放 / 错切、显示 / 颜色 / 可见性 */
 const CHANNEL_TONE: Record<string, string> = {
   translate: 'bg-ok',
   rotate: 'bg-accent',
   scale: 'bg-warn',
-  shear: 'bg-accent-violet'
+  shear: 'bg-accent-violet',
+  display: 'bg-accent-violet',
+  color: 'bg-warn',
+  visible: 'bg-ok'
 }
 
 function sameSelector(a: KeySelector, b: KeySelector): boolean {

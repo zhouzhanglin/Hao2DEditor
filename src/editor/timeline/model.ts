@@ -45,6 +45,13 @@ const BONE_CHANNELS: Array<{ channel: 'translate' | 'rotate' | 'scale' | 'shear'
   { channel: 'shear', label: '错切' }
 ]
 
+/** 插槽子轨道：显示（切 display）在最前，它是做换装动画最常用的通道 */
+const SLOT_CHANNELS: Array<{ channel: 'display' | 'color' | 'visible'; label: string }> = [
+  { channel: 'display', label: '显示' },
+  { channel: 'color', label: '颜色' },
+  { channel: 'visible', label: '可见性' }
+]
+
 export interface KeySelector {
   kind: KeyKind
   target: string
@@ -84,48 +91,42 @@ export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrac
 
   // 骨骼：一行分组标题 + 每个有帧的通道各一行子轨道（位置 / 旋转 / 缩放 / 错切）
   for (const track of animation.bones) {
-    const children: TimelineTrack[] = []
-    let total = 0
-    for (const { channel, label } of BONE_CHANNELS) {
-      const keys: TimelineKey[] = []
-      pushKeys(keys, track.bone, '', 'bone', channel, track[channel])
-      if (keys.length === 0) continue
-      total += keys.length
-      children.push({
-        id: `bone:${track.bone}:${channel}`,
-        group: track.bone,
-        label,
-        kind: 'bone',
-        target: track.bone,
-        attachment: '',
-        keys,
-        depth: 1,
-        parentId: `bone:${track.bone}`,
-        channel
+    pushGroupedTracks(
+      tracks,
+      'bone',
+      track.bone,
+      BONE_CHANNELS.map(({ channel, label }) => {
+        const keys: TimelineKey[] = []
+        pushKeys(keys, track.bone, '', 'bone', channel, track[channel])
+        return { channel, label, keys }
       })
-    }
-    if (children.length === 0) continue
-    tracks.push({
-      id: `bone:${track.bone}`,
-      group: track.bone,
-      label: track.bone,
-      kind: 'bone',
-      target: track.bone,
-      attachment: '',
-      keys: [],
-      depth: 0,
-      isGroup: true,
-      keyCount: total
-    })
-    tracks.push(...children)
+    )
   }
 
+  // 插槽：同样是「分组行 + 子轨」，显示通道的每个帧带上附件名，便于一眼看出切到了哪个 display
   for (const track of animation.slots) {
-    const keys: TimelineKey[] = []
-    pushKeys(keys, track.slot, '', 'slot', 'color', track.color)
-    pushKeys(keys, track.slot, '', 'slot', 'display', track.displayIndex)
-    pushKeys(keys, track.slot, '', 'slot', 'visible', track.visible)
-    if (keys.length > 0) tracks.push(makeTrack('slot', track.slot, '', track.slot, keys))
+    const displayKeys: TimelineKey[] = track.displayIndex.map((frame, index) => ({
+      id: `slot:${track.slot}#display@${frame.time}`,
+      trackId: `slot:${track.slot}`,
+      kind: 'slot' as const,
+      channel: 'display',
+      target: track.slot,
+      attachment: track.displayAttachment[index] ?? '',
+      time: frame.time,
+      easing: frame.easing,
+      curve: frame.curve
+    }))
+    pushGroupedTracks(
+      tracks,
+      'slot',
+      track.slot,
+      SLOT_CHANNELS.map(({ channel, label }) => {
+        if (channel === 'display') return { channel, label, keys: displayKeys }
+        const keys: TimelineKey[] = []
+        pushKeys(keys, track.slot, '', 'slot', channel, track[channel])
+        return { channel, label, keys }
+      })
+    )
   }
 
   for (const track of animation.deforms) {
@@ -384,6 +385,50 @@ export function keyframeTargets(
 }
 
 export { GROUP_LABEL }
+
+/**
+ * 「分组行 + 通道子轨」两层的轨道结构（骨骼与插槽共用）：
+ * 分组行只作标题与折叠入口，子轨各自持有自己的关键帧；没有任何子轨时整组不出现。
+ */
+function pushGroupedTracks(
+  tracks: TimelineTrack[],
+  kind: KeyKind,
+  target: string,
+  channels: Array<{ channel: string; label: string; keys: TimelineKey[] }>
+): void {
+  const children: TimelineTrack[] = []
+  let total = 0
+  for (const item of channels) {
+    if (item.keys.length === 0) continue
+    total += item.keys.length
+    children.push({
+      id: `${kind}:${target}:${item.channel}`,
+      group: target,
+      label: item.label,
+      kind,
+      target,
+      attachment: '',
+      keys: item.keys.sort((a, b) => a.time - b.time),
+      depth: 1,
+      parentId: `${kind}:${target}`,
+      channel: item.channel
+    })
+  }
+  if (children.length === 0) return
+  tracks.push({
+    id: `${kind}:${target}`,
+    group: target,
+    label: target,
+    kind,
+    target,
+    attachment: '',
+    keys: [],
+    depth: 0,
+    isGroup: true,
+    keyCount: total
+  })
+  tracks.push(...children)
+}
 
 function makeTrack(kind: KeyKind, label: string, attachment: string, target: string, keys: TimelineKey[]): TimelineTrack {
   return {

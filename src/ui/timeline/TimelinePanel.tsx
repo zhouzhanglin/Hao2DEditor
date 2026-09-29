@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { KeyRound, Pause, Play, Repeat, SkipBack, SkipForward, Square, Timer, Trash2, Zap } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
@@ -7,6 +7,7 @@ import { useModeStore } from '@editor/store/modeStore'
 import { animationDuration } from '@editor/runtime'
 import { getActiveScene } from '@editor/activeScene'
 import { buildTimeline, setKeyEasing, setKeysTimes } from '@editor/timeline/model'
+import { uniqueName } from '@editor/commands/authoringCommands'
 import { keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
 import type { KeyKind, KeySelector, TimelineTrack } from '@editor/timeline/model'
 import DopeSheet from './DopeSheet'
@@ -55,6 +56,59 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
     return null
   }, [selectedKeys, tracks])
 
+  /** 重命名中的动画名（非 null 时把按钮区换成输入框） */
+  const [renaming, setRenaming] = useState<string | null>(null)
+
+  const commitRename = (): void => {
+    const next = (renaming ?? '').trim()
+    const current = animation?.name
+    setRenaming(null)
+    if (!next || !current || next === current) return
+    if (document.animations.some((item) => item.name === next)) {
+      onStatus(`已经有一个叫「${next}」的动画了`)
+      return
+    }
+    update('重命名动画', (draft) => {
+      const target = draft.animations.find((item) => item.name === current)
+      if (target) target.name = next
+    })
+    timeline.setAnimation(next)
+    onStatus(`动画「${current}」已重命名为「${next}」`)
+  }
+
+  const duplicateAnimation = (): void => {
+    if (!animation) return
+    const source = animation
+    let created = ''
+    update('复制动画', (draft) => {
+      const origin = draft.animations.find((item) => item.name === source.name)
+      if (!origin) return
+      created = uniqueName(
+        draft.animations.map((item) => item.name),
+        `${source.name}_copy`
+      )
+      // 深拷贝一份（动画数据是纯 JSON，序列化一次最省事）
+      const copy = JSON.parse(JSON.stringify(origin)) as typeof origin
+      copy.name = created
+      draft.animations.push(copy)
+    })
+    if (created) {
+      timeline.setAnimation(created)
+      onStatus(`已复制出动画「${created}」`)
+    }
+  }
+
+  const removeAnimation = (): void => {
+    if (!animation) return
+    const name = animation.name
+    update('删除动画', (draft) => {
+      draft.animations = draft.animations.filter((item) => item.name !== name)
+    })
+    const next = document.animations.find((item) => item.name !== name)?.name ?? null
+    timeline.setAnimation(next)
+    onStatus(`已删除动画「${name}」${next ? `，已切到「${next}」` : ''}（可撤销）`)
+  }
+
   const stepFrame = (delta: number): void => {
     const next = Math.max(0, Math.min(totalFrames, frame + delta)) / document.frameRate
     timeline.setTime(Number(next.toFixed(4)))
@@ -93,12 +147,14 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         <button
           type="button"
           className="hao-btn h-[20px] px-1.5 text-3xs"
-          title="新建动画"
-          onClick={() =>
+          title="新建动画（建好自动切过去）"
+          onClick={() => {
+            let created = ''
             update('新建动画', (draft) => {
               let name = 'animation'
               let index = 2
               while (draft.animations.some((a) => a.name === name)) name = `animation_${index++}`
+              created = name
               draft.animations.push({
                 name,
                 duration: 1,
@@ -110,10 +166,56 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
                 constraints: []
               })
             })
-          }
+            if (created) timeline.setAnimation(created)
+          }}
         >
           + 动画
         </button>
+
+        {renaming !== null ? (
+          <input
+            autoFocus
+            value={renaming}
+            title="输入新名字，回车确认 / Esc 取消"
+            className="hao-field h-[20px] w-[110px]"
+            onChange={(event) => setRenaming(event.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commitRename()
+              else if (event.key === 'Escape') setRenaming(null)
+            }}
+          />
+        ) : (
+          <>
+            <button
+              type="button"
+              className="hao-btn h-[20px] px-1.5 text-3xs"
+              title="重命名当前动画"
+              disabled={!animation}
+              onClick={() => setRenaming(animation?.name ?? null)}
+            >
+              重命名
+            </button>
+            <button
+              type="button"
+              className="hao-btn h-[20px] px-1.5 text-3xs"
+              title="复制当前动画（连同全部关键帧）"
+              disabled={!animation}
+              onClick={duplicateAnimation}
+            >
+              复制
+            </button>
+            <button
+              type="button"
+              className="hao-btn h-[20px] px-1.5 text-3xs hover:border-danger/50 hover:text-danger"
+              title="删除当前动画（可撤销）"
+              disabled={!animation}
+              onClick={removeAnimation}
+            >
+              删除
+            </button>
+          </>
+        )}
 
         <label
           className="flex shrink-0 items-center gap-1 text-3xs text-content-lo"

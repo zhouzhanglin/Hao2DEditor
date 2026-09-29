@@ -3,10 +3,12 @@ import type {
   AuthoringAttachment,
   AuthoringSkin,
   AuthoringSkinSlot,
+  AuthoringVertex,
+  AuthoringWeight,
   EditorDocument
 } from '@core/model/authoring'
 import type { Vec2 } from '@core/math/matrix'
-import { createGridMesh } from '@core/mesh/triangulate'
+import { createGridMesh, triangulatePolygon } from '@core/mesh/triangulate'
 import type { MeshGeometry } from '@core/mesh/triangulate'
 
 /** 骨架单位 ↔ 像素（与导入 / 导出保持一致的 PPU） */
@@ -186,6 +188,8 @@ export function convertRegionToMesh(
     index % 2 === 0 ? rect.u0 + value * (rect.u1 - rect.u0) : rect.v0 + value * (rect.v1 - rect.v0)
   )
 
+  // 先存下源 Region 的尺寸与 UV，之后可以一键还原回去
+  attachment.regionSnapshot = { size: { ...attachment.size }, uvs: [...attachment.uvs] }
   attachment.type = 'mesh'
   attachment.vertices = grid.vertices.map((point) => ({
     x: point.x,
@@ -198,6 +202,209 @@ export function convertRegionToMesh(
   attachment.hull = grid.vertices.length
 
   return { vertices: grid.vertices.length, triangles: Math.floor(grid.triangles.length / 3) }
+}
+
+/**
+ * Mesh → Region：把网格退回成一张图片显示。
+ *
+ * 有 `regionSnapshot`（由本编辑器转出来的网格都有）就精确还原原尺寸与 UV；
+ * 没有快照（例如 Spine 导入的网格）就按顶点包围盒估一个矩形、UV 用整图。
+ * 顶点/三角面会被清空，对应的 FFD 关键帧也一并移除，避免顶点数对不上越界。
+ */
+export function convertMeshToRegion(doc: EditorDocument, slotName: string, attachmentName: string): boolean {
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment || (attachment.type !== 'mesh' && attachment.type !== 'linkedmesh')) return false
+
+  const snapshot = attachment.regionSnapshot
+  attachment.type = 'region'
+  if (snapshot) {
+    attachment.size = { ...snapshot.size }
+    attachment.uvs = [...snapshot.uvs]
+  } else {
+    const box = vertexBounds(attachment.vertices)
+    if (box) attachment.size = box
+    attachment.uvs = [0, 0, 1, 0, 1, 1, 0, 1]
+  }
+  attachment.vertices = []
+  attachment.triangles = []
+  attachment.edges = []
+  attachment.hull = 0
+  delete attachment.regionSnapshot
+
+  for (const animation of doc.animations) {
+    animation.deforms = animation.deforms.filter(
+      (track) => !(track.slot === slotName && track.attachment === attachmentName)
+    )
+  }
+  return true
+}
+
+/** 点在三角形内（含边界） */
+function pointInTriangle(px: number, py: number, a: Vec2, b: Vec2, c: Vec2): boolean {
+  const d1 = (b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x)
+  const d2 = (c.x - b.x) * (py - b.y) - (c.y - b.y) * (px - b.x)
+  const d3 = (a.x - c.x) * (py - c.y) - (a.y - c.y) * (px - c.x)
+  const hasNegative = d1 < 0 || d2 < 0 || d3 < 0
+  const hasPositive = d1 > 0 || d2 > 0 || d3 > 0
+  return !(hasNegative && hasPositive)
+}
+
+/** 重心坐标：用来把新顶点的 UV / 蒙皮权重按位置比例插值出来 */
+function barycentric(a: Vec2, b: Vec2, c: Vec2, x: number, y: number): { u: number; v: number; w: number } | null {
+  const det = (b.y - c.y) * (a.x - c.x) + (c.x - b.x) * (a.y - c.y)
+  if (Math.abs(det) < 1e-9) return null
+  const u = ((b.y - c.y) * (x - c.x) + (c.x - b.x) * (y - c.y)) / det
+  const v = ((c.y - a.y) * (x - c.x) + (a.x - c.x) * (y - c.y)) / det
+  return { u, v, w: 1 - u - v }
+}
+
+/** 按比例合并若干顶点的权重（结果按骨骼名聚合、归一化） */
+function blendWeights(parts: Array<[AuthoringVertex, number]>): AuthoringWeight[] {
+  const merged = new Map<string, number>()
+  for (const [vertex, factor] of parts) {
+    if (factor <= 1e-4) continue
+    for (const weight of vertex.weights) {
+      merged.set(weight.bone, (merged.get(weight.bone) ?? 0) + weight.weight * factor)
+    }
+  }
+  const entries = [...merged.entries()].filter(([, value]) => value > 1e-4)
+  if (entries.length === 0) return parts[0] ? [...parts[0][0].weights] : []
+  const total = entries.reduce((sum, [, value]) => sum + value, 0)
+  return entries.map(([bone, value]) => ({ bone, weight: total > 0 ? value / total : value }))
+}
+
+/** 命中哪个三角形（返回三角形序号，-1 = 没命中） */
+function triangleAtPoint(attachment: AuthoringAttachment, x: number, y: number): number {
+  const { vertices, triangles } = attachment
+  for (let t = 0; t + 2 < triangles.length; t += 3) {
+    const a = vertices[triangles[t]]
+    const b = vertices[triangles[t + 1]]
+    const c = vertices[triangles[t + 2]]
+    if (!a || !b || !c) continue
+    if (pointInTriangle(x, y, a, b, c)) return t
+  }
+  return -1
+}
+
+/**
+ * 在网格里插入一个顶点：把命中的三角形拆成 3 个（UV 与蒙皮权重按重心坐标插值）。
+ * 返回新顶点的下标，未命中任何三角形时返回 null。
+ */
+export function insertMeshVertex(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  point: Vec2
+): number | null {
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment || attachment.type !== 'mesh') return null
+
+  const triangleIndex = triangleAtPoint(attachment, point.x, point.y)
+  if (triangleIndex < 0) return null
+  const [i0, i1, i2] = [
+    attachment.triangles[triangleIndex],
+    attachment.triangles[triangleIndex + 1],
+    attachment.triangles[triangleIndex + 2]
+  ]
+  const a = attachment.vertices[i0]
+  const b = attachment.vertices[i1]
+  const c = attachment.vertices[i2]
+  const bary = barycentric(a, b, c, point.x, point.y)
+  if (!bary) return null
+
+  const index = attachment.vertices.length
+  attachment.vertices.push({
+    x: point.x,
+    y: point.y,
+    weights: blendWeights([
+      [a, bary.u],
+      [b, bary.v],
+      [c, bary.w]
+    ])
+  })
+  attachment.uvs.push(
+    attachment.uvs[i0 * 2] * bary.u + attachment.uvs[i1 * 2] * bary.v + attachment.uvs[i2 * 2] * bary.w,
+    attachment.uvs[i0 * 2 + 1] * bary.u + attachment.uvs[i1 * 2 + 1] * bary.v + attachment.uvs[i2 * 2 + 1] * bary.w
+  )
+  // 原三角形 → 三个新三角形（共享新顶点）
+  attachment.triangles.splice(triangleIndex, 3, i0, i1, index, i1, i2, index, i2, i0, index)
+  attachment.hull = attachment.vertices.length
+  return index
+}
+
+/**
+ * 删除一个网格顶点：丢掉引用它的三角形，再用「一环邻域」重新三角化把洞填上。
+ * 至少要剩一个三角形，否则直接拒绝。
+ */
+export function deleteMeshVertex(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  vertexIndex: number
+): boolean {
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment || attachment.type !== 'mesh') return false
+  if (vertexIndex < 0 || vertexIndex >= attachment.vertices.length) return false
+  if (attachment.vertices.length <= 3) return false
+
+  const neighbours = new Set<number>()
+  const kept: number[] = []
+  for (let t = 0; t + 2 < attachment.triangles.length; t += 3) {
+    const triangle = [attachment.triangles[t], attachment.triangles[t + 1], attachment.triangles[t + 2]]
+    if (!triangle.includes(vertexIndex)) {
+      kept.push(triangle[0], triangle[1], triangle[2])
+      continue
+    }
+    for (const index of triangle) if (index !== vertexIndex) neighbours.add(index)
+  }
+
+  const victim = attachment.vertices[vertexIndex]
+  const ring = [...neighbours].sort(
+    (left, right) =>
+      Math.atan2(attachment.vertices[left].y - victim.y, attachment.vertices[left].x - victim.x) -
+      Math.atan2(attachment.vertices[right].y - victim.y, attachment.vertices[right].x - victim.x)
+  )
+  const ringPoints = ring.map((index) => ({
+    x: attachment.vertices[index].x,
+    y: attachment.vertices[index].y
+  }))
+  const patch = triangulatePolygon(ringPoints).map((index) => ring[index])
+
+  // 删顶点后所有更大的下标都要前移一位
+  const remap = (index: number): number => (index > vertexIndex ? index - 1 : index)
+  attachment.vertices.splice(vertexIndex, 1)
+  attachment.uvs.splice(vertexIndex * 2, 2)
+  attachment.triangles = [...kept, ...patch].map(remap)
+  attachment.edges = attachment.edges.filter((index) => index !== vertexIndex).map(remap)
+  attachment.hull = attachment.vertices.length
+
+  for (const animation of doc.animations) {
+    for (const track of animation.deforms) {
+      if (track.slot !== slotName || track.attachment !== attachmentName) continue
+      // FFD 帧按「满顶点长度」的 (x,y) 偏移存放，删掉顶点就要同步删它的两个数
+      for (const frame of track.frames) {
+        const start = Math.max(0, (vertexIndex - frame.vertexOffset) * 2)
+        if (start < frame.offsets.length) frame.offsets.splice(start, 2)
+      }
+    }
+  }
+  return true
+}
+
+/** 顶点包围盒（还原 Region 时估尺寸用） */
+function vertexBounds(vertices: readonly { x: number; y: number }[]): { x: number; y: number } | null {
+  if (vertices.length === 0) return null
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const vertex of vertices) {
+    if (vertex.x < minX) minX = vertex.x
+    if (vertex.x > maxX) maxX = vertex.x
+    if (vertex.y < minY) minY = vertex.y
+    if (vertex.y > maxY) maxY = vertex.y
+  }
+  return { x: maxX - minX, y: maxY - minY }
 }
 
 export function deleteAttachment(doc: EditorDocument, slotName: string, attachmentName: string): void {

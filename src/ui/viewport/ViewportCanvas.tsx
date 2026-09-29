@@ -9,7 +9,7 @@ import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { isDragging, toolPointerDown, toolPointerMove, toolPointerUp } from '@editor/tools/authoringTools'
 import type { ToolHost } from '@editor/tools/authoringTools'
-import { createRegionFromImage, uniqueName } from '@editor/commands/authoringCommands'
+import { createRegionFromImage, insertMeshVertex, uniqueName } from '@editor/commands/authoringCommands'
 import { createAuthoringBone } from '@core/model/authoring'
 import { hasImageDrag, readImageDrag } from '@ui/widgets/dragDrop'
 
@@ -363,6 +363,40 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       onPointerUp={releasePointer}
       onPointerCancel={releasePointer}
       onWheel={onWheel}
+      onDoubleClick={(event) => {
+        const scene = sceneRef.current
+        if (!scene) return
+        const selection = useSelectionStore.getState()
+        const tools = useToolStore.getState()
+        // 网格 / FFD 工具下双击网格内部 = 插一个顶点（UV 与蒙皮权重按所在三角形插值）
+        if ((tools.tool === 'mesh' || tools.tool === 'ffd') && selection.kind === 'attachment') {
+          if (useModeStore.getState().mode !== 'pose') {
+            onStatus('插入顶点改的是绑定网格：请切到 Pose 状态')
+            return
+          }
+          const rect = event.currentTarget.getBoundingClientRect()
+          const world = scene.viewport.screenToWorld(event.clientX - rect.left, event.clientY - rect.top)
+          const local = scene.worldToAttachmentLocal(selection.slot, selection.attachment, world.x, world.y)
+          if (!local) {
+            onStatus('双击位置不在附件上')
+            return
+          }
+          let created: number | null = null
+          useProjectStore.getState().update('插入网格顶点', (draft) => {
+            created = insertMeshVertex(draft, selection.slot, selection.attachment, local as { x: number; y: number })
+          })
+          const index = created as number | null
+          if (index === null) {
+            onStatus('双击位置不在网格内部（先选中一个网格附件）')
+            return
+          }
+          useSelectionStore.getState().selectVertices([index])
+          onStatus(`已插入顶点 #${index}（UV 与权重按所在三角形插值）`)
+          return
+        }
+        scene.fit()
+        onStatus('已适配视野')
+      }}
       onDragOver={(event) => {
         if (!hasImageDrag(event.dataTransfer)) return
         // 内部图片拖拽在视口里处理完就停下，别冒泡去触发整窗的「拖入文件导入」覆盖层
@@ -375,10 +409,6 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         event.preventDefault()
         event.stopPropagation()
         onImageDrop(event)
-      }}
-      onDoubleClick={() => {
-        sceneRef.current?.fit()
-        onStatus('已适配视野')
       }}
       onContextMenu={(e) => e.preventDefault()}
       style={{ cursor: pointer.current.panning ? 'grabbing' : 'default' }}

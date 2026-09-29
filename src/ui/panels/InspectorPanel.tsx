@@ -2,7 +2,15 @@ import { BlendMode } from '@core/model/types'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useToolStore } from '@editor/store/toolStore'
-import { convertRegionToMesh, deleteAttachment } from '@editor/commands/authoringCommands'
+import { useModeStore } from '@editor/store/modeStore'
+import { useTimelineStore } from '@editor/store/timelineStore'
+import { keySlotDisplay, keySlotVisible } from '@editor/commands/animationCommands'
+import {
+  convertMeshToRegion,
+  convertRegionToMesh,
+  deleteAttachment,
+  deleteMeshVertex
+} from '@editor/commands/authoringCommands'
 import {
   CheckboxField,
   ColorField,
@@ -26,6 +34,11 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   const update = useProjectStore((s) => s.update)
   const selection = useSelectionStore()
   const gridDivisions = useToolStore((s) => s.gridDivisions)
+  const mode = useModeStore((s) => s.mode)
+  const time = useTimelineStore((s) => s.time)
+  const currentAnimation = useTimelineStore((s) => s.currentAnimation)
+  /** Animate 态切显示附件 = 打 displayIndex 关键帧；Pose 态才是改绑定姿态 */
+  const animating = mode === 'animate' && !!currentAnimation
 
   if (selection.kind === 'none') {
     return (
@@ -218,16 +231,48 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             }
           />
           <SelectField
-            label="setup"
+            label={animating ? '显示（打帧）' : 'setup 显示'}
             value={slot.attachment}
             options={[{ value: '', label: '（不显示）' }, ...(skinSlot?.attachments ?? []).map((a) => ({ value: a.name, label: a.name }))]}
-            onChange={(value) =>
+            onChange={(value) => {
+              const attachments = skinSlot?.attachments ?? []
+              const index = attachments.findIndex((item) => item.name === value)
+              if (animating) {
+                // 换装动画：Animate 态只写关键帧，不动绑定姿态
+                update('关键帧：切换显示', (draft) => {
+                  const animation = draft.animations.find((item) => item.name === currentAnimation)
+                  if (animation) keySlotDisplay(animation, slot.name, time, value ? index : -1, value)
+                })
+                onStatus(
+                  value
+                    ? `已在 ${time.toFixed(3)}s 打帧：插槽「${slot.name}」显示「${value}」`
+                    : `已在 ${time.toFixed(3)}s 打帧：插槽「${slot.name}」不显示`
+                )
+                return
+              }
               update('修改 setup 附件', (draft) => {
                 const target = draft.slots.find((s) => s.name === slot.name)
                 if (target) target.attachment = value
               })
-            }
+            }}
           />
+          <div className="flex items-center gap-1">
+            <ToggleField
+              label={animating ? '可见（打帧）' : '可见'}
+              value={slot.visible}
+              onChange={(value) =>
+                animating
+                  ? update('关键帧：切换可见性', (draft) => {
+                      const animation = draft.animations.find((item) => item.name === currentAnimation)
+                      if (animation) keySlotVisible(animation, slot.name, time, value)
+                    })
+                  : update('修改插槽可见性', (draft) => {
+                      const target = draft.slots.find((s) => s.name === slot.name)
+                      if (target) target.visible = value
+                    })
+              }
+            />
+          </div>
         </FieldGroup>
 
         {attachment ? (
@@ -282,9 +327,11 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
               onChange={(value) => update('修改FFD空间', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.ffdInBoneSpace = value }))}
             />
             {attachment.type === 'mesh' ? (
-              <p className="text-3xs text-content-lo">
+              <p className="text-3xs leading-relaxed text-content-lo">
                 顶点 {attachment.vertices.length} · 三角面 {Math.floor(attachment.triangles.length / 3)} ·
                 加权 {attachment.vertices.filter((v) => v.weights.length > 0).length}
+                <br />
+                用网格 / FFD 工具在网格内双击可插入顶点，选中顶点后可在下面删除
               </p>
             ) : null}
 
@@ -310,6 +357,50 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                 >
                   转为网格（{gridDivisions}×{gridDivisions}）
                 </button>
+              ) : null}
+              {attachment.type === 'mesh' ? (
+                <>
+                  <button
+                    type="button"
+                    className="hao-btn h-[20px] px-2 text-3xs"
+                    disabled={selection.vertices.length === 0}
+                    title={
+                      selection.vertices.length === 0
+                        ? '先在视口里点选一个顶点（网格 / FFD 工具）'
+                        : `删除顶点 #${selection.vertices[0]}，并用它的邻居重新三角化补洞`
+                    }
+                    onClick={() => {
+                      const vertex = selection.vertices[0]
+                      if (vertex === undefined) return
+                      let removed = false
+                      update('删除网格顶点', (draft) => {
+                        removed = deleteMeshVertex(draft, slot.name, attachment.name, vertex)
+                      })
+                      if (removed) selection.selectVertices([])
+                      onStatus(removed ? `已删除顶点 #${vertex}` : '删除失败：顶点不存在或网格至少需要保留 3 个顶点')
+                    }}
+                  >
+                    删除选中顶点
+                  </button>
+                  <button
+                    type="button"
+                    className="hao-btn h-[20px] px-2 text-3xs"
+                    title="清空网格顶点，退回成一张图片显示（由 Region 转来的会精确还原原尺寸与 UV）"
+                    onClick={() => {
+                      let restored = false
+                      update('还原为 Region', (draft) => {
+                        restored = convertMeshToRegion(draft, slot.name, attachment.name)
+                      })
+                      onStatus(
+                        restored
+                          ? `已把「${attachment.name}」还原为 Region（顶点与 FFD 帧已一并清空）`
+                          : '还原失败（附件类型不是网格）'
+                      )
+                    }}
+                  >
+                    还原为 Region
+                  </button>
+                </>
               ) : null}
               <button
                 type="button"

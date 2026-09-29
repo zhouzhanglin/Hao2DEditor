@@ -37,7 +37,7 @@ const TOOL_KEYS: Record<string, EditorTool> = {
 }
 const TOOL_LABEL: Record<EditorTool, string> = {
   select: '选择',
-  bone: '绑骨骼',
+  bone: '画骨骼（拖拽连续绑定）',
   slot: '插槽',
   mesh: '网格',
   weight: '权重刷',

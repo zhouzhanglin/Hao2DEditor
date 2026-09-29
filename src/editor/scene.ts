@@ -59,6 +59,8 @@ export interface SceneViewState {
   gizmo: GizmoDrawMode
   /** 是否绘制骨骼操作器：绘制类工具（权重刷 / FFD / 网格）激活时隐藏，避免出现点不动的假手柄 */
   showGizmo: boolean
+  /** 正在拖拽新建骨骼时的预览（世界坐标的两端），松开即生成 */
+  pendingBone: { x1: number; y1: number; x2: number; y2: number } | null
 }
 
 export interface EditorSceneOptions {
@@ -109,7 +111,8 @@ export class EditorScene {
     time: 0,
     onionSkin: false,
     gizmo: 'move',
-    showGizmo: true
+    showGizmo: true,
+    pendingBone: null
   }
 
   constructor(options: EditorSceneOptions) {
@@ -334,6 +337,40 @@ export class EditorScene {
     if (index === undefined) return null
     const inverse = invert(bundle.skeleton.world.subarray(index * 16, index * 16 + 16))
     return mulPoint(inverse, { x: worldX, y: worldY })
+  }
+
+  /**
+   * 世界坐标 → 附件显示空间。
+   * 附件世界矩阵 = 骨骼世界矩阵 · TRS(附件)，网格顶点编辑（插入顶点）要先把鼠标落到这一层。
+   */
+  worldToAttachmentLocal(
+    slotName: string,
+    attachmentName: string,
+    worldX: number,
+    worldY: number
+  ): Vec2 | null {
+    const bundle = this.bundle
+    const doc = this.document
+    if (!bundle || !doc) return null
+    const slot = doc.slots.find((item) => item.name === slotName)
+    if (!slot) return null
+    const skin = doc.skins.find((item) => item.name === this.skinName) ?? doc.skins[0]
+    const attachment = skin?.slots
+      .find((item) => item.slot === slotName)
+      ?.attachments.find((item) => item.name === attachmentName)
+    const boneIndex = bundle.boneIndex[slot.bone]
+    if (!attachment || boneIndex === undefined) return null
+
+    const boneWorld = bundle.skeleton.world.subarray(boneIndex * 16, boneIndex * 16 + 16)
+    const attachmentMatrix = trs(
+      attachment.position.x,
+      attachment.position.y,
+      attachment.rotation,
+      attachment.scale.x,
+      attachment.scale.y
+    )
+    const world = mul(boneWorld, attachmentMatrix)
+    return mulPoint(invert(world), { x: worldX, y: worldY })
   }
 
   /**
@@ -563,7 +600,9 @@ export class EditorScene {
         hoveredBone: bundle.boneIndex[state.hoveredBone] ?? -1,
         showConstraints: state.overlay.constraints,
         showSlots: false,
-        hollowBones: this.hollowBones
+        hollowBones: this.hollowBones,
+        // 正在拖拽新建骨骼：把待生成的骨骼画成虚线预览
+        pendingBone: state.pendingBone
       })
     } else {
       this.boneStroke.clear()

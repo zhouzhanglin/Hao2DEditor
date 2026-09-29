@@ -13,6 +13,8 @@ export interface BoneOverlayOptions {
   showSlots: boolean
   /** 需要画成空心的骨骼名（来自编辑期模型的 hollow 选项，默认全是实心） */
   hollowBones?: ReadonlySet<string>
+  /** 拖拽新建骨骼时的预览（世界坐标两点） */
+  pendingBone?: { x1: number; y1: number; x2: number; y2: number } | null
 }
 
 const COLOR_BONE = 0xf97316
@@ -29,6 +31,8 @@ const COLOR_AXIS_Y = 0x22c55e
 const COLOR_AXIS_CENTER = 0x60a5fa
 /** 斜切包围盒（紫） */
 const COLOR_SHEAR_BOX = 0xc084fc
+/** 拖拽新建骨骼的虚线预览 */
+const COLOR_PENDING = 0xa78bfa
 
 /** 小坐标轴的模式（与 editor/store/toolStore 的 GizmoMode 一致，避免循环依赖这里重复声明） */
 export type GizmoDrawMode = 'move' | 'rotate' | 'scale' | 'shear'
@@ -266,6 +270,37 @@ export function drawBoneOverlay(
   }
 
   if (options.showConstraints) drawConstraintLinks(g, skeleton, constraints, w)
+  drawPendingBone(strokes, fills, options.pendingBone, w)
+}
+
+/**
+ * 拖拽新建骨骼的预览：起点圆圈 + 虚线骨骼 + 末端圆点。
+ * 松开鼠标后由上层按同样的两点生成真实骨骼，所以预览与结果是同一条线。
+ */
+function drawPendingBone(
+  strokes: Graphics,
+  fills: Graphics,
+  pending: BoneOverlayOptions['pendingBone'],
+  w: number
+): void {
+  if (!pending) return
+  const { x1, y1, x2, y2 } = pending
+  const length = Math.hypot(x2 - x1, y2 - y1)
+  if (length > 1e-4) {
+    const dash = w * 7
+    const gap = w * 5
+    const dx = (x2 - x1) / length
+    const dy = (y2 - y1) / length
+    for (let distance = 0; distance < length; distance += dash + gap) {
+      const segment = Math.min(dash, length - distance)
+      strokes.moveTo(x1 + dx * distance, y1 + dy * distance)
+      strokes.lineTo(x1 + dx * (distance + segment), y1 + dy * (distance + segment))
+    }
+    strokes.stroke({ width: w * 2, color: COLOR_PENDING, alpha: 0.95 })
+  }
+  strokes.circle(x1, y1, w * 5).stroke({ width: w * 2, color: COLOR_PENDING, alpha: 0.95 })
+  fills.circle(x2, y2, w * 5).fill({ color: COLOR_PENDING, alpha: 0.35 })
+  strokes.circle(x2, y2, w * 5).stroke({ width: w * 2, color: COLOR_PENDING, alpha: 0.95 })
 }
 
 function drawConstraintLinks(

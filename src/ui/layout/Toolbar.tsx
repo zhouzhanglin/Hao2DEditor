@@ -31,7 +31,7 @@ export interface ToolbarProps {
 
 const TOOLS: Array<{ id: EditorTool; label: string; icon: typeof MousePointer2 }> = [
   { id: 'select', label: '选择工具 (V)', icon: MousePointer2 },
-  { id: 'bone', label: '绑骨骼工具 (B)', icon: Move3d },
+  { id: 'bone', label: '画骨骼工具 (B)：拖拽画骨骼，从已有骨骼上起手可连成链', icon: Move3d },
   { id: 'slot', label: '插槽工具 (S)', icon: Layers },
   { id: 'mesh', label: '网格工具 (M)', icon: Grid3x3 },
   { id: 'weight', label: '权重刷工具 (G)', icon: Spline },

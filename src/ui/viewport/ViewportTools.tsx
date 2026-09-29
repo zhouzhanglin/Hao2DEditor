@@ -12,11 +12,29 @@ import type { EditorTool, GizmoMode } from '@editor/store/toolStore'
  * 两组语义不同：编辑工具决定「鼠标在视口里做什么」，变换工具决定「选中骨骼怎么动」，
  * 所以中间加一条分隔线，激活态也用不同色系（编辑=强调青色、变换=轴色）。
  */
-const EDIT_TOOLS: Array<{ id: EditorTool; label: string; key: string; icon: typeof MousePointer2 }> = [
-  { id: 'select', label: '选择工具', key: 'V', icon: MousePointer2 },
-  { id: 'bone', label: '绑骨骼工具', key: 'B', icon: Bone },
+const EDIT_TOOLS: Array<{
+  id: EditorTool
+  label: string
+  key: string
+  icon: typeof MousePointer2
+  hint?: string
+}> = [
+  { id: 'select', label: '选择工具', key: 'V', icon: MousePointer2, hint: '选中并变换骨骼 / 插槽' },
+  {
+    id: 'bone',
+    label: '画骨骼工具',
+    key: 'B',
+    icon: Bone,
+    hint: '在视口拖拽画骨骼：起点落在骨骼上会吸附并以它为父，接着拖就能连成骨骼链（仅 Pose 态）'
+  },
   { id: 'weight', label: '权重刷工具', key: 'G', icon: Spline },
-  { id: 'ffd', label: 'FFD 顶点工具', key: 'D', icon: Boxes }
+  {
+    id: 'ffd',
+    label: 'FFD 顶点工具',
+    key: 'D',
+    icon: Boxes,
+    hint: '拖顶点：Pose 改绑定网格，Animate 写 FFD 帧；网格内双击可插入顶点'
+  }
 ]
 
 const GIZMO_ICONS: Record<GizmoMode, typeof Move> = {
@@ -55,13 +73,13 @@ export default function ViewportTools({ onStatus = () => undefined }: ViewportTo
 
   return (
     <div className="pointer-events-auto absolute left-3 top-[58px] z-20 flex flex-col gap-0.5 rounded-lg border border-line bg-ink-900/85 p-1 shadow-lg shadow-black/40 backdrop-blur-sm">
-      {editTools.map(({ id, label, key, icon: Icon }) => {
+      {editTools.map(({ id, label, key, icon: Icon, hint }) => {
         const active = tool === id
         return (
           <button
             key={id}
             type="button"
-            title={`${label}（${key}）`}
+            title={hint ? `${label}（${key}）\n${hint}` : `${label}（${key}）`}
             onClick={() => {
               setTool(id)
               onStatus(`工具：${label}`)

@@ -6,12 +6,15 @@ import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { keySlotDisplay, keySlotVisible } from '@editor/commands/animationCommands'
 import {
+  applyRename,
+  checkRename,
   convertMeshToRegion,
   convertRegionToMesh,
   deleteAttachment,
   deleteMeshVertex,
   patchAttachment
 } from '@editor/commands/authoringCommands'
+import type { RenameKind } from '@editor/commands/authoringCommands'
 import {
   CheckboxField,
   ColorField,
@@ -41,6 +44,32 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   /** Animate 态切显示附件 = 打 displayIndex 关键帧；Pose 态才是改绑定姿态 */
   const animating = mode === 'animate' && !!currentAnimation
 
+  /**
+   * 重命名当前选中对象（骨骼 / 插槽 / 附件 / 约束）。
+   * 名字是元数据：动画轨道里的引用会一并级联更新，不污染关键帧数据，
+   * 所以 Pose / Animate 态都允许改。改名后把选中切到新名字，属性面板继续显示。
+   */
+  const rename = (
+    kind: RenameKind,
+    oldName: string,
+    nextRaw: string,
+    options?: { slot?: string; label?: string; reselect?: () => void }
+  ): void => {
+    const next = nextRaw.trim()
+    if (!next || next === oldName) return
+    const label = options?.label ?? kind
+    const error = checkRename(document, { kind, slot: options?.slot }, oldName, next)
+    if (error) {
+      onStatus(error)
+      return
+    }
+    update(`重命名${label}`, (draft) => {
+      applyRename(draft, { kind, slot: options?.slot }, oldName, next)
+    })
+    options?.reselect?.()
+    onStatus(`「${oldName}」已重命名为「${next}」`)
+  }
+
   if (selection.kind === 'none') {
     return (
       <PanelEmpty
@@ -56,7 +85,12 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
     return (
       <div className="flex flex-col">
         <FieldGroup title="骨骼">
-          <TextField label="名称" value={bone.name} onChange={() => undefined} />
+          <TextField
+            label="名称"
+            value={bone.name}
+            commitOnBlur
+            onChange={(next) => rename('bone', bone.name, next, { label: '骨骼', reselect: () => selection.selectBone(next.trim()) })}
+          />
           <SelectField
             label="父级"
             value={bone.parent}
@@ -186,7 +220,12 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
     return (
       <div className="flex flex-col">
         <FieldGroup title="插槽">
-          <TextField label="名称" value={slot.name} onChange={() => undefined} />
+          <TextField
+            label="名称"
+            value={slot.name}
+            commitOnBlur
+            onChange={(next) => rename('slot', slot.name, next, { label: '插槽', reselect: () => selection.selectSlot(next.trim()) })}
+          />
           <SelectField
             label="骨骼"
             value={slot.bone}
@@ -278,7 +317,18 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
 
         {attachment ? (
           <FieldGroup title={`附件 · ${attachment.type}`}>
-            <TextField label="名称" value={attachment.name} onChange={() => undefined} />
+            <TextField
+              label="名称"
+              value={attachment.name}
+              commitOnBlur
+              onChange={(next) =>
+                rename('attachment', attachment.name, next, {
+                  slot: slot.name,
+                  label: '附件',
+                  reselect: () => selection.selectAttachment(slot.name, next.trim())
+                })
+              }
+            />
             <SelectField
               label="图片"
               value={attachment.image}
@@ -429,7 +479,17 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   return (
     <div className="flex flex-col">
       <FieldGroup title={`${CONSTRAINT_LABEL[constraint.type]}约束`}>
-        <TextField label="名称" value={constraint.name} onChange={() => undefined} />
+        <TextField
+          label="名称"
+          value={constraint.name}
+          commitOnBlur
+          onChange={(next) =>
+            rename('constraint', constraint.name, next, {
+              label: '约束',
+              reselect: () => selection.selectConstraint(next.trim())
+            })
+          }
+        />
         <NumberField
           label="顺序"
           value={constraint.order}

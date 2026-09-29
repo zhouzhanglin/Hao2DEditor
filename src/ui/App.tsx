@@ -141,6 +141,24 @@ export default function App() {
     return () => window.removeEventListener('hao2d:reset-layout', reset)
   }, [])
 
+  // 工程切换（打开 / 最近列表 / 拖入 .hao2d.proj）后重置视口：
+  // 上个会话的缩放与偏移若残留，屏幕中心就不再是世界原点，拖图落点会和「看到的原点」对不上
+  const viewResetForPath = useRef<string | null | undefined>(undefined)
+  /** 视口重置到「原点居中 + 适配内容」：新建 / 打开工程后调用，避免缩放偏移残留 */
+  const resetSceneView = useCallback(() => {
+    getActiveScene()?.fit()
+  }, [])
+  useEffect(() => {
+    if (viewResetForPath.current === undefined) {
+      // 首次挂载不重置（场景自己会做初始适配），只记录基准
+      viewResetForPath.current = projectPath
+      return
+    }
+    if (viewResetForPath.current === projectPath) return
+    viewResetForPath.current = projectPath
+    resetSceneView()
+  }, [projectPath, resetSceneView])
+
   /**
    * 切换 Pose / Animate。绑骨骼 / 权重刷这些改的是绑定姿态，Animate 下视口面板不显示它们，
    * 切过去时把工具收回「选择」，避免留下一个看不见却还在吃鼠标的工具。
@@ -222,7 +240,7 @@ export default function App() {
   const run = useCallback(
     (task: Promise<{ ok: boolean; message: string }> | { ok: boolean; message: string }, label?: string) => {
       setBusy(label ?? '处理中…')
-      void Promise.resolve(task)
+      return Promise.resolve(task)
         .then((result) => {
           if (result.message) flash(result.message)
         })
@@ -235,10 +253,10 @@ export default function App() {
     (command: string) => {
       switch (command) {
         case 'project:new':
-          run(newProject())
+          run(newProject()).then(resetSceneView)
           return
         case 'project:open':
-          run(openProject())
+          run(openProject()).then(resetSceneView)
           return
         case 'project:save':
           run(saveProject(false))

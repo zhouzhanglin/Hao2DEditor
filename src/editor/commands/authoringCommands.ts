@@ -616,3 +616,139 @@ function stripExtension(name: string): string {
   const index = name.lastIndexOf('.')
   return index > 0 ? name.slice(0, index) : name
 }
+
+// ---------------- 重命名（引用级联） ----------------
+
+export type RenameKind = 'bone' | 'slot' | 'attachment' | 'constraint'
+
+export interface RenameTarget {
+  kind: RenameKind
+  /** 骨骼 / 插槽 / 约束 = 自身名字；附件 = 所在插槽名 */
+  slot?: string
+  /** 附件改名时的当前附件名 */
+  attachment?: string
+}
+
+/**
+ * 重命名预检：名字为空 / 与集合内其它项重名时给出原因，通过则返回 null。
+ * 在 update() 之前调用，避免产生无效的撤销记录。
+ */
+export function checkRename(
+  doc: EditorDocument,
+  target: RenameTarget,
+  oldName: string,
+  nextName: string
+): string | null {
+  const next = nextName.trim()
+  if (!next) return '名字不能为空'
+  if (next === oldName) return null
+  const taken = (name: string): boolean => {
+    switch (target.kind) {
+      case 'bone':
+        return doc.bones.some((item) => item.name === name)
+      case 'slot':
+        return doc.slots.some((item) => item.name === name)
+      case 'attachment': {
+        const skinSlot = doc.skins.find((skin) => skin.slots.some((item) => item.slot === target.slot))
+        return !!skinSlot?.slots.find((item) => item.slot === target.slot)?.attachments.some((item) => item.name === name)
+      }
+      case 'constraint':
+        return doc.constraints.some((item) => item.name === name)
+    }
+  }
+  if (taken(next)) return `已经有一个叫「${next}」的${target.kind === 'bone' ? '骨骼' : target.kind === 'slot' ? '插槽' : target.kind === 'attachment' ? '附件' : '约束'}了`
+  return null
+}
+
+/** 把整个文档里的 `old` 引用换成 `next`（骨骼名出现在插槽宿主、动画轨道等处） */
+function renameBoneRefs(doc: EditorDocument, oldName: string, next: string): void {
+  for (const bone of doc.bones) if (bone.parent === oldName) bone.parent = next
+  for (const slot of doc.slots) if (slot.bone === oldName) slot.bone = next
+  for (const anim of doc.animations) for (const track of anim.bones) if (track.bone === oldName) track.bone = next
+}
+
+/** 插槽名出现在皮肤清单、动画轨道、deform、绘制顺序帧里 */
+function renameSlotRefs(doc: EditorDocument, oldName: string, next: string): void {
+  for (const skin of doc.skins) for (const skinSlot of skin.slots) if (skinSlot.slot === oldName) skinSlot.slot = next
+  for (const anim of doc.animations) {
+    for (const track of anim.slots) if (track.slot === oldName) track.slot = next
+    for (const deform of anim.deforms) if (deform.slot === oldName) deform.slot = next
+    for (const key of anim.drawOrder) {
+      if (key.order.includes(oldName)) key.order = key.order.map((name) => (name === oldName ? next : name))
+    }
+  }
+}
+
+/** 附件名出现在插槽当前显示、动画 displayAttachment 关键帧、deform 轨道里 */
+function renameAttachmentRefs(doc: EditorDocument, slotName: string, oldName: string, next: string): void {
+  for (const skin of doc.skins) {
+    const skinSlot = findSkinSlot(skin, slotName)
+    if (!skinSlot) continue
+    for (const attachment of skinSlot.attachments) if (attachment.name === oldName) attachment.name = next
+  }
+  const slot = doc.slots.find((item) => item.name === slotName)
+  if (slot && slot.attachment === oldName) slot.attachment = next
+  for (const anim of doc.animations) {
+    for (const track of anim.slots) {
+      if (track.slot !== slotName) continue
+      if (track.displayAttachment.includes(oldName)) {
+        track.displayAttachment = track.displayAttachment.map((name) => (name === oldName ? next : name))
+      }
+    }
+    for (const deform of anim.deforms) if (deform.slot === slotName && deform.attachment === oldName) deform.attachment = next
+  }
+}
+
+/** 约束名出现在动画的 mix 轨道里 */
+function renameConstraintRefs(doc: EditorDocument, oldName: string, next: string): void {
+  for (const anim of doc.animations) {
+    for (const track of anim.constraints) if (track.constraint === oldName) track.constraint = next
+  }
+}
+
+/**
+ * 在 draft 上执行重命名（所有引用同步级联）。名字校验交给 checkRename，这里只在通不过时返回 false。
+ * 约束按骨骼下标引用，骨骼重命名 / 重排不影响它们；这里的级联只处理按名字引用的场合。
+ */
+export function applyRename(
+  doc: EditorDocument,
+  target: RenameTarget,
+  oldName: string,
+  nextName: string
+): boolean {
+  const next = nextName.trim()
+  if (!next || next === oldName) return false
+  if (checkRename(doc, target, oldName, next)) return false
+
+  switch (target.kind) {
+    case 'bone': {
+      const bone = doc.bones.find((item) => item.name === oldName)
+      if (!bone) return false
+      bone.name = next
+      renameBoneRefs(doc, oldName, next)
+      return true
+    }
+    case 'slot': {
+      const slot = doc.slots.find((item) => item.name === oldName)
+      if (!slot) return false
+      slot.name = next
+      renameSlotRefs(doc, oldName, next)
+      return true
+    }
+    case 'attachment': {
+      if (!target.slot) return false
+      const skinSlot = doc.skins.find((skin) => skin.slots.some((item) => item.slot === target.slot))
+      const attachment = skinSlot?.slots.find((item) => item.slot === target.slot)?.attachments.find((item) => item.name === oldName)
+      if (!attachment) return false
+      renameAttachmentRefs(doc, target.slot, oldName, next)
+      return true
+    }
+    case 'constraint': {
+      const constraint = doc.constraints.find((item) => item.name === oldName)
+      if (!constraint) return false
+      constraint.name = next
+      renameConstraintRefs(doc, oldName, next)
+      return true
+    }
+  }
+}

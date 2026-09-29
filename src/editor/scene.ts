@@ -168,9 +168,12 @@ export class EditorScene {
     if (needsRebuild(this.bundle, doc, skinName)) {
       const previousAnimation = this.animationName
       const previousTime = this.viewState.time
+      // 先构建新运行时，成功了再替换：编译中途抛错时保持原样，
+      // 否则会留下「视图已销毁、新运行时没建起来」的状态，网格从此不再显示
+      const nextBundle = buildRuntime(doc, skinName)
       this.view?.destroy()
       this.view = null
-      this.bundle = buildRuntime(doc, skinName)
+      this.bundle = nextBundle
       this.skinName = skinName
       this.animationName = previousAnimation && doc.animations.some((a) => a.name === previousAnimation) ? previousAnimation : null
       if (this.animationName) {
@@ -206,13 +209,24 @@ export class EditorScene {
     // 播放中同样生效，这样「拖时间轴时画面跟着走」和「继续播放」不会互相打架。
     if (patch.time !== undefined && this.bundle && Math.abs(patch.time - previousTime) > 1e-6) {
       this.bundle.player.time = patch.time
-      this.markDirty()
+      this.invalidateSkin()
     }
     // 从暂停切到播放：把当前时间写回播放器并重建，避免首帧使用过期的采样结果
     if (this.viewState.playing && !wasPlaying && this.bundle) {
       this.bundle.player.time = this.viewState.time
-      this.markDirty()
+      this.invalidateSkin()
     }
+  }
+
+  /**
+   * 时间 / 姿态变化后必须连**网格**一起标脏。
+   *
+   * 蒙皮只在 `view.isDirty` 时重算（见 update）。只标场景脏的话，叠加层里的骨骼会跟着动，
+   * 但插槽（图片 / 网格）还是旧姿态 —— 拖时间轴时看起来「骨骼在动、slot 不动」。
+   */
+  private invalidateSkin(): void {
+    this.view?.markDirty()
+    this.markDirty()
   }
 
   get state(): SceneViewState {
@@ -240,13 +254,13 @@ export class EditorScene {
     } else {
       this.bundle.player.stop()
     }
-    this.markDirty()
+    this.invalidateSkin()
   }
 
   setTime(time: number): void {
     if (!this.bundle) return
     this.bundle.player.time = time
-    this.markDirty()
+    this.invalidateSkin()
   }
 
   get duration(): number {
@@ -308,8 +322,9 @@ export class EditorScene {
     }
   }
 
-  /** 立即重建一帧（编辑后调用，不等下一帧） */
+  /** 立即重建一帧（编辑后调用，不等下一帧）：连网格一起重建 */
   refresh(): void {
+    this.invalidateSkin()
     this.update(0)
   }
 

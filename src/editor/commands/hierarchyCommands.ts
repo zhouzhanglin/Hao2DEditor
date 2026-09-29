@@ -1,4 +1,5 @@
 import type { EditorDocument } from '@core/model/authoring'
+import { decomposeTrs, invert, mul } from '@core/math/matrix'
 import { findSkinSlot } from './authoringCommands'
 
 /**
@@ -53,16 +54,58 @@ export function validateBoneMove(doc: EditorDocument, name: string, targetBone: 
   return { ok: true, message: '' }
 }
 
+export interface MoveBoneOptions {
+  /**
+   * 取骨骼「当前世界矩阵」（列主序 16 个数，setup 姿态）的拷贝。
+   * 传入后重设父级会**保持被移动骨骼的全局位置 / 旋转 / 缩放 / 错切不变**；
+   * 不传则只改父级（局部 TRS 原样保留，世界变换会跟着变）。
+   */
+  worldMatrixOf?: (boneName: string) => Float32Array | null
+}
+
+/**
+ * 重设父级时保持世界变换：按新父（空 = 根层）把旧世界矩阵换算成新的局部 TRS。
+ *
+ * 关闭了「继承旋转 / 缩放」的骨骼不适用（它的局部参数与父级的组合不是标准矩阵乘法，
+ * 逆推不成立），这类骨骼保持原局部值不动。
+ */
+function preserveWorldTransform(
+  bone: Bones[number],
+  newParent: string,
+  worldMatrixOf: (boneName: string) => Float32Array | null
+): void {
+  if (!bone.inheritRotation || !bone.inheritScale) return
+  const world = worldMatrixOf(bone.name)
+  if (!world) return
+  let local: Float32Array
+  if (newParent) {
+    const parentWorld = worldMatrixOf(newParent)
+    if (!parentWorld) return
+    local = mul(invert(parentWorld), world)
+  } else {
+    // 根层：局部矩阵就是世界矩阵
+    local = world
+  }
+  const parts = decomposeTrs(local)
+  bone.localPosition = { x: parts.x, y: parts.y }
+  bone.rotation = parts.rotation
+  bone.localScale = { x: parts.scaleX, y: parts.scaleY }
+  bone.localShear = { x: parts.shearX, y: parts.shearY }
+}
+
 /**
  * 移动骨骼。
  * - `inside`：targetBone 为空串时变成根骨骼，否则成为它的子骨骼
  * - `above` / `below`：与 targetBone 同级，并排到它的前 / 后（数组顺序即树的显示顺序）
+ *
+ * 传入 `options.worldMatrixOf` 时保持骨骼的世界变换（全局位置 / 旋转 / 缩放 / 错切不变）。
  */
 export function moveBone(
   doc: EditorDocument,
   name: string,
   targetBone: string,
-  zone: DropZone
+  zone: DropZone,
+  options?: MoveBoneOptions
 ): MoveResult {
   const check = validateBoneMove(doc, name, targetBone)
   if (!check.ok) return check
@@ -70,10 +113,16 @@ export function moveBone(
   if (!bone) return check
 
   if (zone === 'inside' || !targetBone) {
+    if (options?.worldMatrixOf && bone.parent !== targetBone) {
+      preserveWorldTransform(bone, targetBone, options.worldMatrixOf)
+    }
     bone.parent = targetBone
   } else {
     const target = doc.bones.find((item) => item.name === targetBone)
     if (!target) return { ok: false, message: `找不到骨骼「${targetBone}」` }
+    if (options?.worldMatrixOf && bone.parent !== target.parent) {
+      preserveWorldTransform(bone, target.parent, options.worldMatrixOf)
+    }
     bone.parent = target.parent
     const from = doc.bones.indexOf(bone)
     if (from >= 0) doc.bones.splice(from, 1)

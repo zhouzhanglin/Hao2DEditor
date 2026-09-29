@@ -366,6 +366,18 @@ export class EditorScene {
   }
 
   /**
+   * 骨骼的当前世界矩阵（列主序 16 个数的**拷贝**，setup 姿态）。
+   * 层级树里重设父级时用它把世界变换换算到新父的局部空间；骨骼不存在时返回 null。
+   */
+  worldMatrixOf(boneName: string): Float32Array | null {
+    const bundle = this.bundle
+    if (!bundle) return null
+    const index = bundle.boneIndex[boneName]
+    if (index === undefined) return null
+    return bundle.skeleton.world.slice(index * 16, index * 16 + 16)
+  }
+
+  /**
    * 世界坐标 → 骨骼局部坐标（附件显示空间）。
    * 把图片拖到场景里时，用落点算出附件的 position 就靠这个换算。
    * 用的是骨骼**当前**世界矩阵：Pose 状态下即 setup 姿态。

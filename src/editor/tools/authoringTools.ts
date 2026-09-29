@@ -160,8 +160,8 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   }
 
   // 绑骨骼工具：在视口里拖拽「画」骨骼（连续绑定）。
-  // 起点落在已有骨骼上就吸附到它的轴线并以它为父；落在空白处则接在当前选中骨骼下面，
-  // 于是拖完一根接着拖下一根，自然就接成一条骨骼链。
+  // 起点落在已有骨骼上就吸附到它的轴线并以它为父（明确的「接着画」意图）；
+  // 落在空白处一律建在根层 —— 选中态不参与，避免误挂到上次选中的骨骼下面。
   if (tools.tool === 'bone') {
     if (host.mode !== 'pose') {
       host.status('骨骼属于绑定数据：切到 Pose 状态再画')
@@ -181,7 +181,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     host.status(
       parent
         ? `从「${parent}」接着画：拖动决定长度与方向，松开生成（可以一根接一根拖成骨骼链）`
-        : '拖动决定长度与方向，松开生成骨骼'
+        : '拖动决定长度与方向，松开生成骨骼（建在根层；从骨骼上起笔才会挂到它下面）'
     )
     return true
   }
@@ -803,7 +803,13 @@ function snapToBoneAxis(host: ToolHost, world: Vec2): Vec2 {
   return { x: ox + ax * clamped, y: oy + ay * clamped }
 }
 
-/** 新骨骼的父级：起点命中的骨骼 > 当前选中骨骼 > 根骨骼 */
+/**
+ * 新骨骼的父级：**只看起点是否落在某根骨骼上**（「从这根骨骼接着画」的明确意图），
+ * 否则一律建在根层。
+ *
+ * 这里**刻意不看当前选中骨骼**：画骨骼工具下选中态不参与建档，
+ * 否则「上次选中的骨骼」会静默成为新骨骼的父级，很容易不小心把骨骼挂错地方。
+ */
 function resolveCreateParent(host: ToolHost, world: Vec2): string {
   const bundle = host.scene.runtime
   const hit = host.scene.pickBoneAt(world.x, world.y)
@@ -811,7 +817,7 @@ function resolveCreateParent(host: ToolHost, world: Vec2): string {
     const name = bundle.asset.bones[hit.boneIndex]?.name ?? ''
     if (name) return name
   }
-  return host.selection.kind === 'bone' ? host.selection.bone : ''
+  return ''
 }
 
 /**

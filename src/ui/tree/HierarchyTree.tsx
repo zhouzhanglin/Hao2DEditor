@@ -19,6 +19,7 @@ import {
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useModeStore } from '@editor/store/modeStore'
+import { getActiveScene } from '@editor/activeScene'
 import { createIkConstraint, createPathConstraint, createTransformConstraint } from '@core/model/constraints'
 import type { AuthoringBone, AuthoringConstraint, EditorDocument } from '@core/model/authoring'
 import { createAuthoringBone, createAuthoringSlot } from '@core/model/authoring'
@@ -217,6 +218,11 @@ function TreeRow({
   )
 }
 
+/** 取骨骼当前世界矩阵（重设父级时保持全局变换用）；场景未就绪时返回 null */
+function worldMatrixOfBone(boneName: string): Float32Array | null {
+  return getActiveScene()?.worldMatrixOf(boneName) ?? null
+}
+
 const CONSTRAINT_ICON: Record<AuthoringConstraint['type'], React.ReactNode> = {
   ik: <Target size={11} className="text-accent/80" />,
   transform: <Maximize2 size={11} className="text-ok/80" />,
@@ -345,7 +351,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       }
       let result: MoveResult = check
       update('调整骨骼层级', (draft) => {
-        result = moveBone(draft, payload.name, target.name, position)
+        // 传世界矩阵：换父级后保持骨骼的全局位置 / 旋转 / 缩放
+        result = moveBone(draft, payload.name, target.name, position, { worldMatrixOf: worldMatrixOfBone })
       })
       if (result.message) onStatus?.(result.message)
       return
@@ -832,7 +839,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             if (payload.kind === 'bone') {
               let result: MoveResult = { ok: false, message: '' }
               update('调整骨骼层级', (draft) => {
-                result = moveBone(draft, payload.name, '', 'inside')
+                result = moveBone(draft, payload.name, '', 'inside', { worldMatrixOf: worldMatrixOfBone })
               })
               if (result.message) onStatus?.(result.message)
               return

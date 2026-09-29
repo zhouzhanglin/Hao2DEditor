@@ -1,4 +1,4 @@
-import { DEG2RAD, RAD2DEG } from './utils'
+import { DEG2RAD, RAD2DEG, normalizeAngle } from './utils'
 
 export interface Vec2 {
   x: number
@@ -204,6 +204,44 @@ export function scaleYOf(m: Float32Array): number {
 /** X 轴朝向（度），等价 atan2(c, a) */
 export function rotationOf(m: Float32Array): number {
   return Math.atan2(m[1], m[0]) * RAD2DEG
+}
+
+/** 局部 TRS（含错切）参数，与 fk.ts 的矩阵构造约定互逆 */
+export interface TrsParts {
+  x: number
+  y: number
+  rotation: number
+  scaleX: number
+  scaleY: number
+  shearX: number
+  shearY: number
+}
+
+/**
+ * 把局部矩阵分解回 TRS 参数 —— `fk.ts` 里
+ * `(pos, rotation, scale, shear) → 矩阵` 的逆运算。
+ *
+ * 约定（见 fk.ts）：X 轴角 = rotation + shearX，Y 轴角 = rotation + 90 + shearY。
+ * 分解时把整段 X 轴角归给 rotation（shearX = 0），只把两轴夹角之差写进 shearY ——
+ * 这样没有错切的骨骼不会被动引入错切。镜像（行列式 < 0）统一归到 scaleY 取负，
+ * 并补偿 Y 轴多转的 180°。
+ */
+export function decomposeTrs(m: Float32Array): TrsParts {
+  const thetaX = Math.atan2(m[1], m[0]) * RAD2DEG
+  let thetaY = Math.atan2(m[5], m[4]) * RAD2DEG
+  const scaleX = Math.hypot(m[0], m[1])
+  const scaleY = Math.hypot(m[4], m[5])
+  const mirrored = m[0] * m[5] - m[4] * m[1] < 0
+  if (mirrored) thetaY += 180
+  return {
+    x: m[12],
+    y: m[13],
+    rotation: thetaX,
+    scaleX,
+    scaleY: mirrored ? -scaleY : scaleY,
+    shearX: 0,
+    shearY: normalizeAngle(thetaY - thetaX - 90)
+  }
 }
 
 /** 水平翻转（对局部 scale.x 取负并绕原点镜像），用于编辑器镜像显示 */

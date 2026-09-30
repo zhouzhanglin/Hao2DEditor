@@ -44,7 +44,7 @@ const EDIT_TOOLS: Array<{
     label: '顶点工具',
     key: 'D',
     icon: Grid3x3,
-    hint: '拖顶点：Pose 改绑定网格，Animate 写 FFD 帧；网格内双击可插入顶点'
+    hint: '拖顶点：Pose 改绑定网格，Animate 写 FFD 帧；网格内 Alt+点击插入顶点'
   }
 ]
 
@@ -57,13 +57,13 @@ const VERTEX_TOOL_VIEWS: Record<'pose' | 'animate', { label: string; key: string
     label: '网格工具',
     key: 'M',
     icon: Grid3x3,
-    hint: '编辑网格顶点 / 三角面；网格内双击可插入顶点'
+    hint: '编辑网格顶点 / 三角面；网格内 Alt+点击插入顶点'
   },
   animate: {
     label: 'FFD 顶点工具',
     key: 'D',
     icon: Grid3x3,
-    hint: '拖顶点写当前时间点的 FFD 帧；网格内双击可插入顶点'
+    hint: '拖顶点写当前时间点的 FFD 帧；网格内 Alt+点击插入顶点'
   }
 }
 

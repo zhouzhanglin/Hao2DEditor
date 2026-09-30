@@ -366,8 +366,13 @@ function triangleAtPoint(attachment: AuthoringAttachment, x: number, y: number):
 }
 
 /**
- * 在网格里插入一个顶点：把命中的三角形拆成 3 个（UV 与蒙皮权重按重心坐标插值）。
- * 返回新顶点的下标，未命中任何三角形时返回 null。
+ * 在网格里插入一个顶点。
+ *
+ * - 点落在**已有网格线上**（吸附容差内、且不在端点附近）→ 把这条边一分为二：
+ *   新顶点插在边线上（UV / 权重按边上的比例插值），相邻的 1~2 个三角形各自拆成两个
+ * - 点落在三角形内部 → 把命中的三角形拆成 3 个（UV 与权重按重心坐标插值）
+ *
+ * 返回新顶点的下标；两处都不命中时返回 null。
  */
 export function insertMeshVertex(
   doc: EditorDocument,
@@ -377,6 +382,13 @@ export function insertMeshVertex(
 ): number | null {
   const attachment = findAttachment(doc, slotName, attachmentName)
   if (!attachment || attachment.type !== 'mesh') return null
+
+  // 先看是不是「点在网格线上」：容差内取最近的一条边。
+  // 端点附近（t ≈ 0 / 1）不算 —— 那里本来就有顶点，插进去只会得到退化三角形
+  const edge = nearestEdgeOf(attachment, point.x, point.y)
+  if (edge && edge.distance <= edgeInsertTolerance(attachment) && edge.t >= 0.05 && edge.t <= 0.95) {
+    return insertVertexOnEdge(attachment, edge)
+  }
 
   const triangleIndex = triangleAtPoint(attachment, point.x, point.y)
   if (triangleIndex < 0) return null
@@ -409,6 +421,111 @@ export function insertMeshVertex(
   attachment.triangles.splice(triangleIndex, 3, i0, i1, index, i1, i2, index, i2, i0, index)
   attachment.hull = attachment.vertices.length
   return index
+}
+
+/**
+ * 点到线段的距离与投影参数：遍历所有三角形的三条边，返回最近的一条。
+ * 同一条边会被相邻两个三角形各算一次，这里不去重（网格规模很小，代价可以忽略）。
+ */
+function nearestEdgeOf(
+  attachment: AuthoringAttachment,
+  x: number,
+  y: number
+): { a: number; b: number; t: number; distance: number } | null {
+  const { vertices, triangles } = attachment
+  let best: { a: number; b: number; t: number; distance: number } | null = null
+  for (let i = 0; i + 2 < triangles.length; i += 3) {
+    for (let k = 0; k < 3; k++) {
+      const ia = triangles[i + k]
+      const ib = triangles[i + ((k + 1) % 3)]
+      const a = vertices[ia]
+      const b = vertices[ib]
+      if (!a || !b) continue
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const lengthSq = dx * dx + dy * dy
+      const t = lengthSq < 1e-12 ? 0 : Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / lengthSq))
+      const distance = Math.hypot(x - (a.x + dx * t), y - (a.y + dy * t))
+      if (!best || distance < best.distance) best = { a: ia, b: ib, t, distance }
+    }
+  }
+  return best
+}
+
+/** 「点在网格线上」的吸附容差：按网格包围盒对角线取 1.5%（与视口缩放无关，行为可预期） */
+function edgeInsertTolerance(attachment: AuthoringAttachment): number {
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const vertex of attachment.vertices) {
+    if (vertex.x < minX) minX = vertex.x
+    if (vertex.y < minY) minY = vertex.y
+    if (vertex.x > maxX) maxX = vertex.x
+    if (vertex.y > maxY) maxY = vertex.y
+  }
+  return Math.max(Math.hypot(maxX - minX, maxY - minY) * 0.015, 1e-4)
+}
+
+/** 在一条边上插点：边一分为二，相邻的 1~2 个三角形各自拆成两个 */
+function insertVertexOnEdge(
+  attachment: AuthoringAttachment,
+  edge: { a: number; b: number; t: number }
+): number {
+  const { a: ia, b: ib, t } = edge
+  const va = attachment.vertices[ia]
+  const vb = attachment.vertices[ib]
+  const index = attachment.vertices.length
+  // 新顶点落在**投影点**上（不用原始点击位置：那会让新顶点略微偏离这条边）
+  attachment.vertices.push({
+    x: va.x + (vb.x - va.x) * t,
+    y: va.y + (vb.y - va.y) * t,
+    weights: blendWeights([
+      [va, 1 - t],
+      [vb, t]
+    ])
+  })
+  attachment.uvs.push(
+    attachment.uvs[ia * 2] * (1 - t) + attachment.uvs[ib * 2] * t,
+    attachment.uvs[ia * 2 + 1] * (1 - t) + attachment.uvs[ib * 2 + 1] * t
+  )
+
+  const next: number[] = []
+  for (let i = 0; i + 2 < attachment.triangles.length; i += 3) {
+    const p = attachment.triangles[i]
+    const q = attachment.triangles[i + 1]
+    const r = attachment.triangles[i + 2]
+    const split = splitTriangleAtEdge(p, q, r, ia, ib, index)
+    if (split) next.push(split[0], split[1], split[2], split[3], split[4], split[5])
+    else next.push(p, q, r)
+  }
+  attachment.triangles = next
+  attachment.hull = attachment.vertices.length
+  return index
+}
+
+/**
+ * 三角形含这条边时，按边的**原有方向**拆成两个（保持绕向，避免三角形翻面）。
+ * 相邻的两个三角形里这条边的方向相反，所以两个方向都要匹配。
+ */
+function splitTriangleAtEdge(
+  p: number,
+  q: number,
+  r: number,
+  ia: number,
+  ib: number,
+  index: number
+): number[] | null {
+  const tri = [p, q, r]
+  for (let k = 0; k < 3; k++) {
+    const from = tri[k]
+    const to = tri[(k + 1) % 3]
+    if ((from === ia && to === ib) || (from === ib && to === ia)) {
+      const rest = tri[(k + 2) % 3]
+      return [from, index, rest, index, to, rest]
+    }
+  }
+  return null
 }
 
 /**

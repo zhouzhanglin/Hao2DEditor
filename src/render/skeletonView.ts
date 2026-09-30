@@ -35,12 +35,18 @@ export class SkeletonView {
   private dirty = true
   private lastResult: MeshBuildResult | null = null
   private triangleCount = 0
+  /** 纹理加载完成后的取消订阅句柄（见构造里的说明） */
+  private unsubscribeTextures: (() => void) | null = null
 
   constructor(asset: RuntimeAsset, textures: TextureStore, skinName = '') {
     this.asset = asset
     this.textures = textures
     this.builder = new MeshBuilder(asset, skinName)
     this.container.label = 'hao2d-skeleton'
+    // 纹理是**异步**加载完的：到位后必须重同步一次，否则网格会一直停在 Texture.WHITE
+    //（白块，见 TextureStore.get 的兜底），直到某次编辑触发重建才恢复 ——
+    // 用户看到的就是「工程刚打开时 display 是白的，点一下显示 / 隐藏才正常」
+    this.unsubscribeTextures = textures.onChange(() => this.markDirty())
   }
 
   get meshBuilder(): MeshBuilder {
@@ -97,6 +103,8 @@ export class SkeletonView {
   }
 
   destroy(): void {
+    this.unsubscribeTextures?.()
+    this.unsubscribeTextures = null
     for (const mesh of this.meshes) mesh.destroy()
     for (const geometry of this.geometries) geometry.destroy()
     this.positionBuffer?.destroy()

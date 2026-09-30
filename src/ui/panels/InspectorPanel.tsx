@@ -469,7 +469,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                 顶点 {attachment.vertices.length} · 三角面 {Math.floor(attachment.triangles.length / 3)} ·
                 加权 {attachment.vertices.filter((v) => v.weights.length > 0).length}
                 <br />
-                用网格 / FFD 工具在网格内双击可插入顶点，选中顶点后可在下面删除
+                用网格 / FFD 工具在网格内 Alt+点击插入顶点，选中顶点后可在下面删除
               </p>
             ) : null}
 

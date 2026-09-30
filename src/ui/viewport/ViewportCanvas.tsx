@@ -195,10 +195,17 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     })
   }, [])
 
-  const pointer = useRef<{ panning: boolean; lastX: number; lastY: number }>({
+  const pointer = useRef<{
+    panning: boolean
+    lastX: number
+    lastY: number
+    /** Alt+点击的**待定插点**：松手时没拖动过才真的插入（拖了就转成平移，见 onPointerMove） */
+    insert: { clientX: number; clientY: number; rect: DOMRect } | null
+  }>({
     panning: false,
     lastX: 0,
-    lastY: 0
+    lastY: 0,
+    insert: null
   })
 
   /** 每次事件都从 store 现取状态，避免拖拽过程中持有过期快照 */
@@ -222,11 +229,74 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     return scene.viewport.screenToWorld(event.clientX - rect.left, event.clientY - rect.top)
   }
 
+  /** 网格 / FFD 工具 + 选中附件，才谈得上插顶点（模式不对时给出提示并返回 false） */
+  const canInsertMeshVertex = (): boolean => {
+    const selection = useSelectionStore.getState()
+    if (useToolStore.getState().tool !== 'ffd' || selection.kind !== 'attachment') return false
+    if (useModeStore.getState().mode !== 'pose') {
+      onStatus('插入顶点改的是绑定网格：请切到 Pose 状态')
+      return false
+    }
+    return true
+  }
+
+  /** 在指定屏幕位置插一个顶点（UV 与蒙皮权重按所在三角形插值）；返回是否插入成功 */
+  const insertMeshVertexAt = (clientX: number, clientY: number, rect: DOMRect): boolean => {
+    const scene = sceneRef.current
+    const selection = useSelectionStore.getState()
+    if (!scene || selection.kind !== 'attachment') return false
+    const world = scene.viewport.screenToWorld(clientX - rect.left, clientY - rect.top)
+    const local = scene.worldToAttachmentLocal(selection.slot, selection.attachment, world.x, world.y)
+    if (!local) {
+      onStatus('插入位置不在附件上')
+      return false
+    }
+    let created: number | null = null
+    useProjectStore.getState().update('插入网格顶点', (draft) => {
+      created = insertMeshVertex(draft, selection.slot, selection.attachment, local as { x: number; y: number })
+    })
+    const index = created as number | null
+    if (index === null) {
+      onStatus('该位置不在网格内部：点在网格覆盖的区域内才能插入顶点')
+      return false
+    }
+    useSelectionStore.getState().selectVertices([index])
+    onStatus(`已插入顶点 #${index}（UV 与权重按位置插值，落在网格线上时会把那条边一分为二）`)
+    return true
+  }
+
+  /**
+   * 网格顶点插入的「一次性」入口（双击用）：工具 / 模式不对时返回 false，让调用方走别的逻辑。
+   * Alt+点击不走这里 —— 它先记待定插点、松手才插（见 onPointerDown / releasePointer）。
+   */
+  const tryInsertMeshVertex = (clientX: number, clientY: number, rect: DOMRect): boolean => {
+    if (!canInsertMeshVertex()) return false
+    return insertMeshVertexAt(clientX, clientY, rect)
+  }
+
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
     const scene = sceneRef.current
     if (!scene) return
-    if (event.button === 1 || event.button === 2 || event.altKey) {
-      pointer.current = { panning: true, lastX: event.clientX, lastY: event.clientY }
+    // Alt+点击 = 插入顶点。这里只**记下待定插点**（不在这里判工具 / 选中：松手时才决定
+    // 是插点还是解释为什么不插），真正插入放到松手时 —— 期间没拖动过才算「点击」，
+    // 所以 Alt 拖动依旧是平移，不会一按下去就多出一个顶点
+    if (event.altKey) {
+      pointer.current = {
+        panning: false,
+        lastX: event.clientX,
+        lastY: event.clientY,
+        insert: {
+          clientX: event.clientX,
+          clientY: event.clientY,
+          rect: event.currentTarget.getBoundingClientRect()
+        }
+      }
+      event.currentTarget.setPointerCapture(event.pointerId)
+      event.preventDefault()
+      return
+    }
+    if (event.button === 1 || event.button === 2) {
+      pointer.current = { panning: true, lastX: event.clientX, lastY: event.clientY, insert: null }
       event.currentTarget.setPointerCapture(event.pointerId)
       return
     }
@@ -262,10 +332,18 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
   const onPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
     const scene = sceneRef.current
     if (!scene) return
-    if (pointer.current.panning) {
-      scene.viewport.pan(event.clientX - pointer.current.lastX, event.clientY - pointer.current.lastY)
-      pointer.current.lastX = event.clientX
-      pointer.current.lastY = event.clientY
+    const p = pointer.current
+    // 待定插点：一旦拖动超过阈值，说明用户其实想平移 → 转成平移（这次就不再插点）。
+    // 阈值给到 6px：真实鼠标 / 触控板的「点击」常带几像素抖动，阈值太小会把点击误判成拖动
+    //（表现就是「点了没反应」）
+    if (p.insert && Math.hypot(event.clientX - p.insert.clientX, event.clientY - p.insert.clientY) > 6) {
+      p.insert = null
+      p.panning = true
+    }
+    if (p.panning) {
+      scene.viewport.pan(event.clientX - p.lastX, event.clientY - p.lastY)
+      p.lastX = event.clientX
+      p.lastY = event.clientY
       scene.markDirty()
       return
     }
@@ -279,6 +357,16 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     const hit = scene.pickBoneHandleAt(world.x, world.y)
     const name = hit && scene.runtime ? (scene.runtime.asset.bones[hit.boneIndex]?.name ?? '') : ''
     if (scene.state.hoveredBone !== name) scene.setViewState({ hoveredBone: name })
+
+    // 按住 Alt（网格 / FFD 工具 + 已选网格附件）：光标变「复制」——提示这里点一下会插顶点
+    if (
+      event.altKey &&
+      useToolStore.getState().tool === 'ffd' &&
+      useSelectionStore.getState().kind === 'attachment'
+    ) {
+      if (event.currentTarget.style.cursor !== 'copy') event.currentTarget.style.cursor = 'copy'
+      return
+    }
 
     // 光标：斜切包围盒 > 小坐标轴 > 原点圈（移动）> 骨骼体（旋转）
     const mode = useToolStore.getState().gizmo
@@ -314,7 +402,24 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
   }
 
   const releasePointer = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const pending = pointer.current.insert
     pointer.current.panning = false
+    pointer.current.insert = null
+    // 松手时仍挂着待定插点 = 这是一次「Alt+点击」（期间没拖动过）。
+    // 逐项检查并**明确说明为什么没插**：静默失败最让人困惑（看起来就像功能坏了）
+    if (pending) {
+      const selection = useSelectionStore.getState()
+      const tool = useToolStore.getState().tool
+      if (tool !== 'ffd') {
+        onStatus('Alt+点击插入顶点：先切到网格工具（Pose 按 M / Animate 按 D）')
+      } else if (selection.kind !== 'attachment') {
+        onStatus('Alt+点击插入顶点：先在层级树里选中要编辑的网格附件')
+      } else if (useModeStore.getState().mode !== 'pose') {
+        onStatus('插入顶点改的是绑定网格：请切到 Pose 状态')
+      } else {
+        insertMeshVertexAt(pending.clientX, pending.clientY, pending.rect)
+      }
+    }
     const host = buildHost()
     if (isDragging() && host) toolPointerUp(host)
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -430,37 +535,11 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       onPointerCancel={releasePointer}
       onWheel={onWheel}
       onDoubleClick={(event) => {
-        const scene = sceneRef.current
-        if (!scene) return
-        const selection = useSelectionStore.getState()
-        const tools = useToolStore.getState()
-        // 网格 / FFD 工具下双击网格内部 = 插一个顶点（UV 与蒙皮权重按所在三角形插值）
-        if (tools.tool === 'ffd' && selection.kind === 'attachment') {
-          if (useModeStore.getState().mode !== 'pose') {
-            onStatus('插入顶点改的是绑定网格：请切到 Pose 状态')
-            return
-          }
-          const rect = event.currentTarget.getBoundingClientRect()
-          const world = scene.viewport.screenToWorld(event.clientX - rect.left, event.clientY - rect.top)
-          const local = scene.worldToAttachmentLocal(selection.slot, selection.attachment, world.x, world.y)
-          if (!local) {
-            onStatus('双击位置不在附件上')
-            return
-          }
-          let created: number | null = null
-          useProjectStore.getState().update('插入网格顶点', (draft) => {
-            created = insertMeshVertex(draft, selection.slot, selection.attachment, local as { x: number; y: number })
-          })
-          const index = created as number | null
-          if (index === null) {
-            onStatus('双击位置不在网格内部（先选中一个网格附件）')
-            return
-          }
-          useSelectionStore.getState().selectVertices([index])
-          onStatus(`已插入顶点 #${index}（UV 与权重按所在三角形插值）`)
+        // 网格 / FFD 工具下双击网格内部 = 插一个顶点（与 Alt+点击共用同一实现）
+        if (tryInsertMeshVertex(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect())) {
           return
         }
-        scene.fit()
+        sceneRef.current?.fit()
         onStatus('已适配视野')
       }}
       onDragOver={(event) => {
@@ -490,15 +569,18 @@ async function loadTextures(
 ): Promise<void> {
   if (!store && !imageAlpha) return
   const platform = getPlatform()
-  for (const image of document.images) {
-    // 纹理与 alpha 缓存的就绪状态分开判断：纹理已加载不代表像素拾取能采样了
-    const needTexture = store !== null && !store.has(image.name)
-    const needAlpha = imageAlpha !== null && !imageAlpha.has(image.name)
-    if (!needTexture && !needAlpha) continue
-    // imageUrl：Electron 会读文件字节给同源 blob:（协议 URL 跨源，WebGL 用不了）
-    const url = await platform.imageUrl(image.path)
-    if (!url) continue
-    if (needTexture && store) await store.load(image.name, url)
-    if (needAlpha && imageAlpha) imageAlpha.ensure(image.name, url)
-  }
+  // 并行加载：串行时一张张排队，最后一张读完前面才全部就绪（视口里先是白块，等得越久越明显）
+  await Promise.all(
+    document.images.map(async (image) => {
+      // 纹理与 alpha 缓存的就绪状态分开判断：纹理已加载不代表像素拾取能采样了
+      const needTexture = store !== null && !store.has(image.name)
+      const needAlpha = imageAlpha !== null && !imageAlpha.has(image.name)
+      if (!needTexture && !needAlpha) return
+      // imageUrl：Electron 会读文件字节给同源 blob:（协议 URL 跨源，WebGL 用不了）
+      const url = await platform.imageUrl(image.path)
+      if (!url) return
+      if (needTexture && store) await store.load(image.name, url)
+      if (needAlpha && imageAlpha) imageAlpha.ensure(image.name, url)
+    })
+  )
 }

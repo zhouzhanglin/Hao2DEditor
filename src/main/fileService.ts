@@ -148,6 +148,10 @@ export async function writeBatch(files: BatchFile[]): Promise<void> {
 export async function listDir(dir: string, recursive: boolean): Promise<DirEntry[]> {
   const root = assertSafePath(dir)
   const out: DirEntry[] = []
+  // 传进来的可能是文件（渲染层用它判断「拖入的是不是文件夹」）：
+  // 不是目录时返回空列表，而不是让 readdir 抛 ENOTDIR
+  const st = await fsp.stat(root).catch(() => null)
+  if (!st || !st.isDirectory()) return out
   await walk(root, root, recursive, out, 0)
   return out
 }

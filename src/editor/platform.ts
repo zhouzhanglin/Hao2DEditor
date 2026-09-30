@@ -214,8 +214,21 @@ class MemoryPlatform implements Platform {
     console.log(`[hao2d] 内存模式写入 ${files.length} 个文件：`, files.map((f) => f.path).join(', '))
   }
 
-  async listDir(): Promise<DirEntry[]> {
-    return []
+  /**
+   * 内存文件系统的「目录」视图：把 `dir/...` 前缀下的文件全部返回（含子目录，等价递归）。
+   * 「拖入文件夹 → 展开里面的图片」这条链路因此在浏览器模式下也能跑通（便于自动化验证）：
+   * 传文件路径时没有前缀匹配 → 空列表 → 调用方按普通文件处理。
+   */
+  async listDir(dir: string): Promise<DirEntry[]> {
+    const prefix = dir.endsWith('/') ? dir : `${dir}/`
+    const out: DirEntry[] = []
+    for (const [key, bytes] of this.files) {
+      if (!key.startsWith(prefix)) continue
+      const rest = key.slice(prefix.length)
+      if (rest.length === 0) continue
+      out.push({ path: key, name: rest, relativePath: rest, isDirectory: false, size: bytes.length })
+    }
+    return out
   }
 
   async exists(path: string): Promise<boolean> {

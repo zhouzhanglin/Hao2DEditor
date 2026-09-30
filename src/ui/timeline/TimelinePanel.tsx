@@ -371,7 +371,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
           timeline.setPlaying(false)
           timeline.setTime(value)
         }}
-        onSelectTarget={(track) => selectTrack(track, selection, onStatus)}
+        onSelectTarget={(track) => selectTrack(track, selection, onStatus, timeline.setSelectedTrack)}
         onSetTimes={(entries) => {
           // 绝对时间由 dope sheet 基于拖拽起点算出，这里只做写入（拖拽会话内 selector 时间保持同步）
           const name = animation?.name ?? null
@@ -436,26 +436,40 @@ function selectionTargets(selection: ReturnType<typeof useSelectionStore.getStat
 function selectTrack(
   track: TimelineTrack,
   selection: ReturnType<typeof useSelectionStore.getState>,
-  status: (text: string) => void
+  status: (text: string) => void,
+  setTrack: (track: { kind: string; target: string; attachment: string; channel: string } | null) => void
 ): void {
+  // 记住点中的子轨道：按 K 打关键帧时只打它（分组行只作折叠标题，不参与）
+  setTrack(
+    track.isGroup
+      ? null
+      : {
+          kind: track.kind,
+          target: track.target,
+          attachment: track.attachment,
+          channel: track.channel ?? ''
+        }
+  )
+  const suffix = track.isGroup || !track.channel ? '' : `（按 K 只给「${track.label}」打帧）`
+
   if (track.kind === 'bone') {
     selection.selectBone(track.target)
-    status(`选中骨骼「${track.target}」`)
+    status(`选中骨骼「${track.target}」${suffix}`)
     return
   }
   if (track.kind === 'slot') {
     selection.selectSlot(track.target)
-    status(`选中插槽「${track.target}」`)
+    status(`选中插槽「${track.target}」${suffix}`)
     return
   }
   if (track.kind === 'deform') {
     selection.selectAttachment(track.target, track.attachment)
-    status(`选中附件「${track.target} / ${track.attachment}」`)
+    status(`选中附件「${track.target} / ${track.attachment}」${suffix}`)
     return
   }
   if (track.kind === 'constraint') {
     selection.selectConstraint(track.target)
-    status(`选中约束「${track.target}」`)
+    status(`选中约束「${track.target}」${suffix}`)
     return
   }
   status('事件轨道：在检查器里编辑事件参数')

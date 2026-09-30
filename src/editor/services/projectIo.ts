@@ -1,4 +1,5 @@
 import { getPlatform, baseName, dirName, joinPath, stripExtension } from '../platform'
+import type { Platform } from '../platform'
 import { parseDocument, serializeDocument, PROJECT_EXTENSION } from '@core/codec/projectJson'
 import { decompileAsset } from '@core/codec/decompile'
 import { createAuthoringBone, createEmptyDocument } from '@core/model/authoring'
@@ -316,20 +317,61 @@ export async function importImagesFlow(paths?: readonly string[]): Promise<IoRes
   }
 }
 
-/** 拖入窗口的文件：按内容分派到对应导入流程 */
+const IMAGE_EXT_RE = /\.(png|jpg|jpeg|webp|gif|bmp)$/i
+
+/**
+ * 展开拖入的路径：**文件夹会递归取出里面的所有图片**（其余类型忽略），文件原样保留。
+ *
+ * Electron 下靠 platform.listDir 判断（对文件返回空列表）；浏览器内存模式也返回空列表，
+ * 等价于「都不是文件夹」，行为退化成原来的按文件分派。
+ */
+async function expandDroppedPaths(
+  platform: Platform,
+  paths: readonly string[]
+): Promise<{ list: string[]; folderImages: number }> {
+  const list: string[] = []
+  let folderImages = 0
+  for (const path of paths) {
+    const entries = await platform.listDir(path, true)
+    if (entries.length === 0) {
+      list.push(path)
+      continue
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory) continue
+      if (!IMAGE_EXT_RE.test(entry.path)) continue
+      list.push(entry.path)
+      folderImages++
+    }
+  }
+  return { list, folderImages }
+}
+
+/** 拖入窗口的文件：按内容分派到对应导入流程（文件夹会展开成里面的图片） */
 export async function importDroppedPaths(paths: readonly string[]): Promise<IoResult> {
   const platform = getPlatform()
 
+  const { list, folderImages } = await expandDroppedPaths(platform, paths)
+  if (list.length === 0) {
+    return {
+      ok: false,
+      message: '拖入的文件夹里没有可导入的图片（支持 png / jpg / webp / gif / bmp）'
+    }
+  }
+
   // 拖入工程文件 = 打开工程
-  const project = paths.find((p) => /\.(hao2d\.proj|hao2dproj)$/i.test(p))
+  const project = list.find((p) => /\.(hao2d\.proj|hao2dproj)$/i.test(p))
   if (project) return openProjectAt(project)
 
-  const images = paths.filter((p) => /\.(png|jpg|jpeg|webp|gif|bmp)$/i.test(p))
-  const jsons = paths.filter((p) => /\.json$/i.test(p))
-  const atlases = paths.filter((p) => /\.atlas(\.txt)?$/i.test(p))
+  const images = list.filter((p) => IMAGE_EXT_RE.test(p))
+  const jsons = list.filter((p) => /\.json$/i.test(p))
+  const atlases = list.filter((p) => /\.atlas(\.txt)?$/i.test(p))
 
   if (images.length > 0 && jsons.length === 0) {
-    return importImagesFlow(images)
+    const result = await importImagesFlow(images)
+    return folderImages > 0
+      ? { ...result, message: `${result.message}（文件夹里找到 ${folderImages} 张图片）` }
+      : result
   }
 
   if (jsons.length > 0) {
@@ -364,8 +406,17 @@ export async function importDroppedPaths(paths: readonly string[]): Promise<IoRe
     if (format === 'dragonbones') return importDragonBonesFlow()
   }
 
-  const loose = await importImagesFlow(imageLeaves(paths))
-  return loose
+  const leaves = imageLeaves(list)
+  if (leaves.length === 0) {
+    return {
+      ok: false,
+      message: '拖入的内容里没有可导入的图片（支持 png / jpg / webp / gif / bmp；文件夹会递归查找）'
+    }
+  }
+  const loose = await importImagesFlow(leaves)
+  return folderImages > 0
+    ? { ...loose, message: `${loose.message}（文件夹里找到 ${folderImages} 张图片）` }
+    : loose
 }
 
 /** 兜底：把无法识别的路径按图片尝试导入 */

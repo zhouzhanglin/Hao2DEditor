@@ -1,7 +1,14 @@
 import { Easing } from '@core/model/animation'
 import { lastKeyTime } from '@core/model/authoring'
 import type { AuthoringAnimData, EditorDocument } from '@core/model/authoring'
-import { keyBoneChannel, keyDeform, keySlotColor, pruneEmptyTracks } from '../commands/animationCommands'
+import {
+  keyBoneChannel,
+  keyDeform,
+  keySlotColor,
+  keySlotDisplay,
+  keySlotVisible,
+  pruneEmptyTracks
+} from '../commands/animationCommands'
 
 export type KeyKind = 'bone' | 'slot' | 'deform' | 'constraint' | 'event'
 
@@ -334,20 +341,31 @@ export interface PoseSnapshot {
   localShear: Float32Array
   /** 运行期插槽颜色（RGBA 对象数组） */
   slotColors: Array<{ r: number; g: number; b: number; a: number }>
+  /** 运行期插槽当前显示的附件下标 */
+  slotDisplayIndex: Int32Array
+  /** 运行期插槽可见性（1 / 0） */
+  slotVisible: Uint8Array
   deformOffsets: Array<number[] | null>
   boneIndex: Record<string, number>
   slotIndex: Record<string, number>
+}
+
+/**
+ * 打关键帧的目标。`channel` 缺省时打该对象的全部通道（按对象打帧）；
+ * 指定时只打这一条通道 —— 时间轴上选中某条子轨道（如插槽的「显示」）后按 K 就用它。
+ */
+export interface KeyframeTarget {
+  kind: KeyKind
+  target: string
+  attachment: string
+  channel?: string
 }
 
 export function keyframeTargets(
   doc: EditorDocument,
   animationName: string | null,
   pose: PoseSnapshot,
-  targets: readonly {
-    kind: KeyKind
-    target: string
-    attachment: string
-  }[],
+  targets: readonly KeyframeTarget[],
   time: number
 ): number {
   const animation = doc.animations.find((item) => item.name === animationName)
@@ -357,27 +375,46 @@ export function keyframeTargets(
     if (target.kind === 'bone') {
       const index = pose.boneIndex[target.target]
       if (index === undefined) continue
-      keyBoneChannel(animation, target.target, 'rotate', time, pose.localRot[index])
-      keyBoneChannel(animation, target.target, 'translate', time, {
-        x: pose.localPos[index * 2],
-        y: pose.localPos[index * 2 + 1]
-      })
-      keyBoneChannel(animation, target.target, 'scale', time, {
-        x: pose.localScale[index * 2],
-        y: pose.localScale[index * 2 + 1]
-      })
-      keyBoneChannel(animation, target.target, 'shear', time, {
-        x: pose.localShear[index * 2],
-        y: pose.localShear[index * 2 + 1]
-      })
+      const channels = target.channel
+        ? [target.channel]
+        : ['rotate', 'translate', 'scale', 'shear']
+      for (const channel of channels) {
+        if (channel === 'rotate') keyBoneChannel(animation, target.target, 'rotate', time, pose.localRot[index])
+        else if (channel === 'translate')
+          keyBoneChannel(animation, target.target, 'translate', time, {
+            x: pose.localPos[index * 2],
+            y: pose.localPos[index * 2 + 1]
+          })
+        else if (channel === 'scale')
+          keyBoneChannel(animation, target.target, 'scale', time, {
+            x: pose.localScale[index * 2],
+            y: pose.localScale[index * 2 + 1]
+          })
+        else if (channel === 'shear')
+          keyBoneChannel(animation, target.target, 'shear', time, {
+            x: pose.localShear[index * 2],
+            y: pose.localShear[index * 2 + 1]
+          })
+      }
       count++
       continue
     }
     if (target.kind === 'slot') {
       const index = pose.slotIndex[target.target]
-      const color = index === undefined ? undefined : pose.slotColors[index]
-      if (!color) continue
-      keySlotColor(animation, target.target, time, { r: color.r, g: color.g, b: color.b, a: color.a })
+      if (index === undefined) continue
+      // 指定通道时只打那一条（时间轴上选中的子轨道）；缺省仍是颜色，保持旧行为
+      const channel = target.channel ?? 'color'
+      if (channel === 'color') {
+        const color = pose.slotColors[index]
+        keySlotColor(animation, target.target, time, { r: color.r, g: color.g, b: color.b, a: color.a })
+      } else if (channel === 'display') {
+        // 附件名留空：运行时会用「名字优先、下标兜底」，下标已写入
+        keySlotDisplay(animation, target.target, time, pose.slotDisplayIndex[index], '')
+      } else if (channel === 'visible') {
+        keySlotVisible(animation, target.target, time, pose.slotVisible[index] !== 0)
+      } else {
+        continue
+      }
       count++
       continue
     }

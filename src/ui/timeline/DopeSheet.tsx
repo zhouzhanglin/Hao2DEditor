@@ -107,6 +107,16 @@ export default function DopeSheet(props: DopeSheetProps) {
   const scrubRef = useRef(false)
   /** 中键平移会话 */
   const panRef = useRef<{ x: number; start: number } | null>(null)
+  /** 框选会话：左键按下记录起点，拖动超过阈值才进入框选 */
+  const bandRef = useRef<{ x0: number; y0: number; active: boolean } | null>(null)
+  /** 框选矩形（相对关键帧区的坐标），用于画选框 */
+  const [band, setBand] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
+  /** 框选判定用的最新轨道 / 标记快照 + 选取逻辑（window 监听里用，避免闭包过期） */
+  const pickRef = useRef<{ tracks: typeof tracks; markers: Array<Array<{ slot: number; selectors: KeySelector[] }>> }>({
+    tracks,
+    markers: []
+  })
+  const applyBandRef = useRef<(x0: number, y0: number, x1: number, y1: number) => void>(() => undefined)
   const [areaWidth, setAreaWidth] = useState(0)
   /** 「显示」通道行上的右键菜单：点选 display 即在当前时间打 displayIndex 帧 */
   const [displayMenu, setDisplayMenu] = useState<{ x: number; y: number; slot: string } | null>(null)
@@ -227,6 +237,9 @@ export default function DopeSheet(props: DopeSheetProps) {
       }),
     [visibleTracks]
   )
+
+  // 框选判定要在 window 监听里读最新数据，这里保持一份同步快照
+  pickRef.current = { tracks: visibleTracks, markers: markersByTrack }
 
   /** 像素比例 → 时间（含左侧留白补偿） */
   const timeAtRatio = (ratio: number, map?: TimeMap): number => {
@@ -357,6 +370,19 @@ export default function DopeSheet(props: DopeSheetProps) {
   useEffect(() => {
     const onMove = (event: PointerEvent): void => {
       if (panRef.current) return
+      // 行区左键拖动 = 框选（拖过阈值才算，避免和「点一下定位播放头」打架）
+      const bandState = bandRef.current
+      if (bandState && !dragRef.current) {
+        if (
+          !bandState.active &&
+          Math.hypot(event.clientX - bandState.x0, event.clientY - bandState.y0) < 4
+        ) {
+          return
+        }
+        bandState.active = true
+        applyBandRef.current(bandState.x0, bandState.y0, event.clientX, event.clientY)
+        return
+      }
       if (scrubRef.current) {
         propsRef.current.onScrub(snapScrub(timeAtClientX(event.clientX)))
         return
@@ -373,6 +399,16 @@ export default function DopeSheet(props: DopeSheetProps) {
     }
     const onUp = (): void => {
       scrubRef.current = false
+      const bandState = bandRef.current
+      bandRef.current = null
+      if (bandState) {
+        // 没拖动 = 单击行区空白：定位播放头并清空选择（保持原来的「点哪跳哪」手感）
+        if (!bandState.active) {
+          propsRef.current.onScrub(snapScrub(timeAtClientX(bandState.x0)))
+          propsRef.current.onSelectKeys([])
+        }
+        setBand(null)
+      }
       const drag = dragRef.current
       dragRef.current = null
       // 只有真正移动过才产生一条撤销记录
@@ -409,21 +445,66 @@ export default function DopeSheet(props: DopeSheetProps) {
   const playheadPercent = percent(time)
   const zoomed = Math.abs(zoom - 1) > 0.001
 
-  /** 标记（菱形关键帧 / 事件小红旗）的统一点击逻辑：选中 + 开始拖动 */
+  /**
+   * 框选：把矩形覆盖到的关键帧全部选中。
+   * 用「行号 + 时间范围」判定而不是 DOM 命中 —— 行高固定、时间可从 x 反算，更稳也更快。
+   */
+  const applyBand = (x0: number, y0: number, x1: number, y1: number): void => {
+    const rect = areaRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const left = Math.min(x0, x1)
+    const right = Math.max(x0, x1)
+    const top = Math.min(y0, y1)
+    const bottom = Math.max(y0, y1)
+    const tStart = Math.min(timeAtClientX(left), timeAtClientX(right))
+    const tEnd = Math.max(timeAtClientX(left), timeAtClientX(right))
+    const firstRow = Math.floor((top - rect.top) / ROW_HEIGHT)
+    const lastRow = Math.floor((bottom - rect.top) / ROW_HEIGHT)
+    const { tracks: list, markers } = pickRef.current
+    const picked: KeySelector[] = []
+    for (let row = Math.max(0, firstRow); row <= Math.min(list.length - 1, lastRow); row++) {
+      if (list[row].isGroup) continue
+      for (const marker of markers[row] ?? []) {
+        if (marker.slot >= tStart - 1e-6 && marker.slot <= tEnd + 1e-6) picked.push(...marker.selectors)
+      }
+    }
+    propsRef.current.onSelectKeys(picked)
+    setBand({
+      left: left - rect.left,
+      top: top - rect.top,
+      width: right - left,
+      height: bottom - top
+    })
+  }
+  applyBandRef.current = applyBand
+
+  /**
+   * 标记（菱形关键帧 / 事件小红旗）的统一点击逻辑：选中 + 开始拖动。
+   *
+   * 点中关键帧同时把它所属的**通道**设为当前目标（打关键帧的目标跟着走）；
+   * Shift / Ctrl / Cmd 点击为多选（已选中则取消），随后可整段左右移动。
+   */
   const startMarkerDrag = (
     event: React.PointerEvent<HTMLButtonElement>,
     marker: { slot: number; selectors: KeySelector[] },
-    selected: boolean
+    selected: boolean,
+    track: TimelineTrack
   ): void => {
     event.stopPropagation()
     if (event.button !== 0) return
-    const additive = event.ctrlKey || event.metaKey
+    props.onSelectTarget(track)
+    // 直接读 store 的选择状态：连续快速点击时 props / propsRef 都还没跟上渲染，会读到过期值
+    const live = useTimelineStore.getState().selectedKeys
+    const isLive = (s: KeySelector): boolean => live.some((item) => sameSelector(item, s))
+    const selectedNow = marker.selectors.every(isLive)
+    void selected
+    const additive = event.ctrlKey || event.metaKey || event.shiftKey
     const next = additive
-      ? selected
-        ? selectedKeys.filter((item) => !marker.selectors.some((s) => sameSelector(s, item)))
-        : [...selectedKeys, ...marker.selectors.filter((s) => !isSelected(s))]
-      : selected
-        ? selectedKeys
+      ? selectedNow
+        ? live.filter((item) => !marker.selectors.some((s) => sameSelector(s, item)))
+        : [...live, ...marker.selectors.filter((s) => !isLive(s))]
+      : selectedNow
+        ? live
         : marker.selectors
     props.onSelectKeys(next)
     if (next.length === 0) return
@@ -473,7 +554,7 @@ export default function DopeSheet(props: DopeSheetProps) {
             scrubRef.current = true
             props.onScrub(snapScrub(timeAtClientX(event.clientX)))
           }}
-          title="帧区域滚轮缩放时间轴长度（Shift+滚轮横向平移，Alt+滚轮纵向翻轨道）；拖动可定位时间；结束线右侧可拖入关键帧"
+          title="关键帧区：左键拖动框选关键帧（Shift / Ctrl 点击加选或减选），选中后可整段左右拖动；单击空白定位播放头；滚轮缩放时间轴长度（Shift+滚轮横向平移，Alt+滚轮纵向翻轨道）"
         >
           {minorStep > 0
             ? majorFrames.flatMap((frame) =>
@@ -607,6 +688,14 @@ export default function DopeSheet(props: DopeSheetProps) {
               </div>
             ) : null}
 
+            {/* 框选矩形 */}
+            {band ? (
+              <div
+                className="pointer-events-none absolute z-30 rounded-sm border border-accent/70 bg-accent/10"
+                style={{ left: band.left, top: band.top, width: band.width, height: band.height }}
+              />
+            ) : null}
+
             {visibleTracks.map((track, trackIndex) => (
               <div
                 key={track.id}
@@ -617,7 +706,8 @@ export default function DopeSheet(props: DopeSheetProps) {
                 style={{ height: ROW_HEIGHT }}
                 onPointerDown={(event) => {
                   if (event.button !== 0) return
-                  props.onScrub(snapScrub(timeAtClientX(event.clientX)))
+                  // 记下起点：拖动超过阈值变成框选；只点一下则在松开时定位播放头
+                  bandRef.current = { x0: event.clientX, y0: event.clientY, active: false }
                 }}
               >
                 {(markersByTrack[trackIndex] ?? []).map((marker) => {
@@ -638,7 +728,7 @@ export default function DopeSheet(props: DopeSheetProps) {
                         ].join(' ')}
                         style={{ left: `${left}%` }}
                         title={`${marker.channels[0]} @ ${marker.slot.toFixed(3)}s（事件；拖动改时间，Delete 删除）`}
-                        onPointerDown={(event) => startMarkerDrag(event, marker, selected)}
+                        onPointerDown={(event) => startMarkerDrag(event, marker, selected, track)}
                       >
                         <Flag size={11} fill="currentColor" strokeWidth={2} />
                       </button>
@@ -656,7 +746,7 @@ export default function DopeSheet(props: DopeSheetProps) {
                       ].join(' ')}
                       style={{ left: `${left}%` }}
                       title={`${rowLabel(track)} · ${marker.channels.join(' / ')} @ ${marker.slot.toFixed(3)}s（拖动整组改时间，Delete 删除）`}
-                      onPointerDown={(event) => startMarkerDrag(event, marker, selected)}
+                      onPointerDown={(event) => startMarkerDrag(event, marker, selected, track)}
                     />
                   )
                 })}

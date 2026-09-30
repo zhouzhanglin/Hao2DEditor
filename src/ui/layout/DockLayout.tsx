@@ -6,7 +6,8 @@ export interface DockLayoutProps {
   toolbar: React.ReactNode
   left: React.ReactNode
   center: React.ReactNode
-  right: React.ReactNode
+  /** 为 null 时整个右栏（含分隔条）不渲染，空间让给中间列（Animate 态收起属性面板） */
+  right: React.ReactNode | null
   /** 为 null 时整个时间轴区域不渲染（Pose 态） */
   timeline: React.ReactNode | null
   statusBar: React.ReactNode
@@ -101,13 +102,17 @@ export default function DockLayout(props: DockLayoutProps) {
           ) : null}
         </main>
 
-        <Splitter direction="horizontal" onResize={resizeRight} />
-        <aside
-          className="flex min-h-0 shrink-0 flex-col gap-[3px] overflow-hidden"
-          style={{ width: sizes.right }}
-        >
-          {props.right}
-        </aside>
+        {props.right ? (
+          <>
+            <Splitter direction="horizontal" onResize={resizeRight} />
+            <aside
+              className="flex min-h-0 shrink-0 flex-col gap-[3px] overflow-hidden"
+              style={{ width: sizes.right }}
+            >
+              {props.right}
+            </aside>
+          </>
+        ) : null}
       </div>
 
       <div className="z-20 shrink-0">{props.statusBar}</div>

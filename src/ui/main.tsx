@@ -8,7 +8,14 @@ import { useToolStore } from '@editor/store/toolStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { getPlatform } from '@editor/platform'
-import { lastProject, newProject, openProject, openProjectAt, saveProject } from '@editor/services/projectIo'
+import {
+  importDroppedPaths,
+  lastProject,
+  newProject,
+  openProject,
+  openProjectAt,
+  saveProject
+} from '@editor/services/projectIo'
 
 /**
  * 调试钩子：把 store、平台层与工程 IO 挂到全局，
@@ -30,6 +37,7 @@ const debugTarget = globalThis as unknown as {
     openProject: typeof openProject
     openProjectAt: typeof openProjectAt
     saveProject: typeof saveProject
+    importDroppedPaths: typeof importDroppedPaths
   }
 }
 debugTarget.__haoStores = {
@@ -40,7 +48,7 @@ debugTarget.__haoStores = {
   mode: useModeStore
 }
 debugTarget.__haoPlatform = getPlatform()
-debugTarget.__haoProject = { lastProject, newProject, openProject, openProjectAt, saveProject }
+debugTarget.__haoProject = { lastProject, newProject, openProject, openProjectAt, saveProject, importDroppedPaths }
 
 const container = document.getElementById('root')
 if (!container) {

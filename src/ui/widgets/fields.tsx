@@ -424,15 +424,17 @@ export interface SelectFieldProps {
   value: string
   options: Array<{ value: string; label: string }>
   onChange: (value: string) => void
+  disabled?: boolean
 }
 
-export function SelectField({ label, value, options, onChange }: SelectFieldProps) {
+export function SelectField({ label, value, options, onChange, disabled }: SelectFieldProps) {
   return (
     <label className="flex items-center gap-1.5">
       <span className="hao-label w-[52px] shrink-0">{label}</span>
       <select
-        className="hao-field cursor-pointer bg-ink-900"
+        className="hao-field cursor-pointer bg-ink-900 disabled:cursor-not-allowed disabled:opacity-40"
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
       >
         {options.map((option) => (

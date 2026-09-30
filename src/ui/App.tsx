@@ -532,19 +532,23 @@ export default function App() {
             </div>
           </div>
         }
+        // Animate 态下右栏（属性检查器 / 工具选项）显示的绑定数据没意义，整栏收起，
+        // 把空间让给视口与时间轴
         right={
-          <>
-            <PanelShell
-              title="属性检查器"
-              grow
-              actions={<span className="text-3xs text-content-lo">当前选中对象</span>}
-            >
-              <InspectorPanel onStatus={flash} />
-            </PanelShell>
-            <PanelShell title="工具选项" grow={false} bodyClassName="max-h-[300px]">
-              <ToolOptionsPanel onStatus={flash} />
-            </PanelShell>
-          </>
+          mode === 'animate' ? null : (
+            <>
+              <PanelShell
+                title="属性检查器"
+                grow
+                actions={<span className="text-3xs text-content-lo">当前选中对象</span>}
+              >
+                <InspectorPanel onStatus={flash} />
+              </PanelShell>
+              <PanelShell title="工具选项" grow={false} bodyClassName="max-h-[300px]">
+                <ToolOptionsPanel onStatus={flash} />
+              </PanelShell>
+            </>
+          )
         }
         timeline={mode === 'animate' ? <TimelinePanel onStatus={flash} /> : null}
         statusBar={

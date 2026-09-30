@@ -18,6 +18,11 @@ export interface TimelineState {
   zoom: number
   /** 选中的关键帧（含轨道定位信息，可直接用于增删改） */
   selectedKeys: KeySelector[]
+  /**
+   * 时间轴上点中的轨道（分组行不算）。打关键帧时优先用它：
+   * 选中插槽的「显示」行按 K 就只打显示帧，而不是把该插槽的通道全打一遍。
+   */
+  selectedTrack: { kind: string; target: string; attachment: string; channel: string } | null
 
   setAnimation: (name: string | null) => void
   setTime: (time: number) => void
@@ -29,6 +34,7 @@ export interface TimelineState {
   setSnapToFrame: (snap: boolean) => void
   setZoom: (zoom: number) => void
   setSelectedKeys: (keys: KeySelector[]) => void
+  setSelectedTrack: (track: TimelineState['selectedTrack']) => void
 }
 
 /**
@@ -51,8 +57,9 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   snapToFrame: true,
   zoom: TIMELINE_ZOOM_DEFAULT,
   selectedKeys: [],
+  selectedTrack: null,
 
-  setAnimation: (name) => set({ currentAnimation: name, time: 0, selectedKeys: [] }),
+  setAnimation: (name) => set({ currentAnimation: name, time: 0, selectedKeys: [], selectedTrack: null }),
   setTime: (time) => set({ time }),
   setPlaying: (playing) => set({ playing }),
   // 不在这里静默拦截「未选动画」的情况：调用方（App 命令）会先自动选中动画并给出提示
@@ -62,7 +69,8 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   toggleOnionSkin: () => set({ onionSkin: !get().onionSkin }),
   setSnapToFrame: (snapToFrame) => set({ snapToFrame }),
   setZoom: (zoom) => set({ zoom: Math.max(TIMELINE_ZOOM_MIN, Math.min(TIMELINE_ZOOM_MAX, zoom)) }),
-  setSelectedKeys: (key) => set({ selectedKeys: key })
+  setSelectedKeys: (key) => set({ selectedKeys: key }),
+  setSelectedTrack: (track) => set({ selectedTrack: track })
 }))
 
 export function currentTimeline(): TimelineState {

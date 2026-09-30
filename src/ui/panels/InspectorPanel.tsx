@@ -1,10 +1,11 @@
 import { BlendMode } from '@core/model/types'
+import { curvePercent } from '@core/anim/interpolation'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useToolStore } from '@editor/store/toolStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
-import { keySlotDisplay, keySlotVisible } from '@editor/commands/animationCommands'
+import { keyBoneChannel, keySlotDisplay, keySlotVisible } from '@editor/commands/animationCommands'
 import {
   applyRename,
   checkRename,
@@ -30,6 +31,58 @@ import { BLEND_OPTIONS, CONSTRAINT_LABEL } from '@ui/widgets/constants'
 
 export interface InspectorPanelProps {
   onStatus?: (text: string) => void
+}
+
+/** 关键帧轨道（带 time / value / easing）的最小结构，用于属性面板回显当前时间的动画值 */
+interface KeyLike<T> {
+  time: number
+  value: T
+  easing: number
+  curve: number[] | null
+}
+
+/**
+ * 从动画轨道采样当前时间的值，供 Animate 态的属性面板回显。
+ * 轨道为空（该骨骼还没打过帧）时回退到绑定姿态，与运行时「未打帧用 setup」的语义一致。
+ */
+function sampleVec2Keys(
+  keys: ReadonlyArray<KeyLike<{ x: number; y: number }>> | undefined,
+  time: number,
+  fallback: { x: number; y: number }
+): { x: number; y: number } {
+  if (!keys || keys.length === 0) return fallback
+  let index = -1
+  for (let i = 0; i < keys.length; i++) {
+    if (keys[i].time <= time) index = i
+    else break
+  }
+  if (index < 0) return fallback
+  const a = keys[index]
+  if (index >= keys.length - 1) return a.value
+  const b = keys[index + 1]
+  const span = b.time - a.time
+  const t = span <= 0 ? 1 : curvePercent(a.easing, a.curve, (time - a.time) / span)
+  return { x: a.value.x + (b.value.x - a.value.x) * t, y: a.value.y + (b.value.y - a.value.y) * t }
+}
+
+function sampleNumberKeys(
+  keys: ReadonlyArray<KeyLike<number>> | undefined,
+  time: number,
+  fallback: number
+): number {
+  if (!keys || keys.length === 0) return fallback
+  let index = -1
+  for (let i = 0; i < keys.length; i++) {
+    if (keys[i].time <= time) index = i
+    else break
+  }
+  if (index < 0) return fallback
+  const a = keys[index]
+  if (index >= keys.length - 1) return a.value
+  const b = keys[index + 1]
+  const span = b.time - a.time
+  const t = span <= 0 ? 1 : curvePercent(a.easing, a.curve, (time - a.time) / span)
+  return a.value + (b.value - a.value) * t
 }
 
 /** 属性检查器：骨骼 / 插槽 / 附件 / 约束四类选中对象的属性编辑 */
@@ -82,6 +135,50 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   if (selection.kind === 'bone') {
     const bone = document.bones.find((b) => b.name === selection.bone)
     if (!bone) return <PanelEmpty title="骨骼不存在" description="该骨骼可能已被删除，请重新选择。" />
+
+    /**
+     * Animate 态：局部变换显示「当前动画在播放头时间的值」，改动即在该时间打关键帧；
+     * Pose 态：显示的才是绑定姿态（setup）。
+     * 父级 / 长度属于绑定数据，Animate 态改会污染动画基线，所以禁用。
+     */
+    const animation = animating ? document.animations.find((item) => item.name === currentAnimation) : null
+    const boneTrack = animation?.bones.find((track) => track.bone === bone.name)
+    const shown = animating
+      ? {
+          position: sampleVec2Keys(boneTrack?.translate, time, bone.localPosition),
+          rotation: sampleNumberKeys(boneTrack?.rotate, time, bone.rotation),
+          scale: sampleVec2Keys(boneTrack?.scale, time, bone.localScale),
+          shear: sampleVec2Keys(boneTrack?.shear, time, bone.localShear)
+        }
+      : {
+          position: bone.localPosition,
+          rotation: bone.rotation,
+          scale: bone.localScale,
+          shear: bone.localShear
+        }
+
+    const writeTransform = (
+      channel: 'translate' | 'rotate' | 'scale' | 'shear',
+      value: { x: number; y: number } | number,
+      label: string
+    ): void => {
+      if (animating) {
+        update(`${label}（${time.toFixed(2)}s 打关键帧）`, (draft) => {
+          const target = draft.animations.find((item) => item.name === currentAnimation)
+          if (target) keyBoneChannel(target, bone.name, channel, time, value as never)
+        })
+        return
+      }
+      update(`修改骨骼${label}`, (draft) => {
+        const target = draft.bones.find((b) => b.name === bone.name)
+        if (!target) return
+        if (channel === 'translate') target.localPosition = value as { x: number; y: number }
+        else if (channel === 'rotate') target.rotation = value as number
+        else if (channel === 'scale') target.localScale = value as { x: number; y: number }
+        else target.localShear = value as { x: number; y: number }
+      })
+    }
+
     return (
       <div className="flex flex-col">
         <FieldGroup title="骨骼">
@@ -94,6 +191,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
           <SelectField
             label="父级"
             value={bone.parent}
+            disabled={animating}
             options={[{ value: '', label: '（无 / 根骨骼）' }, ...document.bones.filter((b) => b.name !== bone.name).map((b) => ({ value: b.name, label: b.name }))]}
             onChange={(value) =>
               update('修改骨骼父级', (draft) => {
@@ -108,6 +206,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             step={0.05}
             min={0}
             precision={3}
+            disabled={animating}
             onChange={(value) =>
               update('修改骨骼长度', (draft) => {
                 const target = draft.bones.find((b) => b.name === bone.name)
@@ -115,51 +214,36 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
               })
             }
           />
+          {animating ? (
+            <p className="text-3xs text-content-lo">父级 / 长度属于绑定数据，切到 Pose 状态再改</p>
+          ) : null}
         </FieldGroup>
 
-        <FieldGroup title="局部变换（Setup）">
+        <FieldGroup
+          title={animating ? `动画变换 · ${time.toFixed(2)}s（改动即打关键帧）` : '局部变换（Setup）'}
+        >
           <Vector2Field
             label="位置"
-            value={bone.localPosition}
-            onChange={(value) =>
-              update('修改骨骼位置', (draft) => {
-                const target = draft.bones.find((b) => b.name === bone.name)
-                if (target) target.localPosition = value
-              })
-            }
+            value={shown.position}
+            onChange={(value) => writeTransform('translate', value, '位置')}
           />
           <NumberField
             label="旋转"
-            value={bone.rotation}
+            value={shown.rotation}
             step={1}
             suffix="°"
-            onChange={(value) =>
-              update('修改骨骼旋转', (draft) => {
-                const target = draft.bones.find((b) => b.name === bone.name)
-                if (target) target.rotation = value
-              })
-            }
+            onChange={(value) => writeTransform('rotate', value, '旋转')}
           />
           <Vector2Field
             label="缩放"
-            value={bone.localScale}
+            value={shown.scale}
             step={0.1}
-            onChange={(value) =>
-              update('修改骨骼缩放', (draft) => {
-                const target = draft.bones.find((b) => b.name === bone.name)
-                if (target) target.localScale = value
-              })
-            }
+            onChange={(value) => writeTransform('scale', value, '缩放')}
           />
           <Vector2Field
             label="斜切"
-            value={bone.localShear}
-            onChange={(value) =>
-              update('修改骨骼斜切', (draft) => {
-                const target = draft.bones.find((b) => b.name === bone.name)
-                if (target) target.localShear = value
-              })
-            }
+            value={shown.shear}
+            onChange={(value) => writeTransform('shear', value, '斜切')}
           />
         </FieldGroup>
 

@@ -11,6 +11,16 @@ import { AttachmentType } from '@core/model/types'
 import type { RuntimeAsset } from '@core/model/asset'
 import { encodeAtlasPages, loadImageBitmap } from './pngEncoder'
 import type { PageEncodePlan } from './pngEncoder'
+import {
+  guidFromMeta,
+  hao2dMeta,
+  materialFileNameOf,
+  materialMeta,
+  materialNameOf,
+  materialYaml,
+  stableGuid,
+  textureMeta
+} from './unityExport'
 
 export interface ExportResult {
   ok: boolean
@@ -289,6 +299,109 @@ export async function exportHao2d(): Promise<ExportResult> {
     warnings,
     files: [defaultPath]
   }
+}
+
+/**
+ * 导出给 Unity：`.hao2d` + 图集 png + 每个图集页的材质与 .meta，全部写进 `<dir>/<stem>/`。
+ *
+ * 目录结构与 Unity 侧约定一致（Hao2D 的 ScriptedImporter 只在 `.hao2d` 同目录找纹理与材质）：
+ * ```
+ * <stem>/<stem>.hao2d          + .meta     骨骼 / 动画二进制
+ * <stem>/<stem>_0.png          + .meta     图集页（meta 里带 GUID，供材质引用）
+ * <stem>/<stem>_0_Hao2D.mat    + .meta     材质：Hao2D/Sprite，_MainTex → 图集页
+ * ```
+ *
+ * 复用与「导出运行时」同一份打包计划（同样的缩放与 UV 重映射），
+ * 所以两个弹窗预览里看到的是同一套页。
+ */
+export async function writeHao2dExport(
+  dir: string,
+  plan: RuntimeExportPlan
+): Promise<ExportResult> {
+  const platform = getPlatform()
+  const doc = useProjectStore.getState().document
+  const warnings = [...plan.warnings, ...collectHao2dWarnings(plan.asset)]
+  const outDir = joinPath(dir, plan.stem)
+
+  // png 编码要读源图：先登记它们的目录（与运行时导出同一条路径）
+  for (const image of doc.images) {
+    const imageDir = dirName(image.path)
+    if (imageDir) await platform.registerAssetRoot(imageDir)
+  }
+  const bitmaps = new Map<string, ImageBitmap | null>()
+  const pngs = await encodeAtlasPages(plan.plans, async (name) => {
+    if (bitmaps.has(name)) return bitmaps.get(name) ?? null
+    const image = doc.images.find((entry) => entry.name === name)
+    const bitmap = image ? await loadImageBitmap(await platform.imageUrl(image.path)) : null
+    bitmaps.set(name, bitmap)
+    return bitmap
+  })
+
+  const files: Array<{ path: string; text?: string; bytes?: Uint8Array }> = []
+  const sheetCount = plan.pageFiles.length
+  const materialCount = plan.pageFiles.length
+
+  for (let index = 0; index < plan.pageFiles.length; index++) {
+    const pageFile = plan.pageFiles[index]
+    const bytes = pngs[index]
+    if (!bytes || bytes.length === 0) {
+      warnings.push(`图集页 ${pageFile} 编码失败（可能是源图片无法读取），对应的材质也未生成`)
+      continue
+    }
+    // 纹理 GUID：优先沿用同目录里已有的 .meta（Unity 里已挂的引用不会因为再导一次就失效）
+    const textureGuid = await resolveGuid(platform, outDir, pageFile, plan.stem)
+    files.push({ path: joinPath(outDir, pageFile), bytes })
+    files.push({ path: joinPath(outDir, `${pageFile}.meta`), text: textureMeta(textureGuid) })
+
+    const matFile = materialFileNameOf(pageFile)
+    const matGuid = await resolveGuid(platform, outDir, matFile, plan.stem)
+    files.push({
+      path: joinPath(outDir, matFile),
+      text: materialYaml({ name: materialNameOf(pageFile), textureGuid })
+    })
+    files.push({ path: joinPath(outDir, `${matFile}.meta`), text: materialMeta(matGuid) })
+  }
+
+  const hao2dFile = `${plan.stem}.hao2d`
+  const hao2dGuid = await resolveGuid(platform, outDir, hao2dFile, plan.stem)
+  files.push({ path: joinPath(outDir, hao2dFile), bytes: writeHao2d(plan.asset) })
+  files.push({ path: joinPath(outDir, `${hao2dFile}.meta`), text: hao2dMeta(hao2dGuid) })
+
+  await platform.writeBatch(files)
+  await platform.revealInFolder(joinPath(outDir, hao2dFile))
+  useProjectStore.getState().setWarnings(warnings)
+
+  const parts = [`${hao2dFile}`, `${sheetCount} 张图集页`, `${materialCount} 个材质（Hao2D/Sprite）`]
+  let message = `已导出到 ${baseName(outDir)}/：${parts.join(' / ')}`
+  if (warnings.length > 0) message += `；${warnings.length} 条与 Unity 运行时的差异提示`
+  if (warnings.length > 0) console.warn('[hao2d] Unity 导出告警：', warnings)
+  return {
+    ok: true,
+    message,
+    warnings,
+    files: files.map((file) => baseName(file.path))
+  }
+}
+
+/**
+ * 文件 GUID：同目录已有 `.meta` 就沿用它的（保持 Unity 里既有的引用关系），
+ * 否则按「工程名/文件名」确定性生成 —— 重复导出同一工程得到同一个 GUID。
+ */
+async function resolveGuid(
+  platform: ReturnType<typeof getPlatform>,
+  dir: string,
+  fileName: string,
+  stem: string
+): Promise<string> {
+  const metaPath = joinPath(dir, `${fileName}.meta`)
+  try {
+    const existing = await platform.readText(metaPath)
+    const guid = guidFromMeta(existing)
+    if (guid) return guid
+  } catch {
+    // 没有旧 meta（首次导出）：走确定性生成
+  }
+  return stableGuid(`${stem}/${fileName}`)
 }
 
 /** 文件名安全化（去掉路径分隔符与非法字符） */

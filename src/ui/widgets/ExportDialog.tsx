@@ -3,11 +3,17 @@ import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight, FolderOpen, Loader2, Package, X } from 'lucide-react'
 import { getPlatform } from '@editor/platform'
 import { useProjectStore } from '@editor/store/projectStore'
-import { prepareRuntimeExport, writeRuntimeExport } from '@editor/services/exportService'
+import { prepareRuntimeExport, writeHao2dExport, writeRuntimeExport } from '@editor/services/exportService'
 import type { RuntimeExportPlan } from '@editor/services/exportService'
+import { collectHao2dWarnings } from '@core/codec/hao2dWriter'
 import { loadImageElement } from '@render/imageLoader'
 
+/** 两套导出目标：自定义运行时数据 / 给 Unity 的 .hao2d（共用打包与预览） */
+export type ExportMode = 'runtime' | 'unity'
+
 export interface ExportDialogProps {
+  /** 导出目标：自定义运行时数据 / 给 Unity 的 .hao2d（含图集与材质） */
+  mode: ExportMode
   onClose: () => void
   onStatus?: (text: string) => void
 }
@@ -19,13 +25,26 @@ const MAX_PREVIEW_HEIGHT = 320
 const SCALE_PRESETS = [0.25, 0.5, 0.75, 1]
 const SIZE_PRESETS = [1024, 2048, 4096]
 
+/** 两种导出模式各自的标题与产物说明 */
+const MODE_INFO: Record<ExportMode, { title: string; fileHint: string }> = {
+  runtime: {
+    title: '导出运行时数据',
+    fileHint: 'ske.json（骨骼动画）/ atlas.json（图集索引）/ 图集 png'
+  },
+  unity: {
+    title: '导出 .hao2d（Unity）',
+    fileHint: '.hao2d（骨骼动画）/ 图集 png / 每个图集页一个 Hao2D/Sprite 材质（_MainTex 已指向图集）'
+  }
+}
+
 /**
- * 导出运行时数据弹窗：选目录 → 调图集缩放 / 单页尺寸 → 实时看图集预览 → 导出。
+ * 导出弹窗：选目录 → 调图集缩放 / 单页尺寸 → 实时看图集预览 → 导出。
  *
  * 预览和真正导出的产物出自**同一份** `RuntimeExportPlan`（同样的打包与 UV 重映射），
  * 所以「预览里能装下」＝「导出结果就是这几页」。
+ * 两种模式共用这套预览，只是最后写盘的文件清单不同。
  */
-export default function ExportDialog({ onClose, onStatus }: ExportDialogProps) {
+export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogProps) {
   const doc = useProjectStore((s) => s.document)
   const [dir, setDir] = useState(() => {
     if (typeof localStorage === 'undefined') return ''
@@ -47,6 +66,15 @@ export default function ExportDialog({ onClose, onStatus }: ExportDialogProps) {
   )
   const pages = plan.atlas.pages
   const current = Math.min(page, Math.max(0, pages.length - 1))
+
+  /**
+   * .hao2d 的能力差异提示（变换 / 路径约束在 Unity 侧写不进去等）。
+   * 只在这类导出里显示，运行时导出不受影响。
+   */
+  const warnings = useMemo(
+    () => (mode === 'unity' ? collectHao2dWarnings(plan.asset) : []),
+    [mode, plan]
+  )
 
   /** Esc 关闭；弹窗内的按键不冒泡出去（否则会触发视口 / 工具的全局快捷键） */
   useEffect(() => {
@@ -140,7 +168,10 @@ export default function ExportDialog({ onClose, onStatus }: ExportDialogProps) {
     }
     setBusy(true)
     try {
-      const result = await writeRuntimeExport(dir, plan)
+      const result =
+        mode === 'unity'
+          ? await writeHao2dExport(dir, plan)
+          : await writeRuntimeExport(dir, plan)
       onStatus?.(result.message)
       onClose()
     } finally {
@@ -161,7 +192,7 @@ export default function ExportDialog({ onClose, onStatus }: ExportDialogProps) {
         {/* 标题栏 */}
         <div className="flex h-[30px] shrink-0 items-center gap-2 border-b border-line bg-ink-700 px-2.5">
           <Package size={13} className="text-accent" />
-          <span className="text-panel font-semibold text-content-hi">导出运行时数据</span>
+          <span className="text-panel font-semibold text-content-hi">{MODE_INFO[mode].title}</span>
           <span className="hao-label ml-1">
             {pages.length > 0 ? `共 ${pages.length} 页 · ${totalBlocks} 张图片` : '没有可导出的图片'}
           </span>
@@ -184,11 +215,13 @@ export default function ExportDialog({ onClose, onStatus }: ExportDialogProps) {
           </button>
         </div>
 
-        {/* 折叠提示：产物会放进新建的子文件夹 */}
+        {/* 产物提示：会放进新建的子文件夹 */}
         <div className="shrink-0 border-b border-line/60 px-2.5 py-1.5">
           <span className="hao-label">
             导出时会在所选目录内新建 <span className="text-accent">{plan.stem}/</span> 文件夹，产物都放在里面：
-            {plan.skeName} / {plan.atlasName} / {pages.length} 张图集页
+            {mode === 'unity'
+              ? `${plan.stem}.hao2d / ${pages.length} 张图集页 / ${pages.length} 个材质（Hao2D/Sprite，_MainTex 已指向图集）`
+              : `${plan.skeName} / ${plan.atlasName} / ${pages.length} 张图集页`}
           </span>
         </div>
 
@@ -307,10 +340,10 @@ export default function ExportDialog({ onClose, onStatus }: ExportDialogProps) {
           ) : null}
         </div>
 
-        {/* 警告（打包时放不下的图等） */}
-        {plan.warnings.length > 0 ? (
+        {/* 警告（打包时放不下的图、以及 .hao2d 与 Unity 运行时的能力差异） */}
+        {plan.warnings.length + warnings.length > 0 ? (
           <div className="mx-2.5 mb-2 max-h-[52px] shrink-0 overflow-auto hao-scroll rounded border border-warn/30 bg-warn/10 px-2 py-1">
-            {plan.warnings.map((warning, index) => (
+            {[...plan.warnings, ...warnings].map((warning, index) => (
               <div key={`${index}-${warning}`} className="text-3xs text-warn/90">
                 {warning}
               </div>

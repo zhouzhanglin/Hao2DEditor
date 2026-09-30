@@ -32,7 +32,7 @@ const QUICK_ACTIONS = [
   { command: 'project:save', label: '保存', icon: Save, hint: '保存工程 (Ctrl+S)' },
   { command: 'project:importImages', label: '导入图片', icon: Import, hint: '导入或拖入碎图 (Ctrl+I)' },
   { command: 'project:exportRuntime', label: '导出运行时', icon: Share2, hint: '导出 {名称}_ske.json + {名称}_atlas.json + 图集 png (Ctrl+E)' },
-  { command: 'project:exportHao2d', label: '导出 .hao2d', icon: Share2, hint: '导出给 Unity Hao2D 运行时使用的 .hao2d (Ctrl+Shift+E)' }
+  { command: 'project:exportHao2d', label: '导出 .hao2d', icon: Share2, hint: '导出给 Unity Hao2D 运行时的 .hao2d + 图集 png + 材质 (Ctrl+Shift+E)' }
 ]
 
 /** 顶部菜单栏：品牌 + 文档名 + 快捷动作 + Pose/Animate 二段式开关。 */

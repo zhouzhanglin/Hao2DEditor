@@ -78,8 +78,8 @@ import {
   openProjectAt,
   saveProject
 } from '@editor/services/projectIo'
-import { exportHao2d } from '@editor/services/exportService'
 import ExportDialog from '@ui/widgets/ExportDialog'
+import type { ExportMode } from '@ui/widgets/ExportDialog'
 import { keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
 
 export default function App() {
@@ -107,8 +107,8 @@ export default function App() {
   })
   const [assetHeight, setAssetHeight] = useState(() => loadPanelHeight(ASSET_PANEL_KEY, ASSET_PANEL_HEIGHT, ASSET_PANEL_MIN, ASSET_PANEL_MAX))
   const [slotOrderHeight, setSlotOrderHeight] = useState(() => loadPanelHeight(SLOT_ORDER_KEY, SLOT_ORDER_HEIGHT, SLOT_ORDER_MIN, SLOT_ORDER_MAX))
-  /** 导出运行时弹窗（选目录 / 调图集缩放 / 预览） */
-  const [exportOpen, setExportOpen] = useState(false)
+  /** 导出弹窗（选目录 / 调图集缩放 / 预览）：null = 未打开 */
+  const [exportMode, setExportMode] = useState<ExportMode | null>(null)
   const booted = useRef(false)
 
   const flash = useCallback((message: string) => {
@@ -276,11 +276,11 @@ export default function App() {
           run(importImagesFlow(), '正在导入图片…')
           return
         case 'project:exportRuntime':
-          // 走弹窗：选目录、调图集缩放 / 页尺寸、先看预览再导出
-          setExportOpen(true)
+          // 两个导出命令都走弹窗：选目录、调图集缩放 / 页尺寸、先看预览再导出
+          setExportMode('runtime')
           return
         case 'project:exportHao2d':
-          run(exportHao2d(), '正在导出 .hao2d…')
+          setExportMode('unity')
           return
         case 'edit:undo':
           useProjectStore.getState().undo()
@@ -559,7 +559,9 @@ export default function App() {
         }
       />
 
-      {exportOpen ? <ExportDialog onClose={() => setExportOpen(false)} onStatus={flash} /> : null}
+      {exportMode ? (
+        <ExportDialog mode={exportMode} onClose={() => setExportMode(null)} onStatus={flash} />
+      ) : null}
     </div>
   )
 }

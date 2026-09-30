@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Layers, Package, Plus } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
@@ -15,6 +15,36 @@ export default function AssetPanel() {
   const selection = useSelectionStore()
   /** 悬停的图片 + 所在行元素（预览浮层贴在行旁边） */
   const [hovered, setHovered] = useState<{ image: AuthoringImage; row: HTMLElement } | null>(null)
+  /** 已选图片（多选）：拖拽时整组一起走，落到视口里一次建多个插槽 */
+  const [picked, setPicked] = useState<string[]>([])
+  /** Shift 范围选择的锚点（上一次普通点击 / Cmd 点击的行） */
+  const anchorRef = useRef<string | null>(null)
+
+  // 图片可能被删除 / 改名，选中列表里失效的名字直接忽略
+  const selected = picked.filter((name) => document.images.some((item) => item.name === name))
+  const selectedSet = new Set(selected)
+
+  /** 点行：普通点击单选、Cmd/Ctrl 点击增减、Shift 点击按锚点选一段 */
+  const pickImage = (name: string, event: React.MouseEvent): void => {
+    if (event.metaKey || event.ctrlKey) {
+      setPicked(
+        selected.includes(name) ? selected.filter((item) => item !== name) : [...selected, name]
+      )
+      anchorRef.current = name
+      return
+    }
+    if (event.shiftKey && anchorRef.current) {
+      const names = document.images.map((item) => item.name)
+      const from = names.indexOf(anchorRef.current)
+      const to = names.indexOf(name)
+      if (from >= 0 && to >= 0) {
+        setPicked(names.slice(Math.min(from, to), Math.max(from, to) + 1))
+        return
+      }
+    }
+    setPicked([name])
+    anchorRef.current = name
+  }
 
   const activeSkin = selection.skin && document.skins.some((s) => s.name === selection.skin) ? selection.skin : ''
   // 新附件的挂载骨骼：优先用当前选中的骨骼，否则退回第一根骨骼
@@ -68,9 +98,24 @@ export default function AssetPanel() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto hao-scroll px-2 py-1.5">
+      <div
+        className="min-h-0 flex-1 overflow-auto hao-scroll px-2 py-1.5"
+        // 点列表空白处取消多选
+        onClick={(event) => {
+          if (!(event.target as HTMLElement).closest('li')) setPicked([])
+        }}
+      >
         <h3 className="hao-panel-title mb-1 flex items-center gap-1">
           <Package size={11} /> 图片 / 图集页
+          {selected.length > 1 ? (
+            <span className="ml-auto font-normal normal-case tracking-normal text-accent">
+              已选 {selected.length} 张 · 拖入场景可一起创建
+            </span>
+          ) : (
+            <span className="ml-auto font-normal normal-case tracking-normal text-content-lo/70">
+              ⌘/Ctrl 多选
+            </span>
+          )}
         </h3>
         {document.images.length === 0 ? (
           <PanelEmpty
@@ -83,11 +128,28 @@ export default function AssetPanel() {
               <li
                 key={image.name}
                 draggable
-                title="拖到视口 = 在落点新建插槽；拖到层级树的插槽行 = 给该插槽加一个 display"
-                className="flex cursor-grab items-center gap-1.5 rounded border border-line/60 bg-ink-900/40 px-1.5 py-1 hover:border-accent/40 active:cursor-grabbing"
+                title="拖到视口 = 在落点新建插槽（先多选可以一次拖多张）；拖到层级树的插槽行 = 给该插槽加一个 display"
+                className={[
+                  'flex cursor-grab items-center gap-1.5 rounded border px-1.5 py-1 active:cursor-grabbing',
+                  selectedSet.has(image.name)
+                    ? 'border-accent/60 bg-accent/15'
+                    : 'border-line/60 bg-ink-900/40 hover:border-accent/40'
+                ].join(' ')}
+                onClick={(event) => pickImage(image.name, event)}
                 onDragStart={(event) => {
-                  setImageDragData(event.dataTransfer, image.name)
-                  setDraggingImage(event.dataTransfer, event.currentTarget.querySelector('img'))
+                  // 拖的行在多选里 → 整组带走；否则先把选中切到它（拖动即选中）
+                  const names =
+                    selectedSet.has(image.name) && selectedSet.size > 1 ? selected : [image.name]
+                  if (names.length === 1) {
+                    setPicked([image.name])
+                    anchorRef.current = image.name
+                  }
+                  setImageDragData(event.dataTransfer, names)
+                  setDraggingImage(
+                    event.dataTransfer,
+                    event.currentTarget.querySelector('img'),
+                    names.length
+                  )
                   setHovered(null)
                 }}
                 onMouseEnter={(event) => setHovered({ image, row: event.currentTarget })}
@@ -119,7 +181,9 @@ export default function AssetPanel() {
                       ? 'text-content-lo hover:bg-accent/15 hover:text-accent cursor-pointer'
                       : 'cursor-not-allowed text-content-lo/40'
                   ].join(' ')}
-                  onClick={() => {
+                  onClick={(event) => {
+                    // 别冒泡到行上改了选中（这个按钮只对当前这张生效）
+                    event.stopPropagation()
                     if (!bone) return
                     let created: { slot: string; attachment: string } | null = null
                     update('用图片创建附件', (draft) => {

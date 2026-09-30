@@ -7,8 +7,14 @@
  */
 export const IMAGE_MIME = 'application/x-hao2d-image'
 
-export function setImageDragData(transfer: DataTransfer, name: string): void {
-  transfer.setData(IMAGE_MIME, name)
+/**
+ * 写入拖拽数据：资源面板里**多选**后可以一次拖多张，所以内容是 JSON 数组
+ * （单张也走数组，读取端统一按列表处理）。
+ */
+export function setImageDragData(transfer: DataTransfer, names: string | readonly string[]): void {
+  const list = (typeof names === 'string' ? [names] : names).filter((name) => name.length > 0)
+  if (list.length === 0) return
+  transfer.setData(IMAGE_MIME, JSON.stringify(list))
   transfer.effectAllowed = 'copy'
 }
 
@@ -18,9 +24,22 @@ export function hasImageDrag(transfer: DataTransfer | null): boolean {
   return Array.from(transfer.types).includes(IMAGE_MIME)
 }
 
-export function readImageDrag(transfer: DataTransfer): string {
-  const value = transfer.getData(IMAGE_MIME)
-  return typeof value === 'string' ? value : ''
+/** 读取拖拽的图片名列表（顺序 = 资源面板里的选择顺序）；空数组表示没读到 */
+export function readImageDrag(transfer: DataTransfer): string[] {
+  const raw = transfer.getData(IMAGE_MIME)
+  if (typeof raw !== 'string' || raw.length === 0) return []
+  if (raw.startsWith('[')) {
+    try {
+      const parsed: unknown = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        return parsed.filter((item): item is string => typeof item === 'string' && item.length > 0)
+      }
+    } catch {
+      // 解析失败时按下面的单个名字处理
+    }
+  }
+  // 兼容早期的「裸图片名」格式
+  return [raw]
 }
 
 /**
@@ -68,8 +87,14 @@ export function readTreeDrag(transfer: DataTransfer): TreeDragPayload | null {
  *
  * 这里自绘一张固定尺寸的 canvas（按短边裁成正方形 + 白框），并把热点设为几何中心：
  * 看到哪对准哪，落点就在哪。
+ *
+ * `count > 1`（多选成组拖动）时右下角带数量角标，拖的时候就知道带了几张。
  */
-export function setDraggingImage(transfer: DataTransfer, source: HTMLImageElement | null): void {
+export function setDraggingImage(
+  transfer: DataTransfer,
+  source: HTMLImageElement | null,
+  count = 1
+): void {
   const SIZE = 32
   const canvas = document.createElement('canvas')
   canvas.width = SIZE
@@ -100,6 +125,27 @@ export function setDraggingImage(transfer: DataTransfer, source: HTMLImageElemen
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)'
     ctx.lineWidth = 2
     ctx.strokeRect(1, 1, SIZE - 2, SIZE - 2)
+
+    if (count > 1) {
+      const label = count > 99 ? '99+' : String(count)
+      ctx.font = 'bold 9px system-ui, sans-serif'
+      const badgeW = Math.max(14, ctx.measureText(label).width + 7)
+      const x = SIZE - badgeW + 1
+      const y = SIZE - 13
+      ctx.beginPath()
+      // roundRect 在少数老环境缺失，退回直角
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, badgeW, 12, 6)
+      else ctx.rect(x, y, badgeW, 12)
+      ctx.fillStyle = '#3b82f6'
+      ctx.fill()
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)'
+      ctx.lineWidth = 1
+      ctx.stroke()
+      ctx.fillStyle = '#ffffff'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(label, x + badgeW / 2, y + 6.5)
+    }
   }
 
   // 规范要求 drag image 的元素已在文档中渲染：临时挂到屏幕外，拖拽结束摘掉

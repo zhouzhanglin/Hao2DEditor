@@ -21,7 +21,7 @@ import { useSelectionStore } from '@editor/store/selectionStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { getActiveScene } from '@editor/activeScene'
 import { createIkConstraint, createPathConstraint, createTransformConstraint } from '@core/model/constraints'
-import type { AuthoringBone, AuthoringConstraint, EditorDocument } from '@core/model/authoring'
+import type { AuthoringBone, AuthoringConstraint, AuthoringImage, EditorDocument } from '@core/model/authoring'
 import { createAuthoringBone, createAuthoringSlot } from '@core/model/authoring'
 import { addImageDisplay, createRegionFromImage, deleteAttachment } from '@editor/commands/authoringCommands'
 import {
@@ -66,8 +66,8 @@ interface TreeRowProps {
   onSelect: () => void
   onDelete?: () => void
   onContextMenu?: (event: React.MouseEvent) => void
-  /** 接收资源面板拖来的图片（插槽行用它追加 display） */
-  onDropImage?: (imageName: string) => void
+  /** 接收资源面板拖来的图片（可多选成组；插槽行用它追加 display） */
+  onDropImage?: (imageNames: string[]) => void
   /** 该行归属的插槽名：既用于兜底判定「拖到插槽下面」，也让 display 行归到宿主插槽 */
   dataSlot?: string
   /** 树内拖动：该行本身可拖时给出负载（骨骼 / 插槽 / display） */
@@ -176,8 +176,8 @@ function TreeRow({
                 if (payload) onDropNode(payload, dropPositionOf(event))
                 return
               }
-              const imageName = readImageDrag(event.dataTransfer)
-              if (imageName) onDropImage?.(imageName)
+              const imageNames = readImageDrag(event.dataTransfer)
+              if (imageNames.length > 0) onDropImage?.(imageNames)
             }
           : undefined
       }
@@ -309,26 +309,34 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   }
 
   /** 资源面板拖进来的图片：作为新的 display 追加到该插槽，并立即切换显示 */
-  const addDisplay = (slotName: string, imageName: string): void => {
+  const addDisplay = (slotName: string, imageNames: string[]): void => {
     if (!canEditBinding()) return
-    const image = document.images.find((item) => item.name === imageName)
-    if (!image) return
-    let created: { slot: string; attachment: string } | null = null
-    update('拖入图片添加 display', (draft) => {
-      created = addImageDisplay(draft, {
-        image: image.name,
-        slot: slotName,
-        width: image.width,
-        height: image.height,
-        skin: selection.skin
-      })
-    })
-    if (created) {
-      const result: { slot: string; attachment: string } = created
-      selection.selectAttachment(result.slot, result.attachment)
-      // 插槽行可能被折叠着，展开宿主骨骼让新 display 可见
-      expandBone(boneOfSlot(slotName))
-    }
+    const images = imageNames
+      .map((name) => document.images.find((item) => item.name === name))
+      .filter((item): item is AuthoringImage => Boolean(item))
+    if (images.length === 0) return
+    const created: { slot: string; attachment: string }[] = []
+    update(
+      images.length > 1 ? `拖入 ${images.length} 张图片添加 display` : '拖入图片添加 display',
+      (draft) => {
+        for (const image of images) {
+          const result = addImageDisplay(draft, {
+            image: image.name,
+            slot: slotName,
+            width: image.width,
+            height: image.height,
+            skin: selection.skin
+          })
+          if (result) created.push(result)
+        }
+      }
+    )
+    // 每个新建的 display 都会成为当前显示项，最后一张显示在最上面
+    const last = created[created.length - 1]
+    if (!last) return
+    selection.selectAttachment(last.slot, last.attachment)
+    // 插槽行可能被折叠着，展开宿主骨骼让新 display 可见
+    expandBone(boneOfSlot(slotName))
   }
 
   /** 树内拖放的统一入口：按「拖的是什么 / 落到哪种行」分派，并挡掉不允许的组合 */
@@ -411,25 +419,32 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   }
 
   /** 资源面板拖到骨骼行：在该骨骼下新建插槽，图片作为它的第一个 display */
-  const addSlotFromImage = (boneName: string, imageName: string): void => {
+  const addSlotFromImage = (boneName: string, imageNames: string[]): void => {
     if (!canEditBinding()) return
-    const image = document.images.find((item) => item.name === imageName)
-    if (!image) return
-    let created: { slot: string; attachment: string } | null = null
-    update('拖入图片新建插槽', (draft) => {
-      created = createRegionFromImage(draft, {
-        image: image.name,
-        bone: boneName,
-        width: image.width,
-        height: image.height,
-        skin: selection.skin
-      })
-    })
-    if (created) {
-      const result: { slot: string; attachment: string } = created
-      selection.selectAttachment(result.slot, result.attachment)
-      expandBone(boneName)
-    }
+    const images = imageNames
+      .map((name) => document.images.find((item) => item.name === name))
+      .filter((item): item is AuthoringImage => Boolean(item))
+    if (images.length === 0) return
+    const created: { slot: string; attachment: string }[] = []
+    update(
+      images.length > 1 ? `拖入 ${images.length} 张图片新建插槽` : '拖入图片新建插槽',
+      (draft) => {
+        for (const image of images) {
+          const result = createRegionFromImage(draft, {
+            image: image.name,
+            bone: boneName,
+            width: image.width,
+            height: image.height,
+            skin: selection.skin
+          })
+          if (result) created.push(result)
+        }
+      }
+    )
+    const first = created[0]
+    if (!first) return
+    selection.selectAttachment(first.slot, first.attachment)
+    expandBone(boneName)
   }
 
   /** 展开某根骨骼（新建子对象后自动展开，避免「加了却看不见」） */
@@ -617,7 +632,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         onToggle={() => toggle(bone.name)}
         onSelect={() => selection.selectBone(bone.name)}
         // 拖到骨骼行 = 在这根骨骼下新建一个插槽
-        onDropImage={(imageName) => addSlotFromImage(bone.name, imageName)}
+        onDropImage={(imageNames) => addSlotFromImage(bone.name, imageNames)}
         onContextMenu={(event) => openMenu(event, { kind: 'bone', name: bone.name, bone: bone.parent })}
         trailing={
           <button
@@ -684,7 +699,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         meta={showing ? '显示中' : undefined}
         // display 行也算宿主插槽的地盘：拖到插槽下面（含子行）都是「给这个插槽加 display」
         dataSlot={slot.name}
-        onDropImage={(imageName) => addDisplay(slot.name, imageName)}
+        onDropImage={(imageNames) => addDisplay(slot.name, imageNames)}
         onSelect={() => selectDisplay(slot.name, attachment.name)}
         onDelete={() =>
           update('删除 display', (draft) => deleteAttachment(draft, slot.name, attachment.name))
@@ -721,7 +736,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         dataSlot={slot.name}
         onToggle={() => toggle(`slot:${slot.name}`)}
         onSelect={() => selection.selectSlot(slot.name)}
-        onDropImage={(imageName) => addDisplay(slot.name, imageName)}
+        onDropImage={(imageNames) => addDisplay(slot.name, imageNames)}
         onContextMenu={(event) => openMenu(event, { kind: 'slot', name: slot.name, bone: slot.bone })}
         trailing={
           <button
@@ -861,9 +876,9 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             onStatus?.('display 只能放到插槽下面')
             return
           }
-          const imageName = readImageDrag(event.dataTransfer)
+          const imageNames = readImageDrag(event.dataTransfer)
           const slotName = slotUnderPointer(event.clientY)
-          if (imageName && slotName) addDisplay(slotName, imageName)
+          if (imageNames.length > 0 && slotName) addDisplay(slotName, imageNames)
         }}
       >
         {rows}

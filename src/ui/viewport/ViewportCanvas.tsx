@@ -11,6 +11,8 @@ import { isDragging, toolPointerDown, toolPointerMove, toolPointerUp } from '@ed
 import type { ToolHost } from '@editor/tools/authoringTools'
 import { createRegionFromImage, insertMeshVertex, PPU } from '@editor/commands/authoringCommands'
 import { hasImageDrag, readImageDrag } from '@ui/widgets/dragDrop'
+import { gridDropLayout } from '@ui/viewport/dropLayout'
+import type { AuthoringImage } from '@core/model/authoring'
 
 export interface ViewportCanvasProps {
   onSceneReady: (scene: EditorScene) => void
@@ -319,14 +321,16 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
   /**
    * 资源面板拖进来的图片：在落点建「插槽 + Region display」。
    *
+   * 支持一次多张（资源面板里多选后整组拖动）：以落点为中心排成紧凑网格，避免互相盖住；
+   * 全部在**同一次 update** 里创建，撤销时整组一起退回。
    * 宿主骨骼优先取鼠标下的那根，其次当前选中骨骼，再退回第一根；
    * 一根骨骼都没有（空白工程）时先补一根根骨骼，这样直接拖图就能开工。
    * 只在 Pose 态建档：插槽 / 附件属于绑定数据，Animate 态改 setup 会污染动画基线。
    */
   const onImageDrop = (event: React.DragEvent<HTMLDivElement>): void => {
     const scene = sceneRef.current
-    const imageName = readImageDrag(event.dataTransfer)
-    if (!scene || !imageName) return
+    const droppedNames = readImageDrag(event.dataTransfer)
+    if (!scene || droppedNames.length === 0) return
 
     if (useModeStore.getState().mode !== 'pose') {
       onStatus('切到 Pose 状态才能把图片放进场景：插槽 / 附件属于绑定数据')
@@ -334,9 +338,13 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     }
 
     const store = useProjectStore.getState()
-    const image = store.document.images.find((item) => item.name === imageName)
-    if (!image) {
-      onStatus(`找不到图片「${imageName}」（可能已被移除）`)
+    // 按资源面板里的选择顺序保留；找不到的（刚被移除）跳过并计数
+    const images = droppedNames
+      .map((name) => store.document.images.find((item) => item.name === name))
+      .filter((item): item is AuthoringImage => Boolean(item))
+    const missing = droppedNames.length - images.length
+    if (images.length === 0) {
+      onStatus(`找不到图片「${droppedNames[0]}」（可能已被移除）`)
       return
     }
 
@@ -355,32 +363,48 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       return
     }
 
-    let created: { slot: string; attachment: string } | null = null
-    let local: { x: number; y: number } = { x: world.x, y: world.y }
-    store.update('拖入图片创建插槽', (draft) => {
-      // 落点 → 骨骼局部坐标（宿主骨骼当前姿态下的显示空间）
-      local = scene.worldToBoneLocal(host, world.x, world.y) ?? { x: world.x, y: world.y }
-      created = createRegionFromImage(draft, {
-        image: image.name,
-        bone: host,
-        width: image.width,
-        height: image.height,
-        position: local,
-        skin: useSelectionStore.getState().skin
+    // 多张排成网格；间隙按屏幕像素换算，缩放后间距观感一致
+    const layout = gridDropLayout(
+      images.map((image) => ({ width: image.width / PPU, height: image.height / PPU })),
+      scene.viewport.pixelsToWorld(14)
+    )
+
+    const created: { slot: string; attachment: string }[] = []
+    store.update(images.length > 1 ? `拖入 ${images.length} 张图片创建插槽` : '拖入图片创建插槽', (draft) => {
+      images.forEach((image, index) => {
+        const target = { x: world.x + layout.offsets[index].x, y: world.y + layout.offsets[index].y }
+        // 落点 → 骨骼局部坐标（宿主骨骼当前姿态下的显示空间）
+        const local = scene.worldToBoneLocal(host, target.x, target.y) ?? target
+        const result = createRegionFromImage(draft, {
+          image: image.name,
+          bone: host,
+          width: image.width,
+          height: image.height,
+          position: local,
+          skin: useSelectionStore.getState().skin
+        })
+        if (result) created.push(result)
       })
     })
 
-    if (!created) {
-      onStatus(`无法用「${image.name}」创建插槽`)
+    if (created.length === 0) {
+      onStatus(`无法用「${images[0].name}」创建插槽`)
       return
     }
-    const result: { slot: string; attachment: string } = created
-    useSelectionStore.getState().selectAttachment(result.slot, result.attachment)
+    // 插槽是单选模型：选中这一批里的第一个，多选拖拽时也只能单选
+    const first = created[0]
+    useSelectionStore.getState().selectAttachment(first.slot, first.attachment)
     if (emptyScene) {
       scene.autoFitDone = true
-      scene.focusOnContent(world.x, world.y, image.width / PPU, image.height / PPU)
+      scene.focusOnContent(world.x, world.y, layout.width, layout.height)
     }
-    onStatus(`已创建插槽「${result.slot}」：图片「${image.name}」作为 display 挂到骨骼「${host}」下`)
+    const skipped = missing > 0 ? `；另有 ${missing} 张图片已不存在，未创建` : ''
+    if (created.length === 1) {
+      onStatus(`已创建插槽「${first.slot}」：图片「${images[0].name}」作为 display 挂到骨骼「${host}」下${skipped}`)
+    } else {
+      const names = images.slice(0, created.length).map((image) => image.name).join('、')
+      onStatus(`已创建 ${created.length} 个插槽（${names}）挂到骨骼「${host}」下${skipped}`)
+    }
   }
 
   return (

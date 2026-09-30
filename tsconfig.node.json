@@ -21,6 +21,7 @@
       "@importers/*": ["src/importers/*"],
       "@render/*": ["src/render/*"],
       "@editor/*": ["src/editor/*"],
+      "@ui/*": ["src/ui/*"],
       "@shared/*": ["src/shared/*"]
     }
   },
@@ -32,6 +33,7 @@
     "src/importers/**/*.ts",
     "src/render/**/*.ts",
     "src/editor/**/*.ts",
+    "src/ui/**/*.ts",
     "electron.vite.config.ts",
     "vite.web.config.ts",
     "vitest.config.ts",

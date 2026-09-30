@@ -167,8 +167,10 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       host.status('骨骼属于绑定数据：切到 Pose 状态再画')
       return true
     }
-    const parent = resolveCreateParent(host, info.world)
-    const start = snapToBoneAxis(host, info.world)
+    // 端点吸附优先（「接着上一根画」）：精确接到末端 / 根端那个点上，并把该骨骼作为父级
+    const endpoint = snapToBoneEndpoint(host, info.world)
+    const parent = endpoint ? endpoint.bone : resolveCreateParent(host, info.world)
+    const start = endpoint ? endpoint.point : snapToBoneAxis(host, info.world)
     drag = {
       ...IDLE,
       kind: 'bone-create',
@@ -179,9 +181,11 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     scene.setViewState({ pendingBone: { x1: start.x, y1: start.y, x2: start.x, y2: start.y } })
     storeHandler.begin('新建骨骼')
     host.status(
-      parent
-        ? `从「${parent}」接着画：拖动决定长度与方向，松开生成（可以一根接一根拖成骨骼链）`
-        : '拖动决定长度与方向，松开生成骨骼（建在根层；从骨骼上起笔才会挂到它下面）'
+      endpoint
+        ? `已吸附到「${parent}」的骨骼端点：拖动决定长度与方向，松开生成（一根接一根就是骨骼链）`
+        : parent
+          ? `从「${parent}」接着画：拖动决定长度与方向，松开生成（可以一根接一根拖成骨骼链）`
+          : '拖动决定长度与方向，松开生成骨骼（建在根层；从骨骼上起笔才会挂到它下面）'
     )
     return true
   }
@@ -715,7 +719,8 @@ export function toolPointerMove(host: ToolHost, info: PointerInfo): void {
   }
 
   if (drag.kind === 'bone-create') {
-    const end = snapToBoneAxis(host, info.world)
+    // 收笔同样吸端点：拖到目标骨骼的根端 / 末端时精确对接（端点优先于轴线投影）
+    const end = snapToBoneEndpoint(host, info.world)?.point ?? snapToBoneAxis(host, info.world)
     drag.createEnd = end
     host.scene.setViewState({
       pendingBone: { x1: drag.createStart.x, y1: drag.createStart.y, x2: end.x, y2: end.y }
@@ -784,6 +789,50 @@ export function toolPointerUp(host: ToolHost): void {
     }
   }
   drag = { ...IDLE }
+}
+
+/**
+ * 端点吸附半径（屏幕像素）。比骨骼体的拾取半径（8px）大不少：
+ * 「从上一根的末端接着画」是最常见的意图，值得放宽容错 ——
+ * 判定用欧氏距离，斜向偏差（如右下各偏 10px）实际就是 14px，
+ * 半径太紧会让「明明点在末端上」的操作失败。
+ * 也不宜再大：正常长度的骨骼两端吸附圈不会碰到中部（分支要在中段起笔）。
+ */
+const BONE_ENDPOINT_SNAP_PIXELS = 20
+
+/**
+ * 起笔 / 收笔点靠近任意骨骼的**根端或末端**时，精确吸附到那个端点。
+ *
+ * 「接着上一根画骨骼链」必须接在**末端那个点**上，只投影到轴线是不够的：
+ * 投影点会落在离末端还差鼠标偏移量的地方，链节之间就有肉眼可见的缝；
+ * 偏差稍大时（超过骨骼体的拾取半径）更是连父子关系都建不上，直接掉到根层。
+ */
+function snapToBoneEndpoint(
+  host: ToolHost,
+  world: Vec2
+): { point: Vec2; bone: string } | null {
+  const bundle = host.scene.runtime
+  if (!bundle) return null
+  const radius = host.scene.viewport.pixelsToWorld(BONE_ENDPOINT_SNAP_PIXELS)
+  const bones = bundle.asset.bones
+  let best: { point: Vec2; bone: string; distance: number } | null = null
+  for (let index = 0; index < bones.length; index++) {
+    const offset = index * 16
+    const ox = bundle.skeleton.world[offset + 12]
+    const oy = bundle.skeleton.world[offset + 13]
+    // 末端 = 原点沿骨骼 x 轴走一个 length（矩阵首列含缩放，直接用即可）
+    const points = [
+      { x: ox, y: oy },
+      { x: ox + bundle.skeleton.world[offset] * bones[index].length, y: oy + bundle.skeleton.world[offset + 1] * bones[index].length }
+    ]
+    for (const point of points) {
+      const distance = Math.hypot(point.x - world.x, point.y - world.y)
+      if (distance <= radius && (!best || distance < best.distance)) {
+        best = { point, bone: bones[index].name, distance }
+      }
+    }
+  }
+  return best ? { point: best.point, bone: best.bone } : null
 }
 
 /**

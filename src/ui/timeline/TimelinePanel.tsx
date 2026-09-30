@@ -6,20 +6,21 @@ import { useSelectionStore } from '@editor/store/selectionStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { animationDuration } from '@editor/runtime'
 import { getActiveScene } from '@editor/activeScene'
-import { buildTimeline, lastKeyTime, setKeyEasing, setKeysTimes } from '@editor/timeline/model'
+import { buildTimeline, lastKeyTime, setKeysTimes } from '@editor/timeline/model'
 import { uniqueName } from '@editor/commands/authoringCommands'
 import { keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
 import type { KeyKind, KeySelector, TimelineTrack } from '@editor/timeline/model'
 import DopeSheet from './DopeSheet'
-import CurveEditor from './CurveEditor'
-import KeyframeCard from '@ui/panels/KeyframeCard'
 import { CommitTextField } from '@ui/widgets/fields'
 
 export interface TimelinePanelProps {
   onStatus?: (text: string) => void
 }
 
-/** 时间轴：播放条 + 轨道列表 + dope sheet + 曲线编辑器（仅在 Animate 状态渲染） */
+/**
+ * 时间轴：播放条 + 轨道列表 + dope sheet（仅在 Animate 状态渲染）。
+ * 曲线在左栏「曲线」面板；关键帧的值在视口下方的浮动条，都不占这里的高度。
+ */
 export default function TimelinePanel({ onStatus = () => undefined }: TimelinePanelProps) {
   const document = useProjectStore((s) => s.document)
   const update = useProjectStore((s) => s.update)
@@ -47,22 +48,6 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
   const frame = Math.round(timeline.time * document.frameRate)
   const totalFrames = Math.max(1, Math.round(duration * document.frameRate))
   const selectedKeys = timeline.selectedKeys
-
-  const activeKey = useMemo(() => {
-    if (selectedKeys.length === 0) return null
-    const selector = selectedKeys[0]
-    for (const track of tracks) {
-      const found = track.keys.find(
-        (key) =>
-          key.kind === selector.kind &&
-          key.target === selector.target &&
-          key.channel === selector.channel &&
-          Math.abs(key.time - selector.time) < 1e-4
-      )
-      if (found) return found
-    }
-    return null
-  }, [selectedKeys, tracks])
 
   /** 重命名中的动画名（非 null 时把按钮区换成输入框） */
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -396,20 +381,6 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         onStatus={onStatus}
       />
 
-      {/* 底部工具条：左边曲线编辑器，右边关键帧属性（选中关键帧时可编辑时间/缓动/值） */}
-      <div className="flex shrink-0 items-start gap-2 border-t border-line bg-ink-800/70 px-2 py-1.5">
-        <CurveEditor
-          selectedKeys={selectedKeys}
-          easing={activeKey?.easing ?? 0}
-          curve={activeKey?.curve ?? null}
-          onChange={(easing, curve) => {
-            update('修改缓动', (draft) => {
-              setKeyEasing(draft, animation?.name ?? null, selectedKeys, easing, curve)
-            })
-          }}
-        />
-        <KeyframeCard onStatus={onStatus} />
-      </div>
     </div>
   )
 }

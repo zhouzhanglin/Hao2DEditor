@@ -8,6 +8,8 @@ export interface CurveEditorProps {
   easing: Easing
   curve: number[] | null
   onChange: (easing: Easing, curve: number[] | null) => void
+  /** 面板已由外层 PanelShell 给出「曲线」标题时传 false，避免标题重复 */
+  showTitle?: boolean
 }
 
 const PRESETS: Array<{ label: string; easing: Easing; curve: number[] | null }> = [
@@ -26,7 +28,7 @@ const PAD = 10
  * 贝塞尔曲线编辑器：四点手柄（p0(0,0) / p1 / p2 / p3(1,1)），x 为时间进度、y 为值进度。
  * 手柄可拖动，坐标与 Runtime 的 `curve = [cx1, cy1, cx2, cy2]` 一一对应。
  */
-export default function CurveEditor({ selectedKeys, easing, curve, onChange }: CurveEditorProps) {
+export default function CurveEditor({ selectedKeys, easing, curve, onChange, showTitle = true }: CurveEditorProps) {
   const svgRef = useRef<SVGSVGElement | null>(null)
   const dragging = useRef<0 | 1 | null>(null)
   const active = curve ?? [0.25, 0.25, 0.75, 0.75]
@@ -66,7 +68,7 @@ export default function CurveEditor({ selectedKeys, easing, curve, onChange }: C
   const path = `M ${p0.cx} ${p0.cy} C ${p1.cx} ${p1.cy}, ${p2.cx} ${p2.cy}, ${p3.cx} ${p3.cy}`
 
   return (
-    <div className="flex shrink-0 items-start gap-2">
+    <div className="flex shrink-0 flex-wrap items-start gap-2">
       <svg
         ref={svgRef}
         width={SIZE}
@@ -138,8 +140,8 @@ export default function CurveEditor({ selectedKeys, easing, curve, onChange }: C
         ) : null}
       </svg>
 
-      <div className="flex min-w-0 flex-col gap-1">
-        <span className="hao-panel-title">曲线</span>
+      <div className="flex min-w-[104px] flex-1 flex-col gap-1">
+        {showTitle ? <span className="hao-panel-title">曲线</span> : null}
         <div className="flex flex-wrap gap-1">
           {PRESETS.map((preset) => {
             const isActive =

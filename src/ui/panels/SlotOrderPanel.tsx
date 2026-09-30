@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, Eye, EyeOff, GripVertical } from 'lucide-react'
 import { useModeStore } from '@editor/store/modeStore'
 import { useProjectStore } from '@editor/store/projectStore'
@@ -77,6 +77,12 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
     commitOrder(names)
   }
 
+  /** 选中的行（在层级树 / 视口里选中 display 也会走到这里）：滚出视野时拉回可见范围 */
+  const activeRowRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    activeRowRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [selection.kind, selection.slot])
+
   const toggleVisible = (name: string): void => {
     update('切换插槽可见性', (draft) => {
       const target = draft.slots.find((item) => item.name === name)
@@ -135,14 +141,35 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
           '上面的行画在更前面；调整的是 setup 绘制顺序'
         )}
       </p>
-      <div className="hao-scroll min-h-0 flex-1 overflow-auto pb-1">
+      {/* 容器同时兜底「拖到列表下方空白」：落到末尾 = 最底层 */}
+      <div
+        className="hao-scroll min-h-0 flex-1 overflow-auto pb-1"
+        onDragOver={(event) => {
+          if (!event.dataTransfer.types.includes(ORDER_MIME)) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+        }}
+        onDrop={(event) => {
+          // 落在这里 = 没落在任何行上（行下方 / 行间的空白）→ 放到列表末尾
+          const from = event.dataTransfer.getData(ORDER_MIME)
+          if (!from) return
+          event.preventDefault()
+          const names = [...layers].filter((name) => name !== from)
+          names.push(from)
+          setDragging(null)
+          commitOrder(names)
+        }}
+      >
         {layers.map((name) => {
           const slot = rowByName(document, name)
           if (!slot) return null
-          const active = selection.kind === 'slot' && selection.slot === name
+          // 选中 display（附件）时也高亮它所属的插槽：两处选择是同一个对象
+          const active =
+            (selection.kind === 'slot' || selection.kind === 'attachment') && selection.slot === name
           return (
             <div
               key={name}
+              ref={active ? activeRowRef : null}
               draggable
               onDragStart={(event) => {
                 event.dataTransfer.setData(ORDER_MIME, name)
@@ -158,6 +185,8 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
               onDrop={(event) => {
                 const from = event.dataTransfer.getData(ORDER_MIME)
                 if (!from || from === name) return
+                // 行内自己处理完就停：不要让容器的兜底再提交一次（会把位置覆盖成末尾）
+                event.stopPropagation()
                 const rect = event.currentTarget.getBoundingClientRect()
                 dropAt(name, event.clientY - rect.top < rect.height / 2 ? 'before' : 'after')
               }}

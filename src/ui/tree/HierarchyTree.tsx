@@ -28,7 +28,7 @@ import { getActiveScene } from '@editor/activeScene'
 import { createIkConstraint, createPathConstraint, createTransformConstraint } from '@core/model/constraints'
 import type { AuthoringBone, AuthoringConstraint, AuthoringImage, EditorDocument } from '@core/model/authoring'
 import { createAuthoringBone, createAuthoringSlot } from '@core/model/authoring'
-import { addImageDisplay, createRegionFromImage, deleteAttachment } from '@editor/commands/authoringCommands'
+import { addImageDisplay, createRegionFromImage, deleteAttachment, deleteSlot } from '@editor/commands/authoringCommands'
 import {
   boneSlotAnchor,
   moveBone,
@@ -687,8 +687,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           onSelect: () => {
             if (target.kind === 'slot') {
               update('删除插槽', (draft) => {
-                draft.slots = draft.slots.filter((s) => s.name !== target.name)
-                for (const skin of draft.skins) skin.slots = skin.slots.filter((s) => s.slot !== target.name)
+                deleteSlot(draft, target.name)
               })
               return
             }
@@ -870,8 +869,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         }
         onDelete={() =>
           update('删除插槽', (draft) => {
-            draft.slots = draft.slots.filter((s) => s.name !== slot.name)
-            for (const skin of draft.skins) skin.slots = skin.slots.filter((s) => s.slot !== slot.name)
+            deleteSlot(draft, slot.name)
           })
         }
       />

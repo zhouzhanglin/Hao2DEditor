@@ -680,11 +680,13 @@ export default function DopeSheet(props: DopeSheetProps) {
                 ].join(' ')}
                 style={{ height: ROW_HEIGHT, paddingLeft: 5 + track.depth * 12 }}
                 title={
-                  track.isGroup
-                    ? `${track.kind === 'slot' ? '插槽' : '骨骼'}「${track.label}」的通道（点击选中该对象）`
-                    : track.kind === 'slot' && track.channel === 'display'
-                      ? `${track.group} · 显示 · 单击选中插槽，右键选择要显示的 display（在当前时间打关键帧）`
-                      : `${track.group} · ${track.label} · 点击选中该通道（按 K 只给它打帧）`
+                  track.kind === 'drawOrder'
+                    ? '插槽层级（绘制顺序）：每帧是一份完整顺序快照，在 slot 层级面板调完顺序后打帧；点选后按 Delete 可删除整条通道'
+                    : track.isGroup
+                      ? `${track.kind === 'slot' ? '插槽' : '骨骼'}「${track.label}」的通道（点击选中该对象）`
+                      : track.kind === 'slot' && track.channel === 'display'
+                        ? `${track.group} · 显示 · 单击选中插槽，右键选择要显示的 display（在当前时间打关键帧）`
+                        : `${track.group} · ${track.label} · 点击选中该通道（按 K 只给它打帧，Delete 删除整条通道）`
                 }
                 onClick={() => props.onSelectTarget(track)}
                 onContextMenu={(event) => {

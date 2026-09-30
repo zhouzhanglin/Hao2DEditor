@@ -17,7 +17,8 @@ const KIND_LABEL: Record<KeySelector['kind'], string> = {
   slot: '插槽',
   deform: 'FFD 变形',
   constraint: '约束',
-  event: '事件'
+  event: '事件',
+  drawOrder: '插槽层级'
 }
 
 const CHANNEL_LABEL: Record<string, string> = {
@@ -29,6 +30,7 @@ const CHANNEL_LABEL: Record<string, string> = {
   display: '显示附件',
   displayIndex: '显示附件',
   visible: '可见性',
+  order: '绘制顺序',
   offsets: 'FFD 偏移',
   mix: '混合权重',
   position: '位置',
@@ -167,6 +169,18 @@ export default function KeyframeCard({ onStatus = () => undefined }: KeyframeCar
                   onChange={(value) => editFrames('修改事件浮点参数', (item) => { item.floatParam = value })}
                 />
               </div>
+            </>
+          ) : single.kind === 'drawOrder' ? (
+            <>
+              <InfoChip label="轨道" value="插槽层级 · 绘制顺序" />
+              <InfoChip label="时间" value={`${single.time.toFixed(3)}s · 第 ${frameIndex} 帧`} />
+              <InfoChip
+                label="顺序"
+                value={((frame as { order?: string[] } | null)?.order ?? []).join(' → ') || '（空）'}
+              />
+              <p className="w-full text-3xs text-content-lo">
+                绘制顺序帧记录该时刻完整的插槽顺序；在右下角「slot 层级」面板调好顺序后重新打帧即可覆盖。
+              </p>
             </>
           ) : (
             <>

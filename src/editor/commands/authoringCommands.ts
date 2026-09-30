@@ -734,6 +734,28 @@ function renameBoneRefs(doc: EditorDocument, oldName: string, next: string): voi
 }
 
 /** 插槽名出现在皮肤清单、动画轨道、deform、绘制顺序帧里 */
+/**
+ * 删除插槽：连同皮肤里的附件、动画里的轨道、以及绘制顺序帧里的名字一起清理。
+ *
+ * 绘制顺序帧里必须摘掉被删的名字 —— 缺项的 order 会让运行期只覆盖前 N 个槽，
+ * 尾部留着上一次的顺序（同一插槽画两次、有的插槽不画）。编译期还会再归一化一次兜底。
+ */
+export function deleteSlot(doc: EditorDocument, slotName: string): boolean {
+  const before = doc.slots.length
+  doc.slots = doc.slots.filter((slot) => slot.name !== slotName)
+  if (doc.slots.length === before) return false
+
+  for (const skin of doc.skins) skin.slots = skin.slots.filter((skinSlot) => skinSlot.slot !== slotName)
+  for (const anim of doc.animations) {
+    anim.slots = anim.slots.filter((track) => track.slot !== slotName)
+    anim.deforms = anim.deforms.filter((track) => track.slot !== slotName)
+    for (const key of anim.drawOrder) {
+      if (key.order.includes(slotName)) key.order = key.order.filter((name) => name !== slotName)
+    }
+  }
+  return true
+}
+
 function renameSlotRefs(doc: EditorDocument, oldName: string, next: string): void {
   for (const skin of doc.skins) for (const skinSlot of skin.slots) if (skinSlot.slot === oldName) skinSlot.slot = next
   for (const anim of doc.animations) {

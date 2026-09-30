@@ -80,7 +80,7 @@ import {
 } from '@editor/services/projectIo'
 import ExportDialog from '@ui/widgets/ExportDialog'
 import type { ExportMode } from '@ui/widgets/ExportDialog'
-import { keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
+import { deleteSelectedTrack, keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
 
 export default function App() {
   const mode = useModeStore((s) => s.mode)
@@ -394,7 +394,13 @@ export default function App() {
         const switched = useToolStore.getState().tool !== before
         flash(`骨骼工具：${GIZMO_LABEL[next]}（${event.key.toUpperCase()}）${switched ? '· 已退出绘制工具' : ''}`)
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
-        handleCommand('anim:deleteKeys')
+        // 选中了具体关键帧 → 删帧；只点选了某条通道 → 删整条通道
+        const timeline = useTimelineStore.getState()
+        if (timeline.selectedKeys.length === 0 && timeline.selectedTrack) {
+          flash(deleteSelectedTrack().message)
+        } else {
+          handleCommand('anim:deleteKeys')
+        }
       } else if (event.key === 'ArrowLeft') {
         handleCommand('anim:prevFrame')
       } else if (event.key === 'ArrowRight') {

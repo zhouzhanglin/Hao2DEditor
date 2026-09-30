@@ -341,6 +341,8 @@ function compileAnimations(
   anim: AuthoringAnimData,
   boneIndex: Map<string, number>,
   slotIndex: Record<string, number>,
+  /** 实际插槽数量（不能用 slotIndex 的 key 数：重名插槽会被覆盖，导致数量偏小） */
+  slotCount: number,
   constraintIndex: Record<string, number>,
   constraints: Constraint[],
   ikIndices: number[],
@@ -386,9 +388,13 @@ function compileAnimations(
       frames: track.frames
     }))
 
+  // 绘制顺序帧必须是**完整排列**。曾经直接 map + filter 丢掉解析不到的名字，
+  // 数组一旦变短，运行期就只覆盖前 N 个槽、尾部留着上一次的顺序 ——
+  // 表现为「动画走到层级变化处，有的图被画两次、有的图直接不显示」。
+  // 这里统一归一化：帧里有的顺序优先，重复的丢掉，缺的按 setup 顺序补到末尾。
   const drawOrder = anim.drawOrder.map<DrawOrderKeyframe>((key) => ({
     time: key.time,
-    order: key.order.map((name) => slotIndex[name]).filter((v) => v !== undefined)
+    order: normalizeDrawOrder(key.order, slotIndex, slotCount)
   }))
 
   const constraintTracks: ConstraintAnim[] = []
@@ -427,6 +433,29 @@ function compileAnimations(
  * Authoring 工程模型 → Runtime 模型。
  * 骨骼做拓扑排序、插槽按 zOrder 排序，动画与约束的名字引用换算成下标。
  */
+/**
+ * 绘制顺序帧归一化：补成**完整排列**。
+ *
+ * 帧里已写下的顺序优先（重复的丢掉），解析不到的名字忽略，
+ * 缺失的槽按 setup 顺序补到末尾 —— 运行期要求 order 覆盖全部槽位。
+ */
+function normalizeDrawOrder(
+  order: readonly string[],
+  slotIndex: Record<string, number>,
+  total: number
+): number[] {
+  const out: number[] = []
+  const seen = new Set<number>()
+  for (const name of order) {
+    const index = slotIndex[name]
+    if (index === undefined || index < 0 || index >= total || seen.has(index)) continue
+    seen.add(index)
+    out.push(index)
+  }
+  for (let i = 0; i < total; i++) if (!seen.has(i)) out.push(i)
+  return out
+}
+
 export function compileDocument(doc: EditorDocument): CompileResult {
   const warnings: string[] = []
   const { ordered, index, warnings: boneWarnings } = topologicalBones(doc)
@@ -477,7 +506,7 @@ export function compileDocument(doc: EditorDocument): CompileResult {
   }))
 
   const animations = doc.animations.map((anim) =>
-    compileAnimations(anim, index, slotIndex, constraintIndex, constraints, ikIndices, warnings)
+    compileAnimations(anim, index, slotIndex, slots.length, constraintIndex, constraints, ikIndices, warnings)
   )
 
   const defaultSkinIndex = Math.max(

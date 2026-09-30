@@ -51,23 +51,35 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
 
     let raf = 0
     let last = performance.now()
+    /**
+     * 渲染循环。
+     *
+     * 下一帧的 rAF **必须**排在 try/catch 之外：`scene.update` 里任何一处抛异常
+     * （渲染 / 采样 / 覆盖层）都会让整个循环停摆 —— 表现为「画面定格、拖拽缩放全无反应，
+     * 但面板还能用」，而且 rAF 回调里的异常不会弹提示，只看控制台很容易漏掉。
+     * 这里把单帧错误隔离开：跳过这一帧、打出堆栈，循环继续跑。
+     */
     const loop = (now: number): void => {
       const dt = Math.min(0.1, (now - last) / 1000)
       last = now
-      scene.update(dt)
-      // 首次拿到有效几何后自动适配视野（拖图会提前置 autoFitDone，见 onImageDrop）
-      if (!scene.autoFitDone) {
-        const bounds = scene.meshResult?.bounds
-        if (bounds && bounds.maxX - bounds.minX > 1e-4 && bounds.maxY - bounds.minY > 1e-4) {
-          scene.autoFitDone = true
-          scene.fit()
+      try {
+        scene.update(dt)
+        // 首次拿到有效几何后自动适配视野（拖图会提前置 autoFitDone，见 onImageDrop）
+        if (!scene.autoFitDone) {
+          const bounds = scene.meshResult?.bounds
+          if (bounds && bounds.maxX - bounds.minX > 1e-4 && bounds.maxY - bounds.minY > 1e-4) {
+            scene.autoFitDone = true
+            scene.fit()
+          }
         }
-      }
-      const timeline = useTimelineStore.getState()
-      if (scene.currentAnimation && timeline.playing) {
-        // 播放推进后把时间回写到 store，供时间轴显示
-        const time = scene.runtime?.player.time ?? 0
-        if (Math.abs(time - timeline.time) > 1e-4) timeline.setTime(time)
+        const timeline = useTimelineStore.getState()
+        if (scene.currentAnimation && timeline.playing) {
+          // 播放推进后把时间回写到 store，供时间轴显示
+          const time = scene.runtime?.player.time ?? 0
+          if (Math.abs(time - timeline.time) > 1e-4) timeline.setTime(time)
+        }
+      } catch (error) {
+        console.error('[hao2d] 视口渲染循环出错（已跳过该帧，视口不会卡死）', error)
       }
       raf = requestAnimationFrame(loop)
     }

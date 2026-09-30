@@ -10,7 +10,7 @@ import {
   pruneEmptyTracks
 } from '../commands/animationCommands'
 
-export type KeyKind = 'bone' | 'slot' | 'deform' | 'constraint' | 'event'
+export type KeyKind = 'bone' | 'slot' | 'deform' | 'constraint' | 'event' | 'drawOrder'
 
 export interface TimelineKey {
   /** 稳定标识：轨道 + 通道 + 时间（时间会随拖动变化，仅用于当前帧内的定位） */
@@ -78,7 +78,8 @@ const GROUP_LABEL: Record<KeyKind, string> = {
   slot: '插槽',
   deform: 'FFD',
   constraint: '约束',
-  event: '事件'
+  event: '事件',
+  drawOrder: '插槽层级'
 }
 
 /** 从动画数据构建轨道 + 关键帧模型（供 dope sheet 渲染与编辑） */
@@ -140,6 +141,32 @@ export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrac
         return { channel, label, keys, always }
       })
     )
+  }
+
+  // 插槽层级（绘制顺序）：每帧是一份完整顺序快照，在 slot 层级面板改完顺序后打帧产生。
+  // 它不属于任何单个插槽，所以是一条独立顶层轨道，删除 / 移动帧都走通用编辑链路。
+  if (animation.drawOrder.length > 0) {
+    const keys: TimelineKey[] = animation.drawOrder.map((frame) => ({
+      id: `drawOrder@${frame.time}`,
+      trackId: 'drawOrder',
+      kind: 'drawOrder' as const,
+      channel: 'order',
+      target: '',
+      attachment: '',
+      time: frame.time,
+      easing: Easing.Stepped,
+      curve: null
+    }))
+    tracks.push({
+      id: 'drawOrder',
+      group: GROUP_LABEL.drawOrder,
+      label: GROUP_LABEL.drawOrder,
+      kind: 'drawOrder',
+      target: '',
+      attachment: '',
+      keys,
+      depth: 0
+    })
   }
 
   for (const track of animation.deforms) {
@@ -348,6 +375,7 @@ function sortAllTracks(animation: AuthoringAnimData): void {
     for (const list of Object.values(constraintFrames(track))) sortFrames(list)
   }
   sortFrames(animation.events)
+  sortFrames(animation.drawOrder)
 }
 
 export function setKeyEasing(
@@ -605,6 +633,8 @@ export interface AnyKeyframe {
  */
 function resolveTimeFrames(animation: AuthoringAnimData, selector: KeySelector): Array<AnyKeyframe> | null {
   if (selector.kind === 'event') return animation.events
+  // 绘制顺序帧只有 time 与完整顺序快照（没有 easing / curve），单独走一支
+  if (selector.kind === 'drawOrder') return animation.drawOrder
   return resolveFrames(animation, selector)
 }
 
@@ -683,7 +713,10 @@ function resolveFrames(
     if (!track) return null
     if (selector.channel === 'color') return track.color
     if (selector.channel === 'visible') return track.visible
-    return track.displayIndex
+    // 只有「显示」通道走这里；未知 channel 不再兜底到它 ——
+    // 否则形状像 `order` 这类选择器会误删显示帧
+    if (selector.channel === 'display') return track.displayIndex
+    return null
   }
   if (selector.kind === 'deform') {
     const track = animation.deforms.find(

@@ -396,6 +396,16 @@ export class AnimationPlayer {
       const order = anim.drawOrder[orderIndex].order
       const count = Math.min(order.length, buf.drawOrder.length)
       for (let i = 0; i < count; i++) buf.drawOrder[i] = order[i]
+      // 兜底：顺序帧不完整（老工程文件 / 手改数据）时，把没出现的槽按下标补到末尾。
+      // 不补的话尾部会保留上一次的顺序，同一插槽被画两次、别的插槽整个不画。
+      if (count < buf.drawOrder.length) {
+        const used = new Set<number>()
+        for (let i = 0; i < count; i++) used.add(buf.drawOrder[i])
+        let write = count
+        for (let slot = 0; slot < buf.drawOrder.length && write < buf.drawOrder.length; slot++) {
+          if (!used.has(slot)) buf.drawOrder[write++] = slot
+        }
+      }
     }
   }
 

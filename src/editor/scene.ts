@@ -174,7 +174,18 @@ export class EditorScene {
       // 先构建新运行时，成功了再替换：编译中途抛错时保持原样，
       // 否则会留下「视图已销毁、新运行时没建起来」的状态，网格从此不再显示
       const nextBundle = buildRuntime(doc, skinName)
-      this.view?.destroy()
+      // 先把旧视图从显示列表摘掉，**再**销毁它。
+      //
+      // 顺序反了会崩：`view.destroy()` 会释放 GPU buffer，而此时旧视图仍挂在
+      // contentLayer 上，pixi 这一帧的渲染指令还引用着那些 buffer —— 渲染时读到
+      // null，抛 `Cannot read properties of null (reading 'usage')`，异常冒到
+      // requestAnimationFrame 循环外层，整个视口就此定格（改 slot 层级 / 任何
+      // 触发重建的编辑都会复现）。
+      const previousView = this.view
+      if (previousView) {
+        this.viewport.contentLayer.removeChild(previousView.container)
+        previousView.destroy()
+      }
       this.view = null
       this.bundle = nextBundle
       this.skinName = skinName
@@ -191,6 +202,7 @@ export class EditorScene {
     }
     if (!this.view && this.bundle) {
       this.view = new SkeletonView(this.bundle.asset, this.textures, skinName)
+      // 兜底：清掉可能残留的其它子节点（旧视图已在上面按顺序摘除）
       for (const child of this.viewport.contentLayer.removeChildren()) void child
       this.viewport.contentLayer.addChild(this.view.container)
       this.markDirty()

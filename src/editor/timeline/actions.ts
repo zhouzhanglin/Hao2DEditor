@@ -4,9 +4,10 @@ import { useSelectionStore } from '../store/selectionStore'
 import { useTimelineStore } from '../store/timelineStore'
 import type { Selection } from '../store/selectionStore'
 import type { RuntimeBundle } from '../runtime'
-import { deleteKeys, keyframeTargets } from './model'
+import { buildTimeline, deleteKeys, keyframeTargets } from './model'
 import { keySlotDisplay } from '../commands/animationCommands'
-import type { KeyframeTarget, KeyKind, PoseSnapshot } from './model'
+import type { KeyframeTarget, KeyKind, KeySelector, PoseSnapshot } from './model'
+import type { AuthoringAnimData } from '@core/model/authoring'
 
 export interface ActionResult {
   ok: boolean
@@ -212,4 +213,74 @@ export function removeSelectedKeys(): ActionResult {
   })
   timeline.setSelectedKeys([])
   return { ok: true, message: `已删除 ${removed} 个关键帧` }
+}
+
+/** 收集某条通道（轨道）当前的全部关键帧选择器：按 kind / target / attachment / channel 精确定位 */
+function selectorsOfFocus(animation: AuthoringAnimData | null, focus: KeySelector): KeySelector[] {
+  if (!animation) return []
+  return buildTimeline(animation)
+    .flatMap((track) => track.keys)
+    .filter(
+      (key) =>
+        key.kind === focus.kind &&
+        key.target === focus.target &&
+        key.attachment === focus.attachment &&
+        (!focus.channel || key.channel === focus.channel)
+    )
+    .map((key) => ({
+      kind: key.kind,
+      target: key.target,
+      attachment: key.attachment,
+      channel: key.channel,
+      time: key.time
+    }))
+}
+
+/**
+ * 删除**当前选中的整条通道**（轨道）：把它名下的关键帧一次性删掉。
+ *
+ * 走的是与「删除选中关键帧」同一条数据链路，因此事件、插槽层级（绘制顺序）
+ * 这类特殊轨也一样支持；删空后由数据层清理空轨道并同步动画时长。
+ */
+export function deleteSelectedTrack(): ActionResult {
+  const timeline = useTimelineStore.getState()
+  const focus = timeline.selectedTrack
+  if (!focus) return { ok: false, message: '先在时间轴上点选一条通道，再按 Delete 删除它' }
+
+  const animation =
+    useProjectStore.getState().document.animations.find((item) => item.name === timeline.currentAnimation) ?? null
+  const selectors = selectorsOfFocus(animation, focus as KeySelector)
+  if (selectors.length === 0) return { ok: false, message: `通道「${trackLabelOf(focus)}」还没有关键帧` }
+
+  let removed = 0
+  useProjectStore.getState().update('删除动画通道', (draft) => {
+    removed = deleteKeys(draft, timeline.currentAnimation, selectors)
+  })
+  timeline.setSelectedKeys([])
+  return removed > 0
+    ? { ok: true, message: `已删除通道「${trackLabelOf(focus)}」（${removed} 个关键帧）` }
+    : { ok: false, message: `通道「${trackLabelOf(focus)}」没有可删除的关键帧` }
+}
+
+/** 通道名的中文label（提示文案用） */
+function trackLabelOf(focus: { kind: string; target: string; channel: string }): string {
+  const channel = CHANNEL_LABEL[focus.channel] ?? focus.channel
+  if (focus.kind === 'drawOrder') return '插槽层级'
+  if (focus.kind === 'event') return `事件 ${focus.target}`
+  if (focus.kind === 'bone') return `${focus.target} · ${channel}`
+  if (focus.kind === 'slot') return `${focus.target} · ${channel}`
+  if (focus.kind === 'deform') return `${focus.target} · FFD`
+  return focus.target || channel
+}
+
+const CHANNEL_LABEL: Record<string, string> = {
+  translate: '位置',
+  rotate: '旋转',
+  scale: '缩放',
+  shear: '斜切',
+  display: '显示',
+  color: '颜色',
+  visible: '可见性',
+  order: '绘制顺序',
+  offsets: 'FFD'
 }

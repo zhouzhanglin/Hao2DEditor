@@ -120,6 +120,19 @@ export async function openProjectAt(path: string): Promise<IoResult> {
   // 工程自带的图片存的是相对路径（images/xxx）：按工程文件所在目录解析成绝对路径，
   // 之后预览 / 渲染 / 导出都按绝对路径读文件，不用再关心工程被移到哪里
   parsed.document.images = resolveImagePaths(parsed.document.images, dirName(path))
+  // 资源面板的缩略图走 hao2d-file:// 协议，主进程只允许读**已登记资源根**以内的文件；
+  // 打开工程只读了 JSON，从不登记图片目录 → 缩略图全部被 403 拒绝，变成破图
+  //（视口不受影响：那边走 readBinary → blob:，不经过协议）。
+  // 这里把工程目录与每张图片所在目录补登记：图片在工程目录内时是同一个根，
+  // 老工程引用外部目录的图片也能正常显示。
+  const roots = new Set<string>()
+  const projectDir = dirName(path)
+  if (projectDir) roots.add(projectDir)
+  for (const image of parsed.document.images) {
+    const dir = dirName(image.path)
+    if (dir) roots.add(dir)
+  }
+  for (const dir of roots) await platform.registerAssetRoot(dir)
   useProjectStore.getState().setDocument(parsed.document, path, false)
   useProjectStore.getState().setWarnings(parsed.warnings)
   await platform.recentAdd(path)

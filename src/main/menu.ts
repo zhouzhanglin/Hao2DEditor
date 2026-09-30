@@ -35,7 +35,7 @@ export function buildAppMenu(): void {
       item('导入图片…', 'project:importImages', 'CmdOrCtrl+I'),
       { type: 'separator' },
       item('导出运行时数据…', 'project:exportRuntime', 'CmdOrCtrl+E'),
-      item('导出 .hao2d…', 'project:exportHao2d', 'CmdOrCtrl+Shift+E'),
+      item('导出 Unity…', 'project:exportHao2d', 'CmdOrCtrl+Shift+E'),
       { type: 'separator' },
       isMac ? { role: 'close', label: '关闭窗口' } : { role: 'quit', label: '退出' }
     ]

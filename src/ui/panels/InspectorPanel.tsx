@@ -5,9 +5,11 @@ import { useSelectionStore } from '@editor/store/selectionStore'
 import { useToolStore } from '@editor/store/toolStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
+import { getActiveScene } from '@editor/activeScene'
 import { keyBoneChannel, keySlotDisplay, keySlotVisible } from '@editor/commands/animationCommands'
 import {
   applyRename,
+  autoGenerateRegionMesh,
   checkRename,
   convertMeshToRegion,
   convertRegionToMesh,
@@ -471,27 +473,68 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             ) : null}
 
             <div className="flex flex-wrap gap-1 pt-0.5">
-              {attachment.type === 'region' ? (
-                <button
-                  type="button"
-                  className="hao-btn h-[20px] px-2 text-3xs"
-                  title={`按 ${gridDivisions}×${gridDivisions} 栅格切分网格并三角化，之后可用权重刷 / FFD 工具编辑`}
-                  onClick={() => {
-                    let result: { vertices: number; triangles: number } | null = null
-                    update('Region 转网格', (draft) => {
-                      result = convertRegionToMesh(draft, slot.name, attachment.name, gridDivisions)
-                    })
-                    onStatus(
-                      result
-                        ? `已转为网格：${(result as { vertices: number }).vertices} 顶点 / ${
-                            (result as { triangles: number }).triangles
-                          } 三角面`
-                        : '转换失败（附件类型不是 Region）'
-                    )
-                  }}
-                >
-                  转为网格（{gridDivisions}×{gridDivisions}）
-                </button>
+              {/* 自动生成网格对「图片」和「由图片转来的网格」都可用：改细分数后可以重算 */}
+              {attachment.type === 'region' ||
+              (attachment.type === 'mesh' && Boolean(attachment.regionSnapshot)) ? (
+                <>
+                  {attachment.type === 'region' ? (
+                  <button
+                    type="button"
+                    className="hao-btn h-[20px] px-2 text-3xs"
+                    title={`按 ${gridDivisions}×${gridDivisions} 栅格切分网格并三角化，之后可用权重刷 / FFD 工具编辑`}
+                    onClick={() => {
+                      let result: { vertices: number; triangles: number } | null = null
+                      update('Region 转网格', (draft) => {
+                        result = convertRegionToMesh(draft, slot.name, attachment.name, gridDivisions)
+                      })
+                      onStatus(
+                        result
+                          ? `已转为网格：${(result as { vertices: number }).vertices} 顶点 / ${
+                              (result as { triangles: number }).triangles
+                            } 三角面`
+                          : '转换失败（附件类型不是 Region）'
+                      )
+                    }}
+                  >
+                    转为网格（{gridDivisions}×{gridDivisions}）
+                  </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="hao-btn h-[20px] px-2 text-3xs"
+                    title={`只沿图片不透明像素的轮廓生成贴合网格（透明区域不占三角形，内部孔洞忽略）；细分数 ${gridDivisions} 控制顶点数量级`}
+                    onClick={() => {
+                      const scene = getActiveScene()
+                      if (!scene) {
+                        onStatus('视口尚未就绪，稍后再试')
+                        return
+                      }
+                      const entry = scene.imageAlpha.entryOf(attachment.image)
+                      if (!entry) {
+                        onStatus(`图片「${attachment.image}」还没解码完成，稍后再试`)
+                        return
+                      }
+                      let result: { vertices: number; triangles: number } | null = null
+                      update('自动生成网格', (draft) => {
+                        result = autoGenerateRegionMesh(
+                          draft,
+                          slot.name,
+                          attachment.name,
+                          entry,
+                          gridDivisions
+                        )
+                      })
+                      if (result) {
+                        const stats = result as { vertices: number; triangles: number }
+                        onStatus(`已自动生成网格：${stats.vertices} 顶点 / ${stats.triangles} 三角面（轮廓贴合，孔洞已忽略）`)
+                      } else {
+                        onStatus('自动生成失败：图片没有可用的不透明像素区域')
+                      }
+                    }}
+                  >
+                    自动生成网格
+                  </button>
+                </>
               ) : null}
               {attachment.type === 'mesh' ? (
                 <>

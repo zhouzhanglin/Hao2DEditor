@@ -28,6 +28,14 @@ export class ImageAlphaCache {
   }
 
   /**
+   * 取整张遮罩（自动生成网格要遍历像素，逐点 alphaAt 太慢）。
+   * 未就绪 / 未知图片返回 null —— 调用方据此提示「图片还没解码好」。
+   */
+  entryOf(name: string): ImageAlphaEntry | null {
+    return this.entries.get(name) ?? null
+  }
+
+  /**
    * 采样 uv 处的不透明度（0..1）。
    * 未就绪 / 未知图片 / uv 越界一律返回 1 —— 让拾取退化为几何命中而不是「点不中」。
    */

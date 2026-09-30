@@ -22,8 +22,8 @@ import { useToolStore } from '@editor/store/toolStore'
 import type { EditorTool, GizmoMode } from '@editor/store/toolStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 
-/** Q/W/E/R → 骨骼变换工具（与小坐标轴工具条一致） */
-const GIZMO_KEYS: Record<string, GizmoMode> = { q: 'move', w: 'rotate', e: 'scale', r: 'shear' }
+/** W/E/R/T → 骨骼变换工具（与小坐标轴工具条从上到下一致） */
+const GIZMO_KEYS: Record<string, GizmoMode> = { w: 'move', e: 'rotate', r: 'scale', t: 'shear' }
 const GIZMO_LABEL: Record<GizmoMode, string> = { move: '移动', rotate: '旋转', scale: '缩放', shear: '斜切' }
 
 /** V/B/S/M/G/D/C → 编辑工具（与顶部工具条、视口工具面板一致） */
@@ -387,7 +387,7 @@ export default function App() {
         useToolStore.getState().setTool(next)
         flash(`工具：${TOOL_LABEL[next]}（${event.key.toUpperCase()}）`)
       } else if (!mod && GIZMO_KEYS[event.key.toLowerCase()]) {
-        // Q/W/E/R：切换骨骼变换小坐标轴（移动 / 旋转 / 缩放 / 斜切）
+        // W/E/R/T：切换骨骼变换小坐标轴（移动 / 旋转 / 缩放 / 斜切）
         const next = GIZMO_KEYS[event.key.toLowerCase()]
         const before = useToolStore.getState().tool
         useToolStore.getState().setGizmo(next)

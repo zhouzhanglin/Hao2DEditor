@@ -10,6 +10,8 @@ import type {
 import type { Vec2 } from '@core/math/matrix'
 import { createGridMesh, triangulatePolygon } from '@core/mesh/triangulate'
 import type { MeshGeometry } from '@core/mesh/triangulate'
+import { buildAutoMesh } from '@core/mesh/autoMesh'
+import type { AlphaMask } from '@core/mesh/autoMesh'
 
 /** 骨架单位 ↔ 像素（与导入 / 导出保持一致的 PPU） */
 export const PPU = 100
@@ -202,6 +204,70 @@ export function convertRegionToMesh(
   attachment.hull = grid.vertices.length
 
   return { vertices: grid.vertices.length, triangles: Math.floor(grid.triangles.length / 3) }
+}
+
+/**
+ * Region → **轮廓网格**（自动生成）：沿图片不透明像素的边界生成贴合的多边形网格，
+ * 透明区域不占三角形；内部孔洞会被忽略（只取面积最大的连通区域，与 hull 单外环的
+ * 数据结构一致）。顶点数量级由 `divisions`（工具选项里的细分数）控制。
+ *
+ * 可以重复执行：已经是网格、但带有 `regionSnapshot` 的附件也能再次自动生成
+ * （用快照里的 UV 矩形定位图片区域）。
+ */
+export function autoGenerateRegionMesh(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  mask: AlphaMask,
+  divisions: number
+): { vertices: number; triangles: number; coverage: number } | null {
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment) return null
+  // 有快照的网格可以重算；纯图片附件直接算
+  const isMesh = attachment.type === 'mesh' && Boolean(attachment.regionSnapshot)
+  if (attachment.type !== 'region' && !isMesh) return null
+
+  const slot = doc.slots.find((item) => item.name === slotName)
+  const bone = slot?.bone ?? ''
+  // UV 矩形取「原 Region 的 UV」：网格用快照里的，避免被上一次的网格 UV 带偏
+  const sourceUvs = attachment.regionSnapshot?.uvs ?? attachment.uvs
+  const rect = uvRect(sourceUvs)
+
+  const mesh = buildAutoMesh(mask, {
+    size: attachment.size,
+    uvRect: rect,
+    divisions
+  })
+  if (!mesh) return null
+
+  // 首次转换时留一份原 Region 数据，之后可以一键还原
+  if (!attachment.regionSnapshot) {
+    attachment.regionSnapshot = { size: { ...attachment.size }, uvs: [...attachment.uvs] }
+  }
+  attachment.type = 'mesh'
+  attachment.vertices = mesh.vertices.map((point) => ({
+    x: point.x,
+    y: point.y,
+    weights: bone ? [{ bone, weight: 1 }] : []
+  }))
+  attachment.uvs = mesh.uvs
+  attachment.triangles = mesh.triangles
+  attachment.edges = mesh.edges
+  attachment.hull = mesh.hull
+
+  // 顶点数变了，旧的 FFD 关键帧（按满顶点长度存 offsets）会整体错位 —— 直接清掉，
+  // 与 convertMeshToRegion 的处理一致；重新编辑 FFD 时会按新顶点数重建。
+  for (const animation of doc.animations) {
+    animation.deforms = animation.deforms.filter(
+      (track) => !(track.slot === slotName && track.attachment === attachmentName)
+    )
+  }
+
+  return {
+    vertices: mesh.vertices.length,
+    triangles: Math.floor(mesh.triangles.length / 3),
+    coverage: mesh.mask.coverage
+  }
 }
 
 /**

@@ -25,16 +25,10 @@ const MAX_PREVIEW_HEIGHT = 320
 const SCALE_PRESETS = [0.25, 0.5, 0.75, 1]
 const SIZE_PRESETS = [1024, 2048, 4096]
 
-/** 两种导出模式各自的标题与产物说明 */
-const MODE_INFO: Record<ExportMode, { title: string; fileHint: string }> = {
-  runtime: {
-    title: '导出运行时数据',
-    fileHint: 'ske.json（骨骼动画）/ atlas.json（图集索引）/ 图集 png'
-  },
-  unity: {
-    title: '导出 .hao2d（Unity）',
-    fileHint: '.hao2d（骨骼动画）/ 图集 png / 每个图集页一个 Hao2D/Sprite 材质（_MainTex 已指向图集）'
-  }
+/** 两种导出模式的标题 */
+const MODE_TITLE: Record<ExportMode, string> = {
+  runtime: '导出运行时数据',
+  unity: '导出 Unity'
 }
 
 /**
@@ -192,7 +186,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
         {/* 标题栏 */}
         <div className="flex h-[30px] shrink-0 items-center gap-2 border-b border-line bg-ink-700 px-2.5">
           <Package size={13} className="text-accent" />
-          <span className="text-panel font-semibold text-content-hi">{MODE_INFO[mode].title}</span>
+          <span className="text-panel font-semibold text-content-hi">{MODE_TITLE[mode]}</span>
           <span className="hao-label ml-1">
             {pages.length > 0 ? `共 ${pages.length} 页 · ${totalBlocks} 张图片` : '没有可导出的图片'}
           </span>

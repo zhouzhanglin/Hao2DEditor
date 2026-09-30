@@ -7,18 +7,18 @@ export type BrushMode = 'add' | 'subtract' | 'replace'
 
 /**
  * 骨骼变换小坐标轴（gizmo）的操作模式：移动 / 旋转 / 缩放 / 斜切。
- * 快捷键 Q / W / E / R（与主流编辑器一致）。
+ * 快捷键 W / E / R / T（按工具条从上到下的顺序连续排布）。
  */
 export type GizmoMode = 'move' | 'rotate' | 'scale' | 'shear'
 
 /** 小坐标轴工具顺序（快捷键与工具栏共用，改一处即可） */
 export const GIZMO_ORDER: ReadonlyArray<{ mode: GizmoMode; key: string; label: string; hint: string }> = [
-  { mode: 'move', key: 'Q', label: '移动', hint: '移动骨骼：拖 X/Y 轴只走单轴，拖中间方块自由移动；Shift 拖动改位移（Pose 改 setup / Animate 写关键帧）' },
-  { mode: 'rotate', key: 'W', label: '旋转', hint: '旋转骨骼：拖圆环或骨骼本体都行' },
-  { mode: 'scale', key: 'E', label: '缩放', hint: '缩放骨骼：X 轴改长度、Y 轴改粗细，拖中间方块等比缩放' },
+  { mode: 'move', key: 'W', label: '移动', hint: '移动骨骼：拖 X/Y 轴只走单轴，拖中间方块自由移动；Shift 拖动改位移（Pose 改 setup / Animate 写关键帧）' },
+  { mode: 'rotate', key: 'E', label: '旋转', hint: '旋转骨骼：拖圆环或骨骼本体都行' },
+  { mode: 'scale', key: 'R', label: '缩放', hint: '缩放骨骼：X 轴改长度、Y 轴改粗细，拖中间方块等比缩放' },
   {
     mode: 'shear',
-    key: 'R',
+    key: 'T',
     label: '斜切',
     hint: '斜切骨骼：选中骨骼会被包围盒框住，拖动包围盒的边即可斜切（上下边横向拖改 shearY，左右边纵向拖改 shearX）'
   }

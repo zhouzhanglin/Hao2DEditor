@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Eye,
   EyeOff,
+  Grid3x3,
   Image as ImageIcon,
   KeyRound,
   Link2,
@@ -17,6 +18,7 @@ import {
   Trash2,
   Unlock
 } from 'lucide-react'
+import type { AuthoringAttachmentType } from '@core/model/authoring'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useModeStore } from '@editor/store/modeStore'
@@ -244,6 +246,11 @@ const CONSTRAINT_KIND: Record<AuthoringConstraint['type'], string> = {
 export interface HierarchyTreeProps {
   /** 状态栏提示（Animate 态拒绝改绑定数据时说明原因） */
   onStatus?: (text: string) => void
+}
+
+/** 网格型附件（含 linkedmesh）：层级树里用网格图标，和贴图区分开 */
+function isMeshType(type: AuthoringAttachmentType): boolean {
+  return type === 'mesh' || type === 'linkedmesh'
 }
 
 /**
@@ -784,12 +791,14 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           selection.attachment === attachment.name
         }
         icon={
-          <ImageIcon
-            size={11}
-            className={showing ? 'text-accent' : 'text-content-lo/60'}
-          />
+          // 网格型附件用网格图标，和贴图（图片）一眼区分开
+          isMeshType(attachment.type) ? (
+            <Grid3x3 size={11} className={showing ? 'text-accent' : 'text-content-lo/60'} />
+          ) : (
+            <ImageIcon size={11} className={showing ? 'text-accent' : 'text-content-lo/60'} />
+          )
         }
-        meta={showing ? '显示中' : undefined}
+        meta={showing ? (isMeshType(attachment.type) ? '显示中 · 网格' : '显示中') : isMeshType(attachment.type) ? '网格' : undefined}
         // display 行也算宿主插槽的地盘：拖到插槽下面（含子行）都是「给这个插槽加 display」
         dataSlot={slot.name}
         onDropImage={(imageNames) => addDisplay(slot.name, imageNames)}

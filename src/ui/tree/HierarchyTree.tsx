@@ -22,13 +22,21 @@ import type { AuthoringAttachmentType } from '@core/model/authoring'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useModeStore } from '@editor/store/modeStore'
+import { useTimelineStore } from '@editor/store/timelineStore'
 import { keySlotDisplayNow, keyframeTargetsNow } from '@editor/timeline/actions'
+import { slotDisplayNameAt } from '@editor/timeline/model'
 import type { KeyframeTarget } from '@editor/timeline/model'
 import { getActiveScene } from '@editor/activeScene'
 import { createIkConstraint, createPathConstraint, createTransformConstraint } from '@core/model/constraints'
 import type { AuthoringBone, AuthoringConstraint, AuthoringImage, EditorDocument } from '@core/model/authoring'
 import { createAuthoringBone, createAuthoringSlot } from '@core/model/authoring'
-import { addImageDisplay, createRegionFromImage, deleteAttachment, deleteSlot } from '@editor/commands/authoringCommands'
+import {
+  addImageDisplay,
+  createRegionFromImage,
+  deleteAttachment,
+  deleteSlot,
+  toggleSlotDisplay
+} from '@editor/commands/authoringCommands'
 import {
   boneSlotAnchor,
   moveBone,
@@ -297,17 +305,48 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     return named ?? document.skins[0] ?? null
   }, [document.skins, selection.skin])
 
+  const mode = useModeStore((s) => s.mode)
+  const currentAnimationName = useTimelineStore((s) => s.currentAnimation)
+  const timelineTime = useTimelineStore((s) => s.time)
+  const activeAnimation = useMemo(
+    () => document.animations.find((item) => item.name === currentAnimationName) ?? null,
+    [document.animations, currentAnimationName]
+  )
+
+  /**
+   * 当前显示的 display 名：Animate 态按**关键帧数据**采样（与运行期同一规则），Pose 态 setup 值就是权威。
+   * 不能一律看 `slot.attachment` —— 打显示关键帧不改 setup，用 setup 判断会得到
+   * 「打完显示帧后再点没反应」的错觉（点击判定与行尾「显示中」标记都用这个函数）。
+   */
+  const shownDisplayName = (slot: EditorDocument['slots'][number]): string =>
+    mode === 'animate' ? slotDisplayNameAt(activeAnimation, slot.name, timelineTime, slot.attachment) : slot.attachment
+
   const displaysOf = (slotName: string): EditorDocument['skins'][number]['slots'][number]['attachments'] =>
     activeSkin?.slots.find((item) => item.slot === slotName)?.attachments ?? []
 
   /**
-   * 切换插槽当前显示的 display：一个插槽可以挂多个，但同时只显示 `slot.attachment` 这一个。
+   * 点击插槽下的 display：切到它；**再点当前正显示的那一个则隐藏** —— 插槽只有两种状态：
+   * 显示某一个 display，或一个都不显示（运行期 displayIndex = -1，是合法的「不显示」）。
+   *
+   * Pose 态改绑定数据 `slot.attachment`（空串 = 不显示）；Animate 态只写显示关键帧、
+   * 不动绑定姿态，与检查器的「显示（关键帧）」下拉是同一语义。
    */
   const selectDisplay = (slotName: string, attachmentName: string): void => {
-    update('切换显示的 display', (draft) => {
-      const target = draft.slots.find((item) => item.name === slotName)
-      if (target) target.attachment = attachmentName
-    })
+    const animate = mode === 'animate'
+    const slot = document.slots.find((item) => item.name === slotName)
+    // 「是否正在显示它」与行尾标记同一数据源（Animate 态看关键帧采样，Pose 态看 setup）
+    const showing = slot ? shownDisplayName(slot) === attachmentName : false
+    if (animate) {
+      onStatus?.(keySlotDisplayNow(slotName, showing ? '' : attachmentName).message)
+    } else {
+      update(showing ? '隐藏 display' : '切换显示的 display', (draft) => {
+        toggleSlotDisplay(draft, slotName, attachmentName)
+      })
+      onStatus?.(
+        showing ? `插槽「${slotName}」不再显示任何 display` : `插槽「${slotName}」显示「${attachmentName}」`
+      )
+    }
+    // 隐藏后仍选中这一行：还能在检查器里编辑它，或再点一次重新显示
     selection.selectAttachment(slotName, attachmentName)
   }
 
@@ -774,7 +813,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     attachment: EditorDocument['skins'][number]['slots'][number]['attachments'][number],
     depth: number
   ): React.ReactNode => {
-    const showing = slot.attachment === attachment.name
+    // 「显示中」标记与点击判定同一数据源：Animate 态按当前时间点的关键帧数据判断
+    const showing = shownDisplayName(slot) === attachment.name
     return (
       <TreeRow
         key={`display:${slot.name}:${attachment.name}`}
@@ -842,8 +882,9 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             style={{ background: toCss(slot.color) }}
           />
         }
-        // 行尾显示当前显示的 display 名，不用展开也知道显示的是哪一个
-        meta={slot.attachment || (displays.length > 0 ? `${displays.length} 个 display` : undefined)}
+        // 行尾显示当前显示的 display 名，不用展开也知道显示的是哪一个。
+        // Animate 态按关键帧采样（与 display 行的「显示中」标记同一数据源），不能直接看 setup
+        meta={shownDisplayName(slot) || (displays.length > 0 ? `${displays.length} 个 display` : undefined)}
         expandable={displays.length > 0}
         expanded={expanded}
         dataSlot={slot.name}
@@ -1028,6 +1069,16 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
               icon: <KeyRound size={12} />,
               onSelect: () => {
                 const result = keySlotDisplayNow(displayMenu.slot, displayMenu.attachment)
+                onStatus?.(result.message)
+              }
+            },
+            {
+              key: 'display-hide-key',
+              label: '隐藏关键帧（从这里开始不显示）',
+              hint: '在当前时间把该插槽切成「不显示」',
+              icon: <EyeOff size={12} />,
+              onSelect: () => {
+                const result = keySlotDisplayNow(displayMenu.slot, '')
                 onStatus?.(result.message)
               }
             }

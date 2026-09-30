@@ -169,6 +169,19 @@ export function addImageDisplay(
 }
 
 /**
+ * 切换插槽当前显示的 display：传入**当前正在显示的那一个**则隐藏（空串 = 一个都不显示），
+ * 否则切到它 —— 插槽只有这两种状态，空串在运行期解析成 displayIndex = -1，是合法值。
+ *
+ * 层级树里「再点一次当前显示的 display」就走这里。
+ */
+export function toggleSlotDisplay(doc: EditorDocument, slotName: string, attachmentName: string): boolean {
+  const slot = doc.slots.find((item) => item.name === slotName)
+  if (!slot) return false
+  slot.attachment = slot.attachment === attachmentName ? '' : attachmentName
+  return true
+}
+
+/**
  * Region → 网格：按栅格切分顶点并把 UV 映射进原 Region 的 UV 矩形。
  * 顶点权重默认全部绑到插槽所在骨骼（权重可在权重工具里继续刷）。
  */

@@ -124,8 +124,10 @@ export function keyframeTargetsNow(targets: readonly KeyframeTarget[], label = '
 }
 
 /**
- * 在当前时间点打一帧**显示**关键帧，把插槽切到指定附件（层级树里右键某个 display = 从这里开始显示它）。
- * 名字与下标一起写入（运行期名字优先，换皮肤后仍能解析）。
+ * 在当前时间点打一帧**显示**关键帧：把插槽切到指定附件，**传空名表示不显示任何附件**。
+ *
+ * 名字与下标一起写入（运行期名字优先，换皮肤后仍能解析）；不显示时下标写 -1，
+ * 这是「setup 时不显示任何附件」的合法值（见 asset.ts 的 setupDisplayIndex）。
  */
 export function keySlotDisplayNow(slotName: string, attachmentName: string): ActionResult {
   const scene = getActiveScene()
@@ -139,8 +141,11 @@ export function keySlotDisplayNow(slotName: string, attachmentName: string): Act
   if (slotIndex === undefined) return { ok: false, message: `找不到插槽「${slotName}」` }
   const skin = bundle.maps.skinOfSlot[slotIndex]
   const attachments = skin >= 0 ? bundle.maps.skinArr[skin].attachments : []
-  const index = attachments.findIndex((attachment) => attachment.name === attachmentName)
-  if (index < 0) return { ok: false, message: `当前皮肤里没有「${attachmentName}」` }
+  // 空名 = 这一个关键帧起不再显示任何 display（下标 -1），不需要校验附件是否存在
+  const index = attachmentName
+    ? attachments.findIndex((attachment) => attachment.name === attachmentName)
+    : -1
+  if (attachmentName && index < 0) return { ok: false, message: `当前皮肤里没有「${attachmentName}」` }
 
   const at = timeline.time
   useProjectStore.getState().update('打显示关键帧', (draft) => {
@@ -152,7 +157,12 @@ export function keySlotDisplayNow(slotName: string, attachmentName: string): Act
   useTimelineStore.getState().setSelectedKeys([
     { kind: 'slot', target: slotName, attachment: '', channel: 'display', time: at }
   ])
-  return { ok: true, message: `已在 ${at.toFixed(2)}s 打「${slotName}」的显示帧 → 「${attachmentName}」` }
+  return {
+    ok: true,
+    message: attachmentName
+      ? `已在 ${at.toFixed(2)}s 打「${slotName}」的显示帧 → 「${attachmentName}」`
+      : `已在 ${at.toFixed(2)}s 打「${slotName}」的显示帧 → 不显示`
+  }
 }
 
 /**

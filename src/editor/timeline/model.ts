@@ -82,6 +82,34 @@ const GROUP_LABEL: Record<KeyKind, string> = {
   drawOrder: '插槽层级'
 }
 
+/**
+ * 当前时间点某插槽实际显示的 display 名（空串 = 不显示）；没有 display 轨道 / 早于第一帧时用 setup 名。
+ *
+ * 采样规则与运行期一致（见 core/anim/player.ts 的 resolveDisplay）：取 `time <= t` 的最后一帧，
+ * 名字为空表示这一帧起不显示。Animate 态判断「是否正在显示某个 display」要用它，
+ * 不能用 `slot.attachment`：打显示关键帧不改 setup，用 setup 判断会得到
+ * 「打完显示帧后再点没反应」的错觉。
+ */
+export function slotDisplayNameAt(
+  animation: AuthoringAnimData | null,
+  slotName: string,
+  time: number,
+  setupName: string
+): string {
+  const track = animation?.slots.find((item) => item.slot === slotName)
+  if (!track || track.displayIndex.length === 0) return setupName
+  let best = Number.NEGATIVE_INFINITY
+  let name = setupName
+  for (let i = 0; i < track.displayIndex.length; i++) {
+    const frameTime = track.displayIndex[i].time
+    // 不依赖帧一定有序：取所有 `<= t` 的帧里时间最大的那个
+    if (frameTime > time + 1e-6 || frameTime < best) continue
+    best = frameTime
+    name = track.displayAttachment[i] ?? ''
+  }
+  return name
+}
+
 /** 从动画数据构建轨道 + 关键帧模型（供 dope sheet 渲染与编辑） */
 export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrack[] {
   if (!animation) return []

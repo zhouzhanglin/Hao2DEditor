@@ -1,18 +1,28 @@
 import { useRef, useState } from 'react'
-import { Layers, Package, Plus } from 'lucide-react'
+import { ImagePlus, Layers, Package, Plus } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
+import { getPlatform } from '@editor/platform'
+import { importDroppedPaths } from '@editor/services/projectIo'
 import { PanelEmpty } from '@ui/widgets/PanelShell'
 import { createRegionFromImage } from '@editor/commands/authoringCommands'
-import { setDraggingImage, setImageDragData } from '@ui/widgets/dragDrop'
+import { hasExternalFiles, setDraggingImage, setImageDragData } from '@ui/widgets/dragDrop'
 import { ImageHoverPreview, ImageThumb } from './ImageThumb'
 import type { AuthoringImage } from '@core/model/authoring'
 
-/** 皮肤与图集面板：切换当前皮肤、查看图片清单（导出时打包为图集） */
-export default function AssetPanel() {
+export interface AssetPanelProps {
+  /** 点面板里的「导入」：交给 App 走统一导入命令（带忙碌提示 / 结果反馈） */
+  onImport?: () => void
+  onStatus?: (text: string) => void
+}
+
+/** 皮肤与图集面板：切换当前皮肤、查看图片清单（导出时打包为图集）；导入资源的入口也在这里 */
+export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
   const document = useProjectStore((s) => s.document)
   const update = useProjectStore((s) => s.update)
   const selection = useSelectionStore()
+  /** 从系统拖文件悬停在本面板上（面板范围内的高亮，不是整窗覆盖层） */
+  const [fileDragging, setFileDragging] = useState(false)
   /** 悬停的图片 + 所在行元素（预览浮层贴在行旁边） */
   const [hovered, setHovered] = useState<{ image: AuthoringImage; row: HTMLElement } | null>(null)
   /** 已选图片（多选）：拖拽时整组一起走，落到视口里一次建多个插槽 */
@@ -46,6 +56,14 @@ export default function AssetPanel() {
     anchorRef.current = name
   }
 
+  /** 拖进本面板的文件：走统一的导入分派（图片 / 图集 / Spine、DragonBones JSON / 工程文件） */
+  const importFromFiles = async (files: File[]): Promise<void> => {
+    const platform = getPlatform()
+    const paths = await Promise.all(files.map((file) => platform.pathForDroppedFile(file)))
+    const result = await importDroppedPaths(paths.filter(Boolean))
+    if (result.message) onStatus?.(result.message)
+  }
+
   const activeSkin = selection.skin && document.skins.some((s) => s.name === selection.skin) ? selection.skin : ''
   // 新附件的挂载骨骼：优先用当前选中的骨骼，否则退回第一根骨骼
   const bone =
@@ -56,7 +74,38 @@ export default function AssetPanel() {
     ''
 
   return (
-    <div className="flex h-full flex-col">
+    <div
+      className={[
+        'relative flex h-full flex-col',
+        // 系统文件悬停在本面板上时高亮：导入范围就限定在这个面板（没有整窗覆盖层）
+        fileDragging ? 'bg-accent/5 outline outline-1 -outline-offset-1 outline-accent/60' : ''
+      ].join(' ')}
+      onDragOver={(event) => {
+        if (!hasExternalFiles(event.dataTransfer)) return
+        event.preventDefault()
+        event.stopPropagation()
+        event.dataTransfer.dropEffect = 'copy'
+        if (!fileDragging) setFileDragging(true)
+      }}
+      onDragLeave={(event) => {
+        // 子元素之间移动也会触发 dragleave：真正离开面板才收高亮
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+        setFileDragging(false)
+      }}
+      onDrop={(event) => {
+        if (!hasExternalFiles(event.dataTransfer)) return
+        event.preventDefault()
+        event.stopPropagation()
+        setFileDragging(false)
+        const files = Array.from(event.dataTransfer.files)
+        if (files.length > 0) void importFromFiles(files)
+      }}
+    >
+      {fileDragging ? (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-10 py-1 text-center text-3xs text-accent">
+          松开导入到「资源与皮肤」
+        </div>
+      ) : null}
       <div className="border-b border-line/60 px-2 py-1.5">
         <h3 className="hao-panel-title mb-1 flex items-center gap-1">
           <Layers size={11} /> 皮肤
@@ -116,11 +165,19 @@ export default function AssetPanel() {
               ⌘/Ctrl 多选
             </span>
           )}
+          <button
+            type="button"
+            title="导入图片 / 图集（⌘/Ctrl+I）；也可以把文件 / 文件夹直接拖进这个面板"
+            onClick={() => onImport?.()}
+            className="hao-btn flex h-[18px] w-[18px] shrink-0 items-center justify-center p-0"
+          >
+            <ImagePlus size={11} />
+          </button>
         </h3>
         {document.images.length === 0 ? (
           <PanelEmpty
             title="尚无图片"
-            description="通过「导入图片」或直接把碎图拖入窗口，即可作为附件贴图使用；导出时会自动打包成图集。"
+            description="点右上角「导入」选文件，或把图片 / 图集直接拖进这个面板；导入后即可作为附件贴图使用，导出时会自动打包成图集。"
           />
         ) : (
           <ul className="flex flex-col gap-1">

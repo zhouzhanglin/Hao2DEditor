@@ -1,7 +1,7 @@
 /**
  * 面板内拖拽协议（资源面板 → 视口 / 层级树）。
  *
- * 用自定义 MIME 而不是 text/plain：既能和「拖入文件导入」那条路径区分开
+ * 用自定义 MIME 而不是 text/plain：既能和「从系统拖入文件」区分开
  * （内部拖拽时 dataTransfer.files 为空），也不会被浏览器当成普通文本
  * 塞进别的输入框。
  */
@@ -22,6 +22,15 @@ export function setImageDragData(transfer: DataTransfer, names: string | readonl
 export function hasImageDrag(transfer: DataTransfer | null): boolean {
   if (!transfer) return false
   return Array.from(transfer.types).includes(IMAGE_MIME)
+}
+
+/**
+ * 从系统拖入的文件（Electron / 浏览器）。dragover 阶段就能从 types 认出来，
+ * 用它和内部拖拽区分开：内部拖拽（图片 / 树节点）不会带 `Files`。
+ */
+export function hasExternalFiles(transfer: DataTransfer | null): boolean {
+  if (!transfer) return false
+  return Array.from(transfer.types).includes('Files')
 }
 
 /** 读取拖拽的图片名列表（顺序 = 资源面板里的选择顺序）；空数组表示没读到 */

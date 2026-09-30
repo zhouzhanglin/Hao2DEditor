@@ -69,7 +69,6 @@ import { setActiveScene, getActiveScene } from '@editor/activeScene'
 import type { EditorScene } from '@editor/scene'
 import {
   importDragonBonesFlow,
-  importDroppedPaths,
   importImagesFlow,
   importSpineFlow,
   lastProject,
@@ -104,7 +103,6 @@ export default function App() {
     texturesLoaded: 0,
     texturesTotal: 0
   })
-  const [dragging, setDragging] = useState(false)
   const [assetHeight, setAssetHeight] = useState(() => loadPanelHeight(ASSET_PANEL_KEY, ASSET_PANEL_HEIGHT, ASSET_PANEL_MIN, ASSET_PANEL_MAX))
   const [slotOrderHeight, setSlotOrderHeight] = useState(() => loadPanelHeight(SLOT_ORDER_KEY, SLOT_ORDER_HEIGHT, SLOT_ORDER_MIN, SLOT_ORDER_MAX))
   const booted = useRef(false)
@@ -414,22 +412,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [handleCommand])
 
-  const onDrop = useCallback(
-    (event: React.DragEvent<HTMLDivElement>) => {
-      event.preventDefault()
-      setDragging(false)
-      const files = Array.from(event.dataTransfer.files)
-      if (files.length === 0) return
-      const platform = getPlatform()
-      void Promise.all(files.map((file) => platform.pathForDroppedFile(file)))
-        .then((paths) => importDroppedPaths(paths.filter(Boolean)))
-        .then((result) => {
-          if (result.message) flash(result.message)
-        })
-    },
-    [flash]
-  )
-
   const selectionText =
     selection.kind === 'bone'
       ? `骨骼「${selection.bone}」`
@@ -446,12 +428,14 @@ export default function App() {
   return (
     <div
       className="relative h-full w-full"
-      onDragOver={(e) => {
-        e.preventDefault()
-        setDragging(true)
+      // 从系统拖入文件不再导入（导入走菜单）。但仍必须挡掉浏览器 / Electron 的**默认行为**：
+      // 不拦的话拖入图片 / json 会把整个应用页面导航替换成那个文件，只能重开窗口。
+      // dropEffect 设为 none 表示「这里不接受放置」，光标上就能看出来。
+      onDragOver={(event) => {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'none'
       }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={onDrop}
+      onDrop={(event) => event.preventDefault()}
     >
       <DockLayout
         menuBar={
@@ -504,7 +488,10 @@ export default function App() {
               style={{ height: assetHeight }}
               actions={<span className="text-3xs text-content-lo">拖动上方分隔条调高</span>}
             >
-              <AssetPanel />
+              <AssetPanel
+                onImport={() => handleCommand('project:importImages')}
+                onStatus={flash}
+              />
             </PanelShell>
           </>
         }
@@ -563,14 +550,6 @@ export default function App() {
           />
         }
       />
-
-      {dragging ? (
-        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center bg-accent/5 backdrop-blur-[1px]">
-          <div className="rounded border border-accent/50 bg-ink-800/90 px-4 py-3 text-panel text-accent animate-fade-in">
-            松开即可导入：Spine / DragonBones JSON、.atlas 图集或碎图
-          </div>
-        </div>
-      ) : null}
     </div>
   )
 }

@@ -452,7 +452,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       }}
       onDragOver={(event) => {
         if (!hasImageDrag(event.dataTransfer)) return
-        // 内部图片拖拽在视口里处理完就停下，别冒泡去触发整窗的「拖入文件导入」覆盖层
+        // 内部图片拖拽在视口里处理完就停下，别冒泡去触发整窗的拖放兜底处理
         event.preventDefault()
         event.stopPropagation()
         event.dataTransfer.dropEffect = 'copy'

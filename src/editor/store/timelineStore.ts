@@ -23,7 +23,15 @@ export interface TimelineState {
    * 选中插槽的「显示」行按 K 就只打显示帧，而不是把该插槽的通道全打一遍。
    */
   selectedTrack: { kind: string; target: string; attachment: string; channel: string } | null
+  /**
+   * 最近打过关键帧的轨道（id 与 `buildTimeline` 的子轨道 id 一致）。
+   * 打帧的位置往往在轨道列表下方看不见，DopeSheet 靠它自动滚动到该行并高亮一下 ——
+   * 否则「点了打关键帧但时间轴没反应」会让人以为是没打上。
+   * `stamp` 递增：连续给同一轨道打帧也能重新触发滚动/高亮。
+   */
+  lastKeyed: { trackId: string; time: number; stamp: number } | null
 
+  notifyKeyed: (trackId: string, time: number) => void
   setAnimation: (name: string | null) => void
   setTime: (time: number) => void
   setPlaying: (playing: boolean) => void
@@ -58,7 +66,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   zoom: TIMELINE_ZOOM_DEFAULT,
   selectedKeys: [],
   selectedTrack: null,
+  lastKeyed: null,
 
+  notifyKeyed: (trackId, time) =>
+    set((state) => ({ lastKeyed: { trackId, time, stamp: (state.lastKeyed?.stamp ?? 0) + 1 } })),
   setAnimation: (name) => set({ currentAnimation: name, time: 0, selectedKeys: [], selectedTrack: null }),
   setTime: (time) => set({ time }),
   setPlaying: (playing) => set({ playing }),

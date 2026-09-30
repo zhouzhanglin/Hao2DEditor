@@ -41,20 +41,25 @@ export default function ContextMenu({ x, y, title, items, onClose }: ContextMenu
   }, [x, y, items.length])
 
   useEffect(() => {
-    const close = (): void => onClose()
+    const onPointerDown = (event: PointerEvent): void => {
+      // 点在本菜单内：不能关。这里是最外层（捕获阶段）监听，一定会先于菜单项自己的
+      // 处理器执行；靠子元素的 stopPropagation 拦不住它 —— 一旦在这里关闭菜单，
+      // 元素当场卸载，随后的 click 落到菜单下面的元素上，菜单项永远点不中。
+      if (ref.current?.contains(event.target as Node | null)) return
+      onClose()
+    }
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') onClose()
     }
-    // 捕获阶段：确保面板内部的点击不会先触发其它逻辑
-    window.addEventListener('pointerdown', close, true)
+    window.addEventListener('pointerdown', onPointerDown, true)
     window.addEventListener('keydown', onKey)
-    window.addEventListener('resize', close)
-    window.addEventListener('wheel', close, { passive: true })
+    window.addEventListener('resize', onClose)
+    window.addEventListener('wheel', onClose, { passive: true })
     return () => {
-      window.removeEventListener('pointerdown', close, true)
+      window.removeEventListener('pointerdown', onPointerDown, true)
       window.removeEventListener('keydown', onKey)
-      window.removeEventListener('resize', close)
-      window.removeEventListener('wheel', close)
+      window.removeEventListener('resize', onClose)
+      window.removeEventListener('wheel', onClose)
     }
   }, [onClose])
 

@@ -160,12 +160,26 @@ export function keySlotDisplay(
   attachmentName: string
 ): void {
   const track = ensureSlotAnim(anim, slot)
-  upsertKeyframe(track.displayIndex, { time, value: displayIndex, easing: 1, curve: null })
-  const index = track.displayIndex.findIndex((frame) => Math.abs(frame.time - time) < 1e-4)
-  if (index >= 0) track.displayAttachment[index] = attachmentName
-  if (track.displayAttachment.length !== track.displayIndex.length) {
-    track.displayAttachment = track.displayIndex.map((frame, i) => track.displayAttachment[i] ?? '')
+  // displayIndex 帧与 displayAttachment（附件名）是**两个并行数组**，运行期按名字解析显示项。
+  // 这里必须「帧 + 名字」成对写入再成对排序：先 upsert 帧、再按下标补名字的写法，
+  // 在「往中间插帧」时会把已有帧的名字挤到别的帧上（错位）→
+  // 播放时该插槽显示成别的附件，或索引越界干脆不画（表现为「有的图丢失看不见」）。
+  const pairs = track.displayIndex.map((frame, index) => ({
+    frame,
+    name: track.displayAttachment[index] ?? ''
+  }))
+  const existing = pairs.find((pair) => Math.abs(pair.frame.time - time) < 1e-4)
+  if (existing) {
+    existing.frame.value = displayIndex
+    existing.frame.easing = 1
+    existing.frame.curve = null
+    existing.name = attachmentName
+  } else {
+    pairs.push({ frame: { time, value: displayIndex, easing: 1, curve: null }, name: attachmentName })
   }
+  pairs.sort((left, right) => left.frame.time - right.frame.time)
+  track.displayIndex = pairs.map((pair) => pair.frame)
+  track.displayAttachment = pairs.map((pair) => pair.name)
 }
 
 export function keySlotVisible(anim: AuthoringAnimData, slot: string, time: number, visible: boolean): void {

@@ -7,6 +7,7 @@ import {
   Eye,
   EyeOff,
   Image as ImageIcon,
+  KeyRound,
   Link2,
   Lock,
   Maximize2,
@@ -19,6 +20,8 @@ import {
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useModeStore } from '@editor/store/modeStore'
+import { keySlotDisplayNow, keyframeTargetsNow } from '@editor/timeline/actions'
+import type { KeyframeTarget } from '@editor/timeline/model'
 import { getActiveScene } from '@editor/activeScene'
 import { createIkConstraint, createPathConstraint, createTransformConstraint } from '@core/model/constraints'
 import type { AuthoringBone, AuthoringConstraint, AuthoringImage, EditorDocument } from '@core/model/authoring'
@@ -518,17 +521,107 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
 
   /** 右键菜单：记录点击位置与目标对象 */
   const [menu, setMenu] = useState<{ x: number; y: number; target: MenuTarget } | null>(null)
+  /** display 行自己的右键菜单（Animate 态：从当前时间开始显示它） */
+  const [displayMenu, setDisplayMenu] = useState<{
+    x: number
+    y: number
+    slot: string
+    attachment: string
+  } | null>(null)
 
   const openMenu = (event: React.MouseEvent, target: MenuTarget): void => {
     event.preventDefault()
     event.stopPropagation()
+    // Animate 态根层没有关键帧操作：不开空菜单（比弹一个空框更清楚）
+    if (useModeStore.getState().mode === 'animate' && target.kind === 'root') return
     if (target.kind === 'bone') selection.selectBone(target.name)
     else if (target.kind === 'slot') selection.selectSlot(target.name)
     else if (target.kind === 'constraint') selection.selectConstraint(target.name)
     setMenu({ x: event.clientX, y: event.clientY, target })
   }
 
+  /** 一条「打关键帧」菜单项：点击即在当前时间点写入对应的通道帧 */
+  const keyframeItem = (
+    key: string,
+    label: string,
+    hint: string,
+    targets: KeyframeTarget[]
+  ): ContextMenuItem => {
+    // 一个动画都没有时直接置灰并说明原因：否则点了只会闪一行状态栏，像是「没反应」
+    const noAnimation = document.animations.length === 0
+    return {
+      key,
+      label,
+      hint: noAnimation ? '工程里还没有动画：先在时间轴点「+ 动画」' : hint,
+      icon: <KeyRound size={12} />,
+      disabled: noAnimation,
+      onSelect: () => {
+        const result = keyframeTargetsNow(targets, hint)
+        onStatus?.(result.message)
+      }
+    }
+  }
+
+  /**
+   * Animate 态的菜单：只给「打关键帧」。
+   * 加骨骼 / 插槽 / 约束、删除这些改的是 setup（绑定）数据，动画状态里动它们会污染动画基线。
+   */
+  const keyframeMenuItems = (target: MenuTarget): ContextMenuItem[] => {
+    if (target.kind === 'bone') {
+      const bone = target.name
+      const channel = (name: string): KeyframeTarget[] => [
+        { kind: 'bone', target: bone, attachment: '', channel: name }
+      ]
+      return [
+        keyframeItem('k-translate', '位置关键帧', `${bone} · 位置`, channel('translate')),
+        keyframeItem('k-rotate', '旋转关键帧', `${bone} · 旋转`, channel('rotate')),
+        keyframeItem('k-scale', '缩放关键帧', `${bone} · 缩放`, channel('scale')),
+        keyframeItem('k-shear', '斜切关键帧', `${bone} · 斜切`, channel('shear')),
+        { key: 'sep-k', label: '', separator: true },
+        keyframeItem('k-all', '全部通道关键帧', bone, [
+          ...channel('rotate'),
+          ...channel('translate'),
+          ...channel('scale'),
+          ...channel('shear')
+        ])
+      ]
+    }
+    if (target.kind === 'slot') {
+      const slot = target.name
+      const channel = (name: string): KeyframeTarget[] => [
+        { kind: 'slot', target: slot, attachment: '', channel: name }
+      ]
+      return [
+        keyframeItem('k-display', '显示关键帧', `${slot} · 显示`, channel('display')),
+        keyframeItem('k-color', '颜色关键帧', `${slot} · 颜色`, channel('color')),
+        keyframeItem('k-visible', '可见性关键帧', `${slot} · 可见性`, channel('visible')),
+        { key: 'sep-k', label: '', separator: true },
+        keyframeItem('k-all', '全部通道关键帧', slot, [
+          ...channel('display'),
+          ...channel('color'),
+          ...channel('visible')
+        ])
+      ]
+    }
+    if (target.kind === 'constraint') {
+      // 约束的 mix / offset 是检查器里的编辑值（不在运行时姿态里），打帧暂未支持 ——
+      // 明说比点了没反应好
+      return [
+        {
+          key: 'k-constraint',
+          label: '约束关键帧（暂未支持）',
+          hint: '约束参数请在检查器里编辑；打帧目前支持骨骼 / 插槽 / display',
+          icon: <KeyRound size={12} />,
+          disabled: true
+        }
+      ]
+    }
+    return []
+  }
+
   const menuItems = (target: MenuTarget): ContextMenuItem[] => {
+    // Animate 态：菜单换成打关键帧（绑定类操作属于 setup，见上面的说明）
+    if (useModeStore.getState().mode === 'animate') return keyframeMenuItems(target)
     const host = target.kind === 'bone' ? target.name : target.bone
     const where = target.kind === 'bone' ? `挂在「${target.name}」下` : host ? `挂在「${host}」下` : '挂在根层'
     const items: ContextMenuItem[] = [
@@ -701,6 +794,18 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         dataSlot={slot.name}
         onDropImage={(imageNames) => addDisplay(slot.name, imageNames)}
         onSelect={() => selectDisplay(slot.name, attachment.name)}
+        // Animate 态：右键 display = 从当前时间点开始显示它（打显示关键帧）
+        onContextMenu={(event) => {
+          if (useModeStore.getState().mode !== 'animate') return
+          event.preventDefault()
+          event.stopPropagation()
+          setDisplayMenu({
+            x: event.clientX,
+            y: event.clientY,
+            slot: slot.name,
+            attachment: attachment.name
+          })
+        }}
         onDelete={() =>
           update('删除 display', (draft) => deleteAttachment(draft, slot.name, attachment.name))
         }
@@ -889,12 +994,38 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           x={menu.x}
           y={menu.y}
           title={
-            menu.target.kind === 'root'
-              ? '新建对象'
-              : `${menu.target.kind === 'bone' ? '骨骼' : menu.target.kind === 'slot' ? '插槽' : '约束'}「${menu.target.name}」`
+            useModeStore.getState().mode === 'animate'
+              ? `${menu.target.kind === 'bone' ? '骨骼' : menu.target.kind === 'slot' ? '插槽' : '约束'}「${menu.target.name}」· 打关键帧${
+                  // 置灰项的 hover 提示看不到，把原因写在标题里
+                  document.animations.length === 0 ? '（工程里还没有动画：先在时间轴点「+ 动画」）' : ''
+                }`
+              : menu.target.kind === 'root'
+                ? '新建对象'
+                : `${menu.target.kind === 'bone' ? '骨骼' : menu.target.kind === 'slot' ? '插槽' : '约束'}「${menu.target.name}」`
           }
           items={menuItems(menu.target)}
           onClose={() => setMenu(null)}
+        />
+      ) : null}
+
+      {displayMenu ? (
+        <ContextMenu
+          x={displayMenu.x}
+          y={displayMenu.y}
+          title={`「${displayMenu.slot}」· display「${displayMenu.attachment}」`}
+          items={[
+            {
+              key: 'display-key',
+              label: '显示关键帧（从这里开始显示）',
+              hint: `在当前时间切到「${displayMenu.attachment}」`,
+              icon: <KeyRound size={12} />,
+              onSelect: () => {
+                const result = keySlotDisplayNow(displayMenu.slot, displayMenu.attachment)
+                onStatus?.(result.message)
+              }
+            }
+          ]}
+          onClose={() => setDisplayMenu(null)}
         />
       ) : null}
     </div>

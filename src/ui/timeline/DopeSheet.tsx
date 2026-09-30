@@ -208,6 +208,40 @@ export default function DopeSheet(props: DopeSheetProps) {
    * 当前选中的**子轨道（通道）**：点击通道行时由 TimelinePanel 写入。
    * 它同时决定「按 K 只给这条通道打帧」，所以行上必须有明确的选中反馈。
    */
+  /** 轨道列表滚动容器：打帧后把对应行滚到可见 */
+  const trackListRef = useRef<HTMLDivElement | null>(null)
+  /** 刚打帧的轨道 id（短暂高亮） */
+  const [flashTrackId, setFlashTrackId] = useState<string | null>(null)
+  /**
+   * 打帧（含右键菜单 / K / 时间轴右键选 display）后把该轨道滚进视野并闪一下。
+   * 轨道多的时候新帧落在列表下方，不这么做会像「点了打关键帧但时间轴没反应」。
+   */
+  const lastKeyed = useTimelineStore((state) => state.lastKeyed)
+  useEffect(() => {
+    if (!lastKeyed) return
+    // ① 垂直：把该轨道行滚进视野
+    const row = trackListRef.current?.querySelector(
+      `[data-track-id="${CSS.escape(lastKeyed.trackId)}"]`
+    )
+    row?.scrollIntoView({ block: 'nearest' })
+    // ② 水平：时间点不在当前可见时间段内时，把视图挪过去 ——
+    //    时间轴可以缩放/平移，新帧可能落在水平方向的可视区之外
+    const current = viewRef.current
+    const currentSpan = current.zoom > 0 ? axis / current.zoom : axis
+    const viewStart = Math.min(Math.max(0, current.start), Math.max(0, axis - currentSpan))
+    if (lastKeyed.time < viewStart || lastKeyed.time > viewStart + currentSpan) {
+      const limit = Math.max(0, axis - currentSpan)
+      applyView({
+        start: Math.max(0, Math.min(limit, lastKeyed.time - currentSpan * 0.5))
+      })
+    }
+    // ③ 高亮一下
+    setFlashTrackId(lastKeyed.trackId)
+    const timer = window.setTimeout(() => setFlashTrackId(null), 900)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastKeyed, axis])
+
   const activeTrack = useTimelineStore((state) => state.selectedTrack)
   const isTrackActive = (track: TimelineTrack): boolean =>
     !track.isGroup &&
@@ -623,7 +657,7 @@ export default function DopeSheet(props: DopeSheetProps) {
         <div className="min-w-0 flex-1" />
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto hao-scroll">
+      <div ref={trackListRef} className="min-h-0 flex-1 overflow-auto hao-scroll">
         <div className="flex min-h-full">
           {/* 轨道名（骨骼是「分组行 + 通道子轨」两层结构） */}
           <div className="shrink-0 border-r border-line bg-ink-800/60" style={{ width: LABEL_WIDTH }}>
@@ -633,13 +667,16 @@ export default function DopeSheet(props: DopeSheetProps) {
               <button
                 key={track.id}
                 type="button"
+                data-track-id={track.id}
                 className={[
                   'relative flex w-full items-center gap-1 border-b border-line/40 pr-1.5 text-left text-3xs cursor-pointer',
                   track.isGroup
                     ? 'bg-ink-900/50 font-semibold text-content-hi hover:bg-ink-700'
                     : trackActive
                       ? 'bg-accent/15 font-semibold text-accent'
-                      : 'text-content-mid hover:bg-ink-700'
+                      : 'text-content-mid hover:bg-ink-700',
+                  // 刚打帧的行短暂高亮：帧大概率埋在列表下方，光靠滚动还不够醒目
+                  flashTrackId === track.id ? 'bg-accent/30' : ''
                 ].join(' ')}
                 style={{ height: ROW_HEIGHT, paddingLeft: 5 + track.depth * 12 }}
                 title={

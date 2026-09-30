@@ -1,6 +1,6 @@
 import { Easing } from '@core/model/animation'
 import { lastKeyTime } from '@core/model/authoring'
-import type { AuthoringAnimData, EditorDocument } from '@core/model/authoring'
+import type { AuthoringAnimData, AuthoringSlotAnim, EditorDocument } from '@core/model/authoring'
 import {
   keyBoneChannel,
   keyDeform,
@@ -270,6 +270,25 @@ export function repairAnimationDurations(doc: EditorDocument): number {
 }
 
 /**
+ * 打开工程 / 导入后的兜底：displayIndex 帧与 displayAttachment（附件名）必须一一对应，
+ * 两者长度不一致时补齐 / 截断，避免运行期取到 undefined 后显示异常。
+ *
+ * 注意：只能修「长度不匹配」；「长度一致但内容错位」的历史数据无法从数据本身判断，
+ * 写入端（打帧 / 拖动 / 删除）已经做了成对维护，新数据不会再出现。
+ */
+export function repairDisplayNames(doc: EditorDocument): number {
+  let repaired = 0
+  for (const animation of doc.animations) {
+    for (const track of animation.slots) {
+      if (track.displayAttachment.length === track.displayIndex.length) continue
+      track.displayAttachment = track.displayIndex.map((_, index) => track.displayAttachment[index] ?? '')
+      repaired++
+    }
+  }
+  return repaired
+}
+
+/**
  * 按「选择器（保存原始时间）+ 目标时间」重设关键帧时间。
  * 拖拽时每次都基于**原始时间**重算，避免增量累积误差；selector 始终能定位到原始帧。
  */
@@ -295,6 +314,22 @@ export function setKeysTimes(
   return count
 }
 
+/**
+ * display 通道的帧与「附件名」是**两个并行数组**（displayIndex / displayAttachment），
+ * 运行期按帧对应的名字解析显示项。所以排序时必须把「帧 + 名字」成对搬运 ——
+ * 只排帧数组会让名字错位：播放时该插槽显示成别的附件，或索引越界干脆不画
+ * （表现为「有的图丢失看不见」）。
+ */
+function sortDisplayTrack(track: AuthoringSlotAnim): void {
+  const pairs = track.displayIndex.map((frame, index) => ({
+    frame,
+    name: track.displayAttachment[index] ?? ''
+  }))
+  pairs.sort((left, right) => left.frame.time - right.frame.time)
+  track.displayIndex = pairs.map((pair) => pair.frame)
+  track.displayAttachment = pairs.map((pair) => pair.name)
+}
+
 /** 所有轨道的关键帧按时间重排（含事件轨） */
 function sortAllTracks(animation: AuthoringAnimData): void {
   for (const track of animation.bones) {
@@ -305,7 +340,7 @@ function sortAllTracks(animation: AuthoringAnimData): void {
   }
   for (const track of animation.slots) {
     sortFrames(track.color)
-    sortFrames(track.displayIndex)
+    sortDisplayTrack(track)
     sortFrames(track.visible)
   }
   for (const track of animation.deforms) sortFrames(track.frames)
@@ -343,6 +378,12 @@ export interface PoseSnapshot {
   slotColors: Array<{ r: number; g: number; b: number; a: number }>
   /** 运行期插槽当前显示的附件下标 */
   slotDisplayIndex: Int32Array
+  /**
+   * 运行期插槽当前显示的附件名（与 slotDisplayIndex 一一对应）。
+   * 显示帧必须把名字一起写进去：运行期是「名字优先、下标兜底」，
+   * 只写下标的话，换皮肤 / 附件增删后下标就可能指到别的附件 —— 表现为「有的图丢失看不见」。
+   */
+  slotDisplayNames?: string[]
   /** 运行期插槽可见性（1 / 0） */
   slotVisible: Uint8Array
   deformOffsets: Array<number[] | null>
@@ -408,8 +449,14 @@ export function keyframeTargets(
         const color = pose.slotColors[index]
         keySlotColor(animation, target.target, time, { r: color.r, g: color.g, b: color.b, a: color.a })
       } else if (channel === 'display') {
-        // 附件名留空：运行时会用「名字优先、下标兜底」，下标已写入
-        keySlotDisplay(animation, target.target, time, pose.slotDisplayIndex[index], '')
+        // 名字与下标一起写：运行期「名字优先、下标兜底」，名字在手才不怕换皮肤 / 附件增删
+        keySlotDisplay(
+          animation,
+          target.target,
+          time,
+          pose.slotDisplayIndex[index],
+          pose.slotDisplayNames?.[index] ?? ''
+        )
       } else if (channel === 'visible') {
         keySlotVisible(animation, target.target, time, pose.slotVisible[index] !== 0)
       } else {
@@ -597,8 +644,22 @@ function editFrameTimes(
       .map((selector) => frames.find((frame) => Math.abs(frame.time - selector.time) < 1e-4))
       .filter((frame): frame is { time: number } => Boolean(frame))
     if (subset.length === 0) continue
+    // display 通道：帧和附件名是并行数组，删/移动帧后要按**帧对象身份**恢复配对
+    // （否则名字会错位，播放时显示出错误的 attachment 或直接不画）
+    const displayTrack =
+      list[0].kind === 'slot' && list[0].channel === 'display'
+        ? animation.slots.find((item) => item.slot === list[0].target)
+        : undefined
+    const namesByFrame = displayTrack
+      ? new Map(displayTrack.displayIndex.map((frame, index) => [frame, displayTrack.displayAttachment[index] ?? '']))
+      : null
     mutate(subset, frames)
     count += subset.length
+    if (displayTrack && namesByFrame) {
+      displayTrack.displayAttachment = displayTrack.displayIndex.map(
+        (frame) => namesByFrame.get(frame) ?? ''
+      )
+    }
   }
   sortAllTracks(animation)
   syncDuration(animation)

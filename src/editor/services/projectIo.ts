@@ -10,6 +10,7 @@ import { parseSpineAtlas } from '@importers/atlasSpine'
 import { dbTextureNames, parseDbTextureJson } from '@importers/dragonBonesAtlas'
 import { detectSkeletonFormat, isDbTextureJson } from '@importers/detect'
 import { registerLooseImages } from '@importers/looseImages'
+import { ASSET_DIR, copyAssets, planAssetCopies, resolveImagePaths } from './projectAssets'
 import type { AtlasRegion, PageSizes } from '@importers/uv'
 import { useProjectStore } from '../store/projectStore'
 
@@ -116,6 +117,9 @@ export async function openProjectAt(path: string): Promise<IoResult> {
   } catch (error) {
     return fail(`工程文件解析失败：${error instanceof Error ? error.message : String(error)}`)
   }
+  // 工程自带的图片存的是相对路径（images/xxx）：按工程文件所在目录解析成绝对路径，
+  // 之后预览 / 渲染 / 导出都按绝对路径读文件，不用再关心工程被移到哪里
+  parsed.document.images = resolveImagePaths(parsed.document.images, dirName(path))
   useProjectStore.getState().setDocument(parsed.document, path, false)
   useProjectStore.getState().setWarnings(parsed.warnings)
   await platform.recentAdd(path)
@@ -127,6 +131,13 @@ export async function recentProjects(): Promise<string[]> {
   return getPlatform().recentList()
 }
 
+/**
+ * 保存工程。
+ *
+ * 用到的图片会一并复制到 `<工程目录>/images/`，工程文件里改存相对路径 ——
+ * 整个工程文件夹可以随意搬走 / 打包，不再依赖图片原来的位置。
+ * 图片复制失败不阻塞保存（工程本身照常写出，问题在提示里说明）。
+ */
 export async function saveProject(saveAs: boolean): Promise<IoResult> {
   const platform = getPlatform()
   const store = useProjectStore.getState()
@@ -144,10 +155,23 @@ export async function saveProject(saveAs: boolean): Promise<IoResult> {
     path = `${path.replace(/\.[^./\\]+$/, '')}.${PROJECT_EXTENSION}`
   }
 
-  await platform.writeText(path, serializeDocument(store.document))
+  // 图片随工程走：先复制到 images/，工程文件里用相对路径写入
+  const plan = planAssetCopies(store.document.images, dirName(path))
+  const copied = await copyAssets(plan.copies, platform, platform)
+
+  await platform.writeText(path, serializeDocument({ ...store.document, images: plan.images }))
   store.markSaved(path)
   await platform.recentAdd(path)
-  return { ok: true, message: `已保存到 ${baseName(path)}` }
+
+  const total = store.document.images.length
+  const parts: string[] = []
+  if (copied.copied > 0) parts.push(`${copied.copied} 张图片已复制到 ${ASSET_DIR}/`)
+  else if (total > 0 && copied.warnings.length === 0) parts.push(`${total} 张图片已在 ${ASSET_DIR}/`)
+  let message = `已保存到 ${baseName(path)}`
+  if (parts.length > 0) message += `（${parts.join('，')}）`
+  if (copied.warnings.length > 0) message += `；${copied.warnings[0]}`
+  if (copied.warnings.length > 0) console.warn('[hao2d] 图片复制告警：', copied.warnings)
+  return { ok: true, message, warnings: copied.warnings.length > 0 ? copied.warnings : undefined }
 }
 
 export async function importSpineFlow(): Promise<IoResult> {

@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, Eye, EyeOff, GripVertical } from 'lucide-react'
+import { ArrowDown, ArrowUp, Eye, EyeOff, GripVertical, KeyRound } from 'lucide-react'
 import { useModeStore } from '@editor/store/modeStore'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { drawOrderFrameAt, keyDrawOrder } from '@editor/commands/animationCommands'
 import { applySlotOrder } from '@editor/commands/hierarchyCommands'
+import { keyframeTargetsNow } from '@editor/timeline/actions'
+import type { KeyframeTarget } from '@editor/timeline/model'
+import ContextMenu from '@ui/widgets/ContextMenu'
+import type { ContextMenuItem } from '@ui/widgets/ContextMenu'
 
 type Direction = 'up' | 'down' | 'top' | 'bottom'
 const ORDER_MIME = 'application/x-hao2d-slotorder'
@@ -22,6 +26,8 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
   const [dropIndex, setDropIndex] = useState<number | null>(null)
   /** 行元素（按插槽名索引）：插入位置靠它们的中心线算 */
   const rowRefs = useRef(new Map<string, HTMLDivElement | null>())
+  /** 行右键菜单（Animate 态：给这条插槽打关键帧） */
+  const [rowMenu, setRowMenu] = useState<{ x: number; y: number; slot: string } | null>(null)
 
   const animate = mode === 'animate' && timeline.currentAnimation !== null
   const animation = document.animations.find((item) => item.name === timeline.currentAnimation) ?? null
@@ -230,7 +236,13 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
                 slot.visible ? '' : 'opacity-55'
               ].join(' ')}
               onClick={() => selection.selectSlot(name)}
-              title={`${slot.name}（挂载于「${slot.bone}」）：拖动调整绘制顺序${animate ? '，Animate 态自动打关键帧' : ''}`}
+              onContextMenu={(event) => {
+                // Animate 态：右键插槽 = 给它打关键帧（显示 / 颜色 / 可见性）
+                if (!animate) return
+                event.preventDefault()
+                setRowMenu({ x: event.clientX, y: event.clientY, slot: name })
+              }}
+              title={`${slot.name}（挂载于「${slot.bone}」）：拖动调整绘制顺序${animate ? '，Animate 态自动打关键帧，右键可打显示 / 颜色 / 可见性帧' : ''}`}
             >
               {/* 落点指示线：绝对定位，不占布局（占位会推挤行、让落点来回跳） */}
               {dropIndex === index ? (
@@ -262,8 +274,51 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
           <div className="h-[2px] bg-accent" />
         ) : null}
       </div>
+
+      {rowMenu ? (
+        <ContextMenu
+          x={rowMenu.x}
+          y={rowMenu.y}
+          title={`插槽「${rowMenu.slot}」· 打关键帧${
+            // 置灰项的 hover 提示看不到，把原因写在标题里
+            document.animations.length === 0 ? '（工程里还没有动画：先在时间轴点「+ 动画」）' : ''
+          }`}
+          items={slotKeyframeItems(rowMenu.slot, onStatus, document.animations.length > 0)}
+          onClose={() => setRowMenu(null)}
+        />
+      ) : null}
     </div>
   )
+}
+
+/** 插槽的「打关键帧」菜单项：显示 / 颜色 / 可见性，以及一次打全部通道 */
+function slotKeyframeItems(
+  slot: string,
+  onStatus: ((text: string) => void) | undefined,
+  hasAnimation: boolean
+): ContextMenuItem[] {
+  const item = (key: string, label: string, hint: string, targets: KeyframeTarget[]): ContextMenuItem => ({
+    key,
+    label,
+    // 没有动画时置灰并说明原因（点了只会闪一行状态栏，容易被当成「没反应」）
+    hint: hasAnimation ? hint : '工程里还没有动画：先在时间轴点「+ 动画」',
+    icon: <KeyRound size={12} />,
+    disabled: !hasAnimation,
+    onSelect: () => {
+      const result = keyframeTargetsNow(targets, hint)
+      onStatus?.(result.message)
+    }
+  })
+  const channel = (name: string): KeyframeTarget[] => [
+    { kind: 'slot', target: slot, attachment: '', channel: name }
+  ]
+  return [
+    item('k-display', '显示关键帧', `${slot} · 显示`, channel('display')),
+    item('k-color', '颜色关键帧', `${slot} · 颜色`, channel('color')),
+    item('k-visible', '可见性关键帧', `${slot} · 可见性`, channel('visible')),
+    { key: 'sep-k', label: '', separator: true },
+    item('k-all', '全部通道关键帧', slot, [...channel('display'), ...channel('color'), ...channel('visible')])
+  ]
 }
 
 function rowByName(doc: { slots: Array<{ name: string; bone: string; visible: boolean }> }, name: string) {

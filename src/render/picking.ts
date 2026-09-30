@@ -303,9 +303,12 @@ export interface AttachmentHit {
 }
 
 /**
- * 点选附件：用 mesh 的世界顶点按插槽分组做包围盒测试（含 `tolerance` 外扩），
+ * 点选附件（几何版）：用 mesh 的世界顶点按插槽分组做包围盒测试（含 `tolerance` 外扩），
  * 命中多个时取包围盒**面积最小**的 —— 小图叠在大图上时优先选到小图。
  * mesh 只包含「当前显示」的附件，所以不可见的 display 不会被点到。
+ *
+ * 注意：这是**矩形区域**判定，图片四角留白也会被算成命中；
+ * 场景里的点选走的是 `pickAttachmentPixel`（按像素 alpha 判定）。
  */
 export function pickAttachmentAt(
   result: MeshBuildResult | null,
@@ -335,6 +338,81 @@ export function pickAttachmentAt(
     if (y < box.minY - tolerance || y > box.maxY + tolerance) continue
     const area = Math.max(0, box.maxX - box.minX) * Math.max(0, box.maxY - box.minY)
     if (!best || area < best.area) best = { slotIndex, area }
+  }
+  return best
+}
+
+export interface AttachmentPixelHit {
+  slotIndex: number
+}
+
+export interface AttachmentPixelOptions {
+  /** 插槽当前显示的附件用哪张图片（没有 / 未知返回空串） */
+  imageOfSlot: (slotIndex: number) => string
+  /** 采样图片 uv 处的不透明度（0..1）；未就绪时返回 1 表示「当作不透明」 */
+  alphaAt: (image: string, u: number, v: number) => number
+  /** 小于该不透明度视为透明（默认 0.03 ≈ 8/255，滤掉边缘的抗锯齿像素） */
+  alphaThreshold?: number
+}
+
+/**
+ * 点选附件（像素级）：遍历当前可见附件的三角形，找**包含鼠标点**的那个，
+ * 用重心坐标插值出 UV，再采样图片 alpha —— 只有落在**不透明像素**上才算命中。
+ *
+ * 这样图片四角的透明留白、图集打包留下的空隙都不会被点到（矩形包围盒判定会），
+ * 点透明处会像点到背景一样「穿透」到它下面的对象。
+ *
+ * 重叠命中时取**最后绘制**的那个（视觉上最上层的），与「点到的就是看到的」一致。
+ */
+export function pickAttachmentPixel(
+  result: MeshBuildResult | null,
+  x: number,
+  y: number,
+  options: AttachmentPixelOptions
+): AttachmentPixelHit | null {
+  if (!result || result.vertexCount === 0) return null
+  const threshold = options.alphaThreshold ?? 0.03
+  const positions = result.positions
+  const uvs = result.uvs
+  const sourceSlot = result.sourceSlot
+  let best: AttachmentPixelHit | null = null
+
+  // groups 按绘制顺序排列（先画的在前）：后命中的在上层，直接覆盖即可
+  for (let g = 0; g < result.groups.length; g++) {
+    const group = result.groups[g]
+    const indices = group.indices
+    for (let t = 0; t < group.indexCount; t += 3) {
+      const i0 = indices[t]
+      const i1 = indices[t + 1]
+      const i2 = indices[t + 2]
+      const x0 = positions[i0 * 2]
+      const y0 = positions[i0 * 2 + 1]
+      const x1 = positions[i1 * 2]
+      const y1 = positions[i1 * 2 + 1]
+      const x2 = positions[i2 * 2]
+      const y2 = positions[i2 * 2 + 1]
+
+      // 三角形包围盒粗筛
+      if (x < Math.min(x0, x1, x2) || x > Math.max(x0, x1, x2)) continue
+      if (y < Math.min(y0, y1, y2) || y > Math.max(y0, y1, y2)) continue
+
+      // 重心坐标：点必须落在三角形内（含边上）
+      const denom = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+      if (Math.abs(denom) < 1e-12) continue
+      const w0 = ((y1 - y2) * (x - x2) + (x2 - x1) * (y - y2)) / denom
+      const w1 = ((y2 - y0) * (x - x2) + (x0 - x2) * (y - y2)) / denom
+      const w2 = 1 - w0 - w1
+      if (w0 < 0 || w1 < 0 || w2 < 0) continue
+
+      const slotIndex = sourceSlot[i0]
+      const image = options.imageOfSlot(slotIndex)
+      if (image) {
+        const u = uvs[i0 * 2] * w0 + uvs[i1 * 2] * w1 + uvs[i2 * 2] * w2
+        const v = uvs[i0 * 2 + 1] * w0 + uvs[i1 * 2 + 1] * w1 + uvs[i2 * 2 + 1] * w2
+        if (options.alphaAt(image, u, v) < threshold) continue
+      }
+      best = { slotIndex }
+    }
   }
   return best
 }

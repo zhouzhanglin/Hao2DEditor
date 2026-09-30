@@ -21,7 +21,7 @@ import {
   BONE_ORIGIN_RADIUS,
   attachmentGizmoFrame,
   gizmoGeometry,
-  pickAttachmentAt,
+  pickAttachmentPixel,
   pickBone,
   pickBoneHandle,
   pickGizmo,
@@ -30,6 +30,7 @@ import {
   pickVertex
 } from '@render/picking'
 import type { BoneHandleHit, BoneHit, GizmoPart, ShearEdge, VertexHit } from '@render/picking'
+import { ImageAlphaCache } from '@render/imageAlpha'
 
 /** 斜切包围盒：局部 AABB + 世界坐标四角（左上 → 右上 → 右下 → 左下） */
 export interface ShearBox {
@@ -87,6 +88,8 @@ export interface EditorSceneOptions {
 export class EditorScene {
   readonly viewport: Viewport
   readonly textures: TextureStore
+  /** 图片 alpha 缓存：附件像素级拾取用（纹理在 GPU 上读不出来，这里解码一份） */
+  readonly imageAlpha = new ImageAlphaCache()
   readonly overlay = new Container()
 
   // 描边与填充必须分开（pixi v8 中 stroke 后的路径仍会被后续 fill 填充）
@@ -511,11 +514,21 @@ export class EditorScene {
     )
   }
 
-  /** 点选附件本体：mesh 里当前显示的附件，按包围盒命中（小图叠大图时优先小图） */
+  /**
+   * 点选附件本体：按**像素**判定（不是矩形区域）—— 落在图片的透明像素上不算命中，
+   * 会穿透到它下面的对象；重叠时取视觉上最上层的那个。
+   */
   pickAttachmentAt(worldX: number, worldY: number): { slot: string; attachment: string } | null {
     const bundle = this.bundle
     if (!bundle) return null
-    const hit = pickAttachmentAt(this.meshResult, worldX, worldY, this.viewport.pixelsToWorld(6))
+    const hit = pickAttachmentPixel(this.meshResult, worldX, worldY, {
+      // 运行时附件的纹素名 = 图片名（与 alpha 缓存的键一致）
+      imageOfSlot: (slotIndex) => {
+        const displayIndex = bundle.skeleton.slotDisplayIndex[slotIndex]
+        return this.attachmentAt(slotIndex, displayIndex)?.textureName ?? ''
+      },
+      alphaAt: (image, u, v) => this.imageAlpha.alphaAt(image, u, v)
+    })
     if (!hit) return null
     const slot = bundle.asset.slots[hit.slotIndex]
     const displayIndex = bundle.skeleton.slotDisplayIndex[hit.slotIndex]

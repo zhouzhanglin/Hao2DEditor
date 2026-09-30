@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { EditorScene } from '@editor/scene'
 import { TextureStore } from '@render/material'
+import { ImageAlphaCache } from '@render/imageAlpha'
 import { getPlatform } from '@editor/platform'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
@@ -90,7 +91,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       const { document } = useProjectStore.getState()
       const selection = useSelectionStore.getState()
       scene.setDocument(document, selection.skin)
-      void loadTextures(texturesRef.current, document)
+      void loadTextures(texturesRef.current, document, scene.imageAlpha)
     }
     sync()
     const unsubscribe = useProjectStore.subscribe(sync)
@@ -470,14 +471,22 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
   )
 }
 
-async function loadTextures(store: TextureStore | null, document: ReturnType<typeof useProjectStore.getState>['document']): Promise<void> {
-  if (!store) return
+async function loadTextures(
+  store: TextureStore | null,
+  document: ReturnType<typeof useProjectStore.getState>['document'],
+  imageAlpha: ImageAlphaCache | null
+): Promise<void> {
+  if (!store && !imageAlpha) return
   const platform = getPlatform()
   for (const image of document.images) {
-    if (store.has(image.name)) continue
+    // 纹理与 alpha 缓存的就绪状态分开判断：纹理已加载不代表像素拾取能采样了
+    const needTexture = store !== null && !store.has(image.name)
+    const needAlpha = imageAlpha !== null && !imageAlpha.has(image.name)
+    if (!needTexture && !needAlpha) continue
     // imageUrl：Electron 会读文件字节给同源 blob:（协议 URL 跨源，WebGL 用不了）
     const url = await platform.imageUrl(image.path)
     if (!url) continue
-    await store.load(image.name, url)
+    if (needTexture && store) await store.load(image.name, url)
+    if (needAlpha && imageAlpha) imageAlpha.ensure(image.name, url)
   }
 }

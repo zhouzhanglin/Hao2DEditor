@@ -32,14 +32,20 @@ interface PackedAtlas {
 /**
  * 图集打包：把工程里用到的所有图片按**整图**重新装进新页。
  * 整图打包的收益是 UV 重映射只是仿射变换，且不会丢裁剪信息（原始 trim 偏移仍按附件数据保留）。
+ *
+ * `scale` 会按比例缩小每个图块在页里的占位（同时 png 编码时也绘制成这个尺寸）：
+ * 用来把放不下的碎图塞进更少的页里 —— 附件自身的世界尺寸不变，画面大小不变，
+ * 只是纹理分辨率降低。
  */
 function buildAtlas(
   asset: RuntimeAsset,
   images: ReadonlyArray<{ name: string; path: string; width: number; height: number }>,
   stem: string,
-  maxSize: number
+  maxSize: number,
+  scale = 1
 ): PackedAtlas {
   const warnings: string[] = []
+  const ratio = Number.isFinite(scale) && scale > 0 ? scale : 1
   const used = asset.textureNames.filter((name) => name.length > 0)
   const items = used.map((name) => {
     const image = images.find((entry) => entry.name === name)
@@ -47,7 +53,11 @@ function buildAtlas(
       warnings.push(`图片「${name}」缺少尺寸信息，导出时按 1×1 占位处理`)
       return { id: name, width: 1, height: 1 }
     }
-    return { id: name, width: image.width, height: image.height }
+    return {
+      id: name,
+      width: Math.max(1, Math.round(image.width * ratio)),
+      height: Math.max(1, Math.round(image.height * ratio))
+    }
   })
 
   const packed = packMaxRects(items, { maxSize, initialSize: Math.min(512, maxSize), padding: 2, border: 2 })
@@ -98,7 +108,7 @@ function buildAtlas(
 }
 
 /** 把附件上的 UV / textureName 重映射到新图集 */
-function remapAsset(asset: RuntimeAsset, packed: PackedAtlas, images: ReadonlyArray<{ name: string; width: number; height: number }>): void {
+function remapAsset(asset: RuntimeAsset, packed: PackedAtlas): void {
   const newTextureNames = packed.atlas.pages.map((page) => page.image)
   for (const skin of asset.skins) {
     for (const skinSlot of skin.slots) {
@@ -111,18 +121,11 @@ function remapAsset(asset: RuntimeAsset, packed: PackedAtlas, images: ReadonlyAr
           attachment.textureName = newTextureNames[0] ?? ''
           continue
         }
-        const image = images.find((entry) => entry.name === source)
-        const sourceSize = {
-          width: Math.max(1, image?.width ?? 1),
-          height: Math.max(1, image?.height ?? 1)
-        }
         const page = packed.atlas.pages[target.page]
-        attachment.uvs = remapPageUvs(
-          attachment.uvs,
-          sourceSize,
-          target.placement,
-          { width: page.width, height: page.height }
-        )
+        attachment.uvs = remapPageUvs(attachment.uvs, target.placement, {
+          width: page.width,
+          height: page.height
+        })
         attachment.textureName = page.image
       }
     }
@@ -156,18 +159,33 @@ async function pickOutputDir(title: string): Promise<string | null> {
   return picked[0] ?? null
 }
 
-/**
- * 导出自定义运行时数据：`{name}_ske.json` + `{name}_atlas.json` + 图集页 png。
- * 图集在编辑器内打包，产物可直接给游戏侧加载（配套 `core/runtime/loader.ts` 已实现闭环验证）。
- */
-export async function exportRuntimeData(): Promise<ExportResult> {
-  const store = useProjectStore.getState()
-  const doc = store.document
-  const stem = sanitize(stripExtension(doc.armatureName) || 'armature')
-  const dir = await pickOutputDir('选择导出目录（运行时数据）')
-  if (!dir) return { ok: false, message: '已取消', warnings: [], files: [] }
+export interface RuntimeExportOptions {
+  /** 图集缩放：<1 用更低的分辨率换取更少的页数（附件渲染尺寸不变） */
+  scale: number
+  /** 单页最大边长 */
+  maxSize: number
+}
 
-  const platform = getPlatform()
+/**
+ * 导出前的准备工作：编译 → 打包 → UV 重映射，**不写任何文件**。
+ * 弹窗用它实时算预览（改缩放 / 页尺寸立即重算），确认后再交给 `writeRuntimeExport`。
+ */
+export interface RuntimeExportPlan {
+  stem: string
+  skeName: string
+  atlasName: string
+  pageFiles: string[]
+  atlas: RuntimeAtlasJson
+  /** 每页的绘制计划：png 编码与弹窗预览共用同一份 */
+  plans: PageEncodePlan[]
+  warnings: string[]
+  /** 已重映射 UV 的资产（写盘时直接序列化） */
+  asset: RuntimeAsset
+}
+
+export function prepareRuntimeExport(options: RuntimeExportOptions): RuntimeExportPlan {
+  const doc = useProjectStore.getState().document
+  const stem = sanitize(stripExtension(doc.armatureName) || 'armature')
   const compiled = compileDocument(doc)
   const warnings = [...compiled.warnings]
 
@@ -175,12 +193,36 @@ export async function exportRuntimeData(): Promise<ExportResult> {
     warnings.push('当前工程没有使用任何图片，导出的图集将为空（角色会以纯色块渲染）')
   }
 
-  const packed = buildAtlas(compiled.asset, doc.images, stem, 2048)
+  const packed = buildAtlas(compiled.asset, doc.images, stem, options.maxSize, options.scale)
   warnings.push(...packed.warnings)
-  remapAsset(compiled.asset, packed, doc.images)
+  remapAsset(compiled.asset, packed)
 
-  const skeName = `${stem}_ske.json`
-  const atlasName = `${stem}_atlas.json`
+  return {
+    stem,
+    skeName: `${stem}_ske.json`,
+    atlasName: `${stem}_atlas.json`,
+    pageFiles: packed.pageFiles,
+    atlas: packed.atlas,
+    plans: packed.plans,
+    warnings,
+    asset: compiled.asset
+  }
+}
+
+/**
+ * 把准备好的产物写进 `<dir>/<stem>/`。
+ *
+ * 单独建一层子文件夹：用户选中的目录往往还有别的东西，产出的 json + 若干 png
+ * 混在里头既难分辨、也容易和别的工程撞名；整包文件夹可以直接拷进游戏工程。
+ */
+export async function writeRuntimeExport(
+  dir: string,
+  plan: RuntimeExportPlan
+): Promise<ExportResult> {
+  const platform = getPlatform()
+  const doc = useProjectStore.getState().document
+  const warnings = [...plan.warnings]
+  const outDir = joinPath(dir, plan.stem)
 
   // png 编码需要能读取源图：先把它们的目录登记为资源根
   for (const image of doc.images) {
@@ -188,7 +230,7 @@ export async function exportRuntimeData(): Promise<ExportResult> {
     if (imageDir) await platform.registerAssetRoot(imageDir)
   }
   const bitmaps = new Map<string, ImageBitmap | null>()
-  const pngs = await encodeAtlasPages(packed.plans, async (name) => {
+  const pngs = await encodeAtlasPages(plan.plans, async (name) => {
     if (bitmaps.has(name)) return bitmaps.get(name) ?? null
     const image = doc.images.find((entry) => entry.name === name)
     // imageUrl：Electron 下是同源 blob:，fetch / createImageBitmap 都不会被 CSP 拦
@@ -198,25 +240,25 @@ export async function exportRuntimeData(): Promise<ExportResult> {
   })
 
   const files: Array<{ path: string; text?: string; bytes?: Uint8Array }> = [
-    { path: joinPath(dir, skeName), text: serializeRuntimeSke(compiled.asset, { atlasFileName: atlasName, ppu: RUNTIME_PPU }) },
-    { path: joinPath(dir, atlasName), text: serializeRuntimeAtlas(packed.atlas) }
+    { path: joinPath(outDir, plan.skeName), text: serializeRuntimeSke(plan.asset, { atlasFileName: plan.atlasName, ppu: RUNTIME_PPU }) },
+    { path: joinPath(outDir, plan.atlasName), text: serializeRuntimeAtlas(plan.atlas) }
   ]
-  packed.pageFiles.forEach((file, index) => {
+  plan.pageFiles.forEach((file, index) => {
     const bytes = pngs[index]
     if (!bytes || bytes.length === 0) {
       warnings.push(`图集页 ${file} 编码失败（可能是源图片无法读取）`)
       return
     }
-    files.push({ path: joinPath(dir, file), bytes })
+    files.push({ path: joinPath(outDir, file), bytes })
   })
 
   await platform.writeBatch(files)
-  await platform.revealInFolder(joinPath(dir, skeName))
-  store.setWarnings(warnings)
+  await platform.revealInFolder(joinPath(outDir, plan.skeName))
+  useProjectStore.getState().setWarnings(warnings)
 
   return {
     ok: true,
-    message: `已导出运行时数据：${skeName} / ${atlasName} / ${packed.pageFiles.length} 张图集页`,
+    message: `已导出到 ${baseName(outDir)}/：${plan.skeName} / ${plan.atlasName} / ${plan.pageFiles.length} 张图集页`,
     warnings,
     files: files.map((file) => baseName(file.path))
   }

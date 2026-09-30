@@ -14,13 +14,16 @@ export interface Placement {
  * 把「源图集页内」的归一化 UV 重映射到「新图集页内的放置位置」。
  *
  * 导出时按**整图**打包（不裁剪），因此映射是 UV 空间上的仿射变换：
- *   u_new = (pageX + u_old * srcW) / newW
- *   v_new = 1 - (pageY + (1 - v_old) * srcH) / newH
+ *   u_new = (pageX + u_old * placedW) / newW
+ *   v_new = 1 - (pageY + (1 - v_old) * placedH) / newH
  * （UV 的 v 以左下为原点，图块放置坐标以左上为原点）
+ *
+ * 用**放置区尺寸**而不是源图尺寸：图集可以按比例整体缩放（导出时用更低的分辨率
+ * 换取更少的页数），此时放置区比源图小，UV 仍然精确覆盖这一整块图案 ——
+ * 附件自身的世界尺寸不变，所以渲染出来一样大，只是纹理分辨率降低。
  */
 export function remapPageUvs(
   uvs: ArrayLike<number>,
-  source: PageSize,
   placement: Placement,
   page: PageSize
 ): Float32Array {
@@ -30,8 +33,8 @@ export function remapPageUvs(
   for (let i = 0; i + 1 < uvs.length; i += 2) {
     const u = uvs[i]
     const v = uvs[i + 1]
-    out[i] = (placement.x + u * source.width) / newW
-    out[i + 1] = 1 - (placement.y + (1 - v) * source.height) / newH
+    out[i] = (placement.x + u * placement.width) / newW
+    out[i + 1] = 1 - (placement.y + (1 - v) * placement.height) / newH
   }
   return out
 }

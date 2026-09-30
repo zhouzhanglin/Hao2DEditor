@@ -18,6 +18,10 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
   const mode = useModeStore((s) => s.mode)
   const timeline = useTimelineStore()
   const [dragging, setDragging] = useState<string | null>(null)
+  /** 拖动中的插入位置（0..n）；null = 没在拖 */
+  const [dropIndex, setDropIndex] = useState<number | null>(null)
+  /** 行元素（按插槽名索引）：插入位置靠它们的中心线算 */
+  const rowRefs = useRef(new Map<string, HTMLDivElement | null>())
 
   const animate = mode === 'animate' && timeline.currentAnimation !== null
   const animation = document.animations.find((item) => item.name === timeline.currentAnimation) ?? null
@@ -67,13 +71,36 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
     commitOrder(names)
   }
 
-  const dropAt = (targetName: string, side: 'before' | 'after'): void => {
-    if (!dragging || dragging === targetName) return
+  /**
+   * 鼠标 y → 插入位置（0..n）。判定基准是**每行的中心线**，所以：
+   * - 行的上半 → 插到它前面；下半 → 插到它后面（边缘 / 1px 缝隙都算得出来）
+   * - 列表下方（或上方）的空白 → 直接落到末尾 / 开头
+   *
+   * 落点由容器统一计算，不依赖「drop 事件命中了哪一行」——
+   * 拖到行边缘、行与行之间、列表空白处都能生效。
+   */
+  const dropIndexAt = (clientY: number): number => {
+    const names = layers.filter((name) => name !== dragging)
+    let index = 0
+    for (const name of names) {
+      const row = rowRefs.current.get(name)
+      if (!row) continue
+      const rect = row.getBoundingClientRect()
+      if (clientY > rect.top + rect.height / 2) index++
+      else break
+    }
+    return index
+  }
+
+  const commitDrop = (clientY: number): void => {
+    if (!dragging) return
     const names = [...layers].filter((name) => name !== dragging)
-    const at = names.indexOf(targetName)
-    if (at < 0) return
-    names.splice(side === 'before' ? at : at + 1, 0, dragging)
+    const index = Math.max(0, Math.min(dropIndexAt(clientY), names.length))
+    names.splice(index, 0, dragging)
     setDragging(null)
+    setDropIndex(null)
+    // 拖回原位不算改动：不产生撤销记录
+    if (names.every((name, i) => name === layers[i])) return
     commitOrder(names)
   }
 
@@ -141,26 +168,39 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
           '上面的行画在更前面；调整的是 setup 绘制顺序'
         )}
       </p>
-      {/* 容器同时兜底「拖到列表下方空白」：落到末尾 = 最底层 */}
+      {/* 落点全部由容器统一判定（按行中心线算插入位置）：行边缘 / 缝隙 / 空白都能拖 */}
       <div
         className="hao-scroll min-h-0 flex-1 overflow-auto pb-1"
         onDragOver={(event) => {
           if (!event.dataTransfer.types.includes(ORDER_MIME)) return
           event.preventDefault()
+          // 内部拖拽就地处理，别让它继续冒泡（祖先若覆盖 dropEffect 会让浏览器不派发 drop）
+          event.stopPropagation()
           event.dataTransfer.dropEffect = 'move'
+          const index = dropIndexAt(event.clientY)
+          setDropIndex((current) => (current === index ? current : index))
+        }}
+        onDragLeave={(event) => {
+          // 拖拽事件的 relatedTarget 多为 null，靠它判断会误清指示线（表现为线闪烁），
+          // 直接看坐标是否还在列表范围内
+          const rect = event.currentTarget.getBoundingClientRect()
+          if (
+            event.clientX >= rect.left &&
+            event.clientX <= rect.right &&
+            event.clientY >= rect.top &&
+            event.clientY <= rect.bottom
+          ) {
+            return
+          }
+          setDropIndex(null)
         }}
         onDrop={(event) => {
-          // 落在这里 = 没落在任何行上（行下方 / 行间的空白）→ 放到列表末尾
-          const from = event.dataTransfer.getData(ORDER_MIME)
-          if (!from) return
+          if (!event.dataTransfer.getData(ORDER_MIME)) return
           event.preventDefault()
-          const names = [...layers].filter((name) => name !== from)
-          names.push(from)
-          setDragging(null)
-          commitOrder(names)
+          commitDrop(event.clientY)
         }}
       >
-        {layers.map((name) => {
+        {layers.map((name, index) => {
           const slot = rowByName(document, name)
           if (!slot) return null
           // 选中 display（附件）时也高亮它所属的插槽：两处选择是同一个对象
@@ -169,29 +209,22 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
           return (
             <div
               key={name}
-              ref={active ? activeRowRef : null}
+              ref={(el) => {
+                if (active) activeRowRef.current = el
+                rowRefs.current.set(name, el)
+              }}
               draggable
               onDragStart={(event) => {
                 event.dataTransfer.setData(ORDER_MIME, name)
                 event.dataTransfer.effectAllowed = 'move'
                 setDragging(name)
               }}
-              onDragEnd={() => setDragging(null)}
-              onDragOver={(event) => {
-                if (!event.dataTransfer.types.includes(ORDER_MIME)) return
-                event.preventDefault()
-                event.dataTransfer.dropEffect = 'move'
-              }}
-              onDrop={(event) => {
-                const from = event.dataTransfer.getData(ORDER_MIME)
-                if (!from || from === name) return
-                // 行内自己处理完就停：不要让容器的兜底再提交一次（会把位置覆盖成末尾）
-                event.stopPropagation()
-                const rect = event.currentTarget.getBoundingClientRect()
-                dropAt(name, event.clientY - rect.top < rect.height / 2 ? 'before' : 'after')
+              onDragEnd={() => {
+                setDragging(null)
+                setDropIndex(null)
               }}
               className={[
-                'group flex h-[22px] cursor-grab items-center gap-1 px-1.5 text-panel active:cursor-grabbing',
+                'group relative flex h-[22px] cursor-grab items-center gap-1 px-1.5 text-panel active:cursor-grabbing',
                 active ? 'bg-accent/12 text-yellow-400' : 'text-content-mid hover:bg-ink-700',
                 dragging === name ? 'opacity-40' : '',
                 slot.visible ? '' : 'opacity-55'
@@ -199,6 +232,10 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
               onClick={() => selection.selectSlot(name)}
               title={`${slot.name}（挂载于「${slot.bone}」）：拖动调整绘制顺序${animate ? '，Animate 态自动打关键帧' : ''}`}
             >
+              {/* 落点指示线：绝对定位，不占布局（占位会推挤行、让落点来回跳） */}
+              {dropIndex === index ? (
+                <span className="pointer-events-none absolute inset-x-0 -top-px h-[2px] bg-accent" />
+              ) : null}
               <GripVertical size={10} className="shrink-0 text-content-lo/70" />
               <button
                 type="button"
@@ -220,6 +257,10 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
             </div>
           )
         })}
+        {/* 末尾落点指示线：拖到列表下方的空白 = 放到最底层 */}
+        {dropIndex !== null && dropIndex >= layers.length ? (
+          <div className="h-[2px] bg-accent" />
+        ) : null}
       </div>
     </div>
   )

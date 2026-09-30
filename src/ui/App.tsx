@@ -65,6 +65,7 @@ function loadPanelHeight(key: string, fallback: number, min: number, max: number
   return Math.min(max, Math.max(min, stored))
 }
 import { getPlatform } from '@editor/platform'
+import { hasExternalFiles } from '@ui/widgets/dragDrop'
 import { setActiveScene, getActiveScene } from '@editor/activeScene'
 import type { EditorScene } from '@editor/scene'
 import {
@@ -430,10 +431,13 @@ export default function App() {
       className="relative h-full w-full"
       // 从系统拖入文件不再导入（导入走菜单）。但仍必须挡掉浏览器 / Electron 的**默认行为**：
       // 不拦的话拖入图片 / json 会把整个应用页面导航替换成那个文件，只能重开窗口。
-      // dropEffect 设为 none 表示「这里不接受放置」，光标上就能看出来。
+      //
+      // 注意：**只对外部文件**把 dropEffect 设成 none。dropEffect 是 dataTransfer 上的共享属性，
+      // 内部拖拽（图片 / 树节点 / 层序）在子元素上设了 move/copy，事件冒泡到这里若被一律抹成
+      // 'none'，浏览器就认定「这里不接受放置」，松手时**不会派发 drop**（表现为拖动有提示、松手没反应）。
       onDragOver={(event) => {
         event.preventDefault()
-        event.dataTransfer.dropEffect = 'none'
+        if (hasExternalFiles(event.dataTransfer)) event.dataTransfer.dropEffect = 'none'
       }}
       onDrop={(event) => event.preventDefault()}
     >

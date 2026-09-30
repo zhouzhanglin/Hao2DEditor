@@ -71,6 +71,9 @@ interface TreeRowProps {
   label: string
   active: boolean
   icon: React.ReactNode
+  /** 图标可点击：行内快捷操作（display 行 = 切换显示 / 隐藏）。不传则图标只是装饰 */
+  onIconClick?: (event: React.MouseEvent<HTMLButtonElement>) => void
+  iconTitle?: string
   meta?: string
   trailing?: React.ReactNode
   expandable?: boolean
@@ -103,6 +106,8 @@ function TreeRow({
   label,
   active,
   icon,
+  onIconClick,
+  iconTitle,
   meta,
   trailing,
   expandable,
@@ -210,7 +215,23 @@ function TreeRow({
       ) : (
         <span className="w-[14px] shrink-0" />
       )}
-      <span className="flex h-[14px] w-[14px] shrink-0 items-center justify-center text-content-lo">{icon}</span>
+      {onIconClick ? (
+        <button
+          type="button"
+          tabIndex={-1}
+          title={iconTitle}
+          className="flex h-[14px] w-[14px] shrink-0 cursor-pointer items-center justify-center rounded text-content-lo hover:bg-ink-600 hover:text-content-mid"
+          onClick={(event) => {
+            // 图标是行内快捷操作：拦掉冒泡，避免同时触发行点击（选中）
+            event.stopPropagation()
+            onIconClick(event)
+          }}
+        >
+          {icon}
+        </button>
+      ) : (
+        <span className="flex h-[14px] w-[14px] shrink-0 items-center justify-center text-content-lo">{icon}</span>
+      )}
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {meta ? <span className="shrink-0 font-mono text-3xs text-content-lo">{meta}</span> : null}
       {trailing}
@@ -807,7 +828,12 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     for (const constraint of constraints) rows.push(renderConstraint(constraint, depth + 1))
   }
 
-  /** 插槽下的一个 display（附件）行：点它 = 切到这个 display（同一时刻只显示一个） */
+  /**
+   * 插槽下的一个 display（附件）行。
+   *
+   * 点**前面的小图标** = 切换显示：默认切到它，再点当前正显示的那个则隐藏（一个都不显示）；
+   * 点文字只选中这一行，不改显示状态。
+   */
   const renderDisplay = (
     slot: EditorDocument['slots'][number],
     attachment: EditorDocument['skins'][number]['slots'][number]['attachments'][number],
@@ -841,7 +867,10 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         // display 行也算宿主插槽的地盘：拖到插槽下面（含子行）都是「给这个插槽加 display」
         dataSlot={slot.name}
         onDropImage={(imageNames) => addDisplay(slot.name, imageNames)}
-        onSelect={() => selectDisplay(slot.name, attachment.name)}
+        // 点**前面的小图标** = 切换显示 / 隐藏（图标就是这个开关），点文字只选中不改显示
+        onIconClick={() => selectDisplay(slot.name, attachment.name)}
+        iconTitle={showing ? '点击隐藏（该插槽不显示任何 display）' : '点击显示它'}
+        onSelect={() => selection.selectAttachment(slot.name, attachment.name)}
         // Animate 态：右键 display = 从当前时间点开始显示它（打显示关键帧）
         onContextMenu={(event) => {
           if (useModeStore.getState().mode !== 'animate') return

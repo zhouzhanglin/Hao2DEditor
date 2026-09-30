@@ -159,7 +159,13 @@ function readAttachment(reader: ByteReader): AttachmentData {
     uvs[i * 2 + 1] = reader.readFloat32()
   }
 
-  const vertices = Float32Array.from(reader.readFloatArray())
+  // vertices：按「float2 元素个数」读（与 writer 及参考库 ReadFloat2Array 对齐）
+  const vertexCount = reader.readInt32()
+  const vertices = new Float32Array(vertexCount * 2)
+  for (let i = 0; i < vertexCount; i++) {
+    vertices[i * 2] = reader.readFloat32()
+    vertices[i * 2 + 1] = reader.readFloat32()
+  }
   const triangles = reader.readIntArray()
   const edges = reader.readIntArray()
   const hull = reader.readInt32()

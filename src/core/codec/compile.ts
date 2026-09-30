@@ -385,7 +385,10 @@ function compileAnimations(
     .map<DeformAnim>((track) => ({
       slotIndex: slotIndex[track.slot],
       attachmentName: track.attachment,
-      frames: track.frames
+      // 深拷贝帧与 offsets：编译期要把「骨内 FFD」换算成显示空间（normalizeBoneSpaceFfd），
+      // 若直接引用工程数据会**原地改到 document**——每次重建都再换算一次，偏移被反复
+      // 变换而彻底错乱。compile 必须是纯的。
+      frames: track.frames.map((frame) => ({ ...frame, offsets: [...frame.offsets] }))
     }))
 
   // 绘制顺序帧必须是**完整排列**。曾经直接 map + filter 丢掉解析不到的名字，
@@ -529,6 +532,8 @@ export function compileDocument(doc: EditorDocument): CompileResult {
     images
   })
   asset.bindposes = bindposes
+  // Unity 侧对「骨内 FFD」没有一致行为（跳过 / 多乘一次 bindpose），统一换算成显示空间
+  normalizeBoneSpaceFfd(asset, bindposes, slotIndex, warnings)
 
   return {
     asset,
@@ -536,6 +541,88 @@ export function compileDocument(doc: EditorDocument): CompileResult {
     boneIndex: Object.fromEntries(index),
     slotIndex,
     constraintIndex
+  }
+}
+
+/**
+ * 归一化「骨内 FFD」：把 offsets 换算成**显示空间**，并清掉 `ffdInBoneSpace` 标记。
+ *
+ * 标记为骨内空间时参考库（Unity）没有一致行为 —— 纯 C# 路径**直接跳过**该 FFD，
+ * Burst 路径**忽略标记**再多乘一次 bindpose，偏移被多旋转 / 缩放一次（网格被拉飞）。
+ * 编辑器自己的 FFD 工具写的本来就是显示空间，只有导入数据或手动开关会标成 true。
+ *
+ * 换算取每个顶点**权重最大的骨骼**的 bindpose 线性部分求逆：
+ *   ffd_new = inv(linear(bindpose[b0])) · ffd_old
+ * 于是编辑器（`local += bindpose · ffd_new`）与 Unity 各路径算出的位移都等于原来的
+ * `ffd_old`，表现完全一致（单骨骼权重时精确）。
+ */
+function normalizeBoneSpaceFfd(
+  asset: RuntimeAsset,
+  bindposes: Float32Array,
+  slotIndex: Record<string, number>,
+  warnings: string[]
+): void {
+  type Mat2 = { a: number; b: number; c: number; d: number }
+  const inverseOf = new Map<string, Array<Mat2 | null>>()
+  const keyOf = (index: number, name: string): string => `${index}|${name}`
+
+  for (const skin of asset.skins) {
+    for (const skinSlot of skin.slots) {
+      const index = slotIndex[skinSlot.slotName]
+      if (index === undefined) continue
+      for (const attachment of skinSlot.attachments) {
+        if (!attachment.ffdInBoneSpace) continue
+        if (attachment.type !== AttachmentType.Mesh || attachment.vertices.length === 0) continue
+
+        const count = Math.floor(attachment.vertices.length / 2)
+        const list: Array<Mat2 | null> = []
+        let degenerate = false
+        for (let i = 0; i < count; i++) {
+          const bone = attachment.weights[i]?.b0 ?? 0
+          const o = bone * 16
+          // bindpose 是列主序 4×4：线性部分为 [0],[1] 与 [4],[5]
+          const a = bindposes[o] ?? 1
+          const c = bindposes[o + 1] ?? 0
+          const b = bindposes[o + 4] ?? 0
+          const d = bindposes[o + 5] ?? 1
+          const det = a * d - b * c
+          if (!Number.isFinite(det) || Math.abs(det) < 1e-9) {
+            list.push(null)
+            degenerate = true
+            continue
+          }
+          list.push({ a: d / det, b: -b / det, c: -c / det, d: a / det })
+        }
+        inverseOf.set(keyOf(index, attachment.name), list)
+        attachment.ffdInBoneSpace = false
+        if (degenerate) {
+          warnings.push(`网格「${attachment.name}」有顶点的 bindpose 退化，这部分 FFD 偏移按原值导出`)
+        }
+      }
+    }
+  }
+
+  if (inverseOf.size === 0) return
+
+  for (const anim of asset.animations) {
+    for (const track of anim.deforms) {
+      const list = inverseOf.get(keyOf(track.slotIndex, track.attachmentName))
+      if (!list) continue
+      for (const frame of track.frames) {
+        // 只处理整段偏移（vertexOffset = 0，编辑器恒为 0）
+        if (frame.vertexOffset !== 0) continue
+        const offsets = frame.offsets
+        const count = Math.min(list.length, Math.floor(offsets.length / 2))
+        for (let i = 0; i < count; i++) {
+          const inv = list[i]
+          if (!inv) continue
+          const x = offsets[i * 2]
+          const y = offsets[i * 2 + 1]
+          offsets[i * 2] = inv.a * x + inv.b * y
+          offsets[i * 2 + 1] = inv.c * x + inv.d * y
+        }
+      }
+    }
   }
 }
 

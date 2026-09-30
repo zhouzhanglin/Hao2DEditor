@@ -130,7 +130,14 @@ function writeAttachment(writer: ByteWriter, a: AttachmentData): void {
     writer.writeFloat32(a.uvs[i + 1])
   }
 
-  writer.writeFloatArray(a.vertices)
+  // vertices：写「float2 元素个数」，与 uvs 及参考库的 ReadFloat2Array 语义一致。
+  // 写成 writeFloatArray 的「float 总数」会让 Unity 按元素个数多读一倍，
+  // 之后 triangles / edges / weights 全部错位（读取直接抛 EndOfStreamException）。
+  writer.writeInt32(a.vertices.length / 2)
+  for (let i = 0; i < a.vertices.length; i += 2) {
+    writer.writeFloat32(a.vertices[i])
+    writer.writeFloat32(a.vertices[i + 1])
+  }
   writer.writeIntArray(a.triangles)
   writer.writeIntArray(a.edges)
   writer.writeInt32(a.hull)

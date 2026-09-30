@@ -204,6 +204,19 @@ export default function DopeSheet(props: DopeSheetProps) {
 
   const isSelected = (selector: KeySelector): boolean => selectedKeys.some((item) => sameSelector(selector, item))
 
+  /**
+   * 当前选中的**子轨道（通道）**：点击通道行时由 TimelinePanel 写入。
+   * 它同时决定「按 K 只给这条通道打帧」，所以行上必须有明确的选中反馈。
+   */
+  const activeTrack = useTimelineStore((state) => state.selectedTrack)
+  const isTrackActive = (track: TimelineTrack): boolean =>
+    !track.isGroup &&
+    activeTrack !== null &&
+    activeTrack.kind === track.kind &&
+    activeTrack.target === track.target &&
+    (activeTrack.attachment ?? '') === (track.attachment ?? '') &&
+    activeTrack.channel === (track.channel ?? '')
+
   /** 折叠的骨骼分组（只影响显示，不动数据） */
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   const toggleCollapse = (id: string): void =>
@@ -614,13 +627,19 @@ export default function DopeSheet(props: DopeSheetProps) {
         <div className="flex min-h-full">
           {/* 轨道名（骨骼是「分组行 + 通道子轨」两层结构） */}
           <div className="shrink-0 border-r border-line bg-ink-800/60" style={{ width: LABEL_WIDTH }}>
-            {visibleTracks.map((track) => (
+            {visibleTracks.map((track) => {
+              const trackActive = isTrackActive(track)
+              return (
               <button
                 key={track.id}
                 type="button"
                 className={[
-                  'flex w-full items-center gap-1 border-b border-line/40 pr-1.5 text-left text-3xs hover:bg-ink-700 cursor-pointer',
-                  track.isGroup ? 'bg-ink-900/50 font-semibold text-content-hi' : 'text-content-mid'
+                  'relative flex w-full items-center gap-1 border-b border-line/40 pr-1.5 text-left text-3xs cursor-pointer',
+                  track.isGroup
+                    ? 'bg-ink-900/50 font-semibold text-content-hi hover:bg-ink-700'
+                    : trackActive
+                      ? 'bg-accent/15 font-semibold text-accent'
+                      : 'text-content-mid hover:bg-ink-700'
                 ].join(' ')}
                 style={{ height: ROW_HEIGHT, paddingLeft: 5 + track.depth * 12 }}
                 title={
@@ -628,7 +647,7 @@ export default function DopeSheet(props: DopeSheetProps) {
                     ? `${track.kind === 'slot' ? '插槽' : '骨骼'}「${track.label}」的通道（点击选中该对象）`
                     : track.kind === 'slot' && track.channel === 'display'
                       ? `${track.group} · 显示 · 单击选中插槽，右键选择要显示的 display（在当前时间打关键帧）`
-                      : `${track.group} · ${track.label} · 点击选中该对象`
+                      : `${track.group} · ${track.label} · 点击选中该通道（按 K 只给它打帧）`
                 }
                 onClick={() => props.onSelectTarget(track)}
                 onContextMenu={(event) => {
@@ -637,6 +656,10 @@ export default function DopeSheet(props: DopeSheetProps) {
                   setDisplayMenu({ x: event.clientX, y: event.clientY, slot: track.target })
                 }}
               >
+                {/* 选中通道的左侧色条：与 hover 区分开，一眼能看出「按 K 会打到哪条通道」 */}
+                {trackActive ? (
+                  <span className="pointer-events-none absolute left-0 top-0 h-full w-[2px] bg-accent" />
+                ) : null}
                 {track.isGroup ? (
                   <span
                     role="presentation"
@@ -661,7 +684,8 @@ export default function DopeSheet(props: DopeSheetProps) {
                   {track.isGroup ? track.keyCount ?? 0 : track.keys.length}
                 </span>
               </button>
-            ))}
+              )
+            })}
             {visibleTracks.length === 0 ? (
               <div className="px-2 py-3 text-3xs text-content-lo">
                 没有轨道：在 Pose 状态调整骨骼/插槽后按 K 打关键帧
@@ -701,7 +725,11 @@ export default function DopeSheet(props: DopeSheetProps) {
                 key={track.id}
                 className={[
                   'relative border-b border-line/40',
-                  track.isGroup ? 'bg-ink-900/30' : ''
+                  track.isGroup
+                    ? 'bg-ink-900/30'
+                    : isTrackActive(track)
+                      ? 'bg-accent/10'
+                      : ''
                 ].join(' ')}
                 style={{ height: ROW_HEIGHT }}
                 onPointerDown={(event) => {

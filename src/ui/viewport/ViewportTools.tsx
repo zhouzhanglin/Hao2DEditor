@@ -1,9 +1,6 @@
 import {
   Bone,
-  Boxes,
   Grid3x3,
-  Layers,
-  Link2,
   MousePointer2,
   Move,
   MoveDiagonal2,
@@ -18,7 +15,8 @@ import type { EditorTool, GizmoMode } from '@editor/store/toolStore'
 /**
  * 视口左上角（Pose / Animate 下方）的工具面板，分两组：
  *
- * - **编辑工具**：选择 / 绑骨骼 / 插槽 / 网格 / 权重刷 / FFD 顶点 / 约束（V / B / S / M / G / D / C）
+ * - **编辑工具**：选择 / 绑骨骼 / 插槽 / 权重刷 / 顶点 / 约束
+ *   （顶点工具的快捷键与名字随模式变化：Pose = 网格工具 M，Animate = FFD 顶点工具 D）
  * - **变换工具**：移动 / 旋转 / 缩放 / 斜切（W / E / R / T）——决定骨骼小坐标轴的行为
  *
  * 两组语义不同：编辑工具决定「鼠标在视口里做什么」，变换工具决定「选中骨骼怎么动」，
@@ -40,18 +38,48 @@ const EDIT_TOOLS: Array<{
     icon: Bone,
     hint: '在视口拖拽画骨骼：起点落在骨骼上会吸附并以它为父，接着拖就能连成骨骼链（仅 Pose 态）'
   },
-  { id: 'slot', label: '插槽工具', key: 'S', icon: Layers, hint: '点骨骼选中它下面挂的插槽' },
-  { id: 'mesh', label: '网格工具', key: 'M', icon: Grid3x3, hint: '编辑网格顶点 / 三角面；网格内双击可插入顶点' },
   { id: 'weight', label: '权重刷工具', key: 'G', icon: Spline },
   {
     id: 'ffd',
+    label: '顶点工具',
+    key: 'D',
+    icon: Grid3x3,
+    hint: '拖顶点：Pose 改绑定网格，Animate 写 FFD 帧；网格内双击可插入顶点'
+  }
+]
+
+/**
+ * 顶点工具的外观**随模式切换**：同一个工具，Pose 态自称「网格工具(M)」、
+ * Animate 态自称「FFD 顶点工具(D)」—— 用户按场景找名字，实现却只有一份。
+ */
+const VERTEX_TOOL_VIEWS: Record<'pose' | 'animate', { label: string; key: string; icon: typeof Grid3x3; hint: string }> = {
+  pose: {
+    label: '网格工具',
+    key: 'M',
+    icon: Grid3x3,
+    hint: '编辑网格顶点 / 三角面；网格内双击可插入顶点'
+  },
+  animate: {
     label: 'FFD 顶点工具',
     key: 'D',
-    icon: Boxes,
-    hint: '拖顶点：Pose 改绑定网格，Animate 写 FFD 帧；网格内双击可插入顶点'
-  },
-  { id: 'constraint', label: '约束工具', key: 'C', icon: Link2, hint: '选中约束后点骨骼设置它的目标' }
-]
+    icon: Grid3x3,
+    hint: '拖顶点写当前时间点的 FFD 帧；网格内双击可插入顶点'
+  }
+}
+
+type EditToolItem = {
+  id: EditorTool
+  label: string
+  key: string
+  icon: typeof MousePointer2
+  hint?: string
+}
+
+function withVertexToolView(item: EditToolItem, mode: 'pose' | 'animate'): EditToolItem {
+  if (item.id !== 'ffd') return item
+  const view = VERTEX_TOOL_VIEWS[mode]
+  return { ...item, label: view.label, key: view.key, icon: view.icon, hint: view.hint }
+}
 
 const GIZMO_ICONS: Record<GizmoMode, typeof Move> = {
   move: Move,
@@ -79,7 +107,7 @@ export default function ViewportTools({ onStatus = () => undefined }: ViewportTo
   const setGizmo = useToolStore((s) => s.setGizmo)
   /**
    * Animate 状态隐藏绑定期工具（绑骨骼 / 权重刷——它们改的是绑定姿态），
-   * 但 **FFD 顶点要保留**：动画态拖顶点写的是 deform 关键帧，是正当的动画编辑操作。
+   * 但 **顶点工具要保留**：动画态拖顶点写的是 deform 关键帧，是正当的动画编辑操作。
    */
   const editTools =
     mode === 'animate' ? EDIT_TOOLS.filter((item) => item.id === 'select' || item.id === 'ffd') : EDIT_TOOLS
@@ -89,7 +117,9 @@ export default function ViewportTools({ onStatus = () => undefined }: ViewportTo
 
   return (
     <div className="pointer-events-auto absolute left-3 top-[58px] z-20 flex flex-col gap-0.5 rounded-lg border border-line bg-ink-900/85 p-1 shadow-lg shadow-black/40 backdrop-blur-sm">
-      {editTools.map(({ id, label, key, icon: Icon, hint }) => {
+      {editTools.map((rawItem) => {
+        // 顶点工具按当前模式换名字：Pose = 网格工具(M)，Animate = FFD 顶点工具(D)
+        const { id, label, key, hint, icon: Icon } = withVertexToolView(rawItem, mode)
         const active = tool === id
         return (
           <button

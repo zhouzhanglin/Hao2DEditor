@@ -1,7 +1,12 @@
 
 import { create } from 'zustand'
 
-export type EditorTool = 'select' | 'bone' | 'slot' | 'mesh' | 'weight' | 'ffd' | 'constraint'
+/**
+ * 编辑工具。**顶点编辑只有一个工具**（`ffd`）：Pose 态它就是「网格工具(M)」，
+ * Animate 态是「FFD 顶点工具(D)」—— 两者本来就是同一段实现（见 authoringTools 的顶点拖拽分支），
+ * 拆成两个按钮只会让人犹豫点哪个。
+ */
+export type EditorTool = 'select' | 'bone' | 'weight' | 'ffd'
 
 export type BrushMode = 'add' | 'subtract' | 'replace'
 
@@ -65,8 +70,11 @@ export const useToolStore = create<ToolState>((set, get) => ({
   setTool: (tool) => {
     const overlay = { ...get().overlay }
     if (tool === 'weight') overlay.weight = true
-    if (tool === 'ffd') overlay.ffd = true
-    if (tool === 'mesh') overlay.mesh = true
+    if (tool === 'ffd') {
+      // 顶点编辑：Pose 态要看网格线，Animate 态要看 FFD 偏移虚线，两个显示层都打开
+      overlay.ffd = true
+      overlay.mesh = true
+    }
     set({ tool, overlay })
   },
   /**

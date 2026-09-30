@@ -26,24 +26,22 @@ import { useTimelineStore } from '@editor/store/timelineStore'
 const GIZMO_KEYS: Record<string, GizmoMode> = { w: 'move', e: 'rotate', r: 'scale', t: 'shear' }
 const GIZMO_LABEL: Record<GizmoMode, string> = { move: '移动', rotate: '旋转', scale: '缩放', shear: '斜切' }
 
-/** V/B/S/M/G/D/C → 编辑工具（与顶部工具条、视口工具面板一致） */
+/**
+ * V/B/M/G/D → 编辑工具（与视口工具面板一致）。
+ * M 与 D 是同一个顶点工具的两种模式别名：Pose 态叫「网格」、Animate 态叫「FFD 顶点」。
+ */
 const TOOL_KEYS: Record<string, EditorTool> = {
   v: 'select',
   b: 'bone',
-  s: 'slot',
-  m: 'mesh',
+  m: 'ffd',
   g: 'weight',
-  d: 'ffd',
-  c: 'constraint'
+  d: 'ffd'
 }
 const TOOL_LABEL: Record<EditorTool, string> = {
   select: '选择',
   bone: '画骨骼（拖拽连续绑定）',
-  slot: '插槽',
-  mesh: '网格',
   weight: '权重刷',
-  ffd: 'FFD 顶点',
-  constraint: '约束'
+  ffd: '网格 / FFD 顶点'
 }
 
 /** 左下「资源与皮肤」面板的初始高度与拖拽范围（高度可拖长，图片多时不用只靠滚动） */

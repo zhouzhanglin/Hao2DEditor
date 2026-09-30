@@ -65,9 +65,9 @@ export default function ToolOptionsPanel({ onStatus = () => undefined }: ToolOpt
 
   // 各分组只在「当前状态下真的有用」时才显示，避免 Animate 态下摆一堆用不上的绑定期参数
   const weightTool = tools.tool === 'weight' && mode === 'pose'
-  const meshTool = (tools.tool === 'mesh' || tools.tool === 'ffd') && mode === 'pose'
+  const vertexTool = tools.tool === 'ffd' && mode === 'pose'
   const showFfdReset = mode === 'animate' && hasAttachment
-  const bindingToolIdle = mode !== 'pose' && (tools.tool === 'weight' || tools.tool === 'mesh' || tools.tool === 'ffd' || tools.tool === 'bone')
+  const bindingToolIdle = mode !== 'pose' && (tools.tool === 'weight' || tools.tool === 'ffd' || tools.tool === 'bone')
 
   return (
     <div className="flex flex-col">
@@ -116,7 +116,7 @@ export default function ToolOptionsPanel({ onStatus = () => undefined }: ToolOpt
         </FieldGroup>
       ) : null}
 
-      {meshTool ? (
+      {vertexTool ? (
         <FieldGroup title="网格 / FFD">
           <NumberField
             label="细分数"

@@ -1,42 +1,84 @@
 import { useEffect, useRef, useState } from 'react'
 import { useProjectStore } from '@editor/store/projectStore'
 
-/** 中键拖动调值的步长：整数用 1、浮点用 0.1（按拖动开始时的值判断，拖动期间固定，避免半路变步长） */
+/**
+ * 拖动步长的**兜底**：调用方没声明 `step` 时，按当前值是否是整数猜（整数 ±1、浮点 ±0.1）。
+ *
+ * 有 `step` 的字段一律以 `step` 为准 —— 按值猜会把「值为 1 的浮点字段」误判成整数字段：
+ * 缩放 1.0 拖一下直接跳 1（应为 0.1），长度 0.05 的粒度也会被吃成 0.1。
+ */
 function scrubStepFor(value: number): number {
   return Number.isInteger(value) ? 1 : 0.1
 }
 
+/** 步长对应的小数位数（0.1 → 1 位、0.05 → 2 位），拖动取整时用它规避浮点噪声 */
+function digitsForStep(step: number): number {
+  if (!(step > 0) || step >= 1) return 0
+  const text = step.toFixed(6).replace(/0+$/, '')
+  const dot = text.indexOf('.')
+  return dot < 0 ? 0 : Math.min(6, text.length - dot - 1)
+}
+
 /**
- * 左键左右拖动调值（DCC 手感）：向左减小、向右增大，每移动 1 像素变化一个步长。
+ * 按住**中键**左右拖动调值（DCC 手感）：向左减小、向右增大，每移动 1 像素变化一个步长
+ * —— 步长以字段声明的 `step` 为准（缩放 0.1、长度 0.05、旋转 1…），与上下键微调一致。
  *
- * - 拖动开始先退出文本编辑态；中键默认的自动滚动会被拦掉
- * - 整段拖动用一条事务包住，只留一条撤销记录（否则每像素一条，撤销会疯掉）
+ * 用中键而不是左键：左键要留给「点进输入框改文本」，两者抢同一个手势会互相干扰
+ * （左键版本要么点不进输入框，要么得靠移动阈值勉强区分）。
+ *
+ * - 中键默认会触发浏览器的「自动滚动」，必须在 `mousedown` 阶段拦掉
+ * - 拖动真正开始时才退出文本编辑态、才开事务（一次拖动只留一条撤销记录）
+ * - `pointerup` / `pointercancel` 都必须清理监听：漏掉 cancel 会让 `pointermove`
+ *   常驻在 window 上，表现为「鼠标没按下、只是划过就改数值」
  */
 function useScrubDrag(
   value: number,
   onChange: (next: number) => void,
-  options?: { enabled?: boolean; min?: number; max?: number }
-): { onPointerDown: (event: React.PointerEvent<HTMLInputElement>) => void } {
+  options?: { enabled?: boolean; min?: number; max?: number; step?: number }
+): {
+  onMouseDown: (event: React.MouseEvent<HTMLInputElement>) => void
+  onPointerDown: (event: React.PointerEvent<HTMLInputElement>) => void
+} {
   const enabled = options?.enabled ?? true
+  const stepOption = options?.step
   return {
-    onPointerDown: (event: React.PointerEvent<HTMLInputElement>) => {
-      if (!enabled || event.button !== 0) return
+    // 中键默认会进入浏览器的「自动滚动」（四向箭头 + 滚动页面），提前拦掉
+    onMouseDown: (event: React.MouseEvent<HTMLInputElement>) => {
+      if (!enabled || event.button !== 1) return
       event.preventDefault()
+    },
+    onPointerDown: (event: React.PointerEvent<HTMLInputElement>) => {
+      if (!enabled || event.button !== 1) return
       const target = event.currentTarget
-      target.blur()
+      // 左右箭头光标只在**按住中键期间**显示：悬停时用普通文本光标，
+      // 否则鼠标只是划过输入框就变成拖动样式，会让人误以为可以拖。
+      // 必须同时设在输入框**自身**上：光标虽是可继承属性，但输入框自带的光标声明
+      // 会盖住从 body 继承来的值，只设 body 的话鼠标停在输入框上仍是文本光标。
+      target.style.cursor = 'ew-resize'
+      document.body.style.cursor = 'ew-resize'
       const startX = event.clientX
       const start = value
-      const step = scrubStepFor(start)
-      const digits = step < 1 ? 1 : 0
+      // 步长以字段声明的 step 为准（与上下键微调同一步长），没声明才按值兜底猜
+      const step = stepOption ?? scrubStepFor(start)
+      const digits = digitsForStep(step)
       const clamp = (next: number): number => {
         let out = next
         if (options?.min !== undefined) out = Math.max(options.min, out)
         if (options?.max !== undefined) out = Math.min(options.max, out)
         return out
       }
-      useProjectStore.getState().beginTransaction('调整数值')
+      /** 越过阈值前当点击处理（不拦默认行为），越过之后才真正进入拖动 */
+      let dragging = false
       let last = start
+
       const move = (ev: PointerEvent): void => {
+        if (!dragging) {
+          if (Math.abs(ev.clientX - startX) < 3) return
+          dragging = true
+          target.blur()
+          document.body.style.userSelect = 'none'
+          useProjectStore.getState().beginTransaction('调整数值')
+        }
         const next = clamp(Number((start + (ev.clientX - startX) * step).toFixed(digits)))
         if (next === last) return
         last = next
@@ -45,10 +87,16 @@ function useScrubDrag(
       const finish = (): void => {
         window.removeEventListener('pointermove', move)
         window.removeEventListener('pointerup', finish)
+        window.removeEventListener('pointercancel', finish)
+        target.style.cursor = ''
+        document.body.style.cursor = ''
+        if (!dragging) return
+        document.body.style.userSelect = ''
         useProjectStore.getState().endTransaction()
       }
       window.addEventListener('pointermove', move)
       window.addEventListener('pointerup', finish)
+      window.addEventListener('pointercancel', finish)
     }
   }
 }
@@ -97,18 +145,19 @@ export function NumberField({
     setText(format(next, precision))
   }
 
-  // 中键左右拖动调值：整数每次 ±1、浮点每次 ±0.1
+  // 中键左右拖动调值：步长与字段的 step 一致（与上下键微调同步）
   const scrub = useScrubDrag(value, (next) => commit(String(next)), {
     enabled: !disabled,
     min,
-    max
+    max,
+    step
   })
 
   return (
     <label className="flex items-center gap-1.5">
       <span className="hao-label w-[52px] shrink-0">{label}</span>
       <input
-        className="hao-field cursor-ew-resize font-mono"
+        className="hao-field font-mono"
         type="text"
         inputMode="decimal"
         disabled={disabled}
@@ -184,15 +233,19 @@ function VectorInput({
     setText(format(parsed))
   }
 
-  // 中键左右拖动调值：整数每次 ±1、浮点每次 ±0.1
-  const scrub = useScrubDrag(value, (next) => {
-    onCommit(next)
-    setText(format(next))
-  })
+  // 中键左右拖动调值：步长与字段的 step 一致（与上下键微调同步）
+  const scrub = useScrubDrag(
+    value,
+    (next) => {
+      onCommit(next)
+      setText(format(next))
+    },
+    { step }
+  )
 
   return (
     <input
-      className="hao-field cursor-ew-resize font-mono"
+      className="hao-field font-mono"
       type="text"
       inputMode="decimal"
       value={text}
@@ -294,7 +347,7 @@ export function CommitTextField({
 
   return (
     <input
-      className={scrub ? `${className ?? ''} cursor-ew-resize` : className}
+      className={className}
       type="text"
       inputMode={inputMode}
       title={title}

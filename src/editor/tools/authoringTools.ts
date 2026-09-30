@@ -190,7 +190,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     return true
   }
 
-  if (tools.tool === 'ffd' || tools.tool === 'mesh') {
+  if (tools.tool === 'ffd') {
     const vertex = scene.pickVertexAt(info.world.x, info.world.y)
     if (!vertex) return false
     const resolved = resolveVertex(host, vertex.vertexIndex)
@@ -206,7 +206,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       vertex: resolved.vertex,
       startWorld: { ...info.world }
     }
-    storeHandler.begin(tools.tool === 'ffd' && host.mode === 'animate' ? '编辑 FFD' : '编辑网格顶点')
+    storeHandler.begin(host.mode === 'animate' ? '编辑 FFD' : '编辑网格顶点')
     useSelectionStore.getState().select({
       kind: 'attachment',
       slot: resolved.slot,
@@ -288,22 +288,6 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   }
 
   const selection = useSelectionStore.getState()
-  if (tools.tool === 'constraint' && selection.kind === 'constraint') {
-    useProjectStore.getState().update('设置约束目标', (draft) => {
-      const target = draft.constraints.find((item) => item.name === selection.constraint)
-      if (target) target.target = bone.name
-    })
-    host.status(`约束「${selection.constraint}」的目标设为骨骼「${bone.name}」`)
-    return true
-  }
-  if (tools.tool === 'slot') {
-    const slot = scene.runtime.asset.slots.find((item) => item.boneIndex === hit.boneIndex)
-    if (slot) {
-      selection.selectSlot(slot.name)
-      host.status(`选中插槽「${slot.name}」`)
-      return true
-    }
-  }
 
   selection.selectBone(bone.name)
 
@@ -1036,7 +1020,8 @@ function dragVertex(host: ToolHost, world: Vec2): void {
   const deltaWorld: Vec2 = { x: world.x - drag.startWorld.x, y: world.y - drag.startWorld.y }
   const delta = attachmentWorld ? mulVector(invert(attachmentWorld), deltaWorld) : deltaWorld
 
-  const editBind = host.tools.tool === 'mesh' || host.mode !== 'animate'
+  // 顶点工具只有一个：Pose 态改绑定网格，Animate 态写 FFD 帧
+  const editBind = host.mode !== 'animate'
   const store = useProjectStore.getState()
 
   if (editBind) {

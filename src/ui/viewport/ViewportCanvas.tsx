@@ -435,7 +435,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         const selection = useSelectionStore.getState()
         const tools = useToolStore.getState()
         // 网格 / FFD 工具下双击网格内部 = 插一个顶点（UV 与蒙皮权重按所在三角形插值）
-        if ((tools.tool === 'mesh' || tools.tool === 'ffd') && selection.kind === 'attachment') {
+        if (tools.tool === 'ffd' && selection.kind === 'attachment') {
           if (useModeStore.getState().mode !== 'pose') {
             onStatus('插入顶点改的是绑定网格：请切到 Pose 状态')
             return

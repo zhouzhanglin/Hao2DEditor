@@ -245,6 +245,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
           <Vector2Field
             label="斜切"
             value={shown.shear}
+            step={0.1}
             onChange={(value) => writeTransform('shear', value, '斜切')}
           />
         </FieldGroup>

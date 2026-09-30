@@ -2,12 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Flag, Lock, ZoomIn } from 'lucide-react'
 import { TIMELINE_ZOOM_MAX, TIMELINE_ZOOM_MIN } from '@editor/store/timelineStore'
 import type { KeySelector, TimelineTrack } from '@editor/timeline/model'
-import { keySlotDisplay } from '@editor/commands/animationCommands'
 import { useProjectStore } from '@editor/store/projectStore'
-import { useSelectionStore } from '@editor/store/selectionStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
-import ContextMenu from '@ui/widgets/ContextMenu'
-import type { ContextMenuItem } from '@ui/widgets/ContextMenu'
 
 export interface DopeSheetProps {
   tracks: TimelineTrack[]
@@ -118,34 +114,6 @@ export default function DopeSheet(props: DopeSheetProps) {
   })
   const applyBandRef = useRef<(x0: number, y0: number, x1: number, y1: number) => void>(() => undefined)
   const [areaWidth, setAreaWidth] = useState(0)
-  /** 「显示」通道行上的右键菜单：点选 display 即在当前时间打 displayIndex 帧 */
-  const [displayMenu, setDisplayMenu] = useState<{ x: number; y: number; slot: string } | null>(null)
-
-  const displayMenuItems = (slotName: string): ContextMenuItem[] => {
-    const document = useProjectStore.getState().document
-    const skinName = useSelectionStore.getState().skin
-    const skin = document.skins.find((item) => item.name === skinName) ?? document.skins[0]
-    const attachments = skin?.slots.find((item) => item.slot === slotName)?.attachments ?? []
-    if (attachments.length === 0) {
-      return [{ key: 'empty', label: '该插槽还没有 display', disabled: true }]
-    }
-    return attachments.map((attachment, index) => ({
-      key: attachment.name,
-      label: attachment.name,
-      hint: '在当前时间打显示关键帧',
-      onSelect: () => {
-        const animName = useTimelineStore.getState().currentAnimation
-        const time = useTimelineStore.getState().time
-        if (!animName) return
-        useProjectStore.getState().update('切换显示的 display', (draft) => {
-          const animation = draft.animations.find((item) => item.name === animName)
-          // displayIndex 属于动画轨道：只打关键帧，不动插槽的 setup 显示项
-          if (animation) keySlotDisplay(animation, slotName, time, index, attachment.name)
-        })
-        props.onStatus?.(`已在 ${time.toFixed(2)}s 打「${slotName}」的显示帧 → 「${attachment.name}」`)
-      }
-    }))
-  }
 
   /**
    * 视窗（起点 + 缩放）以 ref 为权威：滚轮事件一帧内可能来很多个，
@@ -685,15 +653,10 @@ export default function DopeSheet(props: DopeSheetProps) {
                     : track.isGroup
                       ? `${track.kind === 'slot' ? '插槽' : '骨骼'}「${track.label}」的通道（点击选中该对象）`
                       : track.kind === 'slot' && track.channel === 'display'
-                        ? `${track.group} · 显示 · 单击选中插槽，右键选择要显示的 display（在当前时间打关键帧）`
+                        ? `${track.group} · 显示 · 单击选中插槽，按 K 在当前时间打显示帧`
                         : `${track.group} · ${track.label} · 点击选中该通道（按 K 只给它打帧，Delete 删除整条通道）`
                 }
                 onClick={() => props.onSelectTarget(track)}
-                onContextMenu={(event) => {
-                  if (track.kind !== 'slot' || track.channel !== 'display') return
-                  event.preventDefault()
-                  setDisplayMenu({ x: event.clientX, y: event.clientY, slot: track.target })
-                }}
               >
                 {/* 选中通道的左侧色条：与 hover 区分开，一眼能看出「按 K 会打到哪条通道」 */}
                 {trackActive ? (
@@ -823,16 +786,6 @@ export default function DopeSheet(props: DopeSheetProps) {
         </div>
       </div>
 
-      {/* 「显示」通道行的右键菜单：点某个 display 即在当前时间打显示帧 */}
-      {displayMenu ? (
-        <ContextMenu
-          x={displayMenu.x}
-          y={displayMenu.y}
-          title={`切换「${displayMenu.slot}」显示的 display`}
-          items={displayMenuItems(displayMenu.slot)}
-          onClose={() => setDisplayMenu(null)}
-        />
-      ) : null}
     </div>
   )
 }

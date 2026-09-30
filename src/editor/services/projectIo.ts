@@ -166,7 +166,8 @@ export async function saveProject(saveAs: boolean): Promise<IoResult> {
   const total = store.document.images.length
   const parts: string[] = []
   if (copied.copied > 0) parts.push(`${copied.copied} 张图片已复制到 ${ASSET_DIR}/`)
-  else if (total > 0 && copied.warnings.length === 0) parts.push(`${total} 张图片已在 ${ASSET_DIR}/`)
+  // 没有复制任务：图片本来就随工程（上次已复制过，或本身就是工程内联数据）
+  else if (total > 0 && copied.warnings.length === 0) parts.push(`${total} 张图片已在工程内`)
   let message = `已保存到 ${baseName(path)}`
   if (parts.length > 0) message += `（${parts.join('，')}）`
   if (copied.warnings.length > 0) message += `；${copied.warnings[0]}`

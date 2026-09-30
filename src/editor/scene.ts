@@ -710,7 +710,8 @@ export class EditorScene {
   private drawAxes(): void {
     const g = this.axes
     g.clear()
-    if (!this.viewState.overlay.bones && !this.viewState.overlay.constraints) return
+    // 世界坐标轴属于骨架辅助显示：关掉「骨骼」后一并隐藏，避免只留两条跨界黑线
+    if (!this.viewState.overlay.bones) return
     const viewport = this.viewport
     const topLeft = viewport.screenToWorld(0, 0)
     const bottomRight = viewport.screenToWorld(viewport.width, viewport.height)
@@ -727,17 +728,23 @@ export class EditorScene {
     const state = this.viewState
     const unitPerPixel = this.viewport.pixelsToWorld(1)
 
-    const showBones = (state.overlay.bones || state.overlay.constraints) && bundle !== null
+    // 骨骼本体与约束是**两个独立开关**，但共用同一对绘制层：
+    // 「骨骼」关掉、「约束」仍开时这一层还要留着画约束手柄，只是跳过骨骼本体。
+    // 曾经用 `bones || constraints` 当作骨骼自身的可见条件，于是关掉「骨骼」后骨架仍在屏幕上。
+    const showSkeleton = state.overlay.bones && bundle !== null
+    const showConstraints = state.overlay.constraints && bundle !== null
+    const showBoneLayer = showSkeleton || showConstraints
     const selectedIndex = bundle ? (bundle.boneIndex[state.selectedBone] ?? -1) : -1
-    this.boneStroke.visible = showBones
-    this.boneFill.visible = showBones
-    if (showBones && bundle && state.onionSkin) this.drawOnionSkin(this.boneStroke, unitPerPixel)
-    if (showBones && bundle) {
+    this.boneStroke.visible = showBoneLayer
+    this.boneFill.visible = showBoneLayer
+    if (showSkeleton && bundle && state.onionSkin) this.drawOnionSkin(this.boneStroke, unitPerPixel)
+    if (showBoneLayer && bundle) {
       drawBoneOverlay(this.boneStroke, this.boneFill, bundle.skeleton, bundle.asset.constraints, {
         unitsPerPixel: unitPerPixel,
         selectedBone: selectedIndex,
         hoveredBone: bundle.boneIndex[state.hoveredBone] ?? -1,
-        showConstraints: state.overlay.constraints,
+        showBones: showSkeleton,
+        showConstraints,
         showSlots: false,
         hollowBones: this.hollowBones,
         // 正在拖拽新建骨骼：把待生成的骨骼画成虚线预览
@@ -753,7 +760,7 @@ export class EditorScene {
     this.gizmoFill.clear()
     const attachmentGizmo = state.selectedAttachment
     const showGizmo =
-      showBones && bundle !== null && state.showGizmo && (selectedIndex >= 0 || attachmentGizmo !== null)
+      showBoneLayer && bundle !== null && state.showGizmo && (selectedIndex >= 0 || attachmentGizmo !== null)
     this.gizmoStroke.visible = showGizmo
     this.gizmoFill.visible = showGizmo
     if (showGizmo && bundle) {

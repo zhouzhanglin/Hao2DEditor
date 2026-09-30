@@ -10,6 +10,8 @@ export interface BoneOverlayOptions {
   unitsPerPixel: number
   selectedBone: number
   hoveredBone: number
+  /** 是否绘制骨骼本体（关掉「骨骼」开关但「约束」仍开着时传 false：只留约束手柄，不画骨架） */
+  showBones: boolean
   showConstraints: boolean
   showSlots: boolean
   /** 需要画成空心的骨骼名（来自编辑期模型的 hollow 选项，默认全是实心） */
@@ -232,8 +234,8 @@ export function drawBoneOverlay(
   const w = options.unitsPerPixel
   const boneCount = skeleton.boneCount
 
-  // 骨骼体（四边形）+ 原点圈
-  for (let i = 0; i < boneCount; i++) {
+  // 骨骼体（四边形）+ 原点圈：「骨骼」开关关掉时整段跳过（约束手柄与骨骼是两个独立开关）
+  for (let i = 0; options.showBones && i < boneCount; i++) {
     const o = i * 16
     const x = skeleton.world[o + 12]
     const y = skeleton.world[o + 13]

@@ -265,8 +265,7 @@ export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | n
 
     const boneIndexOf = new Map<string, number>()
     input.boneNames.forEach((name, i) => boneIndexOf.set(name, i))
-    const slotIndexOf = new Map<string, number>()
-    input.slotNames.forEach((name, i) => slotIndexOf.set(name, i))
+
 
     // setup 基准（官方坐标系的原始值，与我们的 BoneData 同源）：常量通道要靠它判断「是否已在 setup」
     const setupById = new Map<number, { x: number; y: number; rotation: number; scaleX: number; scaleY: number; shearX: number; shearY: number }>()
@@ -285,12 +284,6 @@ export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | n
         shearY: pose.shearY
       })
     }
-
-    // 官方运行库读不到皮肤时（典型是 3.3 的对象式 `skins`，4.x 运行库只认数组式），
-    // 采样出的 attachment 恒为 null —— 照常产出 slot 轨道会把**所有槽位写成「空显示」**，
-    // 覆盖掉调用方内置解析的正确结果（表现：Pose 正常、一播动画整个角色消失）。
-    // 这种情况只给骨骼轨道，slot 交给内置解析。
-    const hasSkin = data.skins !== undefined && data.skins.length > 0
 
     const out: BakedAnimation[] = []
     for (const animation of data.animations) {
@@ -343,21 +336,13 @@ export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | n
           track.shear.push({ time, x: pose.shearX, y: pose.shearY })
         }
 
-        if (hasSkin) {
-          for (const slot of skeleton.slots) {
-            const index = slotIndexOf.get(slot.data.name)
-            if (index === undefined) continue
-            const pose = slot.appliedPose
-            let track = slotTracks.get(index)
-            if (!track) {
-              track = { slot: index, display: [], color: [] }
-              slotTracks.set(index, track)
-            }
-            const attachment = pose.attachment
-            track.display.push({ time, name: attachment ? attachment.name : '' })
-            track.color.push({ time, r: pose.color.r, g: pose.color.g, b: pose.color.b, a: pose.color.a })
-          }
-        }
+        // 这里**不采样 slot（附件显示 / 颜色）** —— 对齐参考实现：
+        // 「采样只烘焙骨骼变换（含 IK 反算到 localPose）；slot / deform / drawOrder 用自解析」。
+        //
+        // 原因是采样时骨架只挂了**默认皮肤**：换装角色（如 Goblins 的 default 只有 3 个槽）
+        // 里其余槽位 sampling 出 null，会被写成「隐藏（-1）」，一播动画整个角色就没了；
+        // 而未采样的槽位在运行期会保持按**当前皮肤**算出的 setup 显示（player 的替换式采样）。
+        // 附件轨道交给内置解析（它是稀疏关键帧，且按附件名在当前皮肤里解析）。
       }
 
       // 采样后处理：① 还原阶跃语义 → ② 压掉能直线近似的冗余帧（阶跃段会被跳过）

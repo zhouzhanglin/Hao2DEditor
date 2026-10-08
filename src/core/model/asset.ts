@@ -174,6 +174,23 @@ export function resolveLinkedMesh(asset: RuntimeAsset, lm: AttachmentData, slotN
   return null
 }
 
+/**
+ * 在「附件名 → 下标」表里查找，**兼容换装皮肤的「皮肤名/」前缀**。
+ *
+ * Spine 的换装皮肤把附件名写成 `goblin/head`（区域名同理），而 slot 的 setup 附件名
+ * 与动画里的附件轨道用的是**裸名**（`head`）—— 直接 `map.get('head')` 会落空，
+ * 表现就是「切换皮肤后角色整个消失 / 只有零星部件」（Goblins 这类换装角色）。
+ */
+export function findAttachmentIndex(map: ReadonlyMap<string, number>, name: string): number | undefined {
+  const exact = map.get(name)
+  if (exact !== undefined) return exact
+  for (const [key, index] of map) {
+    const slash = key.lastIndexOf('/')
+    if (slash >= 0 && key.slice(slash + 1) === name) return index
+  }
+  return undefined
+}
+
 /** 构建运行期预解析映射（对齐参考库 MeshBuilder.Init）。 */
 export function buildRuntimeMaps(asset: RuntimeAsset, skinName = ''): RuntimeMaps {
   const slotSkin = new Map<string, SkinSlotData>()
@@ -219,7 +236,8 @@ export function buildRuntimeMaps(asset: RuntimeAsset, skinName = ''): RuntimeMap
     let display = asset.slots[i].defaultDisplayIndex
     const want = asset.slots[i].setupAttachment
     if (want) {
-      const byName = map.get(want)
+      // 换装皮肤的附件名带「皮肤名/」前缀，而 slot.attachment 是裸名 → 用兼容查找
+      const byName = findAttachmentIndex(map, want)
       if (byName !== undefined) display = byName
     }
     // -1 是「setup 时不显示任何附件」的合法值，必须保留；只有越界才退化为第一个附件

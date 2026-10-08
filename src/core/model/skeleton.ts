@@ -4,7 +4,7 @@ import type { Vec2 } from '../math/matrix'
 import { WHITE } from './types'
 import type { RGBA } from './types'
 import type { RuntimeAsset, RuntimeMaps } from './asset'
-import { findBoneIndex, findSlotIndex } from './asset'
+import { findAttachmentIndex, findBoneIndex, findSlotIndex } from './asset'
 
 /**
  * 运行期骨架：纯数据 pose 缓冲，无任何渲染依赖。
@@ -202,7 +202,8 @@ export class Skeleton {
     if (slotIndex < 0 || slotIndex >= this.slotCount) return false
     const map = this.slotAttIndex[slotIndex]
     if (!map) return false
-    const index = map.get(attachmentName)
+    // 兼容换装皮肤的「皮肤名/」前缀（见 findAttachmentIndex）
+    const index = findAttachmentIndex(map, attachmentName)
     if (index === undefined) return false
     this.attOverrideName[slotIndex] = attachmentName
     this.setupDisplayIndex[slotIndex] = index

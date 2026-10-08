@@ -255,18 +255,34 @@ function packVertexWeight(entries: Array<{ bone: number; lx: number; ly: number;
 
 function resolveRegion(
   attachment: SpineAttachmentJson,
-  ctx: AttachmentContext
+  ctx: AttachmentContext,
+  skinName?: string
 ): AtlasRegion | null {
   const key = attachment.path ?? attachment.name ?? ''
-  const region = ctx.regions.get(key)
-  if (!region) {
-    ctx.warnings.push(`附件的图集区域「${key}」不存在，贴图可能显示异常`)
-    return null
+  // Spine 的换装皮肤把图集区域名带上**皮肤前缀**（`goblin/head`、`goblingirl/head`），
+  // 而皮肤里的附件名保持裸名（`head`）且不带 path —— 官方运行库的做法正是给附件补上
+  // 「皮肤名/」前缀（解析后附件名直接变成 `goblin/head`）。
+  //
+  // 只按裸名查的话，Goblins 这类换装角色两个皮肤的区域都找不到，附件全无贴图 ——
+  // 表现就是「切换皮肤完全没变化」。
+  const candidates: string[] = []
+  if (attachment.path) candidates.push(attachment.path)
+  if (skinName) candidates.push(`${skinName}/${key}`)
+  candidates.push(key)
+  for (const candidate of candidates) {
+    const region = ctx.regions.get(candidate)
+    if (region) return region
   }
-  return region
+  ctx.warnings.push(`附件的图集区域「${candidates[0]}」不存在，贴图可能显示异常`)
+  return null
 }
 
-function convertAttachment(attachment: SpineAttachmentJson, ctx: AttachmentContext): AttachmentData {
+function convertAttachment(
+  attachment: SpineAttachmentJson,
+  ctx: AttachmentContext,
+  /** 所属皮肤名：换装皮肤的区域名带「皮肤名/」前缀（见 resolveRegion） */
+  skinName?: string
+): AttachmentData {
   const type = (attachment.type ?? '').toLowerCase()
   const base = {
     name: attachment.name ?? '',
@@ -277,7 +293,7 @@ function convertAttachment(attachment: SpineAttachmentJson, ctx: AttachmentConte
   }
 
   if (type === 'linkedmesh') {
-    const region = resolveRegion(attachment, ctx)
+    const region = resolveRegion(attachment, ctx, skinName)
     return createAttachmentData({
       ...base,
       type: AttachmentType.LinkedMesh,
@@ -289,7 +305,7 @@ function convertAttachment(attachment: SpineAttachmentJson, ctx: AttachmentConte
   }
 
   if (type === 'mesh') {
-    const region = resolveRegion(attachment, ctx)
+    const region = resolveRegion(attachment, ctx, skinName)
     const meshUvs = attachment.uvs ?? []
     const vertexCount = Math.floor(meshUvs.length / 2)
     const rawVertices = attachment.vertices ?? []
@@ -341,7 +357,7 @@ function convertAttachment(attachment: SpineAttachmentJson, ctx: AttachmentConte
   }
 
   // region
-  const region = resolveRegion(attachment, ctx)
+  const region = resolveRegion(attachment, ctx, skinName)
   const geometry = region ? regionGeometry(region, attachment.width, attachment.height) : null
   return createAttachmentData({
     ...base,
@@ -423,7 +439,8 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
     slots: Object.entries(skin.attachments).map<SkinSlotData>(([slotName, attachments]) => ({
       slotName,
       attachments: Object.entries(attachments).map(([name, attachment]) =>
-        convertAttachment({ ...attachment, name: attachment.name ?? name }, ctx)
+        // 附件名保持裸名（动画 / setup 都按它引用），只把皮肤名交给区域查找
+        convertAttachment({ ...attachment, name: attachment.name ?? name }, ctx, skin.name)
       )
     }))
   }))

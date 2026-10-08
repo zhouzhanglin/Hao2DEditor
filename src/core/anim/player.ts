@@ -2,6 +2,7 @@ import { clamp01, lerpAngle } from '../math/utils'
 import { lastKeyframeTime } from '../model/animation'
 import type { AnimData, ConstraintAnim, EventKeyframe, FloatKeyframe, SlotAnim } from '../model/animation'
 import { curvePercent, sampleAngle, sampleColor, sampleDeformIndex, sampleDrawOrderIndex, sampleInt, sampleNumber, sampleVec2 } from './interpolation'
+import { findAttachmentIndex } from '../model/asset'
 import type { RuntimeAsset } from '../model/asset'
 import type { Skeleton } from '../model/skeleton'
 import type { Constraint } from '../model/constraints'
@@ -414,7 +415,8 @@ export class AnimationPlayer {
     const name = track.displayAttachment[keyIndex] ?? ''
     if (name) {
       const map = this.skeleton.slotAttIndex[slotIndex]
-      const byName = map ? map.get(name) : undefined
+      // 动画里的附件轨道用裸名（`head`），而换装皮肤的附件名带前缀（`goblin/head`）
+      const byName = map ? findAttachmentIndex(map, name) : undefined
       if (byName !== undefined) return byName
     }
     return bakedIndex

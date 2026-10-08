@@ -956,6 +956,54 @@ export function runAutoWeights(host: ToolHost, falloff: number): number {
   return touched
 }
 
+/**
+ * 自动权重（检查器「权重骨骼列表」的按钮调用）：只对**列表里绑定的骨骼**算权重。
+ *
+ * 与 `runAutoWeights` 的区别是不再依赖「当前选中骨骼 + 子骨骼」，而是按网格上显式
+ * 绑定的骨骼集合来算 —— 列表外的骨骼不会被算进来，列表内每根都参与竞争（就近者权重高）。
+ * 骨骼线段按当前姿态取（Pose 态即绑定姿态）。
+ */
+export function runAutoWeightsForBones(
+  host: ToolHost,
+  slotName: string,
+  attachmentName: string,
+  boneNames: readonly string[],
+  falloff: number
+): number {
+  const scene = host.scene
+  const bundle = scene.runtime
+  if (!bundle || host.mode !== 'pose' || boneNames.length === 0) return 0
+  const samples = samplesFor(host, slotName, attachmentName)
+  if (samples.length === 0) return 0
+
+  const segments = boneNames
+    .map((name) => ({ name, index: bundle.boneIndex[name] ?? -1 }))
+    .filter((item) => item.index >= 0)
+    .map((item) => {
+      const offset = item.index * 16
+      const ox = bundle.skeleton.world[offset + 12]
+      const oy = bundle.skeleton.world[offset + 13]
+      const length = Math.max(0.001, bundle.asset.bones[item.index].length)
+      const angle = (bundle.skeleton.worldRot[item.index] * Math.PI) / 180
+      return {
+        name: item.name,
+        ax: ox,
+        ay: oy,
+        bx: ox + Math.cos(angle) * length,
+        by: oy + Math.sin(angle) * length
+      }
+    })
+  if (segments.length === 0) return 0
+
+  let touched = 0
+  useProjectStore.getState().update('自动权重（绑定骨骼）', (draft) => {
+    touched = autoWeights(draft, samples, segments, { falloff, maxBones: 4 })
+  })
+  scene.setDocument(useProjectStore.getState().document, host.selection.skin)
+  scene.refresh()
+  return touched
+}
+
 const storeHandler = {
   begin(label: string): void {
     useProjectStore.getState().beginTransaction(label)

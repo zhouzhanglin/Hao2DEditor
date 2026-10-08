@@ -96,6 +96,12 @@ export interface AuthoringAttachment {
    * 「还原为 Region」靠它恢复原尺寸与原 UV；没有快照（如导入的网格）只能按顶点包围盒近似。
    */
   regionSnapshot?: { size: Vec2; uvs: number[] }
+  /**
+   * 该网格**绑定**的骨骼（权重骨骼列表）：检查器里逐根添加 / 移除，
+   * 「自动计算权重」只对这些骨骼生效（不会把别处的权重算进来）。
+   * 空 / 未设置时按「顶点权重里出现过的骨骼」推断，兼容老工程与手动刷过权重的网格。
+   */
+  bones?: string[]
 }
 
 export interface AuthoringSkinSlot {

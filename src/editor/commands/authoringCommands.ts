@@ -752,6 +752,74 @@ export function autoWeights(
 }
 
 /**
+ * 网格**绑定的骨骼列表**（检查器「权重骨骼列表」用）：
+ * 优先用附件上的显式列表；老数据没有这个字段时退回「顶点权重里出现过的骨骼」
+ * —— 手动刷过权重的网格因此也能显示出绑定关系。
+ */
+export function weightBonesOf(attachment: AuthoringAttachment): string[] {
+  if (attachment.bones && attachment.bones.length > 0) {
+    // 去重（保序）：列表里混进重名会让检查器显示出两行同样的骨骼
+    return [...new Set(attachment.bones)]
+  }
+  const seen = new Set<string>()
+  for (const vertex of attachment.vertices) {
+    for (const weight of vertex.weights) {
+      if (weight.weight > 1e-6) seen.add(weight.bone)
+    }
+  }
+  return [...seen]
+}
+
+/** 把一根骨骼加进网格的权重骨骼列表（已在列表里 / 骨骼不存在时返回 false，调用方据此提示） */
+export function addWeightBone(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  bone: string
+): boolean {
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment || attachment.type !== 'mesh') return false
+  if (!doc.bones.some((item) => item.name === bone)) return false
+  const current = weightBonesOf(attachment)
+  if (current.includes(bone)) return false
+  attachment.bones = [...current, bone]
+  return true
+}
+
+/**
+ * 从权重骨骼列表移除一根骨骼，并清掉它在所有顶点上的权重。
+ *
+ * 剩下的权重会**重新归一化**（只按比例放大、方向不变）：否则权重和小于 1，
+ * 顶点会朝原点塌陷，看起来像网格被压扁了。
+ */
+export function removeWeightBone(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  bone: string
+): boolean {
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment || attachment.type !== 'mesh') return false
+  const current = weightBonesOf(attachment)
+  if (!current.includes(bone)) return false
+  attachment.bones = current.filter((item) => item !== bone)
+
+  for (const vertex of attachment.vertices) {
+    const kept = vertex.weights.filter((weight) => weight.bone !== bone)
+    const total = kept.reduce((sum, weight) => sum + weight.weight, 0)
+    if (total > 1e-6) {
+      vertex.weights = kept.map((weight) => ({ bone: weight.bone, weight: weight.weight / total }))
+      continue
+    }
+    // 删完一根不剩：顶点会失去蒙皮、塌到原点。退回列表里的第一根骨骼（权重 1）兜底，
+    // 列表也空了才留空 —— 用户重新绑定并点「自动计算权重」即可恢复。
+    const fallback = attachment.bones?.[0]
+    vertex.weights = fallback ? [{ bone: fallback, weight: 1 }] : []
+  }
+  return true
+}
+
+/**
  * 从当前网格结果里取出「共享顶点 → 附件顶点」的对应关系与 setup 世界坐标。
  * `resolve` 由调用方提供（把 slotIndex + 附件内下标解析成 插槽名 / 附件名）。
  */

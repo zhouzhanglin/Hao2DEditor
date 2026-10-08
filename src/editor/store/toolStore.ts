@@ -51,12 +51,18 @@ export interface ToolState {
   brush: BrushState
   /** 网格创建的栅格细分数量（Region 转网格） */
   gridDivisions: number
+  /**
+   * 「添加绑定骨骼」的等待态：记下正要把骨骼绑给哪个网格，之后在视口里点中的骨骼
+   * 就加入它的权重骨骼列表。刻意与 tool 解耦（独立字段），切换工具 / gizmo 时自动清掉。
+   */
+  pendingWeightBone: { slot: string; attachment: string } | null
   setTool: (tool: EditorTool) => void
   setGizmo: (mode: GizmoMode) => void
   setOverlay: (overlay: OverlayState) => void
   toggleOverlay: (key: keyof OverlayState) => void
   setBrush: (brush: Partial<BrushState>) => void
   setGridDivisions: (value: number) => void
+  setPendingWeightBone: (target: { slot: string; attachment: string } | null) => void
 }
 
 export const useToolStore = create<ToolState>((set, get) => ({
@@ -65,6 +71,7 @@ export const useToolStore = create<ToolState>((set, get) => ({
   overlay: { bones: true, mesh: false, weight: false, ffd: false, constraints: true },
   brush: { radius: 40, strength: 0.5, mode: 'add' },
   gridDivisions: 4,
+  pendingWeightBone: null,
 
   // 选中绘制类工具时顺手打开对应显示层，否则「工具选了但看不到能编辑的东西」
   setTool: (tool) => {
@@ -75,7 +82,8 @@ export const useToolStore = create<ToolState>((set, get) => ({
       overlay.ffd = true
       overlay.mesh = true
     }
-    set({ tool, overlay })
+    // 换工具就放弃「等待点选骨骼」，免得换个工具后第一次点击被旧等待态吃掉
+    set({ tool, overlay, pendingWeightBone: null })
   },
   /**
    * 选择变换工具时**自动退出绘制类工具**（权重刷 / FFD / 网格 / 插槽 / 约束）。
@@ -84,12 +92,13 @@ export const useToolStore = create<ToolState>((set, get) => ({
   setGizmo: (gizmo) => {
     const tool = get().tool
     const painting = tool !== 'select' && tool !== 'bone'
-    set(painting ? { gizmo, tool: 'select' } : { gizmo })
+    set(painting ? { gizmo, tool: 'select', pendingWeightBone: null } : { gizmo, pendingWeightBone: null })
   },
   setOverlay: (overlay) => set({ overlay }),
   toggleOverlay: (key) => set({ overlay: { ...get().overlay, [key]: !get().overlay[key] } }),
   setBrush: (brush) => set({ brush: { ...get().brush, ...brush } }),
-  setGridDivisions: (value) => set({ gridDivisions: Math.max(1, Math.min(24, Math.round(value))) })
+  setGridDivisions: (value) => set({ gridDivisions: Math.max(1, Math.min(24, Math.round(value))) }),
+  setPendingWeightBone: (target) => set({ pendingWeightBone: target })
 }))
 
 export function currentTools(): ToolState {

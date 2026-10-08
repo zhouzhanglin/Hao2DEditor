@@ -192,7 +192,9 @@ function normalizeAttachment(raw: Record<string, unknown>): AuthoringAttachment 
     linkedMeshSkin: str(raw.linkedMeshSkin),
     linkedMeshAttachment: str(raw.linkedMeshAttachment),
     // 由 Region 转来的网格会带一份源 Region 快照，读回来才能「还原为 Region」
-    regionSnapshot: normalizeRegionSnapshot(raw.regionSnapshot)
+    regionSnapshot: normalizeRegionSnapshot(raw.regionSnapshot),
+    // 权重骨骼列表（白名单逐字段还原，漏了这行落盘的绑定关系会被丢掉）
+    bones: strArray(raw.bones)
   }
 }
 

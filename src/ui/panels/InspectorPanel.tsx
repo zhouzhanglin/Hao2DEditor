@@ -2,6 +2,7 @@ import { BlendMode } from '@core/model/types'
 import { curvePercent } from '@core/anim/interpolation'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
+import { useToolStore } from '@editor/store/toolStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { getActiveScene } from '@editor/activeScene'
@@ -12,8 +13,11 @@ import {
   convertMeshToRegion,
   deleteAttachment,
   deleteMeshVertex,
-  patchAttachment
+  patchAttachment,
+  removeWeightBone,
+  weightBonesOf
 } from '@editor/commands/authoringCommands'
+import { runAutoWeightsForBones } from '@editor/tools/authoringTools'
 import type { RenameKind } from '@editor/commands/authoringCommands'
 import {
   CheckboxField,
@@ -89,6 +93,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   const document = useProjectStore((s) => s.document)
   const update = useProjectStore((s) => s.update)
   const selection = useSelectionStore()
+  const tools = useToolStore()
   const mode = useModeStore((s) => s.mode)
   const time = useTimelineStore((s) => s.time)
   const currentAnimation = useTimelineStore((s) => s.currentAnimation)
@@ -299,6 +304,14 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
     const skinSlot = document.skins.find((s) => s.name === selection.skin)?.slots.find((s) => s.slot === slot.name)
       ?? document.skins[0]?.slots.find((s) => s.slot === slot.name)
     const attachment = skinSlot?.attachments.find((a) => a.name === selection.attachment)
+    // 权重骨骼列表：优先用附件上显式绑定的（老数据按顶点权重推断，见 weightBonesOf）
+    const weightBones = attachment && attachment.type === 'mesh' ? weightBonesOf(attachment) : []
+    const boneColorOf = (name: string): string =>
+      document.bones.find((bone) => bone.name === name)?.color ?? '#F97316'
+    /** 是否正在为**这个**附件等待点选骨骼（等待态是全局的，按钮只在目标附件上高亮） */
+    const pickingWeightBone =
+      tools.pendingWeightBone?.slot === selection.slot &&
+      tools.pendingWeightBone?.attachment === selection.attachment
 
     return (
       <div className="flex flex-col">
@@ -467,6 +480,95 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                 <br />
                 用网格 / FFD 工具在网格内 Alt+点击插入顶点，选中顶点后可在下面删除
               </p>
+            ) : null}
+
+            {attachment.type === 'mesh' ? (
+              <FieldGroup title="权重骨骼列表">
+                <button
+                  type="button"
+                  className="hao-btn h-[20px] w-full px-2 text-3xs"
+                  title={
+                    pickingWeightBone
+                      ? '结束绑定：已点选的骨骼会保留在列表里'
+                      : '进入绑定骨骼状态后，在视口里点选骨骼加入列表（可以连续点选多根），右键或再点这个按钮结束'
+                  }
+                  onClick={() => {
+                    if (pickingWeightBone) {
+                      tools.setPendingWeightBone(null)
+                      onStatus('已结束绑定骨骼')
+                      return
+                    }
+                    tools.setPendingWeightBone({ slot: slot.name, attachment: attachment.name })
+                    onStatus('绑定骨骼：在视口里点选骨骼加入列表（可连续多根），完成后右键或再点这个按钮')
+                  }}
+                >
+                  {pickingWeightBone ? '完成绑定骨骼' : '添加绑定骨骼'}
+                </button>
+                <div className="flex max-h-[160px] flex-col gap-0.5 overflow-y-auto rounded border border-line bg-ink-900/60 p-1">
+                  {weightBones.length === 0 ? (
+                    <span className="px-1 py-0.5 text-3xs leading-relaxed text-content-lo">
+                      还没有绑定骨骼：点上面的按钮进入绑定状态，再在视口里点选骨骼（可连续点选多根）
+                    </span>
+                  ) : (
+                    weightBones.map((name) => (
+                      <div
+                        key={name}
+                        className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-ink-700/60"
+                      >
+                        <span
+                          className="size-2.5 shrink-0 rounded-[2px] border border-black/40"
+                          style={{ background: boneColorOf(name) }}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-3xs" title={name}>
+                          {name}
+                        </span>
+                        <button
+                          type="button"
+                          className="shrink-0 text-3xs text-content-lo hover:text-danger"
+                          title="从列表移除，并清掉该骨骼在所有顶点上的权重"
+                          onClick={() => {
+                            let removed = false
+                            update('移除权重骨骼', (draft) => {
+                              removed = removeWeightBone(draft, slot.name, attachment.name, name)
+                            })
+                            onStatus(removed ? `已移除权重骨骼「${name}」` : `「${name}」不在权重列表里`)
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="hao-btn h-[20px] w-full px-2 text-3xs"
+                  disabled={weightBones.length === 0}
+                  title="按列表里的骨骼重算所有顶点权重：顶点离哪根骨骼近，它在那根骨骼上的权重就高（列表外的骨骼不参与）"
+                  onClick={() => {
+                    const scene = getActiveScene()
+                    if (!scene) return
+                    if (mode !== 'pose') {
+                      onStatus('自动计算权重写的是绑定姿态：请切到 Pose 状态')
+                      return
+                    }
+                    const touched = runAutoWeightsForBones(
+                      { scene, selection, tools, mode, time, status: onStatus },
+                      slot.name,
+                      attachment.name,
+                      weightBones,
+                      2
+                    )
+                    onStatus(
+                      touched > 0
+                        ? `已按绑定骨骼重算 ${touched} 个顶点的权重`
+                        : '没有可计算权重的顶点（Region 请先转为网格）'
+                    )
+                  }}
+                >
+                  自动计算权重
+                </button>
+              </FieldGroup>
             ) : null}
 
             <div className="flex flex-wrap gap-1 pt-0.5">

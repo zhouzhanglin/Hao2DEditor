@@ -411,7 +411,13 @@ export default function App() {
       if (typing) return
 
       const mod = event.metaKey || event.ctrlKey
-      if (event.key === 'Tab') {
+      if (event.key === 'Escape') {
+        // 结束「绑定骨骼」状态：那期间视口的点击会被拾取骨骼吃掉
+        if (useToolStore.getState().pendingWeightBone) {
+          useToolStore.getState().setPendingWeightBone(null)
+          flash('已结束绑定骨骼')
+        }
+      } else if (event.key === 'Tab') {
         event.preventDefault()
         handleCommand('mode:toggle')
       } else if (event.code === 'Space') {

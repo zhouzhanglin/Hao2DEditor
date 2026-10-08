@@ -10,7 +10,7 @@ import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { isDragging, toolPointerDown, toolPointerMove, toolPointerUp } from '@editor/tools/authoringTools'
 import type { ToolHost } from '@editor/tools/authoringTools'
-import { createRegionFromImage, insertMeshVertex, PPU } from '@editor/commands/authoringCommands'
+import { addWeightBone, createRegionFromImage, insertMeshVertex, PPU } from '@editor/commands/authoringCommands'
 import { hasImageDrag, readImageDrag } from '@ui/widgets/dragDrop'
 import { gridDropLayout } from '@ui/viewport/dropLayout'
 import type { AuthoringImage } from '@core/model/authoring'
@@ -277,6 +277,42 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
     const scene = sceneRef.current
     if (!scene) return
+
+    // 「绑定骨骼」状态（检查器点「添加绑定骨骼」进入）：
+    // - 左键点骨骼 → 加进列表，**状态保持**，可以连着点几根
+    // - 右键 / 再点按钮 / Esc → 结束绑定状态
+    // 此状态下不响应平移与普通拾取，免得"想点第二根骨骼"却把视口拖走了
+    const pending = useToolStore.getState().pendingWeightBone
+    if (pending) {
+      if (event.button === 2) {
+        event.preventDefault()
+        useToolStore.getState().setPendingWeightBone(null)
+        onStatus('已结束绑定骨骼')
+        return
+      }
+      if (event.button !== 0) return
+      const target = toWorld(event)
+      if (!target) return
+      const hitBone = scene.pickBoneAt(target.x, target.y)
+      if (!hitBone || !scene.runtime) {
+        onStatus('请点在骨骼上（可连续点选多根；右键或再点按钮结束绑定）')
+        return
+      }
+      const boneName = scene.runtime.asset.bones[hitBone.boneIndex]?.name ?? ''
+      let added = false
+      useProjectStore.getState().update('绑定权重骨骼', (draft) => {
+        added = addWeightBone(draft, pending.slot, pending.attachment, boneName)
+      })
+      scene.setDocument(useProjectStore.getState().document, useSelectionStore.getState().skin)
+      scene.refresh()
+      onStatus(
+        added
+          ? `已绑定「${boneName}」；可继续点选其它骨骼，完成后右键或再点按钮结束`
+          : `「${boneName}」已在列表里；继续点选，或右键结束绑定`
+      )
+      return
+    }
+
     // Alt+点击 = 插入顶点。这里只**记下待定插点**（不在这里判工具 / 选中：松手时才决定
     // 是插点还是解释为什么不插），真正插入放到松手时 —— 期间没拖动过才算「点击」，
     // 所以 Alt 拖动依旧是平移，不会一按下去就多出一个顶点
@@ -295,13 +331,16 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       event.preventDefault()
       return
     }
-    if (event.button === 1 || event.button === 2) {
+    // 平移视口只认中键。右键不再参与平移（绑定骨骼状态下它是「结束绑定」，
+    // 平时则什么都不做），避免右键误拖把视口挪走。
+    if (event.button === 1) {
       pointer.current = { panning: true, lastX: event.clientX, lastY: event.clientY, insert: null }
       event.currentTarget.setPointerCapture(event.pointerId)
       return
     }
     const world = toWorld(event)
     if (!world) return
+
     const host = buildHost()
     if (host && toolPointerDown(host, { world, shift: event.shiftKey, ctrl: event.ctrlKey, alt: event.altKey })) {
       event.currentTarget.setPointerCapture(event.pointerId)
@@ -529,6 +568,10 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     <div
       ref={hostRef}
       className="hao-checkerboard relative flex-1 overflow-hidden"
+      onMouseDown={(e) => {
+        // 中键默认会触发浏览器的「自动滚动」（四向箭头 + 滚动页面），在 mousedown 阶段拦掉
+        if (e.button === 1) e.preventDefault()
+      }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={releasePointer}

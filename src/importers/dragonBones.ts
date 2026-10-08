@@ -15,6 +15,7 @@ import type {
   DbArmatureJson,
   DbBoneJson,
   DbDisplayJson,
+  DbFrameEasingJson,
   DbJson,
   DbSkinSlotJson,
   DbSlotJson
@@ -179,13 +180,23 @@ function parseDbWeights(
   const boneCount = ctx.origToNew.length
   let cursor = 0
   for (let v = 0; v < vertexCount; v++) {
-    const count = weights[cursor] ?? 0
+    if (cursor >= weights.length) {
+      // 数据提前耗尽（导出损坏）：补空权重，保证返回值和顶点一一对应
+      out.push(packWeights([], 0, ctx, slotPose, v))
+      continue
+    }
+    // DragonBones 的 weights 结构是「[骨骼数, (骨骼下标, 权重) × 骨骼数]」逐顶点排列，
+    // 每组占 1 + 2×count 个数。
+    // 早先这里按「每根骨骼固定吃 3 个数」推进（cursor += 3），只在「顶点只绑 1 根骨骼」
+    // 时凑巧正确；一旦出现绑 2 根以上的顶点，后面**所有**顶点的骨骼与权重就整体错位，
+    // 表现为导入后网格被乱骨骼拉扯、部件散架（SkinnedMeshAnim 这类例子必错）。
+    const count = Math.max(0, Math.round(weights[cursor] ?? 0))
     cursor += 1
     const entries: Array<{ bone: number; lx: number; ly: number; w: number }> = []
     for (let k = 0; k < count; k++) {
       const rawBone = weights[cursor] ?? 0
       const w = weights[cursor + 1] ?? 0
-      cursor += 3
+      cursor += 2
       const mapped = rawBone >= 0 && rawBone < boneCount ? ctx.origToNew[rawBone] : 0
       entries.push({ bone: mapped, lx: 0, ly: 0, w })
     }
@@ -270,8 +281,11 @@ function convertDisplay(
       const u = rawUvs[i * 2] ?? 0
       const v = rawUvs[i * 2 + 1] ?? 0
       if (subTexture) {
+        // DB 的 mesh uvs 是「区域内的相对坐标」，v=0 指向区域**顶边**（与官方 UnitySlot 一致）。
+        // 映射到图集再翻成 uv 的底左原点：v 直接用，只对图集 y 做一次 1-y。
+        // （早先多套了一层 (1-v)，等于把网格贴图上下翻了过来 —— 纹理会与顶点错位。）
         uvs[i * 2] = (subTexture.x + u * subTexture.width) / Math.max(1, subTexture.textureWidth)
-        uvs[i * 2 + 1] = 1 - (subTexture.y + (1 - v) * subTexture.height) / Math.max(1, subTexture.textureHeight)
+        uvs[i * 2 + 1] = 1 - (subTexture.y + v * subTexture.height) / Math.max(1, subTexture.textureHeight)
       } else {
         uvs[i * 2] = u
         uvs[i * 2 + 1] = 1 - v
@@ -556,6 +570,22 @@ interface DbAnimContext {
   warnings: string[]
 }
 
+/**
+ * 帧缓动：DB 的 `tweenEasing` **缺省 / null 表示线性补间**（导出时"线性"常常直接省略该字段），
+ * 有 `curve` 数组时用贝塞尔，数值型缓动本转换器统一按线性近似。
+ *
+ * 早先把 null 当成「不补间（阶跃）」是反的：每段都会瞬间跳变，循环动画在末帧↔首帧
+ * 还会抖一次 —— 这是"导入后动画看着不对"的主要原因之一。
+ * displayIndex 这类真正的阶跃量在各自的解析处强制 Stepped，不依赖这里。
+ */
+function easingOfFrame(frame: DbFrameEasingJson): { easing: Easing; curve: number[] | null } {
+  const raw = Array.isArray(frame.curve) ? frame.curve : null
+  if (raw && raw.length >= 4) {
+    return { easing: Easing.Bezier, curve: raw.slice(0, 4).map((value) => Number(value) || 0) }
+  }
+  return { easing: Easing.Linear, curve: null }
+}
+
 /** DB 动画：所有时间以帧计，除以 frameRate 转秒；playTimes == 0 时补循环闭合帧 */
 function importDbAnimation(animation: DbAnimationJson, ctx: DbAnimContext): AnimData {
   const fps = animation.frameRate && animation.frameRate > 0 ? animation.frameRate : ctx.frameRate
@@ -569,37 +599,78 @@ function importDbAnimation(animation: DbAnimationJson, ctx: DbAnimContext): Anim
     if (index === undefined) continue
     const bone = ctx.bones[index]
     const anim = emptyBoneAnim(index)
-    let time = 0
-    for (const frame of track.frame ?? []) {
-      const transform = frame.transform ?? {}
+    const pushTranslate = (time: number, x: number, y: number, frame: DbFrameEasingJson): void => {
+      const e = easingOfFrame(frame)
       anim.translate.push({
         time: toSeconds(time),
-        value: {
-          x: bone.localPosition.x + pxToUnit(transform.x ?? 0),
-          y: bone.localPosition.y - pxToUnit(transform.y ?? 0)
-        },
-        easing: Easing.Linear,
-        curve: null
+        value: { x: bone.localPosition.x + pxToUnit(x), y: bone.localPosition.y - pxToUnit(y) },
+        easing: e.easing,
+        curve: e.curve
       })
+    }
+    const pushRotate = (time: number, rotate: number, frame: DbFrameEasingJson): void => {
+      const e = easingOfFrame(frame)
       anim.rotate.push({
         time: toSeconds(time),
-        value: bone.rotation - (transform.skX ?? 0),
-        easing: Easing.Linear,
-        curve: null
+        value: bone.rotation - rotate,
+        easing: e.easing,
+        curve: e.curve
       })
+    }
+    const pushScale = (time: number, scX: number, scY: number, frame: DbFrameEasingJson): void => {
+      const e = easingOfFrame(frame)
       anim.scale.push({
         time: toSeconds(time),
-        value: {
-          x: bone.localScale.x * (transform.scX ?? 1),
-          y: bone.localScale.y * (transform.scY ?? 1)
-        },
-        easing: Easing.Linear,
-        curve: null
+        value: { x: bone.localScale.x * scX, y: bone.localScale.y * scY },
+        easing: e.easing,
+        curve: e.curve
       })
-      time += frame.duration ?? 0
     }
-    if (anim.rotate.length > 0) {
-      closeLoop(anim, loop, toSeconds(time))
+
+    const legacy = track.frame ?? []
+    let trackDuration = 0
+    if (legacy.length > 0) {
+      // 5.5 之前的旧格式：每帧带完整 transform（值为相对 setup 的增量）
+      let time = 0
+      for (const frame of legacy) {
+        const transform = frame.transform ?? {}
+        pushTranslate(time, transform.x ?? 0, transform.y ?? 0, frame)
+        pushRotate(time, transform.skX ?? 0, frame)
+        pushScale(time, transform.scX ?? 1, transform.scY ?? 1, frame)
+        time += frame.duration ?? 0
+      }
+      trackDuration = time
+    } else {
+      // 5.x 新格式：通道拆开，`duration` 是「这一帧持续多少帧」，时间逐帧累加；
+      // 单帧缺省的分量表示「增量为 0」（即保持 setup），所以**每一帧都要写** ——
+      // 跳过"这一帧没给值"的帧，会让那一整段被相邻关键帧插值覆盖，姿势就错了。
+      //
+      // 早先只认旧格式 track.frame，新格式下一条关键帧都读不到 → 整段骨骼动画被当成
+      // 空轨道丢掉，表现就是「导入后动画不动、蒙皮网格塌成碎片」（SkinnedMeshAnim 这类
+      // 用新格式导出的工程必错）。
+      let duration = 0
+      let time = 0
+      for (const frame of track.translateFrame ?? []) {
+        pushTranslate(time, frame.x ?? 0, frame.y ?? 0, frame)
+        time += frame.duration ?? 0
+      }
+      duration = Math.max(duration, time)
+      time = 0
+      for (const frame of track.rotateFrame ?? []) {
+        pushRotate(time, frame.rotate ?? 0, frame)
+        time += frame.duration ?? 0
+      }
+      duration = Math.max(duration, time)
+      time = 0
+      for (const frame of track.scaleFrame ?? []) {
+        pushScale(time, frame.x ?? 1, frame.y ?? 1, frame)
+        time += frame.duration ?? 0
+      }
+      trackDuration = Math.max(duration, time)
+    }
+    // 三条通道全空才算空轨道（只看 rotate 会把「只动位置」的骨骼整条丢掉）
+    if (anim.rotate.length > 0 || anim.translate.length > 0 || anim.scale.length > 0) {
+      closeLoop(anim, loop, toSeconds(trackDuration))
       bones.push(anim)
     }
   }
@@ -622,11 +693,12 @@ function importDbAnimation(animation: DbAnimationJson, ctx: DbAnimContext): Anim
       })
       anim.displayAttachment.push('')
       if (frame.color) {
+        const e = easingOfFrame(frame)
         anim.color.push({
           time: toSeconds(time),
           value: dbColor(frame.color as DbBoneColorJson, slot.color),
-          easing: Easing.Linear,
-          curve: null
+          easing: e.easing,
+          curve: e.curve
         })
         hasColor = true
       }
@@ -640,30 +712,39 @@ function importDbAnimation(animation: DbAnimationJson, ctx: DbAnimContext): Anim
     const index = ctx.slotIndex.get(track.slot ?? '')
     if (index === undefined) continue
     const anim = emptyDeformAnim(index, track.name ?? '')
-    let time = 0
+    // DB 的 FFD 帧：`offset` 是**浮点数组下标**（起始顶点 = offset/2，需向下取偶），
+    // `vertices` 是相对绑定位置的位移（y-down）；区间外的顶点补 0。
+    // 这里烘焙成「满顶点长度」的数组（vertexOffset 恒为 0），运行期不必再做基址换算。
+    const frames = track.frame ?? []
     let need = 0
-    for (const frame of track.frame ?? []) {
-      const offset = Math.round(frame.offset ?? 0)
-      const vertices = frame.vertices ?? []
-      need = Math.max(need, offset + vertices.length)
-      time += frame.duration ?? 0
+    for (const frame of frames) {
+      const start = Math.round(frame.offset ?? 0) & ~1
+      need = Math.max(need, start + (frame.vertices?.length ?? 0))
     }
-    time = 0
-    for (const frame of track.frame ?? []) {
-      const offset = Math.max(0, Math.round(frame.offset ?? 0))
+    let time = 0
+    for (const frame of frames) {
+      const start = Math.max(0, Math.round(frame.offset ?? 0) & ~1)
       const vertices = frame.vertices ?? []
       const offsets = new Array<number>(need).fill(0)
-      for (let i = 0; i < vertices.length; i++) offsets[offset + i] = flipVertex(vertices[i], offset + i)
+      for (let i = 0; i < vertices.length; i++) {
+        // 奇偶按**段内相对下标**判断 —— 早先误用绝对下标（offset + i），
+        // offset 为奇数时整个 x/y 会反转，FFD 直接把网格拉变形
+        offsets[start + i] = flipVertex(vertices[i], i)
+      }
+      const e = easingOfFrame(frame)
       anim.frames.push({
         time: toSeconds(time),
         offsets,
         vertexOffset: 0,
-        easing: Easing.Linear,
-        curve: null
+        easing: e.easing,
+        curve: e.curve
       })
       time += frame.duration ?? 0
     }
-    if (anim.frames.length > 0) deforms.push(anim)
+    if (anim.frames.length > 0) {
+      closeLoopDeform(anim, loop, toSeconds(time))
+      deforms.push(anim)
+    }
   }
 
   const drawOrder: DrawOrderKeyframe[] = []
@@ -742,6 +823,25 @@ function importDbAnimation(animation: DbAnimationJson, ctx: DbAnimContext): Anim
     iks,
     constraints: []
   }
+}
+
+/** FFD 轨道的循环闭合：末尾补一帧「等于首帧偏移」，让末帧→回绕处连续 */
+function closeLoopDeform(anim: DeformAnim, loop: boolean, duration: number): void {
+  if (!loop || duration <= 0 || anim.frames.length === 0) return
+  const first = anim.frames[0]
+  const last = anim.frames[anim.frames.length - 1]
+  if (last.time >= duration - 1e-6) return
+  const same =
+    first.offsets.length === last.offsets.length &&
+    first.offsets.every((value, i) => Math.abs(value - last.offsets[i]) < 1e-5)
+  if (same) return
+  anim.frames.push({
+    time: duration,
+    offsets: first.offsets.slice(),
+    vertexOffset: 0,
+    easing: Easing.Linear,
+    curve: null
+  })
 }
 
 /** playTimes == 0（无限循环）时在末尾补一帧等于首帧的关键帧，角度走最短弧 */

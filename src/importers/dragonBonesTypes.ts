@@ -76,20 +76,41 @@ export interface DbIkJson {
   weight?: number
 }
 
-export interface DbBoneFrameJson {
+/**
+ * 帧的缓动：`tweenEasing` 缺省 / null 表示**线性补间**（DB 导出时"线性"常常直接省略该字段），
+ * 有 `curve` 数组时按贝塞尔处理。数值型的缓动类型本转换器统一按线性近似。
+ */
+export interface DbFrameEasingJson {
   duration?: number
   tweenEasing?: number | null
+  curve?: number[]
+}
+
+export interface DbBoneFrameJson extends DbFrameEasingJson {
   transform?: DbTransformJson
+}
+
+/**
+ * 5.x 起骨骼动画按通道拆帧：每帧只给本通道的增量值，`duration` 是「这一帧持续多少帧」。
+ * translate → x/y、rotate → rotate、scale → x/y。
+ */
+export interface DbChannelFrameJson extends DbFrameEasingJson {
+  x?: number
+  y?: number
+  rotate?: number
 }
 
 export interface DbBoneTrackJson {
   name?: string
+  /** 5.5 之前的旧格式：每帧带完整 transform */
   frame?: DbBoneFrameJson[]
+  /** 5.x 新格式：三条通道各自成帧 */
+  translateFrame?: DbChannelFrameJson[]
+  rotateFrame?: DbChannelFrameJson[]
+  scaleFrame?: DbChannelFrameJson[]
 }
 
-export interface DbSlotFrameJson {
-  duration?: number
-  tweenEasing?: number | null
+export interface DbSlotFrameJson extends DbFrameEasingJson {
   displayIndex?: number
   color?: DbColorJson
 }
@@ -99,9 +120,7 @@ export interface DbSlotTrackJson {
   frame?: DbSlotFrameJson[]
 }
 
-export interface DbFfdFrameJson {
-  duration?: number
-  tweenEasing?: number | null
+export interface DbFfdFrameJson extends DbFrameEasingJson {
   offset?: number
   vertices?: number[]
 }

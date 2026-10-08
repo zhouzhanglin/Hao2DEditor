@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { KeyRound, Pause, Play, Repeat, SkipBack, SkipForward, Square, Timer, Trash2, Zap } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
-import { playheadTime, usePlayheadStore } from '@editor/store/playheadStore'
+import { playheadTime, usePlayheadStore, useThrottledPlayheadTime } from '@editor/store/playheadStore'
+import { useShallow } from 'zustand/react/shallow'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { animationDuration } from '@editor/runtime'
@@ -27,7 +28,34 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
   const update = useProjectStore((s) => s.update)
   const selection = useSelectionStore()
   const mode = useModeStore((s) => s.mode)
-  const timeline = useTimelineStore()
+  // 细粒度订阅，且**刻意不含 time**：时间走下面那条节流通道。
+  // 原来无选择器订阅整个 store，擦洗时每次 setTime 都把本面板 + 整张 DopeSheet 重渲染
+  // （实测单次净成本 ≈ 100ms）
+  const timeline = useTimelineStore(
+    useShallow((s) => ({
+      currentAnimation: s.currentAnimation,
+      selectedKeys: s.selectedKeys,
+      playing: s.playing,
+      loop: s.loop,
+      speed: s.speed,
+      onionSkin: s.onionSkin,
+      snapToFrame: s.snapToFrame,
+      zoom: s.zoom,
+      setAnimation: s.setAnimation,
+      setTime: s.setTime,
+      setPlaying: s.setPlaying,
+      togglePlaying: s.togglePlaying,
+      toggleLoop: s.toggleLoop,
+      setSpeed: s.setSpeed,
+      toggleOnionSkin: s.toggleOnionSkin,
+      setSnapToFrame: s.setSnapToFrame,
+      setZoom: s.setZoom,
+      setSelectedKeys: s.setSelectedKeys,
+      setSelectedTrack: s.setSelectedTrack
+    }))
+  )
+  /** 面板自身需要的时间（clamp / 跟随 / 初值）：120ms 跟一次足够 —— 播放头与帧号读数不靠它 */
+  const time = useThrottledPlayheadTime(120)
 
   const animation = document.animations.find((a) => a.name === timeline.currentAnimation) ?? null
   /** 动画时长（真实长度，决定播放与擦洗上限） */
@@ -41,12 +69,12 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
 
   // 时长会因为关键帧收缩而变小；播放头若停在旧的末尾之外，会与播放器按循环取模后的时间
   // 不一致（此时拖动骨骼写的关键帧不在画面上，看起来像「拖不动」）。收敛到时长内。
-  const currentTime = timeline.time
+  const currentTime = time
   useEffect(() => {
     if (currentTime > duration + 1e-6) useTimelineStore.getState().setTime(duration)
   }, [duration, currentTime])
 
-  const frame = Math.round(timeline.time * document.frameRate)
+  const frame = Math.round(time * document.frameRate)
   const totalFrames = Math.max(1, Math.round(duration * document.frameRate))
   const selectedKeys = timeline.selectedKeys
 
@@ -365,7 +393,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
           min={0}
           max={duration}
           step={timeline.snapToFrame ? 1 / document.frameRate : 0.001}
-          defaultValue={timeline.time}
+          defaultValue={playheadTime()}
           disabled={!animation}
           onChange={(e) => {
             timeline.setTime(Number(e.target.value))
@@ -374,7 +402,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         />
 
         <span ref={timeReadoutRef} className="shrink-0 font-mono text-3xs text-content-lo">
-          {frame} / {totalFrames} 帧 · {timeline.time.toFixed(3)}s
+          {frame} / {totalFrames} 帧 · {time.toFixed(3)}s
         </span>
       </div>
 
@@ -384,7 +412,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         length={duration}
         zoom={timeline.zoom}
         onZoom={timeline.setZoom}
-        time={timeline.time}
+        time={time}
         frameRate={document.frameRate}
         snapToFrame={timeline.snapToFrame}
         selectedKeys={selectedKeys}

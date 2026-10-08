@@ -4,6 +4,7 @@ import { useModeStore } from '@editor/store/modeStore'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
+import { useShallow } from 'zustand/react/shallow'
 import { drawOrderFrameAt, keyDrawOrder } from '@editor/commands/animationCommands'
 import { applySlotOrder } from '@editor/commands/hierarchyCommands'
 import { keyframeTargetsNow } from '@editor/timeline/actions'
@@ -20,7 +21,10 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
   const update = useProjectStore((s) => s.update)
   const selection = useSelectionStore()
   const mode = useModeStore((s) => s.mode)
-  const timeline = useTimelineStore()
+  // 细粒度订阅：只跟这两个字段。原来订阅整个 store，擦洗时每次 setTime 都会重渲染本面板
+  const timeline = useTimelineStore(
+    useShallow((s) => ({ currentAnimation: s.currentAnimation, time: s.time }))
+  )
   const [dragging, setDragging] = useState<string | null>(null)
   /** 拖动中的插入位置（0..n）；null = 没在拖 */
   const [dropIndex, setDropIndex] = useState<number | null>(null)

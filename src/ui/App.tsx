@@ -23,6 +23,8 @@ import { useSelectionStore } from '@editor/store/selectionStore'
 import { useToolStore } from '@editor/store/toolStore'
 import type { EditorTool, GizmoMode } from '@editor/store/toolStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
+import { playheadTime } from '@editor/store/playheadStore'
+import { useShallow } from 'zustand/react/shallow'
 
 /** W/E/R/T → 骨骼变换工具（与小坐标轴工具条从上到下一致） */
 const GIZMO_KEYS: Record<string, GizmoMode> = { w: 'move', e: 'rotate', r: 'scale', t: 'shear' }
@@ -98,7 +100,18 @@ export default function App() {
   const warnings = useProjectStore((s) => s.warnings)
   const selection = useSelectionStore()
   const tools = useToolStore()
-  const timeline = useTimelineStore()
+  // 细粒度订阅：App 只用这三个字段 + 三个 action。
+  // 原来订阅整个 store —— 擦洗时每次都把整棵树（含所有面板）重渲染一遍
+  const timeline = useTimelineStore(
+    useShallow((s) => ({
+      currentAnimation: s.currentAnimation,
+      selectedKeys: s.selectedKeys,
+      selectedTrack: s.selectedTrack,
+      setAnimation: s.setAnimation,
+      setPlaying: s.setPlaying,
+      togglePlaying: s.togglePlaying
+    }))
+  )
 
   const [hint, setHint] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState<string | null>(null)
@@ -384,7 +397,9 @@ export default function App() {
           const scene = getActiveScene()
           const duration = scene?.duration ?? 1
           const step = (doc.frameRate > 0 ? 1 / doc.frameRate : 1 / 30) * (command === 'anim:nextFrame' ? 1 : -1)
-          const next = Math.max(0, Math.min(duration, state.time + step))
+          // 用播放头时钟取当前位置：主 store 的 time 在播放期间是低频的，
+          // 拿它会从「上次同步的位置」出发，逐帧会跳错
+          const next = Math.max(0, Math.min(duration, playheadTime() + step))
           state.setTime(Number(next.toFixed(4)))
           return
         }

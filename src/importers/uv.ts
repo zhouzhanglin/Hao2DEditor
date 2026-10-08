@@ -37,34 +37,19 @@ export interface AtlasRegion {
 export type PageSizes = Record<string, { width: number; height: number }>
 
 /**
- * 把图集里的像素坐标块映射成归一化 UV（含 v 翻转与旋转）。
- * 返回四角顺序：左下 → 右下 → 右上 → 左上（与 Region 顶点顺序一致）。
- */
-export function regionUvs(region: AtlasRegion, pageSizes: PageSizes): Float32Array {
-  const page = pageSizes[region.page] ?? { width: 1, height: 1 }
-  const tw = Math.max(1, page.width)
-  const th = Math.max(1, page.height)
-  const u0 = region.x / tw
-  const u1 = (region.x + region.width) / tw
-  const v0 = 1 - (region.y + region.height) / th
-  const v1 = 1 - region.y / th
-
-  // 旋转 90°：图集中占位宽高互换，四角 UV 需要按旋转后的对应关系输出
-  const rotate = ((region.rotate % 360) + 360) % 360
-  if (rotate === 90) {
-    return new Float32Array([u0, v1, u0, v0, u1, v0, u1, v1])
-  }
-  if (rotate === 180) {
-    return new Float32Array([u1, v1, u0, v1, u0, v0, u1, v0])
-  }
-  if (rotate === 270) {
-    return new Float32Array([u1, v0, u1, v1, u0, v1, u0, v0])
-  }
-  return new Float32Array([u0, v0, u1, v0, u1, v1, u0, v1])
-}
-
-/**
  * 把「相对图集区域」的 0..1 UV 映射到图集页的归一化 UV（Spine / DragonBones 的 mesh uvs）。
+ *
+ * 区域在图集中可能被旋转存放（Spine 的 `rotate: 90 / 180 / 270`）。映射公式照抄官方运行库
+ * `MeshAttachment.ComputeUVs`（relU 向右、relV 向下；width/height 是**旋转前**的区域尺寸，
+ * 90°/270° 时图集中的占位宽高互换）：
+ *
+ *   0°  ：px = x + relU*w          py = y + relV*h
+ *   90° ：px = x + relV*h          py = y + (1 - relU)*w
+ *   180°：px = x + (1 - relU)*w    py = y + (1 - relV)*h
+ *   270°：px = x + (1 - relV)*h    py = y + relU*w
+ *
+ * 早先这里只按 0° 映射：spineboy-pro 的 head（`rotate: 180`）整块倒过来、goggles
+ * （`rotate: 90`）横竖错位 —— 网格附件贴图错乱的根源。
  */
 export function mapRegionRelativeUvs(
   relative: ArrayLike<number>,
@@ -74,19 +59,51 @@ export function mapRegionRelativeUvs(
   const page = pageSizes[region.page] ?? { width: 1, height: 1 }
   const tw = Math.max(1, page.width)
   const th = Math.max(1, page.height)
+  const x = region.x
+  const y = region.y
+  const w = region.width
+  const h = region.height
+  const rotate = ((Math.round(region.rotate) % 360) + 360) % 360
   const out = new Float32Array(relative.length)
   for (let i = 0; i + 1 < relative.length; i += 2) {
     const u = relative[i]
     const v = relative[i + 1]
-    // 相对 UV 的 v=0 指向区域**顶边**（Spine / DragonBones 同款约定，与官方
-    // UpdateUVs 的线性映射一致），所以直接用 v 取行，只对图集 y 做一次 1-y。
-    // （早先多套了一层 (1-v)，等于把网格贴图上下翻了过来。）
-    const px = region.x + u * region.width
-    const py = region.y + v * region.height
+    let px: number
+    let py: number
+    if (rotate === 90) {
+      px = x + v * h
+      py = y + (1 - u) * w
+    } else if (rotate === 180) {
+      px = x + (1 - u) * w
+      py = y + (1 - v) * h
+    } else if (rotate === 270) {
+      px = x + (1 - v) * h
+      py = y + u * w
+    } else {
+      // 相对 UV 的 v=0 指向区域**顶边**（Spine / DragonBones 同款约定），
+      // 所以直接用 v 取行，只对图集 y 做一次 1-y。
+      px = x + u * w
+      py = y + v * h
+    }
     out[i] = px / tw
     out[i + 1] = 1 - py / th
   }
   return out
+}
+
+/** Region 附件的四角「内容相对 UV」：左下 → 右下 → 右上 → 左上（与 Region 顶点顺序一致） */
+const REGION_CORNER_UVS = Float32Array.from([0, 1, 1, 1, 1, 0, 0, 0])
+
+/**
+ * 把图集里的像素坐标块映射成归一化 UV（含 v 翻转与旋转）。
+ * 返回四角顺序：左下 → 右下 → 右上 → 左上（与 Region 顶点顺序一致）。
+ *
+ * 旋转统一交给 `mapRegionRelativeUvs`：四角只是四个「内容相对 UV」
+ * （v=0 指向内容顶边，所以左下 = (0,1)、右下 = (1,1)、右上 = (1,0)、左上 = (0,0)）。
+ * 早先两处各写一套旋转分支，90°/270° 那套既没换占位宽高、方向也是反的。
+ */
+export function regionUvs(region: AtlasRegion, pageSizes: PageSizes): Float32Array {
+  return mapRegionRelativeUvs(REGION_CORNER_UVS, region, pageSizes)
 }
 
 /**
@@ -101,7 +118,10 @@ export function regionGeometry(
   displayWidthPx?: number,
   displayHeightPx?: number
 ): { width: number; height: number; offsetX: number; offsetY: number } {
-  const rotated = Math.abs(((region.rotate % 360) + 360) % 360 - 90) < 1e-6
+  // 90°/270°：图集中的占位宽高与区域原始宽高互换（对齐官方 packedWidth / packedHeight）
+  // —— 早先只匹配了 90°，270° 的区域尺寸/偏移会算错
+  const degrees = ((Math.round(region.rotate) % 360) + 360) % 360
+  const rotated = degrees === 90 || degrees === 270
   const packedW = rotated ? region.height : region.width
   const packedH = rotated ? region.width : region.height
   const origW = region.origWidth > 0 ? region.origWidth : packedW

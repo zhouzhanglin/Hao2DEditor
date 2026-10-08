@@ -1,5 +1,4 @@
 import type { EditorDocument } from '@core/model/authoring'
-import { decomposeTrs, invert, mul, trs } from '@core/math/matrix'
 import { findSkinSlot } from './authoringCommands'
 
 /**
@@ -54,58 +53,16 @@ export function validateBoneMove(doc: EditorDocument, name: string, targetBone: 
   return { ok: true, message: '' }
 }
 
-export interface MoveBoneOptions {
-  /**
-   * 取骨骼「当前世界矩阵」（列主序 16 个数，setup 姿态）的拷贝。
-   * 传入后重设父级会**保持被移动骨骼的全局位置 / 旋转 / 缩放 / 斜切不变**；
-   * 不传则只改父级（局部 TRS 原样保留，世界变换会跟着变）。
-   */
-  worldMatrixOf?: (boneName: string) => Float32Array | null
-}
-
-/**
- * 重设父级时保持世界变换：按新父（空 = 根层）把旧世界矩阵换算成新的局部 TRS。
- *
- * 关闭了「继承旋转 / 缩放」的骨骼不适用（它的局部参数与父级的组合不是标准矩阵乘法，
- * 逆推不成立），这类骨骼保持原局部值不动。
- */
-function preserveWorldTransform(
-  bone: Bones[number],
-  newParent: string,
-  worldMatrixOf: (boneName: string) => Float32Array | null
-): void {
-  if (!bone.inheritRotation || !bone.inheritScale) return
-  const world = worldMatrixOf(bone.name)
-  if (!world) return
-  let local: Float32Array
-  if (newParent) {
-    const parentWorld = worldMatrixOf(newParent)
-    if (!parentWorld) return
-    local = mul(invert(parentWorld), world)
-  } else {
-    // 根层：局部矩阵就是世界矩阵
-    local = world
-  }
-  const parts = decomposeTrs(local)
-  bone.localPosition = { x: parts.x, y: parts.y }
-  bone.rotation = parts.rotation
-  bone.localScale = { x: parts.scaleX, y: parts.scaleY }
-  bone.localShear = { x: parts.shearX, y: parts.shearY }
-}
-
 /**
  * 移动骨骼。
  * - `inside`：targetBone 为空串时变成根骨骼，否则成为它的子骨骼
  * - `above` / `below`：与 targetBone 同级，并排到它的前 / 后（数组顺序即树的显示顺序）
- *
- * 传入 `options.worldMatrixOf` 时保持骨骼的世界变换（全局位置 / 旋转 / 缩放 / 斜切不变）。
  */
 export function moveBone(
   doc: EditorDocument,
   name: string,
   targetBone: string,
-  zone: DropZone,
-  options?: MoveBoneOptions
+  zone: DropZone
 ): MoveResult {
   const check = validateBoneMove(doc, name, targetBone)
   if (!check.ok) return check
@@ -113,16 +70,10 @@ export function moveBone(
   if (!bone) return check
 
   if (zone === 'inside' || !targetBone) {
-    if (options?.worldMatrixOf && bone.parent !== targetBone) {
-      preserveWorldTransform(bone, targetBone, options.worldMatrixOf)
-    }
     bone.parent = targetBone
   } else {
     const target = doc.bones.find((item) => item.name === targetBone)
     if (!target) return { ok: false, message: `找不到骨骼「${targetBone}」` }
-    if (options?.worldMatrixOf && bone.parent !== target.parent) {
-      preserveWorldTransform(bone, target.parent, options.worldMatrixOf)
-    }
     bone.parent = target.parent
     const from = doc.bones.indexOf(bone)
     if (from >= 0) doc.bones.splice(from, 1)
@@ -145,92 +96,21 @@ export function validateSlotMove(doc: EditorDocument, name: string, targetBone: 
   return { ok: true, message: '' }
 }
 
-export interface MoveSlotOptions {
-  /**
-   * 取骨骼「当前世界矩阵」（列主序 16 个数，setup 姿态）的拷贝。
-   * 传入后换宿主骨骼会**保持插槽内容的全局位置 / 旋转 / 缩放**不变。
-   */
-  worldMatrixOf?: (boneName: string) => Float32Array | null
-}
-
-/**
- * 换宿主骨骼时保持插槽内容的全局变换。
- *
- * 插槽本身没有变换，视觉姿态来自「宿主骨骼世界矩阵 × 附件局部 TRS」，
- * 所以把该插槽在**每张皮肤**上的附件从旧骨骼空间换算到新骨骼空间：
- *
- *   新局部 = inverse(新骨骼世界) × 旧骨骼世界 × 旧局部
- *
- * 附件只有 position / rotation / scale（没有斜切），骨骼之间带斜切时会丢极小一点，
- * 常规（骨骼无斜切）时逐元素精确保持。
- */
-function preserveSlotContent(
-  doc: EditorDocument,
-  slotName: string,
-  fromBone: string,
-  toBone: string,
-  worldMatrixOf: (boneName: string) => Float32Array | null
-): void {
-  const relative = boneSpaceDelta(fromBone, toBone, worldMatrixOf)
-  if (!relative) return
-  for (const skin of doc.skins) {
-    const skinSlot = findSkinSlot(skin, slotName)
-    if (!skinSlot) continue
-    for (const attachment of skinSlot.attachments) preserveAttachmentWorld(attachment, relative)
-  }
-}
-
-/** 「旧骨骼空间 → 新骨骼空间」的相对变换；任一骨骼取不到世界矩阵时返回 null */
-function boneSpaceDelta(
-  fromBone: string,
-  toBone: string,
-  worldMatrixOf: (boneName: string) => Float32Array | null
-): Float32Array | null {
-  const fromWorld = fromBone ? worldMatrixOf(fromBone) : null
-  const toWorld = worldMatrixOf(toBone)
-  if (!fromWorld || !toWorld) return null
-  return mul(invert(toWorld), fromWorld)
-}
-
-/** 按相对变换把附件局部 TRS 从旧骨骼空间换算到新骨骼空间（附件没有斜切，取分解出的 TRS） */
-function preserveAttachmentWorld(
-  attachment: EditorDocument['skins'][number]['slots'][number]['attachments'][number],
-  relative: Float32Array
-): void {
-  const local = trs(
-    attachment.position.x,
-    attachment.position.y,
-    attachment.rotation,
-    attachment.scale.x,
-    attachment.scale.y
-  )
-  const parts = decomposeTrs(mul(relative, local))
-  attachment.position = { x: parts.x, y: parts.y }
-  attachment.rotation = parts.rotation
-  attachment.scale = { x: parts.scaleX, y: parts.scaleY }
-}
-
 /**
  * 移动插槽：换宿主骨骼 + 按绘制顺序重排 zOrder。
  * zOrder 是全局的（编译时按它统一排序绘制），所以这里整表重排一遍。
- *
- * 传入 `options.worldMatrixOf` 时保持插槽内容的全局变换（位置 / 旋转 / 缩放不变）。
  */
 export function moveSlot(
   doc: EditorDocument,
   name: string,
   targetBone: string,
-  anchor: MoveAnchor | null,
-  options?: MoveSlotOptions
+  anchor: MoveAnchor | null
 ): MoveResult {
   const check = validateSlotMove(doc, name, targetBone)
   if (!check.ok) return check
   const slot = doc.slots.find((item) => item.name === name)
   if (!slot) return check
 
-  if (options?.worldMatrixOf && slot.bone !== targetBone) {
-    preserveSlotContent(doc, name, slot.bone, targetBone, options.worldMatrixOf)
-  }
   slot.bone = targetBone
   const ordered = [...doc.slots].sort((left, right) => left.zOrder - right.zOrder).filter((item) => item.name !== name)
   let index = ordered.length
@@ -284,9 +164,6 @@ export function validateDisplayMove(
  * - 源插槽的「当前显示」若被搬走，顺延到剩下的第一个（没了就置空）
  * - 目标插槽原本没有显示项时，接住这个 display
  * - 最后按附件名重算相关插槽的 displayIndex 关键帧
- *
- * 传入 `options.worldMatrixOf` 且两个插槽的宿主骨骼不同时，附件的局部 TRS 会换算到
- * 新宿主骨骼空间，**保持它的全局位置 / 旋转 / 缩放不变**（同插槽内排序不受影响）。
  */
 export function moveDisplay(
   doc: EditorDocument,
@@ -294,8 +171,7 @@ export function moveDisplay(
   name: string,
   toSlot: string,
   anchor: MoveAnchor | null,
-  skinName: string,
-  options?: MoveSlotOptions
+  skinName: string
 ): MoveResult {
   const check = validateDisplayMove(doc, fromSlot, name, toSlot, skinName)
   if (!check.ok) return check
@@ -310,16 +186,6 @@ export function moveDisplay(
   if (at < 0) return check
 
   const [moved] = source.attachments.splice(at, 1)
-
-  // 换插槽（宿主骨骼不同）时保持附件的世界变换
-  if (fromSlot !== toSlot && options?.worldMatrixOf && moved) {
-    const fromBone = doc.slots.find((item) => item.name === fromSlot)?.bone ?? ''
-    const toBone = doc.slots.find((item) => item.name === toSlot)?.bone ?? ''
-    if (fromBone !== toBone) {
-      const relative = boneSpaceDelta(fromBone, toBone, options.worldMatrixOf)
-      if (relative) preserveAttachmentWorld(moved, relative)
-    }
-  }
   let index = target.attachments.length
   if (anchor) {
     const found = target.attachments.findIndex((item) => item.name === anchor.name)

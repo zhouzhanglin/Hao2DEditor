@@ -9,6 +9,12 @@ import type { AttachmentData } from '@core/model/types'
 export const BONE_ORIGIN_RADIUS = 6
 
 /**
+ * 距离「打平」的判定容差（世界单位）：小于它就视为「一样近」。
+ * 打平时统一让**索引更大**（= 更深）的骨骼胜出 —— 骨骼数组是父在前、子在后。
+ */
+const PICK_TIE_EPSILON = 1e-6
+
+/**
  * 骨骼变换小坐标轴（gizmo）：中心 + 局部 X / Y 轴。
  * 轴按屏幕恒定长度绘制，因此这里的轴向是世界单位向量，长度由调用方按 zoom 换算。
  */
@@ -228,7 +234,13 @@ export function pickBoneHandle(
   for (let i = 0; i < skeleton.boneCount; i++) {
     if (i === preferredBone) continue
     const distance = distanceToOrigin(i)
-    if (distance <= handleRadius && (!best || distance < best.distance)) {
+    if (distance > handleRadius) continue
+    // 更近的优先；距离打平时子骨骼（索引更大）胜出 —— 与 pickBone 同一条规则
+    if (
+      !best ||
+      distance < best.distance - PICK_TIE_EPSILON ||
+      (Math.abs(distance - best.distance) <= PICK_TIE_EPSILON && i > best.boneIndex)
+    ) {
       best = { boneIndex: i, zone: 'origin', distance }
     }
   }
@@ -244,8 +256,11 @@ export interface VertexHit {
 }
 
 /**
- * 最近骨骼拾取：把鼠标位置换算到骨骼线段上的最短距离，
- * 命中阈值内取最近的一根（根骨骼优先，便于选中短骨骼）。
+ * 最近骨骼拾取：把鼠标位置换算到骨骼线段上的最短距离，命中阈值内取最近的一根。
+ *
+ * 距离几乎打平时（骨骼重叠、鼠标正好压在两条线上）取**索引更大的那根** ——
+ * 骨骼数组是父在前、子在后（compile 不重排），所以这条规则等于「子骨骼优先」：
+ * 重叠区点得到更具体的子骨骼；想选父骨骼，点它独有的那一段，或从层级树里选。
  */
 export function pickBone(skeleton: Skeleton, x: number, y: number, tolerance: number): BoneHit | null {
   let best: BoneHit | null = null
@@ -261,7 +276,14 @@ export function pickBone(skeleton: Skeleton, x: number, y: number, tolerance: nu
     // 关节本身更容易被点到
     distance = Math.min(distance, Math.hypot(x - bx, y - by))
     if (distance > tolerance) continue
-    if (!best || distance < best.distance) best = { boneIndex: i, distance }
+    // 更近的优先；距离打平时换成索引更大的（= 更深的子骨骼）
+    if (
+      !best ||
+      distance < best.distance - PICK_TIE_EPSILON ||
+      (Math.abs(distance - best.distance) <= PICK_TIE_EPSILON && i > best.boneIndex)
+    ) {
+      best = { boneIndex: i, distance }
+    }
   }
   return best
 }

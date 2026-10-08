@@ -87,6 +87,7 @@ import {
 import ExportDialog from '@ui/widgets/ExportDialog'
 import type { ExportMode } from '@ui/widgets/ExportDialog'
 import { deleteSelectedTrack, keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
+import { deleteMeshVertex } from '@editor/commands/authoringCommands'
 
 export default function App() {
   const mode = useModeStore((s) => s.mode)
@@ -411,6 +412,33 @@ export default function App() {
         const switched = useToolStore.getState().tool !== before
         flash(`骨骼工具：${GIZMO_LABEL[next]}（${event.key.toUpperCase()}）${switched ? '· 已退出绘制工具' : ''}`)
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
+        // 优先：视口里选中了网格顶点（网格 / FFD 工具点选）→ 删顶点。
+        // 顶点属于**绑定网格**，只在 Pose 态能改（Animate 态拖顶点写的是 FFD 帧，顶点本身没动）
+        const pick = useSelectionStore.getState()
+        if (pick.vertices.length > 0) {
+          if (useModeStore.getState().mode !== 'pose') {
+            flash('删除顶点改的是绑定网格：请切到 Pose 状态')
+          } else {
+            // 选中的是**共享缓冲**下标，必须换算成附件自己的顶点下标（跨插槽合并过）；
+            // 顺带以它为准确定是哪个插槽 / 附件 —— 点选顶点不会改「选中的附件」
+            const ref = getActiveScene()?.vertexRefAt(pick.vertices[0]) ?? null
+            if (!ref) {
+              flash('顶点信息已过期：请在视口里重新点选顶点')
+            } else {
+              let removed = false
+              useProjectStore.getState().update('删除网格顶点', (draft) => {
+                removed = deleteMeshVertex(draft, ref.slot, ref.attachment, ref.vertex)
+              })
+              if (removed) useSelectionStore.getState().selectVertices([])
+              flash(
+                removed
+                  ? `已删除「${ref.attachment}」的顶点 #${ref.vertex}`
+                  : '删除失败：顶点不存在或网格至少需要保留 3 个顶点'
+              )
+            }
+          }
+          return
+        }
         // 选中了具体关键帧 → 删帧；只点选了某条通道 → 删整条通道
         const timeline = useTimelineStore.getState()
         if (timeline.selectedKeys.length === 0 && timeline.selectedTrack) {

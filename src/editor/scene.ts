@@ -497,6 +497,26 @@ export class EditorScene {
     return pickVertex(this.meshResult, worldX, worldY, this.viewport.pixelsToWorld(9))
   }
 
+  /**
+   * 把「共享顶点缓冲里的下标」换算成**附件自己的顶点下标**（同时给出它属于哪个插槽 / 附件）。
+   *
+   * 视口点选返回的是共享缓冲下标（按插槽分组的合并结果），而顶点编辑命令
+   * （删顶点 / 权重 / FFD）操作的是附件内部的顶点数组 —— 两者不能混用：
+   * 直接拿共享下标去删，要么越界（表现为「删除失败」），要么删到别的附件上。
+   */
+  vertexRefAt(vertexIndex: number): { slot: string; attachment: string; vertex: number } | null {
+    const mesh = this.meshResult
+    const bundle = this.bundle
+    if (!mesh || !bundle || vertexIndex < 0 || vertexIndex >= mesh.vertexCount) return null
+    const slotIndex = mesh.sourceSlot[vertexIndex]
+    const slotData = bundle.asset.slots[slotIndex]
+    if (!slotData) return null
+    const display = bundle.skeleton.slotDisplayIndex[slotIndex]
+    const current = this.attachmentAt(slotIndex, display)
+    if (!current) return null
+    return { slot: slotData.name, attachment: current.name, vertex: mesh.sourceVertex[vertexIndex] }
+  }
+
   /** 附件操作器拾取：旋转环 / 中心 / X-Y 轴（与骨骼 gizmo 同一套判定，尺寸相同） */
   pickAttachmentGizmoAt(worldX: number, worldY: number): GizmoPart | null {
     const state = this.viewState.selectedAttachment

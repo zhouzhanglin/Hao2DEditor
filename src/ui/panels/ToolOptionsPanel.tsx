@@ -7,6 +7,7 @@ import { useProjectStore } from '@editor/store/projectStore'
 import { ColorField, FieldGroup, NumberField, SelectField } from '@ui/widgets/fields'
 import { getActiveScene } from '@editor/activeScene'
 import { runAutoWeights } from '@editor/tools/authoringTools'
+import { buildGridMesh, buildOutlineMesh } from '@editor/commands/meshActions'
 import { removeDeformKeyframe } from '@editor/commands/animationCommands'
 
 export interface ToolOptionsPanelProps {
@@ -65,9 +66,10 @@ export default function ToolOptionsPanel({ onStatus = () => undefined }: ToolOpt
 
   // 各分组只在「当前状态下真的有用」时才显示，避免 Animate 态下摆一堆用不上的绑定期参数
   const weightTool = tools.tool === 'weight' && mode === 'pose'
-  const vertexTool = tools.tool === 'ffd' && mode === 'pose'
+  /** 网格 / FFD 工具：密度参数与生成入口在两种模式下都显示（Animate 态拖顶点写 FFD 帧时也要能看 / 调密度） */
+  const meshTool = tools.tool === 'ffd'
   const showFfdReset = mode === 'animate' && hasAttachment
-  const bindingToolIdle = mode !== 'pose' && (tools.tool === 'weight' || tools.tool === 'ffd' || tools.tool === 'bone')
+  const bindingToolIdle = mode !== 'pose' && (tools.tool === 'weight' || tools.tool === 'bone')
 
   return (
     <div className="flex flex-col">
@@ -116,10 +118,10 @@ export default function ToolOptionsPanel({ onStatus = () => undefined }: ToolOpt
         </FieldGroup>
       ) : null}
 
-      {vertexTool ? (
+      {meshTool ? (
         <FieldGroup title="网格 / FFD">
           <NumberField
-            label="细分数"
+            label="密度"
             value={tools.gridDivisions}
             step={1}
             min={1}
@@ -129,8 +131,31 @@ export default function ToolOptionsPanel({ onStatus = () => undefined }: ToolOpt
           />
           <p className="flex items-center gap-1 text-3xs text-content-lo">
             <Grid3x3 size={10} />
-            Region 转网格时按该细分生成规则栅格并三角化
+            生成 / 重设网格时的栅格细分（{tools.gridDivisions}×{tools.gridDivisions}）：越大顶点越密、越贴合形状
           </p>
+          <div className="flex flex-wrap gap-1 pt-0.5">
+            <button
+              type="button"
+              className="hao-btn h-[20px] px-2 text-3xs"
+              title="把选中的图片（Region）按密度切分成规则栅格网格并三角化，之后可用权重刷 / 顶点工具编辑"
+              onClick={() => onStatus(buildGridMesh(tools.gridDivisions).message)}
+            >
+              转为网格（{tools.gridDivisions}×{tools.gridDivisions}）
+            </button>
+            <button
+              type="button"
+              className="hao-btn h-[20px] px-2 text-3xs"
+              title="沿图片不透明像素的轮廓生成贴合网格（透明区域不占三角形）；密度控制顶点数量级，也可用来重设手动编辑过的网格"
+              onClick={() => onStatus(buildOutlineMesh(tools.gridDivisions).message)}
+            >
+              自动生成网格
+            </button>
+          </div>
+          {mode !== 'pose' ? (
+            <p className="text-3xs text-content-lo">
+              Animate 态拖顶点写的是 FFD 帧；生成 / 重设绑定网格请切到 Pose 状态
+            </p>
+          ) : null}
         </FieldGroup>
       ) : null}
 

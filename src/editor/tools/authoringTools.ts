@@ -24,6 +24,7 @@ import {
   uniqueName
 } from '../commands/authoringCommands'
 import type { BrushMode, VertexSample } from '../commands/authoringCommands'
+import { fitUvField, isInteriorVertex } from '@core/mesh/triangulate'
 
 export interface PointerInfo {
   world: Vec2
@@ -78,6 +79,12 @@ interface DragSession {
   startWorld: Vec2
   /** 附件空间下的累计位移（顶点拖拽） */
   totalDelta: Vec2
+  /**
+   * 顶点拖拽的 UV 重算场（拖动开始时按邻居拟合出的原映射）。
+   * Pose 态拖**内部**顶点时用它把新位置的 UV 反算出来，贴图内容原地不动；
+   * 边缘顶点 / Animate 态（写的是 FFD 帧）为 null，UV 保持原样。
+   */
+  uvField: ((x: number, y: number) => { u: number; v: number }) | null
   paintMode: BrushMode
   moved: boolean
   /** 新建骨骼：起点（已吸附）、当前终点与父骨骼名，松开时按起点→终点生成 */
@@ -119,6 +126,7 @@ const IDLE: DragSession = {
   vertex: -1,
   startWorld: { x: 0, y: 0 },
   totalDelta: { x: 0, y: 0 },
+  uvField: null,
   paintMode: 'replace',
   moved: false,
   createStart: { x: 0, y: 0 },
@@ -204,7 +212,10 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       slot: resolved.slot,
       attachment: resolved.attachment,
       vertex: resolved.vertex,
-      startWorld: { ...info.world }
+      startWorld: { ...info.world },
+      // 内部顶点：先按邻居拟合好 UV 场，拖动时用它把 UV 一起更新（贴图不变形）
+      uvField:
+        host.mode === 'animate' ? null : prepareUvField(resolved.slot, resolved.attachment, resolved.vertex)
     }
     storeHandler.begin(host.mode === 'animate' ? '编辑 FFD' : '编辑网格顶点')
     useSelectionStore.getState().select({
@@ -1002,6 +1013,38 @@ function paintAt(host: ToolHost, world: Vec2): void {
   host.status(`已为 ${touched} 个顶点刷上「${drag.bone}」的权重`)
 }
 
+/**
+ * 为「Pose 态拖动网格内部顶点」准备 UV 重算场：用该顶点**邻居**的
+ * （附件空间位置 → UV）对应关系，拟合出这块网格原来的位置→UV 映射。
+ *
+ * 返回 null 表示不该重算 UV：边缘顶点（移动它们本来就要拉伸 / 裁剪贴图）、
+ * 非网格附件，或样本退化（邻居太少 / 几乎共线）。
+ */
+function prepareUvField(
+  slot: string,
+  attachmentName: string,
+  vertexIndex: number
+): ((x: number, y: number) => { u: number; v: number }) | null {
+  const attachment = findAttachment(useProjectStore.getState().document, slot, attachmentName)
+  if (!attachment || attachment.type !== 'mesh') return null
+  if (!isInteriorVertex(attachment.triangles, vertexIndex)) return null
+
+  const neighbours = new Set<number>()
+  for (let t = 0; t + 2 < attachment.triangles.length; t += 3) {
+    const triangle = [attachment.triangles[t], attachment.triangles[t + 1], attachment.triangles[t + 2]]
+    if (!triangle.includes(vertexIndex)) continue
+    for (const index of triangle) if (index !== vertexIndex) neighbours.add(index)
+  }
+  return fitUvField(
+    [...neighbours].map((index) => ({
+      x: attachment.vertices[index].x,
+      y: attachment.vertices[index].y,
+      u: attachment.uvs[index * 2],
+      v: attachment.uvs[index * 2 + 1]
+    }))
+  )
+}
+
 function dragVertex(host: ToolHost, world: Vec2): void {
   const scene = host.scene
   const bundle = scene.runtime
@@ -1028,9 +1071,17 @@ function dragVertex(host: ToolHost, world: Vec2): void {
     store.updateSilent((draft) => {
       const attachment = findAttachment(draft, drag.slot, drag.attachment)
       const vertex = attachment?.vertices[drag.vertex]
-      if (!vertex) return
+      if (!vertex || !attachment) return
       vertex.x += delta.x - drag.totalDelta.x
       vertex.y += delta.y - drag.totalDelta.y
+      // 内部顶点：UV 跟着新位置重算。网格顶点只要满足「UV = 原映射在该位置的值」，
+      // 贴图整块就不变形 —— 所以拖到哪就把那里的 UV 算出来（贴图原地不动）；
+      // 否则 UV 留在原处，会把贴图从拖动点「拽」出尖角
+      if (drag.uvField && attachment.uvs.length >= drag.vertex * 2 + 2) {
+        const uv = drag.uvField(vertex.x, vertex.y)
+        attachment.uvs[drag.vertex * 2] = uv.u
+        attachment.uvs[drag.vertex * 2 + 1] = uv.v
+      }
     })
   } else {
     const base = currentOffsets(store.document, scene.currentAnimation, drag.slot, drag.attachment, host.time, vertexCount)

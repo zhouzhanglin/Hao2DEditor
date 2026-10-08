@@ -298,3 +298,88 @@ function thirdVertex(triangles: readonly number[], at: number, i: number, j: num
   }
   return -1
 }
+
+/**
+ * 用一组「位置 → UV」样本点拟合最小二乘仿射映射，返回把任意位置换算成 UV 的函数。
+ *
+ * 用途：Pose 态拖动网格**内部顶点**时重算它的 UV。网格顶点只要都满足
+ * 「UV = 原映射在该位置的值」，贴图就永远不变形 —— 拖动时用邻居（位置 + UV）
+ * 把原映射拟合出来，新位置一套就得到它应有的 UV，贴图内容原地不动，
+ * 只是顶点位置（三角剖分）变了。样本退化（少于 3 点 / 几乎共线）时返回 null。
+ */
+export function fitUvField(
+  samples: readonly { x: number; y: number; u: number; v: number }[]
+): ((x: number, y: number) => { u: number; v: number }) | null {
+  if (samples.length < 3) return null
+  const count = samples.length
+  let mx = 0
+  let my = 0
+  let mu = 0
+  let mv = 0
+  for (const sample of samples) {
+    mx += sample.x
+    my += sample.y
+    mu += sample.u
+    mv += sample.v
+  }
+  mx /= count
+  my /= count
+  mu /= count
+  mv /= count
+
+  // 以质心为中心做最小二乘，解两个 2×2 正规方程（u、v 各一组，共用同一个行列式）
+  let sxx = 0
+  let syy = 0
+  let sxy = 0
+  let sxu = 0
+  let syu = 0
+  let sxv = 0
+  let syv = 0
+  for (const sample of samples) {
+    const x = sample.x - mx
+    const y = sample.y - my
+    sxx += x * x
+    syy += y * y
+    sxy += x * y
+    sxu += x * (sample.u - mu)
+    syu += y * (sample.u - mu)
+    sxv += x * (sample.v - mv)
+    syv += y * (sample.v - mv)
+  }
+  const det = sxx * syy - sxy * sxy
+  if (Math.abs(det) < 1e-12) return null
+
+  const a = (sxu * syy - syu * sxy) / det
+  const b = (syu * sxx - sxu * sxy) / det
+  const d = (sxv * syy - syv * sxy) / det
+  const e = (syv * sxx - sxv * sxy) / det
+  const c = mu - a * mx - b * my
+  const f = mv - d * mx - e * my
+  return (x, y) => ({ u: a * x + b * y + c, v: d * x + e * y + f })
+}
+
+/**
+ * 顶点是否在网格**内部**：它参与的每条边都被两个三角形共享（没有任何边界边）。
+ *
+ * 内部顶点只改变三角剖分，不影响贴图覆盖范围 —— 拖动时要重算 UV 让贴图原地不动；
+ * 边缘（凸包）顶点正相反：移动它们本来就要拉伸 / 裁剪贴图，UV 必须保持原样。
+ */
+export function isInteriorVertex(triangles: readonly number[], vertexIndex: number): boolean {
+  const owners = new Map<number, number>()
+  const keyOf = (i: number, j: number): number => (i < j ? i * 65536 + j : j * 65536 + i)
+  let touches = 0
+  for (let t = 0; t + 2 < triangles.length; t += 3) {
+    for (let k = 0; k < 3; k++) {
+      const key = keyOf(triangles[t + k], triangles[t + ((k + 1) % 3)])
+      owners.set(key, (owners.get(key) ?? 0) + 1)
+      if (triangles[t + k] === vertexIndex) touches += 1
+    }
+  }
+  if (touches === 0) return false
+  for (const [key, count] of owners) {
+    const i = Math.floor(key / 65536)
+    const j = key % 65536
+    if ((i === vertexIndex || j === vertexIndex) && count !== 2) return false
+  }
+  return true
+}

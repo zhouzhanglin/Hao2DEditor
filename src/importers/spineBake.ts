@@ -286,6 +286,12 @@ export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | n
       })
     }
 
+    // 官方运行库读不到皮肤时（典型是 3.3 的对象式 `skins`，4.x 运行库只认数组式），
+    // 采样出的 attachment 恒为 null —— 照常产出 slot 轨道会把**所有槽位写成「空显示」**，
+    // 覆盖掉调用方内置解析的正确结果（表现：Pose 正常、一播动画整个角色消失）。
+    // 这种情况只给骨骼轨道，slot 交给内置解析。
+    const hasSkin = data.skins !== undefined && data.skins.length > 0
+
     const out: BakedAnimation[] = []
     for (const animation of data.animations) {
       const duration = animation.duration > 0 ? animation.duration : 1 / fps
@@ -310,6 +316,22 @@ export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | n
           const index = boneIndexOf.get(bone.data.name)
           if (index === undefined) continue
           const pose = bone.appliedPose
+          // 采样值必须是有限数。官方运行库对**过老的格式**只有部分兼容：实测 3.3 的工程
+          // （对象式 skins + Y 轴朝下的坐标约定）里，所有采样值的 y 分量都会变成 NaN ——
+          // 一旦带进轨道，播放时整条骨骼链连同网格顶点全部 NaN，角色直接消失
+          //（表现：Pose 正常，一播动画就没图像）。发现异常就整体放弃烘焙，
+          // 让调用方回退到内置解析（那边对老格式有完整兼容）。
+          if (
+            !Number.isFinite(pose.x) ||
+            !Number.isFinite(pose.y) ||
+            !Number.isFinite(pose.rotation) ||
+            !Number.isFinite(pose.scaleX) ||
+            !Number.isFinite(pose.scaleY) ||
+            !Number.isFinite(pose.shearX) ||
+            !Number.isFinite(pose.shearY)
+          ) {
+            return null
+          }
           let track = boneTracks.get(index)
           if (!track) {
             track = { bone: index, translate: [], rotate: [], scale: [], shear: [] }
@@ -321,18 +343,20 @@ export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | n
           track.shear.push({ time, x: pose.shearX, y: pose.shearY })
         }
 
-        for (const slot of skeleton.slots) {
-          const index = slotIndexOf.get(slot.data.name)
-          if (index === undefined) continue
-          const pose = slot.appliedPose
-          let track = slotTracks.get(index)
-          if (!track) {
-            track = { slot: index, display: [], color: [] }
-            slotTracks.set(index, track)
+        if (hasSkin) {
+          for (const slot of skeleton.slots) {
+            const index = slotIndexOf.get(slot.data.name)
+            if (index === undefined) continue
+            const pose = slot.appliedPose
+            let track = slotTracks.get(index)
+            if (!track) {
+              track = { slot: index, display: [], color: [] }
+              slotTracks.set(index, track)
+            }
+            const attachment = pose.attachment
+            track.display.push({ time, name: attachment ? attachment.name : '' })
+            track.color.push({ time, r: pose.color.r, g: pose.color.g, b: pose.color.b, a: pose.color.a })
           }
-          const attachment = pose.attachment
-          track.display.push({ time, name: attachment ? attachment.name : '' })
-          track.color.push({ time, r: pose.color.r, g: pose.color.g, b: pose.color.b, a: pose.color.a })
         }
       }
 

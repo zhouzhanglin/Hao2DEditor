@@ -584,6 +584,10 @@ function applyBakedAnimations(
         curve: null
       }))
     }))
+    // slot 轨道为空时**不要覆盖**：这只有一种来源 —— 官方运行库没读到皮肤
+    // （如 3.3 的对象式 skins），此时采样值全是 null，覆盖会把所有槽位隐藏、
+    // 角色整个消失。骨骼数据与皮肤无关，照常采用烘焙结果。
+    if (item.slots.length === 0) continue
     target.slots = item.slots.map((track) => {
       const anim = emptySlotAnim(track.slot)
       const index = attIndexBySlot.get(slots[track.slot]?.name ?? '')

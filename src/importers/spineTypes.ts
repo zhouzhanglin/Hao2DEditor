@@ -13,8 +13,10 @@ export interface SpineBoneJson {
   shearY?: number
   inheritRotation?: boolean
   inheritScale?: boolean
-  /** Spine 4.x：normal / onlyTranslation / noRotationOrReflection / noScale / noScaleOrReflection */
+  /** Spine 3.8–4.1 的继承枚举：normal / onlyTranslation / noRotationOrReflection / noScale / noScaleOrReflection */
   transform?: string
+  /** Spine 4.2+ 改名的同一套枚举（早期只读了 transform，4.2+ 资源里的 inherit 会被忽略） */
+  inherit?: string
 }
 
 export interface SpineSlotJson {
@@ -156,6 +158,11 @@ export interface SpineJson {
   skeleton?: { spine?: string; fps?: number; hash?: string; images?: string }
   bones?: SpineBoneJson[]
   slots?: SpineSlotJson[]
+  /**
+   * 4.2+ 的约束统一放在顶层 `constraints` 数组里（每项带 `type`）：
+   * 旧版（3.8–4.1）才按类型分在 `ik` / `transform` / `path` 三处。
+   */
+  constraints?: Array<SpineIkJson & Partial<SpineTransformConstraintJson> & { type?: string }>
   ik?: SpineIkJson[]
   transform?: SpineTransformConstraintJson[]
   path?: SpinePathConstraintJson[]

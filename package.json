@@ -16,6 +16,7 @@
     "package": "npm run build && electron-builder --dir"
   },
   "dependencies": {
+    "@esotericsoftware/spine-core": "^4.3.13",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "immer": "^10.1.1",

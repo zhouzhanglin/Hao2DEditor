@@ -220,7 +220,8 @@ export async function importSpineFlow(): Promise<IoResult> {
     json: json as never,
     regions: parsed.regions,
     pageSizes,
-    pageImages
+    pageImages,
+    atlasText
   })
   const document = finishImport(result.asset, pageImages, pageSizes)
   const warnings = [...parsed.warnings, ...result.warnings]
@@ -429,7 +430,8 @@ export async function importDroppedPaths(paths: readonly string[]): Promise<IoRe
           json: parsed as never,
           regions: atlas.regions,
           pageSizes: resolved.pageSizes,
-          pageImages: resolved.pageImages
+          pageImages: resolved.pageImages,
+          atlasText
         })
         const document = finishImport(result.asset, resolved.pageImages, resolved.pageSizes)
         return {

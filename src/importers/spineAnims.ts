@@ -125,10 +125,11 @@ export function importSpineAnimations(
       const rawX = numberOr(key.x, 0)
       const nrawX = next ? numberOr(next.x, 0) : rawX
       const e = curveOfChannel(key.curve, 0, timeOf(key), next ? timeOf(next) : timeOf(key), rawX, nrawX)
-      // 剪切帧同样是「相对 setup 的增量」，叠加绑定姿态的剪切值
+      // 与参考库一致：shear 帧**原样保留**（不叠加 setup）
+      // —— 参考的注释明确写着「setup 里没有 shear，且运行期不采样它，原样保留」
       track.shear.push({
         time: timeOf(key),
-        value: { x: bone.localShear.x + rawX, y: bone.localShear.y + numberOr(key.y, 0) },
+        value: { x: rawX, y: numberOr(key.y, 0) },
         ...e
       })
       duration = Math.max(duration, timeOf(key))
@@ -410,6 +411,13 @@ function curveOfChannel(
   const c2v = numberOr(curve[base + 3], 0)
   const dt = time2 - time1
   if (Math.abs(dt) < 1e-9) return { easing: Easing.Linear, curve: null }
+  // 旧版（≤ 4.1）的 curve 是**归一化**的 0..1 控制点，四个分量都落在 [0,1]，可直接交给运行时；
+  // 4.2+ 的 curve 换成了「(时间, 值) 空间的绝对坐标」—— 量级会明显超出 [0,1]
+  //（例如值的控制点 81.5、角度的 30），必须按帧区间归一化。用分量范围区分两种写法。
+  const in01 = (value: number): boolean => value >= -1e-6 && value <= 1 + 1e-6
+  if (in01(c1t) && in01(c1v) && in01(c2t) && in01(c2v)) {
+    return { easing: Easing.Bezier, curve: [c1t, c1v, c2t, c2v] }
+  }
   const dv = value2 - value1
   const flat = Math.abs(dv) < 1e-9
   return {

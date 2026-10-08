@@ -23,11 +23,19 @@ import type {
   SpineJson,
   SpineSlotJson
 } from './spineTypes'
+import { bakeSpineAnimations } from './spineBake'
+import type { BakedAnimation } from './spineBake'
+import { Easing, emptySlotAnim } from '@core/model/animation'
 
 export interface SpineImportInput {
   json: SpineJson
   regions: readonly AtlasRegion[]
   pageSizes: PageSizes
+  /**
+   * 图集原始文本。提供时动画轨道会交给**官方 Spine 运行库**烘焙
+   * （缓动两种写法 / mix / IK 与约束 / 版本差异全由它处理），失败则回退内置解析。
+   */
+  atlasText?: string
   /** 图集页名 → 图片绝对路径 */
   pageImages?: Record<string, string>
 }
@@ -86,9 +94,17 @@ function orderBones(bones: readonly SpineBoneJson[], warnings: string[]): {
   return { ordered, index, origToNew }
 }
 
-/** Spine 的 inherit 语义：4.x 用 transform 枚举，3.3/3.4 用两个布尔 */
+/**
+ * 骨骼的继承语义。
+ *
+ * - **4.2+** 用 `inherit` 字段（Normal / OnlyTranslation / NoRotationOrReflection / NoScale / NoScaleOrReflection）
+ * - **3.8–4.1** 用 `transform` 字段（取值相同），更早用 `inheritRotation` / `inheritScale` 两个布尔
+ *
+ * 早先只读 `transform`，4.2+ 资源里的 `inherit` 全被忽略 —— 典型表现就是
+ * 脚（`noRotationOrReflection`）跟着小腿一起转，而它本该保持自身朝向。
+ */
 function inheritOf(bone: SpineBoneJson): { rotation: boolean; scale: boolean } {
-  const transform = (bone.transform ?? '').toLowerCase()
+  const transform = (bone.inherit ?? bone.transform ?? '').toLowerCase()
   if (transform === 'onlytranslation') return { rotation: false, scale: false }
   if (transform === 'norotationorreflection') return { rotation: false, scale: true }
   if (transform === 'noscale') return { rotation: true, scale: false }
@@ -474,6 +490,22 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
     })
   )
 
+  // 动画的骨骼 / 插槽轨道优先用**官方运行库烘焙**：缓动的两种写法、mix、IK 与其它
+  // 约束、各版本差异全部由官方算好，我们只是按帧采样最终局部姿态。失败则回退内置解析。
+  const baked = input.atlasText
+    ? bakeSpineAnimations({
+        json,
+        atlasText: input.atlasText,
+        boneNames: bones.map((bone) => bone.name),
+        slotNames: slots.map((slot) => slot.name),
+        fps: skeletonOnly.frameRate
+      })
+    : null
+  const bakedApplied = baked ? applyBakedAnimations(animations, baked, slots, attIndexBySlot) : false
+  if (input.atlasText && !baked) {
+    warnings.push('官方运行库烘焙失败，动画改用内置解析（缓动 / IK 可能与官方有差异）')
+  }
+
   const images: ImageRef[] = textureNames.map((name) => ({
     name,
     path: input.pageImages?.[name] ?? name,
@@ -492,12 +524,82 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
     animations,
     textureNames,
     defaultSkinIndex,
-    runtimeIK: true,
+    // IK 已经被官方运行库烘焙进骨骼轨道（含约束修正），运行期不再重复求解 ——
+    // 否则会出现「Pose 态的脚不对」「膝盖朝反」这类问题
+    runtimeIK: !bakedApplied,
     images
   })
   asset.bindposes = bindposes
 
   return { asset, warnings }
+}
+
+/**
+ * 用官方运行库烘焙出的轨道**替换**内置解析的骨骼 / 插槽轨道。
+ *
+ * 采样密度足够（默认 30fps），所以一律用线性缓动；换装按**附件名**解析成显示下标
+ * （换皮肤后按名解析才正确）。FFD / drawOrder / 事件 / 约束仍沿用内置解析的结果。
+ */
+function applyBakedAnimations(
+  animations: AnimData[],
+  baked: readonly BakedAnimation[],
+  slots: readonly SlotData[],
+  attIndexBySlot: Map<string, Map<string, number>>
+): boolean {
+  let applied = false
+  const byName = new Map(animations.map((animation) => [animation.name, animation]))
+  for (const item of baked) {
+    const target = byName.get(item.name)
+    if (!target) continue
+    applied = true
+    if (item.duration > 0) target.duration = item.duration
+    target.bones = item.bones.map((track) => ({
+      boneIndex: track.bone,
+      translate: track.translate.map((key) => ({
+        time: key.time,
+        value: { x: key.x, y: key.y },
+        easing: Easing.Linear,
+        curve: null
+      })),
+      rotate: track.rotate.map((key) => ({
+        time: key.time,
+        value: key.value,
+        easing: Easing.Linear,
+        curve: null
+      })),
+      scale: track.scale.map((key) => ({
+        time: key.time,
+        value: { x: key.x, y: key.y },
+        easing: Easing.Linear,
+        curve: null
+      })),
+      shear: track.shear.map((key) => ({
+        time: key.time,
+        value: { x: key.x, y: key.y },
+        easing: Easing.Linear,
+        curve: null
+      }))
+    }))
+    target.slots = item.slots.map((track) => {
+      const anim = emptySlotAnim(track.slot)
+      const index = attIndexBySlot.get(slots[track.slot]?.name ?? '')
+      for (const key of track.display) {
+        const found = key.name ? (index?.get(key.name) ?? -1) : -1
+        anim.displayIndex.push({ time: key.time, value: found, easing: Easing.Stepped, curve: null })
+        anim.displayAttachment.push(key.name)
+      }
+      for (const key of track.color) {
+        anim.color.push({
+          time: key.time,
+          value: { r: key.r, g: key.g, b: key.b, a: key.a },
+          easing: Easing.Linear,
+          curve: null
+        })
+      }
+      return anim
+    })
+  }
+  return applied
 }
 
 function buildConstraints(
@@ -507,7 +609,20 @@ function buildConstraints(
 ): Constraint[] {
   const constraints: Constraint[] = []
 
-  for (const ik of json.ik ?? []) {
+  // 4.2+ 把约束统一放顶层 `constraints`（每项带 type），旧版按类型分在 ik / transform / path。
+  // 早先只读旧字段，4.2+ 的资源（如 raptor 4.3）**一个约束都读不到** —— IK 完全不生效，
+  // 动画里的 ik 轨道还会报「约束不存在」。
+  const legacyIk = [...(json.ik ?? [])]
+  const legacyTransform = [...(json.transform ?? [])]
+  const legacyPath = [...(json.path ?? [])]
+  for (const item of json.constraints ?? []) {
+    const type = (item.type ?? '').toLowerCase()
+    if (type === 'ik') legacyIk.push(item)
+    else if (type === 'transform') legacyTransform.push(item)
+    else if (type === 'path') legacyPath.push(item)
+  }
+
+  for (const ik of legacyIk) {
     const bones = remapBones(ik.bones, boneIndex)
     const target = boneIndex.get(ik.target)
     if (bones.length === 0 || target === undefined) {
@@ -522,7 +637,9 @@ function buildConstraints(
         boneIndices: bones,
         targetBoneIndex: target,
         mix: ik.mix ?? 1,
-        bendSign: ik.bendPositive === false ? -1 : 1,
+        // 与参考库一致：bendPositive(true) → -1。解算器把它当旋转方向符号用
+        // （`kneeDir = Rotate(u, a1 * bendSign)`），符号反了膝盖会朝另一侧弯
+        bendSign: ik.bendPositive === false ? 1 : -1,
         useBoneLength: false,
         compress: ik.compress ?? false,
         stretch: ik.stretch ?? false,
@@ -531,7 +648,7 @@ function buildConstraints(
     )
   }
 
-  for (const transform of json.transform ?? []) {
+  for (const transform of legacyTransform) {
     const bones = remapBones(transform.bones, boneIndex)
     const target = boneIndex.get(transform.target)
     if (bones.length === 0 || target === undefined) {
@@ -564,7 +681,7 @@ function buildConstraints(
     )
   }
 
-  for (const path of json.path ?? []) {
+  for (const path of legacyPath) {
     const bones = remapBones(path.bones, boneIndex)
     if (bones.length === 0 || path.target === undefined) {
       warnings.push(`路径约束「${path.name}」信息不完整，已跳过`)

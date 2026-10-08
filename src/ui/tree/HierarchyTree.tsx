@@ -74,6 +74,10 @@ interface TreeRowProps {
   /** 图标可点击：行内快捷操作（display 行 = 切换显示 / 隐藏）。不传则图标只是装饰 */
   onIconClick?: (event: React.MouseEvent<HTMLButtonElement>) => void
   iconTitle?: string
+  /** 行首第一列：显示 / 隐藏（插槽的 visible）。不传则该列留空占位，保证各行列对齐 */
+  visibleSwitch?: { on: boolean; title: string; onToggle: () => void }
+  /** 行首第二列：锁定 / 解锁（骨骼的 locked）。不传则该列留空占位 */
+  lockSwitch?: { on: boolean; title: string; onToggle: () => void }
   meta?: string
   trailing?: React.ReactNode
   expandable?: boolean
@@ -108,6 +112,8 @@ function TreeRow({
   icon,
   onIconClick,
   iconTitle,
+  visibleSwitch,
+  lockSwitch,
   meta,
   trailing,
   expandable,
@@ -138,7 +144,6 @@ function TreeRow({
         nodeHint === 'below' ? 'shadow-[inset_0_-2px_0_0_rgba(34,211,238,0.9)]' : '',
         dragPayload ? 'cursor-grab active:cursor-grabbing' : ''
       ].join(' ')}
-      style={{ paddingLeft: 4 + depth * 12 }}
       data-slot={dataSlot}
       onClick={onSelect}
       onContextMenu={onContextMenu}
@@ -201,53 +206,100 @@ function TreeRow({
       }
     >
       {active ? <span className="absolute left-0 top-0 h-full w-[2px] bg-accent" /> : null}
-      {expandable ? (
-        <button
-          type="button"
-          className="flex h-[14px] w-[14px] shrink-0 items-center justify-center text-content-lo hover:text-content-hi"
-          onClick={(e) => {
-            e.stopPropagation()
-            onToggle?.()
-          }}
-        >
-          {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-        </button>
-      ) : (
-        <span className="w-[14px] shrink-0" />
-      )}
-      {onIconClick ? (
-        <button
-          type="button"
-          tabIndex={-1}
-          title={iconTitle}
-          className="flex h-[14px] w-[14px] shrink-0 cursor-pointer items-center justify-center rounded text-content-lo hover:bg-ink-600 hover:text-content-mid"
-          onClick={(event) => {
-            // 图标是行内快捷操作：拦掉冒泡，避免同时触发行点击（选中）
-            event.stopPropagation()
-            onIconClick(event)
-          }}
-        >
-          {icon}
-        </button>
-      ) : (
-        <span className="flex h-[14px] w-[14px] shrink-0 items-center justify-center text-content-lo">{icon}</span>
-      )}
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {meta ? <span className="shrink-0 font-mono text-3xs text-content-lo">{meta}</span> : null}
-      {trailing}
-      {onDelete ? (
-        <button
-          type="button"
-          title="删除"
-          className="hidden h-[16px] w-[16px] items-center justify-center rounded text-danger/80 group-hover:flex hover:bg-danger/15"
-          onClick={(e) => {
-            e.stopPropagation()
-            onDelete()
-          }}
-        >
-          <Trash2 size={11} />
-        </button>
-      ) : null}
+      {/* 行首两列（固定宽度、不随层级缩进）：显示 / 锁定 */}
+      <span className="flex w-[18px] shrink-0 justify-center">
+        {visibleSwitch ? (
+          <button
+            type="button"
+            tabIndex={-1}
+            title={visibleSwitch.title}
+            className={[
+              'flex h-[16px] w-[16px] cursor-pointer items-center justify-center rounded hover:bg-ink-600',
+              // 显示中 = 常规色；已隐藏 = 警示色（一眼看出这行被关掉了）
+              visibleSwitch.on ? 'text-content-mid hover:text-content-hi' : 'text-warn/75 hover:text-warn'
+            ].join(' ')}
+            onClick={(event) => {
+              // 行首开关：拦掉冒泡，别连带选中整行
+              event.stopPropagation()
+              visibleSwitch.onToggle()
+            }}
+          >
+            {visibleSwitch.on ? <Eye size={11} /> : <EyeOff size={11} />}
+          </button>
+        ) : null}
+      </span>
+      <span className="flex w-[18px] shrink-0 justify-center">
+        {lockSwitch ? (
+          <button
+            type="button"
+            tabIndex={-1}
+            title={lockSwitch.title}
+            className={[
+              'flex h-[16px] w-[16px] cursor-pointer items-center justify-center rounded hover:bg-ink-600',
+              // 已锁 = 琥珀色**实心**锁（最醒目）；未锁 = 很淡的开口锁，悬停该行时才提亮
+              lockSwitch.on
+                ? 'text-warn hover:text-warn'
+                : 'text-content-lo/45 group-hover:text-content-mid'
+            ].join(' ')}
+            onClick={(event) => {
+              event.stopPropagation()
+              lockSwitch.onToggle()
+            }}
+          >
+            {lockSwitch.on ? <Lock size={11} fill="currentColor" /> : <Unlock size={11} />}
+          </button>
+        ) : null}
+      </span>
+      {/* 内容：层级缩进只作用在这里，两列始终对齐在最左侧 */}
+      <div className="flex min-w-0 flex-1 items-center gap-1" style={{ paddingLeft: depth * 12 }}>
+        {expandable ? (
+          <button
+            type="button"
+            className="flex h-[14px] w-[14px] shrink-0 items-center justify-center text-content-lo hover:text-content-hi"
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggle?.()
+            }}
+          >
+            {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+          </button>
+        ) : (
+          <span className="w-[14px] shrink-0" />
+        )}
+        {onIconClick ? (
+          <button
+            type="button"
+            tabIndex={-1}
+            title={iconTitle}
+            className="flex h-[14px] w-[14px] shrink-0 cursor-pointer items-center justify-center rounded text-content-lo hover:bg-ink-600 hover:text-content-mid"
+            onClick={(event) => {
+              // 图标是行内快捷操作：拦掉冒泡，避免同时触发行点击（选中）
+              event.stopPropagation()
+              onIconClick(event)
+            }}
+          >
+            {icon}
+          </button>
+        ) : (
+          <span className="flex h-[14px] w-[14px] shrink-0 items-center justify-center text-content-lo">{icon}</span>
+        )}
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {meta ? <span className="shrink-0 font-mono text-3xs text-content-lo">{meta}</span> : null}
+        {trailing}
+        {onDelete ? (
+          <button
+            type="button"
+            title="删除"
+            className="hidden h-[16px] w-[16px] items-center justify-center rounded text-danger/80 group-hover:flex hover:bg-danger/15"
+            onClick={(e) => {
+              e.stopPropagation()
+              onDelete()
+            }}
+          >
+            <Trash2 size={11} />
+          </button>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -793,22 +845,16 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         // 拖到骨骼行 = 在这根骨骼下新建一个插槽
         onDropImage={(imageNames) => addSlotFromImage(bone.name, imageNames)}
         onContextMenu={(event) => openMenu(event, { kind: 'bone', name: bone.name, bone: bone.parent })}
-        trailing={
-          <button
-            type="button"
-            title={bone.locked ? '解锁' : '锁定'}
-            className="flex h-[16px] w-[16px] items-center justify-center rounded text-content-lo hover:bg-ink-600 hover:text-content-hi"
-            onClick={(e) => {
-              e.stopPropagation()
-              update('切换骨骼锁定', (draft) => {
-                const target = draft.bones.find((b) => b.name === bone.name)
-                if (target) target.locked = !target.locked
-              })
-            }}
-          >
-            {bone.locked ? <Lock size={11} /> : <Unlock size={11} />}
-          </button>
-        }
+        // 锁定列（行首第二列）：骨骼可锁 / 解锁
+        lockSwitch={{
+          on: bone.locked,
+          title: bone.locked ? '解锁' : '锁定',
+          onToggle: () =>
+            update('切换骨骼锁定', (draft) => {
+              const target = draft.bones.find((b) => b.name === bone.name)
+              if (target) target.locked = !target.locked
+            })
+        }}
         onDelete={
           document.bones.length > 1
             ? () =>
@@ -921,22 +967,16 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         onSelect={() => selection.selectSlot(slot.name)}
         onDropImage={(imageNames) => addDisplay(slot.name, imageNames)}
         onContextMenu={(event) => openMenu(event, { kind: 'slot', name: slot.name, bone: slot.bone })}
-        trailing={
-          <button
-            type="button"
-            title={slot.visible ? '隐藏插槽' : '显示插槽'}
-            className="flex h-[16px] w-[16px] items-center justify-center rounded text-content-lo hover:bg-ink-600 hover:text-content-hi"
-            onClick={(e) => {
-              e.stopPropagation()
-              update('切换插槽可见性', (draft) => {
-                const target = draft.slots.find((s) => s.name === slot.name)
-                if (target) target.visible = !target.visible
-              })
-            }}
-          >
-            {slot.visible ? <Eye size={11} /> : <EyeOff size={11} />}
-          </button>
-        }
+        // 显示列（行首第一列）：插槽可显示 / 隐藏
+        visibleSwitch={{
+          on: slot.visible,
+          title: slot.visible ? '隐藏插槽' : '显示插槽',
+          onToggle: () =>
+            update('切换插槽可见性', (draft) => {
+              const target = draft.slots.find((s) => s.name === slot.name)
+              if (target) target.visible = !target.visible
+            })
+        }}
         onDelete={() =>
           update('删除插槽', (draft) => {
             deleteSlot(draft, slot.name)

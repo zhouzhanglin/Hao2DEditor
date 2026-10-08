@@ -70,8 +70,11 @@ export interface DbSkinJson {
 
 export interface DbIkJson {
   name?: string
+  /** 末端骨骼 */
   bone?: string
   target?: string
+  /** 末端之外还要向上追溯的骨骼数（chain:1 即「父 + 末端」两骨链） */
+  chain?: number
   bendPositive?: boolean
   weight?: number
 }

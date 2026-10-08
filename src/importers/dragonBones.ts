@@ -503,21 +503,44 @@ export function importDragonBones(input: DragonBonesImportInput): DragonBonesImp
     }
   }
 
-  const iks: IkConstraint[] = (armature.ik ?? []).map((ik) => {
-    const bone = boneIndex.get(ik.bone ?? '')
-    const target = boneIndex.get(ik.target ?? '')
-    return createIkConstraint({
-      name: ik.name ?? 'ik',
-      order: 0,
-      enabled: true,
-      boneIndices: bone === undefined || target === undefined ? [] : [bone],
-      targetBoneIndex: target ?? -1,
-      mix: ik.weight ?? 1,
-      bendSign: ik.bendPositive === false ? -1 : 1,
-      // DragonBones 用「根骨 length × 缩放」作为 l1
-      useBoneLength: true
+  const iks: IkConstraint[] = (armature.ik ?? [])
+    .map((ik) => {
+      const tip = boneIndex.get(ik.bone ?? '')
+      const target = boneIndex.get(ik.target ?? '')
+      // DragonBones 的 IK：`bone` 是**末端**骨骼，`chain` 是「末端之外还要向上追溯的骨骼数」
+      //（chain:1 即「父 + 末端」两骨链）。boneIndices 约定为「根 → … → 末端」，末端在最后。
+      //
+      // 早先只放了一根末端骨骼、完全忽略 chain —— 两骨腿会退化成 CCD 迭代解，
+      // 脚解不到 IK 目标（表现：播放含 IK 的动画时脚穿到地面以下、膝盖方向错）。
+      const chainIndices: number[] = []
+      if (tip !== undefined) {
+        const up: number[] = []
+        let cur = tip
+        const chain = ik.chain ?? 1
+        for (let c = 0; c < chain; c++) {
+          const parent = boneData[cur]?.parentIndex ?? -1
+          if (parent < 0) break
+          up.push(parent)
+          cur = parent
+        }
+        // 从末端向上收集后反转，末端补在最后
+        for (let c = up.length - 1; c >= 0; c--) chainIndices.push(up[c])
+        chainIndices.push(tip)
+      }
+      return createIkConstraint({
+        name: ik.name ?? 'ik',
+        order: 0,
+        enabled: true,
+        boneIndices: chainIndices,
+        targetBoneIndex: target ?? -1,
+        mix: ik.weight ?? 1,
+        // 对齐参考库：DB 的 bendPositive（缺省 true）表示正向弯曲 → +1
+        bendSign: ik.bendPositive === false ? -1 : 1,
+        // DragonBones 用「根骨 length × 缩放」作为 l1
+        useBoneLength: true
+      })
     })
-  }).filter((ik) => ik.boneIndices.length > 0 && ik.targetBoneIndex >= 0)
+    .filter((ik) => ik.boneIndices.length > 0 && ik.targetBoneIndex >= 0)
 
   const frameRate = armature.frameRate ?? input.json.frameRate ?? 24
   const animations: AnimData[] = (armature.animation ?? []).map((animation) =>

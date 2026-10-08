@@ -8,7 +8,7 @@ import type {
   EditorDocument
 } from '@core/model/authoring'
 import type { Vec2 } from '@core/math/matrix'
-import { createGridMesh, triangulatePolygon } from '@core/mesh/triangulate'
+import { createGridMesh, refineAroundVertex, triangulatePolygon } from '@core/mesh/triangulate'
 import type { MeshGeometry } from '@core/mesh/triangulate'
 import { buildAutoMesh } from '@core/mesh/autoMesh'
 import type { AlphaMask } from '@core/mesh/autoMesh'
@@ -419,6 +419,9 @@ export function insertMeshVertex(
   )
   // 原三角形 → 三个新三角形（共享新顶点）
   attachment.triangles.splice(triangleIndex, 3, i0, i1, index, i1, i2, index, i2, i0, index)
+  // 贴着已有边插入时会立刻带出细长三角形：就地做一轮局部 Delaunay 翻转换掉它们
+  //（只动新点周围的连线，其余区域不变）
+  attachment.triangles = refineAroundVertex(attachment.vertices, attachment.triangles, index)
   attachment.hull = attachment.vertices.length
   return index
 }
@@ -499,7 +502,8 @@ function insertVertexOnEdge(
     if (split) next.push(split[0], split[1], split[2], split[3], split[4], split[5])
     else next.push(p, q, r)
   }
-  attachment.triangles = next
+  // 边上插点同样可能夹出细长三角形（吸附位置偏向某一端时）：局部翻转一次
+  attachment.triangles = refineAroundVertex(attachment.vertices, next, index)
   attachment.hull = attachment.vertices.length
   return index
 }

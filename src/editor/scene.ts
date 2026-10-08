@@ -784,12 +784,14 @@ export class EditorScene {
   /**
    * 坐标轴：沿世界 x=0 / y=0 画两条**黑色**细线，铺满当前可见范围。
    * 画在 axisLayer（棋盘格之上、角色之下），因此不会被角色挡住也不会盖住角色。
+   *
+   * 坐标轴是**基础参照**，与「骨骼 / 网格 / 约束」这些辅助显示开关**无关，一直显示**：
+   * 早先它跟着「骨骼」开关走，导入资源后为了看清角色把骨骼关掉，坐标轴也跟着消失，
+   * 看起来就像"xy 不见了"。
    */
   private drawAxes(): void {
     const g = this.axes
     g.clear()
-    // 世界坐标轴属于骨架辅助显示：关掉「骨骼」后一并隐藏，避免只留两条跨界黑线
-    if (!this.viewState.overlay.bones) return
     const viewport = this.viewport
     const topLeft = viewport.screenToWorld(0, 0)
     const bottomRight = viewport.screenToWorld(viewport.width, viewport.height)

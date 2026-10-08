@@ -112,11 +112,13 @@ export function parseSpineAtlas(text: string): SpineAtlasParseResult {
         break
       }
       case 'bounds': {
+        // 4.x 的紧凑写法：bounds: x, y, **width, height**（不是 x1,y1,x2,y2 —— 早先按后者解析，
+        // 宽高会变成 x-width 的负数，附件尺寸直接错掉一个数量级）
         const n = parseNumbers(value)
         current.x = n[0] ?? 0
         current.y = n[1] ?? 0
-        current.width = (n[2] ?? 0) - (n[0] ?? 0)
-        current.height = (n[3] ?? 0) - (n[1] ?? 0)
+        current.width = n[2] ?? 0
+        current.height = n[3] ?? 0
         break
       }
       case 'orig': {

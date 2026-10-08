@@ -153,9 +153,13 @@ function blendOf(blend: string | undefined): BlendMode {
 }
 
 /**
- * 权重数组：[boneCount, (boneIdx, vx, vy, w) × n] × 顶点数
- * → 骨骼下标重映射 + top-4 归并 + 归一化。
- * lx/ly 是 Spine 给出的**骨骼局部坐标**，直接使用（仅做像素 → 世界单位换算）。
+ * 加权网格的骨骼权重（Spine 的 `vertices` 字段，加权时才会是这个形状）：
+ * `[boneCount, (boneIdx, lx, ly, weight) × boneCount] × 顶点数`
+ *
+ * `lx / ly` 是**骨骼局部坐标**（像素）——与 rigid 顶点同一坐标系：官方运行期是
+ * `world = Σ w × (boneWorld × (lx, ly))`（见参考库 ComputeWorldVertices，加权与
+ * rigid 分支共用骨骼世界矩阵；顶点是编辑器按权重反解出的局部坐标，多骨骼共享一份）。
+ * 这里只做像素 → 世界单位换算，然后下标重映射 + top-4 归并 + 归一化。
  */
 function parseWeights(weights: readonly number[], vertexCount: number, ctx: AttachmentContext): VertexWeight[] {
   const out: VertexWeight[] = []
@@ -209,6 +213,7 @@ function packVertexWeight(entries: Array<{ bone: number; lx: number; ly: number;
   const ws = [0, 0, 0, 0]
   for (let k = 0; k < entries.length && k < 4; k++) {
     bones[k] = entries[k].bone
+    // lx/ly 是骨骼局部坐标（像素）→ 世界单位
     lxs[k] = pxToUnit(entries[k].lx)
     lys[k] = pxToUnit(entries[k].ly)
     ws[k] = entries[k].w
@@ -270,20 +275,29 @@ function convertAttachment(attachment: SpineAttachmentJson, ctx: AttachmentConte
   if (type === 'mesh') {
     const region = resolveRegion(attachment, ctx)
     const meshUvs = attachment.uvs ?? []
-    const uvCount = Math.floor(meshUvs.length / 2)
+    const vertexCount = Math.floor(meshUvs.length / 2)
     const rawVertices = attachment.vertices ?? []
-    const vertexCount = uvCount > 0 ? uvCount : Math.floor(rawVertices.length / 2)
+    // Spine 把加权网格的骨骼与权重**一并编码在 `vertices` 里**：长度与 uvs 不等即加权
+    //（参考库 ReadVertices：只有 `verticesLength == vertices.Length` 才是非加权）。
+    // 早先读的是不存在的 `weights` 字段，加权网格全被当成了 rigid。
+    const weighted = rawVertices.length !== meshUvs.length
     const vertices = new Float32Array(vertexCount * 2)
-    for (let i = 0; i < vertexCount; i++) {
-      vertices[i * 2] = pxToUnit(rawVertices[i * 2] ?? 0)
-      vertices[i * 2 + 1] = pxToUnit(rawVertices[i * 2 + 1] ?? 0)
+    if (!weighted) {
+      // 非加权：顶点是「相对骨骼」的局部坐标（官方运行期只乘骨骼矩阵，不含附件 TRS）
+      for (let i = 0; i < vertexCount; i++) {
+        vertices[i * 2] = pxToUnit(rawVertices[i * 2] ?? 0)
+        vertices[i * 2 + 1] = pxToUnit(rawVertices[i * 2 + 1] ?? 0)
+      }
     }
     const uvs = region ? mapRegionRelativeUvs(meshUvs, region, ctx.pageSizes) : Float32Array.from(meshUvs)
-    const rawWeights = attachment.weights ?? []
-    const weights = rawWeights.length > 0 ? parseWeights(rawWeights, vertexCount, ctx) : []
+    const weights = weighted ? parseWeights(rawVertices, vertexCount, ctx) : []
     return createAttachmentData({
       ...base,
       type: AttachmentType.Mesh,
+      // 顶点自带完整位置（相对骨骼）：附件 TRS 必须保持单位阵，否则会被叠加两次
+      position: { x: 0, y: 0 },
+      rotation: 0,
+      scale: { x: 1, y: 1 },
       textureName: region ? region.page : '',
       size: { x: pxToUnit(attachment.width ?? 0), y: pxToUnit(attachment.height ?? 0) },
       uvs,
@@ -292,7 +306,7 @@ function convertAttachment(attachment: SpineAttachmentJson, ctx: AttachmentConte
       edges: attachment.edges ?? [],
       hull: attachment.hull ?? 0,
       weights,
-      // FFD 偏移与网格顶点同空间（附件显示空间），加权蒙皮时由运行期按 bindpose 转到骨内
+      // FFD 偏移是「setup pose 世界空间」的位移，加权路径由运行期按 bindpose 转到骨内
       ffdInBoneSpace: false
     })
   }
@@ -422,6 +436,22 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
 
   const constraints = buildConstraints(json, boneIndex, warnings)
 
+  // 网格附件的绑定顶点表：deform 轨道的「长度对齐 + 绝对坐标→纯位移」换算要用
+  //（key = spot\u0000attachment；加权网格给等长零占位，只用于长度对齐）
+  const deformBase = new Map<string, { vertices: Float32Array; weighted: boolean }>()
+  for (const skin of skins) {
+    for (const skinSlot of skin.slots) {
+      for (const attachment of skinSlot.attachments) {
+        if (attachment.type !== AttachmentType.Mesh) continue
+        const count = Math.floor(attachment.vertices.length / 2)
+        deformBase.set(`${skinSlot.slotName}\u0000${attachment.name}`, {
+          vertices: attachment.vertices,
+          weighted: count > 0 && attachment.weights.length === count
+        })
+      }
+    }
+  }
+
   // 默认皮肤下「插槽 → 附件名 → 下标」，供 attachment 轨道把名字解析成烘焙下标
   const attIndexBySlot = new Map<string, Map<string, number>>()
   for (const skinSlot of defaultSkin?.slots ?? []) {
@@ -439,6 +469,7 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
       attIndexBySlot,
       regions: ctx.regions,
       pageSizes: ctx.pageSizes,
+      deformBase,
       warnings
     })
   )

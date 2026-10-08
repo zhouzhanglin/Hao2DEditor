@@ -78,8 +78,11 @@ export function mapRegionRelativeUvs(
   for (let i = 0; i + 1 < relative.length; i += 2) {
     const u = relative[i]
     const v = relative[i + 1]
+    // 相对 UV 的 v=0 指向区域**顶边**（Spine / DragonBones 同款约定，与官方
+    // UpdateUVs 的线性映射一致），所以直接用 v 取行，只对图集 y 做一次 1-y。
+    // （早先多套了一层 (1-v)，等于把网格贴图上下翻了过来。）
     const px = region.x + u * region.width
-    const py = region.y + (1 - v) * region.height
+    const py = region.y + v * region.height
     out[i] = px / tw
     out[i + 1] = 1 - py / th
   }

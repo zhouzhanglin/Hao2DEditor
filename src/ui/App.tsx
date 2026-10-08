@@ -16,7 +16,7 @@ import ViewportCanvas from './viewport/ViewportCanvas'
 import ModeSwitch from './viewport/ModeSwitch'
 import ViewportTools from './viewport/ViewportTools'
 import PanelShell from './widgets/PanelShell'
-import { useModeStore } from '@editor/store/modeStore'
+import { pickAnimationForAnimate, useModeStore } from '@editor/store/modeStore'
 import type { EditorMode } from '@editor/store/modeStore'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
@@ -180,18 +180,39 @@ export default function App() {
   }, [projectPath, resetSceneView])
 
   /**
-   * 切换 Pose / Animate。绑骨骼 / 权重刷这些改的是绑定姿态，Animate 下视口面板不显示它们，
-   * 切过去时把工具收回「选择」，避免留下一个看不见却还在吃鼠标的工具。
-   * FFD 顶点在动画态是合法操作（写 deform 关键帧），不做回收。
+   * 切换 Pose / Animate 的**唯一入口**（Tab、菜单命令、视口左上角的 ModeSwitch 都走这里），
+   * 内部连带完成「当前动画」的进出场，否则视口会挂着动画继续按当前帧求值：
+   *
+   * - 进 Animate：手头没有选中的动画时，恢复上次离开时选的那个（其次第一个；
+   *   都没有则保持「（未选择动画）」）。已有选中就不动，避免覆盖用户手选。
+   * - 出 Animate：先记住当前动画、把时间轴切回「（未选择动画）」，再切 Pose。
+   * - 绑骨骼 / 权重刷改的是绑定姿态，Animate 下视口面板不显示它们：切过去时把工具
+   *   收回「选择」，避免留下一个看不见却还在吃鼠标的工具；FFD 在动画态合法，不回收。
    */
   const setMode = useCallback(
     (next: EditorMode): void => {
-      setModeRaw(next)
-      const tool = useToolStore.getState().tool
-      if (next === 'animate' && tool !== 'select' && tool !== 'ffd') {
-        useToolStore.getState().setTool('select')
-        flash('Animate 状态已切回选择工具（FFD 顶点仍可用）')
+      const timelineState = useTimelineStore.getState()
+      const modeState = useModeStore.getState()
+      if (next === 'animate') {
+        if (!timelineState.currentAnimation) {
+          // 动画列表从 store 现取：本回调是 useCallback，闭包里的 doc 可能过期
+          const picked = pickAnimationForAnimate(
+            useProjectStore.getState().document.animations.map((item) => item.name),
+            modeState.lastAnimation
+          )
+          if (picked) timelineState.setAnimation(picked)
+        }
+        setModeRaw('animate')
+        const tool = useToolStore.getState().tool
+        if (tool !== 'select' && tool !== 'ffd') {
+          useToolStore.getState().setTool('select')
+          flash('Animate 状态已切回选择工具（FFD 顶点仍可用）')
+        }
+        return
       }
+      modeState.setLastAnimation(timelineState.currentAnimation)
+      timelineState.setAnimation(null)
+      setModeRaw('pose')
     },
     [flash, setModeRaw]
   )
@@ -319,6 +340,7 @@ export default function App() {
           window.dispatchEvent(new Event('hao2d:reset-layout'))
           return
         case 'mode:toggle':
+          // 联动都在 setMode 里（动画进出场 + 工具回收），这里只决定切到哪一边
           setMode(mode === 'pose' ? 'animate' : 'pose')
           return
         case 'anim:playPause': {

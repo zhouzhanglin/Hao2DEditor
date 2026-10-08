@@ -23,3 +23,16 @@ export const useModeStore = create<ModeState>((set, get) => ({
 export function isAnimateMode(): boolean {
   return useModeStore.getState().mode === 'animate'
 }
+
+/**
+ * 进入 Animate 时该选中哪个动画：
+ * 优先恢复「上次离开 Animate 时选的那个」（已经被删掉就作废），否则退回第一个；
+ * 工程里一个动画都没有时返回 null —— 保持「（未选择动画）」状态。
+ */
+export function pickAnimationForAnimate(
+  names: readonly string[],
+  remembered: string | null
+): string | null {
+  if (remembered && names.includes(remembered)) return remembered
+  return names[0] ?? null
+}

@@ -95,6 +95,26 @@
   .hao-btn-accent {
     @apply border-accent/40 bg-accent/15 text-accent hover:bg-accent/25 hover:text-accent;
   }
+
+  /**
+   * 属性检查器里的按钮：统一换成「开启态开关」的配色 —— 深青底 + 亮青描边。
+   * 用作用域选择器而不是给几十处 JSX 逐个加类；`:not(.hao-btn-accent)` 给已经
+   * 用了强调色的按钮留出空间，hover 的具体色值也由各自工具类（如删除按钮的红）覆盖。
+   */
+  .hao-inspector .hao-btn:not(.hao-btn-accent) {
+    @apply border-accent/50;
+    background-color: #274a54;
+  }
+  .hao-inspector .hao-btn:not(.hao-btn-accent):hover {
+    background-color: #2f5965;
+  }
+  .hao-inspector .hao-btn:not(.hao-btn-accent):active {
+    background-color: #37636f;
+  }
+  /* 禁用态压暗，免得青底看起来像还能点 */
+  .hao-inspector .hao-btn:disabled {
+    opacity: 0.45;
+  }
 }
 
 @layer utilities {

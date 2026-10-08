@@ -625,9 +625,11 @@ export default function App() {
         right={
           mode === 'animate' ? null : (
             <>
+              {/* hao-inspector：面板内的按钮统一换成深青底 + 亮青描边（见 styles/index.css） */}
               <PanelShell
                 title="属性检查器"
                 grow
+                bodyClassName="hao-inspector"
                 actions={<span className="text-3xs text-content-lo">当前选中对象</span>}
               >
                 <InspectorPanel onStatus={flash} />

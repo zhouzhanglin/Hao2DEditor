@@ -41,6 +41,33 @@
 }
 
 @layer components {
+  /**
+   * Electron 窗口拖动区。
+   *
+   * 窗口用 `titleBarStyle: 'hiddenInset'`（见 src/main/index.ts）：标题栏被隐藏后，
+   * 系统那套「拖标题栏移动窗口」就不存在了 —— 官方文档原话是
+   * "Since we've removed the default title bar, the application needs to tell Electron
+   *  which regions are draggable."，必须由应用自己声明。
+   *
+   * 用法：给顶部自绘菜单栏加 `hao-window-drag`。里面的交互控件会被下面的规则
+   * 自动排除（`no-drag`）—— 不排除的话，点击会被拖动行为吞掉，按钮就点不动了。
+   */
+  .hao-window-drag {
+    -webkit-app-region: drag;
+    app-region: drag;
+  }
+
+  .hao-window-drag button,
+  .hao-window-drag input,
+  .hao-window-drag select,
+  .hao-window-drag textarea,
+  .hao-window-drag a,
+  .hao-window-drag [role='button'],
+  .hao-window-no-drag {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+
   /* 面板通用外观：1px 描边 + 极弱明暗差分层 */
   .hao-panel {
     @apply flex flex-col min-h-0 min-w-0 bg-ink-800 border border-line;

@@ -71,7 +71,7 @@ function RecentMenu({ onOpen }: { onOpen: (path: string) => void }) {
             aria-label="关闭最近列表"
             onClick={() => setOpen(false)}
           />
-          <div className="absolute left-0 top-[26px] z-50 w-[320px] rounded border border-line bg-ink-800 py-1 shadow-lg shadow-black/40">
+          <div className="hao-window-no-drag absolute left-0 top-[26px] z-50 w-[320px] rounded border border-line bg-ink-800 py-1 shadow-lg shadow-black/40">
             {list.length === 0 ? (
               <p className="px-3 py-2 text-3xs text-content-lo">还没有最近打开的工程</p>
             ) : (
@@ -97,6 +97,13 @@ function RecentMenu({ onOpen }: { onOpen: (path: string) => void }) {
   )
 }
 
+/**
+ * 顶部菜单栏。
+ *
+ * 根元素带 `hao-window-drag`：窗口用 `titleBarStyle: 'hiddenInset'`（标题栏被隐藏），
+ * 不显式声明拖动区的话**整个窗口都拖不动**（详见 src/styles/index.css 里的说明与来源）。
+ * 里面的按钮等交互控件由样式中的 `no-drag` 规则自动排除，点击不受影响。
+ */
 export default function MenuBar({
   documentName,
   dirty,
@@ -107,7 +114,7 @@ export default function MenuBar({
   onOpenRecent
 }: MenuBarProps) {
   return (
-    <header className="flex h-[30px] items-center gap-2 border-b border-line bg-ink-800 pl-[86px] pr-2">
+    <header className="hao-window-drag flex h-[30px] items-center gap-2 border-b border-line bg-ink-800 pl-[86px] pr-2">
       <div className="flex items-center gap-1.5">
         <Bone size={14} className="text-accent" />
         <span className="text-panel font-semibold tracking-wide text-content-hi">Hao2D</span>

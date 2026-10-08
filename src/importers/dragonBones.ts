@@ -427,13 +427,24 @@ export function importDragonBones(input: DragonBonesImportInput): DragonBonesImp
   })
 
   const slotJsons = armature.slot ?? []
-  const slots: SlotData[] = slotJsons.map((slot: DbSlotJson, i) => ({
+  // DB 的绘制顺序 = 按 `slot[].z` 升序（同 z 保持声明顺序；缺省 z 用声明下标兜底，
+  // 与参考 `s["z"].AsInt(i)` 一致）。**导入时就把 slots 排成这个顺序**：
+  // 编译期按 zOrder 再排一次是恒等的，于是「运行期插槽下标 == 这里建造的下标」，
+  // 动画 / FFD 轨道里的 slotIndex 才能对上号（早先按声明顺序摆放，z 不等于声明
+  // 顺序的资源会把动画应用到错误的插槽上）。
+  const orderedSlots = slotJsons
+    .map((slot: DbSlotJson, i) => ({ slot, index: i, z: typeof slot.z === 'number' ? slot.z : i }))
+    .sort((a, b) => a.z - b.z || a.index - b.index)
+  /** 各插槽的静态层级键（已按运行期下标排列）：层级动画要把它当初始值 */
+  const staticZOrder = orderedSlots.map((entry) => entry.z)
+  const slots: SlotData[] = orderedSlots.map(({ slot }, i) => ({
     name: slot.name,
     boneIndex: boneIndex.get(slot.parent ?? '') ?? 0,
     color: dbColor(slot.color as DbBoneColorJson | undefined),
     blendMode: blendOf(slot.blendMode),
     defaultDisplayIndex: -1,
-    defaultZOrder: typeof slot.z === 'number' ? slot.z : i,
+    // 排序后的位次：compile 侧按它排序即恒等，层序在导入期就固化了
+    defaultZOrder: i,
     z: 0,
     setupAttachment: ''
   }))
@@ -549,6 +560,7 @@ export function importDragonBones(input: DragonBonesImportInput): DragonBonesImp
       slotIndex: slotIndexByName,
       bones: boneData,
       slots,
+      staticZOrder,
       iks,
       textureNames,
       frameRate,
@@ -587,6 +599,8 @@ interface DbAnimContext {
   slotIndex: Map<string, number>
   bones: readonly BoneData[]
   slots: readonly SlotData[]
+  /** 各插槽的静态层级键（已按运行期下标排列）：层级动画的初始值 */
+  staticZOrder: readonly number[]
   iks: readonly IkConstraint[]
   textureNames: readonly string[]
   frameRate: number
@@ -601,6 +615,50 @@ interface DbAnimContext {
  * 还会抖一次 —— 这是"导入后动画看着不对"的主要原因之一。
  * displayIndex 这类真正的阶跃量在各自的解析处强制 Stepped，不依赖这里。
  */
+/**
+ * 展开 DB 的 **稀疏 zOrder 表示**：帧里只列出被移动的槽 `[槽下标, 偏移, ...]`，
+ * 要还原成完整的绘制顺序数组。规则照抄参考 `Hao2DConvertUtil.ExpandDrawOrder`：
+ *
+ * ① 默认是声明顺序；
+ * ② 被移动的槽占据「原下标 + 偏移」的**绝对位次**（越界则夹到两端）；
+ * ③ 其余空位按原顺序填入**未移动**的槽；被移动项按下标升序处理，结果才稳定。
+ *
+ * 早先是「在已移动的数组里逐个 splice」：每次 `indexOf` 拿到的位置已被前面的移动带偏，
+ * 元素会错位。Dora_zorder 实测 pairs `[21,-8, 23,-11, 24,-10, 34,-19]`：
+ * 参考得到 `…12, 23, 21, 24, 34…`，旧实现得到 `…12, 23, 12, 24, 34…`（21 被挤出、12 错位）。
+ */
+export function expandDrawOrder(slotIndices: readonly number[], offsets: readonly number[], slotCount: number): number[] {
+  const result: number[] = []
+  for (let i = 0; i < slotCount; i++) result.push(i)
+  const n = Math.min(slotIndices.length, offsets.length)
+  if (slotCount <= 0 || n === 0) return result
+
+  // 按下标升序（补空位规则要求顺序稳定）
+  const pairs: Array<{ index: number; offset: number }> = []
+  for (let i = 0; i < n; i++) pairs.push({ index: slotIndices[i], offset: offsets[i] })
+  pairs.sort((a, b) => a.index - b.index)
+
+  // 被移动的槽占据「原下标 + 偏移」的位次
+  result.fill(-1)
+  const moved = new Array<boolean>(slotCount).fill(false)
+  for (const pair of pairs) {
+    if (pair.index < 0 || pair.index >= slotCount) continue
+    const at = Math.max(0, Math.min(slotCount - 1, pair.index + pair.offset))
+    result[at] = pair.index
+    moved[pair.index] = true
+  }
+
+  // 空位按原顺序填入未移动的槽
+  let free = 0
+  for (let i = 0; i < slotCount; i++) {
+    if (moved[i]) continue
+    while (free < slotCount && result[free] !== -1) free++
+    if (free >= slotCount) break
+    result[free++] = i
+  }
+  return result.filter((value) => value >= 0)
+}
+
 function easingOfFrame(frame: DbFrameEasingJson): { easing: Easing; curve: number[] | null } {
   const raw = Array.isArray(frame.curve) ? frame.curve : null
   if (raw && raw.length >= 4) {
@@ -699,6 +757,8 @@ function importDbAnimation(animation: DbAnimationJson, ctx: DbAnimContext): Anim
   }
 
   const slots: SlotAnim[] = []
+  /** 层级动画：各插槽帧里 `z`（排序键）的采样序列，循环后统一重排成 drawOrder */
+  const zTracks: Array<{ slot: number; keys: Array<{ time: number; z: number }> }> = []
   for (const track of animation.slot ?? []) {
     const index = ctx.slotIndex.get(track.name ?? '')
     if (index === undefined) continue
@@ -706,7 +766,9 @@ function importDbAnimation(animation: DbAnimationJson, ctx: DbAnimContext): Anim
     const anim = emptySlotAnim(index)
     let time = 0
     let hasColor = false
+    const zKeys: Array<{ time: number; z: number }> = []
     for (const frame of track.frame ?? []) {
+      if (typeof frame.z === 'number') zKeys.push({ time: toSeconds(time), z: frame.z })
       const displayIndex = frame.displayIndex ?? 0
       anim.displayIndex.push({
         time: toSeconds(time),
@@ -728,6 +790,7 @@ function importDbAnimation(animation: DbAnimationJson, ctx: DbAnimContext): Anim
       time += frame.duration ?? 0
     }
     if (anim.displayIndex.length > 0 || hasColor) slots.push(anim)
+    if (zKeys.length > 0) zTracks.push({ slot: index, keys: zKeys })
   }
 
   const deforms: DeformAnim[] = []
@@ -776,17 +839,52 @@ function importDbAnimation(animation: DbAnimationJson, ctx: DbAnimContext): Anim
     let time = 0
     for (const frame of zOrderFrames) {
       const pairs = frame.zOrder ?? []
-      const order = ctx.slots.map((_, i) => i)
+      const slotIndices: number[] = []
+      const offsets: number[] = []
       for (let i = 0; i + 1 < pairs.length; i += 2) {
-        const slotIndex = pairs[i]
-        const offset = pairs[i + 1]
-        const from = order.indexOf(slotIndex)
-        if (from < 0) continue
-        order.splice(from, 1)
-        order.splice(Math.max(0, Math.min(order.length, from + offset)), 0, slotIndex)
+        slotIndices.push(pairs[i])
+        offsets.push(pairs[i + 1])
       }
-      drawOrder.push({ time: toSeconds(time), order })
+      drawOrder.push({
+        time: toSeconds(time),
+        order: expandDrawOrder(slotIndices, offsets, ctx.slots.length)
+      })
       time += frame.duration ?? 0
+    }
+  }
+
+  /**
+   * 层级动画（DB 4.5）：插槽的层序在**每个 slot 帧的 `z`** 里给（`z` 是排序键，
+   * 升序绘制、同 z 保持静态顺序）。动画重新给插槽赋 z 就是「层级变化动画」——
+   * 例如 Demon 的 run 把 effect5 从 29 提到 22、火焰从身体后面挪到前面。
+   *
+   * 这里在**每个 z 出现的时刻**用当前所有插槽的 z 重排一次完整绘制顺序，
+   * 只在与上一帧不同时落成关键帧（运行期按阶跃采样，天然贴合 DB 的瞬间换层语义）。
+   *
+   * 早先完全没读帧里的 `z`：层级动画被整段忽略，整段动画都用静态层序。
+   */
+  if (zTracks.length > 0) {
+    const count = ctx.slots.length
+    const currentZ = ctx.staticZOrder.slice()
+    const cursors = zTracks.map(() => 0)
+    const moments = new Set<number>()
+    for (const track of zTracks) for (const key of track.keys) moments.add(key.time)
+
+    let previous: number[] = Array.from({ length: count }, (_, i) => i)
+    for (const moment of [...moments].sort((a, b) => a - b)) {
+      zTracks.forEach((track, i) => {
+        while (cursors[i] < track.keys.length && track.keys[cursors[i]].time <= moment + 1e-9) {
+          currentZ[track.slot] = track.keys[cursors[i]].z
+          cursors[i]++
+        }
+      })
+      const order = Array.from({ length: count }, (_, i) => i).sort(
+        (a, b) => currentZ[a] - currentZ[b] || a - b
+      )
+      if (order.some((value, i) => value !== previous[i])) {
+        drawOrder.push({ time: moment, order })
+        previous = order
+      }
     }
   }
 

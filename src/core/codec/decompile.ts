@@ -193,12 +193,14 @@ export function decompileAsset(asset: RuntimeAsset, activeSkin = ''): EditorDocu
     }))
   }))
 
-  const slots: AuthoringSlot[] = asset.slots.map((slot, i) => ({
+  const slots: AuthoringSlot[] = asset.slots.map((slot) => ({
     name: slot.name,
     bone: asset.bones[slot.boneIndex]?.name ?? '',
     color: rgbaToHex(slot.color),
     blendMode: slot.blendMode,
-    zOrder: i,
+    // 用运行时里保存的 defaultZOrder（导入时来自 DB 的 slot[].z / Spine 的声明下标），
+    // 而不是数组下标：compile 侧按它排序固化层序，写死下标等于把 DB 的层级信息丢掉。
+    zOrder: slot.defaultZOrder,
     z: slot.z,
     attachment: slot.setupAttachment,
     visible: true

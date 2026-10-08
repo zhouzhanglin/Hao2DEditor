@@ -116,6 +116,11 @@ export interface DbBoneTrackJson {
 export interface DbSlotFrameJson extends DbFrameEasingJson {
   displayIndex?: number
   color?: DbColorJson
+  /**
+   * 层级键（DB 4.5+）：插槽绘制顺序的排序键，升序绘制、同 z 保持静态顺序。
+   * 动画重新给插槽赋 z 就是「层级变化动画」（Demon 的每个动画都用它）。
+   */
+  z?: number
 }
 
 export interface DbSlotTrackJson {

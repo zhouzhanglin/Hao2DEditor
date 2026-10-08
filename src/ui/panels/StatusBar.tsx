@@ -1,3 +1,5 @@
+import { usePlayheadStore } from '@editor/store/playheadStore'
+
 export interface StatusBarProps {
   stats: {
     bones: number
@@ -11,7 +13,6 @@ export interface StatusBarProps {
   }
   selection: string
   animationName: string | null
-  time: number
   frameRate: number
   hint?: string
   /** 正在执行的耗时操作（导入 / 导出 / 打包），非空时显示进度提示 */
@@ -23,11 +24,16 @@ export default function StatusBar({
   stats,
   selection,
   animationName,
-  time,
   frameRate,
   hint,
   busy
 }: StatusBarProps) {
+  /**
+   * 时间从**播放头时钟**读（高频通道）：播放时每帧更新，但只让这一小块重渲染，
+   * 不牵扯 App / 时间轴 / 层级树（详见 `playheadStore`）。擦洗与切动画都会镜像过来，
+   * 所以这里始终是当前真实时间。
+   */
+  const time = usePlayheadStore((s) => s.time)
   const frame = Math.round(time * frameRate)
   return (
     <footer className="flex h-[22px] items-center gap-3 border-t border-line bg-ink-800 px-2 text-3xs text-content-lo">

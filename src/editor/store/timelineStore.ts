@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { KeySelector } from '../timeline/model'
+import { usePlayheadStore } from './playheadStore'
 
 export interface TimelineState {
   /** 当前编辑的动画名；null = 未选择动画 */
@@ -70,8 +71,20 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
 
   notifyKeyed: (trackId, time) =>
     set((state) => ({ lastKeyed: { trackId, time, stamp: (state.lastKeyed?.stamp ?? 0) + 1 } })),
-  setAnimation: (name) => set({ currentAnimation: name, time: 0, selectedKeys: [], selectedTrack: null }),
-  setTime: (time) => set({ time }),
+  setAnimation: (name) => {
+    set({ currentAnimation: name, time: 0, selectedKeys: [], selectedTrack: null })
+    // 播放头时钟归零，否则切动画后播放头会停在上一段的旧位置
+    usePlayheadStore.getState().setTime(0)
+  },
+  /**
+   * 低频跳转（擦洗 / 逐帧 / 换动画）。这里同时把值镜像进**播放头时钟**：
+   * 播放头与状态栏读的是高频通道，只有镜像过来才能在跳转瞬间跟上。
+   * 反向不需要同步 —— 播放期间只写高频通道、不写主 store（见 ViewportCanvas 的渲染循环）。
+   */
+  setTime: (time) => {
+    set({ time })
+    usePlayheadStore.getState().setTime(time)
+  },
   setPlaying: (playing) => set({ playing }),
   // 不在这里静默拦截「未选动画」的情况：调用方（App 命令）会先自动选中动画并给出提示
   togglePlaying: () => set({ playing: !get().playing }),

@@ -646,7 +646,6 @@ export default function App() {
             stats={stats}
             selection={selectionText}
             animationName={mode === 'animate' ? timeline.currentAnimation : null}
-            time={timeline.time}
             frameRate={doc.frameRate}
             hint={hint}
             busy={busy}

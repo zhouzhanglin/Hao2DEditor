@@ -3,6 +3,7 @@ import { useToolStore } from '@editor/store/toolStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
+import { useThrottledPlayheadTime } from '@editor/store/playheadStore'
 import { useProjectStore } from '@editor/store/projectStore'
 import { ColorField, FieldGroup, NumberField, SelectField } from '@ui/widgets/fields'
 import { getActiveScene } from '@editor/activeScene'
@@ -19,7 +20,8 @@ export default function ToolOptionsPanel({ onStatus = () => undefined }: ToolOpt
   const tools = useToolStore()
   const selection = useSelectionStore()
   const mode = useModeStore((s) => s.mode)
-  const time = useTimelineStore((s) => s.time)
+  // 节流跟随播放头：同属性面板，读数不需要每帧重渲染
+  const time = useThrottledPlayheadTime(400)
   const animation = useTimelineStore((s) => s.currentAnimation)
   const update = useProjectStore((s) => s.update)
 

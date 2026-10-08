@@ -4,6 +4,7 @@ import { TIMELINE_ZOOM_MAX, TIMELINE_ZOOM_MIN } from '@editor/store/timelineStor
 import type { KeySelector, TimelineTrack } from '@editor/timeline/model'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
+import { playheadTime, usePlayheadStore } from '@editor/store/playheadStore'
 
 export interface DopeSheetProps {
   tracks: TimelineTrack[]
@@ -169,6 +170,68 @@ export default function DopeSheet(props: DopeSheetProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [time, maxStart])
+
+  /**
+   * 播放头走**高频通道 + ref 直接改 DOM**：播放时每帧只挪这两个节点，
+   * 不触发任何 React 重渲染。
+   *
+   * 为什么要这样：播放时每帧写 `timelineStore.time` 会让整张 DopeSheet（还有 App、层级树…）
+   * 每帧重渲染，实测单帧净成本 ~100ms、帧率 8fps；而动画求值 + 蒙皮 + 绘制只要 1.3ms。
+   * 真正常变的只有「播放头那一根线」—— 用 ref 改 `left` 就够了（见 playheadStore 的说明）。
+   */
+  const playheadRulerRef = useRef<HTMLSpanElement | null>(null)
+  const playheadHeadRef = useRef<HTMLDivElement | null>(null)
+  const placePlayheadRef = useRef<(value: number) => void>(() => undefined)
+  /** 帧区域宽度（ResizeObserver 维护）：算像素位移用，避免每帧去读 clientWidth 强制重排 */
+  const areaWidthRef = useRef(areaWidth)
+  areaWidthRef.current = areaWidth
+  placePlayheadRef.current = (value: number): void => {
+    const { start: currentStart, span: currentSpan } = mapRef.current
+    const ratio = currentSpan > 0 ? (value - currentStart) / currentSpan : 0
+    const position = LEAD_RATIO + ratio * (1 - LEAD_RATIO)
+    // 用 transform 而不是 left：改 left 会让浏览器重做样式/布局（实测这一条占 ~9ms/帧），
+    // transform 只走合成，播放头每帧都动也不心疼
+    const x = position * areaWidthRef.current
+    const ruler = playheadRulerRef.current
+    if (ruler) ruler.style.transform = `translateX(${x}px)`
+    const head = playheadHeadRef.current
+    if (head) {
+      head.style.transform = `translateX(${x}px)`
+      head.style.opacity = position < 0 || position > 1 ? '0' : '1'
+    }
+  }
+  /** 播放头走出可见窗口时把它拉回来（用 ref 拿最新闭包，避免 effect 里读到旧的 maxStart） */
+  const followPlayheadRef = useRef<(value: number) => void>(() => undefined)
+  followPlayheadRef.current = (value: number): void => {
+    const { start: currentStart, span: currentSpan } = mapRef.current
+    if (value < currentStart || value > currentStart + currentSpan) {
+      applyView({ start: Math.max(0, Math.min(maxStart, value - currentSpan * 0.5)) })
+    }
+  }
+
+  useEffect(() => {
+    placePlayheadRef.current(playheadTime())
+    let timer = 0
+    const unsubscribe = usePlayheadStore.subscribe((state) => {
+      placePlayheadRef.current(state.time)
+      // 跟随可见窗口：节流 250ms（这段会改视窗状态、触发一次重渲染，不能每帧来）
+      if (timer !== 0) return
+      timer = window.setTimeout(() => {
+        timer = 0
+        followPlayheadRef.current(playheadTime())
+      }, 250)
+    })
+    return () => {
+      unsubscribe()
+      window.clearTimeout(timer)
+    }
+  }, [])
+
+  // 缩放 / 横向平移改变视窗后重摆一次：播放头平时由高频通道用 ref 维持，React 不知道它的位置
+  useEffect(() => {
+    placePlayheadRef.current(playheadTime())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [start, span])
 
   const isSelected = (selector: KeySelector): boolean => selectedKeys.some((item) => sameSelector(selector, item))
 
@@ -616,9 +679,15 @@ export default function DopeSheet(props: DopeSheetProps) {
             )
           })}
 
+          {/* 初始位置只取一次，之后由高频通道用 ref 直接改 transform（见 placePlayheadRef） */}
           <span
-            className="pointer-events-none absolute top-0 z-10 h-full w-px bg-accent"
-            style={{ left: `${playheadPercent}%` }}
+            ref={playheadRulerRef}
+            className="pointer-events-none absolute top-0 left-0 z-10 h-full w-px bg-accent"
+            style={{
+              transform: `translateX(${(playheadPercent / 100) * areaWidth}px)`,
+              // 提升为独立合成层：每帧挪它只走合成，不触发重绘
+              willChange: 'transform'
+            }}
           />
         </div>
         {/* 右侧留白：与轨道区的滚动条宽度对齐 */}
@@ -705,14 +774,22 @@ export default function DopeSheet(props: DopeSheetProps) {
               className="pointer-events-none absolute top-0 z-0 h-full bg-ink-900/40"
               style={{ left: `${Math.max(0, endPercent)}%`, right: 0 }}
             />
-            {playheadPercent >= 0 && playheadPercent <= 100 ? (
-              <div
-                className="pointer-events-none absolute top-0 z-20 h-full w-px bg-accent"
-                style={{ left: `${playheadPercent}%` }}
-              >
-                <span className="absolute -left-[4px] top-0 h-0 w-0 border-x-[4px] border-t-[6px] border-x-transparent border-t-accent" />
-              </div>
-            ) : null}
+            {/*
+              原来按 playheadPercent 条件渲染 —— 高频通道要求这个节点常驻，
+              所以改成始终渲染、用 opacity 控制可见性（同上面的结束标记写法）。
+            */}
+            <div
+              ref={playheadHeadRef}
+              className="pointer-events-none absolute top-0 left-0 z-20 h-full w-px bg-accent"
+              style={{
+                transform: `translateX(${(playheadPercent / 100) * areaWidth}px)`,
+                opacity: playheadPercent < 0 || playheadPercent > 100 ? 0 : 1,
+                // 同标尺：独立合成层，播放时每帧挪动不触发重绘
+                willChange: 'transform'
+              }}
+            >
+              <span className="absolute -left-[4px] top-0 h-0 w-0 border-x-[4px] border-t-[6px] border-x-transparent border-t-accent" />
+            </div>
 
             {/* 框选矩形 */}
             {band ? (

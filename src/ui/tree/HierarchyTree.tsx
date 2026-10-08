@@ -23,6 +23,7 @@ import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
+import { useThrottledPlayheadTime } from '@editor/store/playheadStore'
 import { keySlotDisplayNow, keyframeTargetsNow } from '@editor/timeline/actions'
 import { slotDisplayNameAt } from '@editor/timeline/model'
 import type { KeyframeTarget } from '@editor/timeline/model'
@@ -380,7 +381,9 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
 
   const mode = useModeStore((s) => s.mode)
   const currentAnimationName = useTimelineStore((s) => s.currentAnimation)
-  const timelineTime = useTimelineStore((s) => s.time)
+  // 播放头时间走**节流**通道：这里只用它算「插槽当前显示的附件名」，
+  // 400ms 跟一次足够 —— 整棵骨架树每帧重渲染正是之前播放掉帧的主因之一
+  const timelineTime = useThrottledPlayheadTime(400)
   const activeAnimation = useMemo(
     () => document.animations.find((item) => item.name === currentAnimationName) ?? null,
     [document.animations, currentAnimationName]

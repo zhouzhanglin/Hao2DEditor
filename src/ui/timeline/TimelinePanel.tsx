@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { KeyRound, Pause, Play, Repeat, SkipBack, SkipForward, Square, Timer, Trash2, Zap } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
+import { playheadTime, usePlayheadStore } from '@editor/store/playheadStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { animationDuration } from '@editor/runtime'
@@ -48,6 +49,37 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
   const frame = Math.round(timeline.time * document.frameRate)
   const totalFrames = Math.max(1, Math.round(duration * document.frameRate))
   const selectedKeys = timeline.selectedKeys
+
+  /**
+   * 播放头读数（帧号/秒）与进度滑块：播放时每帧由**高频通道直接改 DOM**，
+   * 不走 React 状态 —— 面板重渲染一次是几十毫秒量级，每帧来一次就把帧率压到个位数
+   * （详见 `playheadStore` 的说明）。
+   */
+  const timeReadoutRef = useRef<HTMLSpanElement | null>(null)
+  const timeSliderRef = useRef<HTMLInputElement | null>(null)
+  /** 上次同步滑块 DOM 的时间戳（节流用） */
+  const sliderSyncRef = useRef(0)
+  useEffect(() => {
+    const apply = (value: number): void => {
+      const readout = timeReadoutRef.current
+      if (readout) {
+        const elapsed = Math.round(value * document.frameRate)
+        readout.textContent = `${elapsed} / ${totalFrames} 帧 · ${value.toFixed(3)}s`
+      }
+      const slider = timeSliderRef.current
+      // 正在拖滑块时不回写：否则会和用户的手抢值（拖动过程中 input 是聚焦的）
+      // 注意 `document` 在这里是 EditorDocument（被局部变量遮蔽），要显式走 window.document
+      //
+      // 另外 range 输入框每帧重绘相当贵（滑块轨道 + 拇指），所以**节流到 ~10 次/秒**；
+      // 上面的帧号/秒数文字读数仍是每帧更新，观感不受影响。
+      if (slider && window.document.activeElement !== slider && performance.now() - sliderSyncRef.current > 100) {
+        sliderSyncRef.current = performance.now()
+        slider.value = String(value)
+      }
+    }
+    apply(playheadTime())
+    return usePlayheadStore.subscribe((state) => apply(state.time))
+  }, [document.frameRate, totalFrames])
 
   /** 重命名中的动画名（非 null 时把按钮区换成输入框） */
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -103,7 +135,10 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
   }
 
   const stepFrame = (delta: number): void => {
-    const next = Math.max(0, Math.min(totalFrames, frame + delta)) / document.frameRate
+    // 从**播放头时钟**取当前位置，而不是 store 的 time：播放期间 store 是低频同步的，
+    // 拿它做基准会从「上次同步的位置」跳，逐帧会跳错。
+    const current = Math.round(playheadTime() * document.frameRate)
+    const next = Math.max(0, Math.min(totalFrames, current + delta)) / document.frameRate
     timeline.setTime(Number(next.toFixed(4)))
   }
 
@@ -322,13 +357,15 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
           <Timer size={13} />
         </button>
 
+        {/* 非受控：位置由高频通道直接写 DOM（见 timeSliderRef），React 不再每帧接管它 */}
         <input
+          ref={timeSliderRef}
           type="range"
           className="h-[4px] flex-1 cursor-pointer appearance-none rounded bg-ink-600 accent-accent"
           min={0}
           max={duration}
           step={timeline.snapToFrame ? 1 / document.frameRate : 0.001}
-          value={timeline.time}
+          defaultValue={timeline.time}
           disabled={!animation}
           onChange={(e) => {
             timeline.setTime(Number(e.target.value))
@@ -336,7 +373,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
           }}
         />
 
-        <span className="shrink-0 font-mono text-3xs text-content-lo">
+        <span ref={timeReadoutRef} className="shrink-0 font-mono text-3xs text-content-lo">
           {frame} / {totalFrames} 帧 · {timeline.time.toFixed(3)}s
         </span>
       </div>

@@ -9,6 +9,7 @@ import { useSelectionStore } from '@editor/store/selectionStore'
 import { useToolStore } from '@editor/store/toolStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
+import { usePlayheadStore } from '@editor/store/playheadStore'
 import { isDragging, toolPointerDown, toolPointerMove, toolPointerUp } from '@editor/tools/authoringTools'
 import type { ToolHost } from '@editor/tools/authoringTools'
 import {
@@ -61,6 +62,8 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
 
     let raf = 0
     let last = performance.now()
+    /** 上一帧是否在播放：用于在「播放 → 停止」的那一帧把最终时间落回主 store */
+    let playing = false
     /**
      * 渲染循环。
      *
@@ -83,11 +86,19 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
           }
         }
         const timeline = useTimelineStore.getState()
-        if (scene.currentAnimation && timeline.playing) {
-          // 播放推进后把时间回写到 store，供时间轴显示
-          const time = scene.runtime?.player.time ?? 0
-          if (Math.abs(time - timeline.time) > 1e-4) timeline.setTime(time)
+        const isPlaying = Boolean(scene.currentAnimation) && timeline.playing
+        const time = scene.runtime?.player.time ?? 0
+        if (isPlaying) {
+          // 播放推进：只写**播放头时钟**（高频通道），不写 timelineStore。
+          // 写主 store 会通知整棵 UI 树重渲染（实测单帧净成本 ~100ms，帧率 44 → 8fps），
+          // 而这一帧里的动画求值 + 蒙皮重建 + 绘制只占 1.3ms。播放头 / 标尺 / 状态栏读数
+          // 是订阅高频通道自己更新的，不需要主 store 参与。
+          usePlayheadStore.getState().setTime(time)
+        } else if (playing) {
+          // 暂停 / 播完：把最终时间落回主 store，让时间轴、层级树与世界状态对齐
+          useTimelineStore.getState().setTime(time)
         }
+        playing = isPlaying
       } catch (error) {
         console.error('[hao2d] 视口渲染循环出错（已跳过该帧，视口不会卡死）', error)
       }

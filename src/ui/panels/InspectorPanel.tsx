@@ -5,6 +5,7 @@ import { useSelectionStore } from '@editor/store/selectionStore'
 import { useToolStore } from '@editor/store/toolStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
+import { useThrottledPlayheadTime } from '@editor/store/playheadStore'
 import { getActiveScene } from '@editor/activeScene'
 import { keyBoneChannel, keySlotDisplay, keySlotVisible } from '@editor/commands/animationCommands'
 import {
@@ -95,7 +96,8 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   const selection = useSelectionStore()
   const tools = useToolStore()
   const mode = useModeStore((s) => s.mode)
-  const time = useTimelineStore((s) => s.time)
+  // 节流跟随播放头：这里只是「当前时间」的取值，没必要每帧重渲染整块属性面板
+  const time = useThrottledPlayheadTime(400)
   const currentAnimation = useTimelineStore((s) => s.currentAnimation)
   /** Animate 态切显示附件 = 打 displayIndex 关键帧；Pose 态才是改绑定姿态 */
   const animating = mode === 'animate' && !!currentAnimation

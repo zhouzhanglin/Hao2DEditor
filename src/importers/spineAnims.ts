@@ -329,13 +329,15 @@ function collectDeforms(
         const offsets = new Array<number>(need).fill(0)
         for (let i = 0; i < vertices.length; i++) {
           const at = offset + i
-          // 非加权网格：Spine 的变形帧存的是「绝对坐标」（绑定顶点 + 位移，见参考库
-          // `deform[i] += vertices[i]`），而我们运行期是「绑定顶点 + 偏移」→
-          // 这里减掉绑定顶点换成纯位移；加权网格的帧本身就是纯位移（setup 世界空间），直接保留。
-          offsets[at] =
-            base && !base.weighted
-              ? pxToUnit(vertices[i]) - (base.vertices[at] ?? 0)
-              : pxToUnit(vertices[i])
+          // Spine 的 deform 帧 `vertices` **本身就是「相对绑定顶点的偏移」**：
+          // 官方 SkeletonJson 读取时是 `deform[i] = 该偏移[i] + 绑定顶点[i]`（非加权网格）
+          // 才凑出绝对坐标。我们运行期同样是「绑定顶点 + 偏移」（见 meshBuilder），
+          // 所以这里**原样使用**。
+          //
+          // 早先误以为 json 存的是绝对坐标、又减了一次绑定顶点 → 偏移变成
+          // 「偏移 − 绑定坐标」，FFD 彻底错乱（表现：deform 作用的部件变形诡异，
+          // 看起来像缩放/斜切出问题 —— 如 spineunitygirl 的手指与脚）。
+          offsets[at] = pxToUnit(vertices[i])
         }
         const key: DeformKeyframe = {
           time: numberOr(frame.time, 0),

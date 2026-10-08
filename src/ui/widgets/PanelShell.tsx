@@ -30,10 +30,15 @@ export default function PanelShell({
 }: PanelShellProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
 
+  // 折叠后必须让出空间：否则面板仍占着 flex-1 的权重、或分隔条拖出的固定高度
+  //（SLOT 层级 / 曲线 / 资源与皮肤都有 height，折叠后会留一大片空白 ——
+  //  只有没设高度的面板，如「工具选项」，才会自然收缩）。
+  const expandedStyle = collapsed ? { ...style, height: undefined, flex: undefined } : style
+
   return (
     <section
-      className={['hao-panel', grow ? 'flex-1' : 'shrink-0', className ?? ''].join(' ')}
-      style={style}
+      className={['hao-panel', grow && !collapsed ? 'flex-1' : 'shrink-0', className ?? ''].join(' ')}
+      style={expandedStyle}
     >
       <header className="hao-panel-header">
         <div className="flex min-w-0 items-center gap-1">

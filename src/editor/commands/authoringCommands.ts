@@ -745,10 +745,28 @@ export function autoWeights(
     const total = top.reduce((sum, item) => sum + item.score, 0)
     if (total <= 0) continue
 
-    vertex.weights = top.map((item) => ({ bone: item.bone, weight: item.score / total }))
-    touched++
+    const next = top.map((item) => ({ bone: item.bone, weight: item.score / total }))
+    // 只在结果**确实变了**时才计数：调用方据此区分「重算完成」和「本来就是这个结果」
+    //（比如列表里只有宿主骨骼一根时，顶点权重必然是它 100%，点了也看不出变化）
+    if (!sameWeights(vertex.weights, next)) {
+      vertex.weights = next
+      touched++
+    }
   }
   return touched
+}
+
+/** 两组权重是否等价（骨骼一一对应且各自权重差在容差内） */
+function sameWeights(
+  a: readonly { bone: string; weight: number }[],
+  b: readonly { bone: string; weight: number }[]
+): boolean {
+  if (a.length !== b.length) return false
+  for (const item of a) {
+    const other = b.find((entry) => entry.bone === item.bone)
+    if (!other || Math.abs(other.weight - item.weight) > 1e-4) return false
+  }
+  return true
 }
 
 /**

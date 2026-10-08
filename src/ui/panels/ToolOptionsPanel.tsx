@@ -48,7 +48,11 @@ export default function ToolOptionsPanel({ onStatus = () => undefined }: ToolOpt
       },
       tools.brush.mode === 'subtract' ? 1 : 2
     )
-    onStatus(touched > 0 ? `已为重算 ${touched} 个顶点的权重` : '没有可计算权重的顶点（Region 请先转为网格）')
+    onStatus(
+      touched > 0
+        ? `已为重算 ${touched} 个顶点的权重`
+        : '权重没有变化（Region 请先转为网格；影响范围仍是「选中骨骼 + 其直接子骨骼」）'
+    )
   }
 
   const resetFfd = (): void => {

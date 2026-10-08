@@ -562,7 +562,9 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                     onStatus(
                       touched > 0
                         ? `已按绑定骨骼重算 ${touched} 个顶点的权重`
-                        : '没有可计算权重的顶点（Region 请先转为网格）'
+                        : weightBones.length < 2
+                          ? `权重没有变化：列表里只有 ${weightBones.length} 根骨骼，结果就是全部 100%。先点「添加绑定骨骼」把相关骨骼加进来再算`
+                          : '权重没有变化：当前权重已是最新结果'
                     )
                   }}
                 >

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { Bone } from 'lucide-react'
 import { EditorScene } from '@editor/scene'
 import { TextureStore } from '@render/material'
 import { ImageAlphaCache } from '@render/imageAlpha'
@@ -31,6 +32,9 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
   const hostRef = useRef<HTMLDivElement | null>(null)
   const sceneRef = useRef<EditorScene | null>(null)
   const texturesRef = useRef<TextureStore | null>(null)
+  /** 绑定骨骼状态下跟着鼠标走的提示图标（用 ref 直接改位置，避免每次移动都触发重渲染） */
+  const bindIconRef = useRef<HTMLDivElement | null>(null)
+  const pendingWeightBone = useToolStore((s) => s.pendingWeightBone)
 
   useEffect(() => {
     const host = hostRef.current
@@ -307,6 +311,12 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         onStatus('已结束绑定骨骼')
         return
       }
+      // 中键仍然平移视口：绑骨骼时经常要挪一下视角，去找被网格 / 其它骨骼挡住的骨骼
+      if (event.button === 1) {
+        pointer.current = { panning: true, lastX: event.clientX, lastY: event.clientY, insert: null }
+        event.currentTarget.setPointerCapture(event.pointerId)
+        return
+      }
       if (event.button !== 0) return
       const target = toWorld(event)
       if (!target) return
@@ -385,7 +395,17 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     }
   }
 
+  /** 绑定骨骼状态的跟随图标：贴在鼠标右下方（直接写 style，不走 state，免得每次移动都重渲染） */
+  const moveBindIcon = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const icon = bindIconRef.current
+    if (!icon) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    icon.style.left = `${event.clientX - rect.left + 12}px`
+    icon.style.top = `${event.clientY - rect.top + 12}px`
+  }
+
   const onPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (bindIconRef.current) moveBindIcon(event)
     const scene = sceneRef.current
     if (!scene) return
     const p = pointer.current
@@ -593,6 +613,13 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       onPointerMove={onPointerMove}
       onPointerUp={releasePointer}
       onPointerCancel={releasePointer}
+      onPointerEnter={() => {
+        if (bindIconRef.current) bindIconRef.current.style.visibility = ''
+      }}
+      onPointerLeave={() => {
+        // 鼠标离开视口就把跟随图标藏起来（下次进来随手一动，它又回到鼠标旁边）
+        if (bindIconRef.current) bindIconRef.current.style.visibility = 'hidden'
+      }}
       onWheel={onWheel}
       onDoubleClick={(event) => {
         // 网格 / FFD 工具下双击网格内部 = 插一个顶点（与 Alt+点击共用同一实现）
@@ -618,6 +645,17 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       onContextMenu={(e) => e.preventDefault()}
       style={{ cursor: pointer.current.panning ? 'grabbing' : 'default' }}
     >
+      {/* 绑定骨骼状态：一个「骨骼」图标跟在鼠标右下角，提示此时点视口是在选骨骼。
+          pointer-events-none：别挡住视口自己的命中判定；初始放在视野外，鼠标一动就归位 */}
+      {pendingWeightBone ? (
+        <div
+          ref={bindIconRef}
+          className="pointer-events-none absolute z-30 flex size-6 items-center justify-center rounded-full border border-lime-400/80 bg-ink-900/85 text-lime-400 shadow-lg shadow-black/50"
+          style={{ left: -9999, top: -9999 }}
+        >
+          <Bone size={14} />
+        </div>
+      ) : null}
     </div>
   )
 }

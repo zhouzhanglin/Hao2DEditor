@@ -537,8 +537,11 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
 /**
  * 用官方运行库烘焙出的轨道**替换**内置解析的骨骼 / 插槽轨道。
  *
- * 采样密度足够（默认 30fps），所以一律用线性缓动；换装按**附件名**解析成显示下标
- * （换皮肤后按名解析才正确）。FFD / drawOrder / 事件 / 约束仍沿用内置解析的结果。
+ * 采样密度足够，所以基本都是线性缓动；只有烘焙时检出「瞬间切换」的关键帧带
+ * `stepped` 标记（还原官方的阶跃语义，如 head-turn 的镜像切换），换成 Stepped。
+ * 采样后的帧已经过简化（删掉能用直线近似替代的中间帧，见 `spineBake.ts`）。
+ * 换装按**附件名**解析成显示下标（换皮肤后按名解析才正确）。
+ * FFD / drawOrder / 事件 / 约束仍沿用内置解析的结果。
  */
 function applyBakedAnimations(
   animations: AnimData[],
@@ -547,6 +550,7 @@ function applyBakedAnimations(
   attIndexBySlot: Map<string, Map<string, number>>
 ): boolean {
   let applied = false
+  const easingOf = (stepped?: boolean): Easing => (stepped ? Easing.Stepped : Easing.Linear)
   const byName = new Map(animations.map((animation) => [animation.name, animation]))
   for (const item of baked) {
     const target = byName.get(item.name)
@@ -558,25 +562,25 @@ function applyBakedAnimations(
       translate: track.translate.map((key) => ({
         time: key.time,
         value: { x: key.x, y: key.y },
-        easing: Easing.Linear,
+        easing: easingOf(key.stepped),
         curve: null
       })),
       rotate: track.rotate.map((key) => ({
         time: key.time,
         value: key.value,
-        easing: Easing.Linear,
+        easing: easingOf(key.stepped),
         curve: null
       })),
       scale: track.scale.map((key) => ({
         time: key.time,
         value: { x: key.x, y: key.y },
-        easing: Easing.Linear,
+        easing: easingOf(key.stepped),
         curve: null
       })),
       shear: track.shear.map((key) => ({
         time: key.time,
         value: { x: key.x, y: key.y },
-        easing: Easing.Linear,
+        easing: easingOf(key.stepped),
         curve: null
       }))
     }))

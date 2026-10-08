@@ -2,15 +2,12 @@ import { BlendMode } from '@core/model/types'
 import { curvePercent } from '@core/anim/interpolation'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
-import { useToolStore } from '@editor/store/toolStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { getActiveScene } from '@editor/activeScene'
 import { keyBoneChannel, keySlotDisplay, keySlotVisible } from '@editor/commands/animationCommands'
-import { buildGridMesh, buildOutlineMesh } from '@editor/commands/meshActions'
 import {
   applyRename,
-  autoGenerateRegionMesh,
   checkRename,
   convertMeshToRegion,
   deleteAttachment,
@@ -92,7 +89,6 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   const document = useProjectStore((s) => s.document)
   const update = useProjectStore((s) => s.update)
   const selection = useSelectionStore()
-  const gridDivisions = useToolStore((s) => s.gridDivisions)
   const mode = useModeStore((s) => s.mode)
   const time = useTimelineStore((s) => s.time)
   const currentAnimation = useTimelineStore((s) => s.currentAnimation)
@@ -474,30 +470,8 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             ) : null}
 
             <div className="flex flex-wrap gap-1 pt-0.5">
-              {/* 自动生成网格对「图片」和「由图片转来的网格」都可用：改细分数后可以重算 */}
-              {attachment.type === 'region' ||
-              (attachment.type === 'mesh' && Boolean(attachment.regionSnapshot)) ? (
-                <>
-                  {attachment.type === 'region' ? (
-                  <button
-                    type="button"
-                    className="hao-btn h-[20px] px-2 text-3xs"
-                    title={`按密度 ${gridDivisions}×${gridDivisions} 栅格切分网格并三角化，之后可用权重刷 / 顶点工具编辑`}
-                    onClick={() => onStatus(buildGridMesh(gridDivisions).message)}
-                  >
-                    转为网格（{gridDivisions}×{gridDivisions}）
-                  </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="hao-btn h-[20px] px-2 text-3xs"
-                    title={`只沿图片不透明像素的轮廓生成贴合网格（透明区域不占三角形，内部孔洞忽略）；密度 ${gridDivisions} 控制顶点数量级`}
-                    onClick={() => onStatus(buildOutlineMesh(gridDivisions).message)}
-                  >
-                    自动生成网格
-                  </button>
-                </>
-              ) : null}
+              {/* 「转为网格 / 自动生成网格」只在网格工具的工具选项面板里（那边能现场改密度，
+                  也是生成网格的统一入口）；检查器这里不再重复一份，只留网格编辑操作 */}
               {attachment.type === 'mesh' ? (
                 <>
                   <button

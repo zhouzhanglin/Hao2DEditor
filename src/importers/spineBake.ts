@@ -214,6 +214,41 @@ function dedupeColor<T extends { r: number; g: number; b: number; a: number }>(k
 }
 
 /**
+ * 常量通道压缩（采样值全程相同）。运行期是**替换式**采样：没有轨道就保持 setup 值
+ * （见 `player.ts` 的 `sampleInto`，buf 先填 setup，轨道只做覆盖）。所以：
+ *
+ * - 整段常量**且等于 setup** → 直接**删掉整条通道**，结果完全等价。这类通道占比最高
+ *   （静止且停在 setup 的部件），删掉后时间轴上的轨道数也大幅减少。
+ * - 整段常量但**不同于 setup**（如某部件全程保持一个偏置姿势）→ 只留 1 帧，
+ *   采样器对单帧轨道恒取该值，同样等价。
+ */
+function compactConstantVec2(
+  keys: BakedVec2Key[],
+  setupX: number,
+  setupY: number,
+  eps: number
+): BakedVec2Key[] {
+  if (keys.length === 0) return keys
+  const first = keys[0]
+  for (const key of keys) {
+    if (Math.abs(key.x - first.x) > eps || Math.abs(key.y - first.y) > eps) return keys
+  }
+  if (Math.abs(first.x - setupX) <= eps && Math.abs(first.y - setupY) <= eps) return []
+  return [first]
+}
+
+/** 常量通道压缩（单值），规则同 `compactConstantVec2` */
+function compactConstantScalar(keys: BakedScalarKey[], setup: number, eps: number): BakedScalarKey[] {
+  if (keys.length === 0) return keys
+  const first = keys[0]
+  for (const key of keys) {
+    if (Math.abs(key.value - first.value) > eps) return keys
+  }
+  if (Math.abs(first.value - setup) <= eps) return []
+  return [first]
+}
+
+/**
  * 烘焙所有动画；失败（版本不兼容 / 图集缺 region / 数据异常）返回 null，
  * 调用方据此回退到内置解析。
  */
@@ -232,6 +267,24 @@ export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | n
     input.boneNames.forEach((name, i) => boneIndexOf.set(name, i))
     const slotIndexOf = new Map<string, number>()
     input.slotNames.forEach((name, i) => slotIndexOf.set(name, i))
+
+    // setup 基准（官方坐标系的原始值，与我们的 BoneData 同源）：常量通道要靠它判断「是否已在 setup」
+    const setupById = new Map<number, { x: number; y: number; rotation: number; scaleX: number; scaleY: number; shearX: number; shearY: number }>()
+    skeleton.setupPose()
+    for (const bone of skeleton.bones) {
+      const index = boneIndexOf.get(bone.data.name)
+      if (index === undefined) continue
+      const pose = bone.pose
+      setupById.set(index, {
+        x: pose.x,
+        y: pose.y,
+        rotation: pose.rotation,
+        scaleX: pose.scaleX,
+        scaleY: pose.scaleY,
+        shearX: pose.shearX,
+        shearY: pose.shearY
+      })
+    }
 
     const out: BakedAnimation[] = []
     for (const animation of data.animations) {
@@ -283,7 +336,9 @@ export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | n
         }
       }
 
-      // 采样后处理：先还原阶跃语义，再压缩冗余帧（阶跃段会被 simplify 自动跳过）
+      // 采样后处理：① 还原阶跃语义 → ② 压掉能直线近似的冗余帧（阶跃段会被跳过）
+      // → ③ 常量通道压缩（全程停在 setup 的整条删掉，常量偏置只留 1 帧）
+      const bones: BakedBoneTrack[] = []
       for (const track of boneTracks.values()) {
         markSteppedVec2(track.translate, 0.1)
         markSteppedVec2(track.scale, 1)
@@ -293,6 +348,18 @@ export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | n
         track.scale = simplifyVec2(track.scale, 1e-4)
         track.rotate = simplifyScalar(track.rotate, 0.05)
         track.shear = simplifyVec2(track.shear, 0.05)
+
+        const setup = setupById.get(track.bone)
+        if (setup) {
+          track.translate = compactConstantVec2(track.translate, setup.x, setup.y, 1e-4)
+          track.scale = compactConstantVec2(track.scale, setup.scaleX, setup.scaleY, 1e-4)
+          track.rotate = compactConstantScalar(track.rotate, setup.rotation, 0.05)
+          track.shear = compactConstantVec2(track.shear, setup.shearX, setup.shearY, 0.05)
+        }
+        // 四条通道都被删掉的骨骼不再作为轨道出现（时间轴上也不该看到空轨道）
+        if (track.translate.length + track.rotate.length + track.scale.length + track.shear.length > 0) {
+          bones.push(track)
+        }
       }
       for (const track of slotTracks.values()) {
         track.display = dedupeDisplay(track.display)
@@ -302,7 +369,7 @@ export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | n
       out.push({
         name: animation.name,
         duration,
-        bones: [...boneTracks.values()],
+        bones,
         slots: [...slotTracks.values()]
       })
     }

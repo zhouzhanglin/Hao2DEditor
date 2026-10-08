@@ -125,6 +125,14 @@ export interface SpineSkinJson {
 
 export interface SpineCurveKeyframe {
   time: number
+  /**
+   * 数值帧的值：3.x/4.1 的 rotate 用 `angle`，**4.2 起统一改名成 `value`**；
+   * translate/scale/shear 一直是 `x` / `y`。
+   */
+  value?: number
+  angle?: number
+  x?: number
+  y?: number
   curve?: number | number[] | string
   [key: string]: unknown
 }
@@ -137,7 +145,9 @@ export interface SpineBoneTimelineJson {
 }
 
 export interface SpineSlotTimelineJson {
+  /** 槽位颜色通道：3.x 叫 `color`，4.x 叫 `rgba` */
   color?: SpineCurveKeyframe[]
+  rgba?: SpineCurveKeyframe[]
   attachment?: SpineCurveKeyframe[]
   twoColor?: SpineCurveKeyframe[]
 }

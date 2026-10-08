@@ -71,13 +71,15 @@ export function importSpineAnimations(
     if (!bone) continue
     const track: BoneAnim = emptyBoneAnim(index)
 
-    // 旋转：Spine 的 angle 是「相对 setup 的增量」，与 setup 同向（顺时针为正）→ 相加
+    // 旋转：Spine 的帧值是「相对 setup 的增量」，与 setup 同向（顺时针为正）→ 相加。
+    // 字段名按版本兼容：3.x/4.1 是 `angle`，**4.2 起统一改成 `value`** ——
+    // 只读一个的话，另一代的资源旋转会被全部读成 0。
     const rotateKeys = timeline.rotate ?? []
     for (let i = 0; i < rotateKeys.length; i++) {
       const key = rotateKeys[i]
       const next = rotateKeys[i + 1]
-      const raw = numberOr(key.angle, 0)
-      const nraw = next ? numberOr(next.angle, 0) : raw
+      const raw = numberOr(key.angle ?? key.value, 0)
+      const nraw = next ? numberOr(next.angle ?? next.value, 0) : raw
       // 缓动的归一化必须用**曲线所在的原始值空间**（角度 / 像素 / 倍数），
       // 不能换成叠加过 setup、除过 PPU 的最终值 —— 控制点是同一空间的绝对坐标
       const e = curveOfChannel(key.curve, 0, timeOf(key), next ? timeOf(next) : timeOf(key), raw, nraw)
@@ -154,7 +156,8 @@ export function importSpineAnimations(
     const track: SlotAnim = emptySlotAnim(slotIndex)
     const attIndex = ctx.attIndexBySlot.get(slotName)
 
-    for (const key of timeline.color ?? []) {
+    // 槽位颜色通道：3.x 是 `color`，4.x 改名成 `rgba`
+    for (const key of timeline.rgba ?? timeline.color ?? []) {
       track.color.push({
         time: timeOf(key),
         value: parseHexColor(typeof key.color === 'string' ? key.color : undefined),

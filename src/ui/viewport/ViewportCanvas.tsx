@@ -10,7 +10,13 @@ import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { isDragging, toolPointerDown, toolPointerMove, toolPointerUp } from '@editor/tools/authoringTools'
 import type { ToolHost } from '@editor/tools/authoringTools'
-import { addWeightBone, createRegionFromImage, insertMeshVertex, PPU } from '@editor/commands/authoringCommands'
+import {
+  addWeightBone,
+  createRegionFromImage,
+  insertMeshVertex,
+  PPU,
+  weightBonesOf
+} from '@editor/commands/authoringCommands'
 import { hasImageDrag, readImageDrag } from '@ui/widgets/dragDrop'
 import { gridDropLayout } from '@ui/viewport/dropLayout'
 import type { AuthoringImage } from '@core/model/authoring'
@@ -148,6 +154,16 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
           }
         }
       }
+      // 选中网格所绑定的骨骼：叠加层用高亮色画出来（权重骨骼列表里有哪几根就画哪几根）
+      let weightBones: string[] = []
+      if (selection.kind === 'attachment' && selection.slot && selection.attachment) {
+        const doc = useProjectStore.getState().document
+        const skin = doc.skins.find((item) => item.name === selection.skin) ?? doc.skins[0]
+        const attachment = skin?.slots
+          .find((item) => item.slot === selection.slot)
+          ?.attachments.find((item) => item.name === selection.attachment)
+        if (attachment?.type === 'mesh') weightBones = weightBonesOf(attachment)
+      }
       scene.setViewState({
         overlay: tools.overlay,
         gizmo: tools.gizmo,
@@ -155,6 +171,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         showGizmo: tools.tool === 'select',
         selectedBone: selection.kind === 'bone' ? selection.bone : '',
         weightBone: tools.overlay.weight ? selection.bone : '',
+        weightBones,
         selectedVertices: selection.vertices,
         selectedAttachment,
         playing: mode === 'animate' && timeline.playing,

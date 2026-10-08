@@ -71,6 +71,12 @@ export interface SceneViewState {
    * 轴 = 附件自身旋转叠加宿主骨骼；null = 不显示（未选附件 / Animate 态 / 绘制工具）。
    */
   selectedAttachment: { boneIndex: number; position: { x: number; y: number }; rotation: number } | null
+  /**
+   * 当前选中网格**绑定的骨骼**名（检查器「权重骨骼列表」里的那些）：
+   * 叠加层把它们换成高亮色画，一眼看出这个网格跟哪几根骨骼有关。
+   * 没选中网格 / 网格没有绑定骨骼时为空数组。
+   */
+  weightBones: string[]
 }
 
 export interface EditorSceneOptions {
@@ -125,7 +131,8 @@ export class EditorScene {
     gizmo: 'move',
     showGizmo: true,
     pendingBone: null,
-    selectedAttachment: null
+    selectedAttachment: null,
+    weightBones: []
   }
 
   constructor(options: EditorSceneOptions) {
@@ -214,7 +221,11 @@ export class EditorScene {
     const previousTime = this.viewState.time
     const wasPlaying = this.viewState.playing
     this.viewState = { ...this.viewState, ...patch }
-    if (patch.selectedBone !== undefined || patch.hoveredBone !== undefined) {
+    if (
+      patch.selectedBone !== undefined ||
+      patch.hoveredBone !== undefined ||
+      patch.weightBones !== undefined
+    ) {
       void previousSelected
       this.markDirty()
     }
@@ -755,6 +766,14 @@ export class EditorScene {
     const showConstraints = state.overlay.constraints && bundle !== null
     const showBoneLayer = showSkeleton || showConstraints
     const selectedIndex = bundle ? (bundle.boneIndex[state.selectedBone] ?? -1) : -1
+    // 选中网格绑定的骨骼：名字 → 索引（已被删除的骨骼自动略过）
+    const weightBoneIndices = new Set<number>()
+    if (bundle) {
+      for (const name of state.weightBones) {
+        const index = bundle.boneIndex[name]
+        if (index !== undefined) weightBoneIndices.add(index)
+      }
+    }
     this.boneStroke.visible = showBoneLayer
     this.boneFill.visible = showBoneLayer
     if (showSkeleton && bundle && state.onionSkin) this.drawOnionSkin(this.boneStroke, unitPerPixel)
@@ -763,6 +782,7 @@ export class EditorScene {
         unitsPerPixel: unitPerPixel,
         selectedBone: selectedIndex,
         hoveredBone: bundle.boneIndex[state.hoveredBone] ?? -1,
+        weightBones: weightBoneIndices,
         showBones: showSkeleton,
         showConstraints,
         showSlots: false,

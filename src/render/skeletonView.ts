@@ -79,6 +79,18 @@ export class SkeletonView {
     this.markDirty()
   }
 
+  /**
+   * 只显示某个插槽的附件（-1 = 显示全部）。
+   * 网格工具用它隔离当前编辑的网格：复杂角色上十几层网格互相遮挡，
+   * 顶点、线框和纹理叠在一起，根本看不清在编哪一个。
+   */
+  setIsolation(slotIndex: number, displayIndex = -1): void {
+    if (this.builder.isolateSlot === slotIndex && this.builder.isolateDisplay === displayIndex) return
+    this.builder.isolateSlot = slotIndex
+    this.builder.isolateDisplay = displayIndex
+    this.markDirty()
+  }
+
   markDirty(): void {
     this.dirty = true
   }

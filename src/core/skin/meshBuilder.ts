@@ -77,6 +77,16 @@ export class MeshBuilder {
   /** 整体染色（默认白 = 不变色） */
   tint: RGBA = { r: 1, g: 1, b: 1, a: 1 }
 
+  /**
+   * 插槽隔离：>= 0 时**只渲染该插槽的附件**，其余一概跳过（-1 = 显示全部）。
+   * 网格工具用它隔离当前编辑的网格 —— 复杂角色上十几层网格互相遮挡，
+   * 顶点、线框和贴图叠成一片，看不清在编哪一个。
+   */
+  isolateSlot = -1
+
+  /** 隔离插槽上要渲染的附件下标（-1 = 用当前显示项）。「选中某附件」不等于「它在显示」 */
+  isolateDisplay = -1
+
   private readonly asset: RuntimeAsset
   private maps: RuntimeMaps | null = null
   private skinName = ''
@@ -157,11 +167,16 @@ export class MeshBuilder {
       const si = order[oi]
       if (si < 0 || si >= slots.length) continue
       if (!skeleton.slotVisible[si]) continue
+      // 插槽隔离：网格工具下只渲染当前编辑的那个网格，其余附件一概跳过
+      if (this.isolateSlot >= 0 && si !== this.isolateSlot) continue
       const k = maps.skinOfSlot[si]
       if (k < 0) continue
       const attachments = maps.skinArr[k].attachments
       if (attachments.length === 0) continue
-      const di = skeleton.slotDisplayIndex[si]
+      const di =
+        si === this.isolateSlot && this.isolateDisplay >= 0
+          ? this.isolateDisplay
+          : skeleton.slotDisplayIndex[si]
       if (di < 0 || di >= attachments.length) continue
 
       let attachment = attachments[di]

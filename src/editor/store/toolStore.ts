@@ -78,9 +78,13 @@ export const useToolStore = create<ToolState>((set, get) => ({
     const overlay = { ...get().overlay }
     if (tool === 'weight') overlay.weight = true
     if (tool === 'ffd') {
-      // 顶点编辑：Pose 态要看网格线，Animate 态要看 FFD 偏移虚线，两个显示层都打开
+      // 顶点编辑：打开「FFD」显示层（顶点方块 + 偏移虚线）。
+      //
+      // **不**顺手打开「网格」：网格层是**全局**的（画所有附件的线框），而且切回别的
+      // 工具后它仍然亮着 —— 整个角色会铺满线框，而这并不是使用者要的「只看我选中的
+      // 那个网格」。网格工具本身已经只渲染选中的那个网格（见 Scene.applyMeshIsolation），
+      // 需要线框时手动点一下「网格」按钮即可（此时也只有那一个网格有线框）。
       overlay.ffd = true
-      overlay.mesh = true
     }
     // 换工具就放弃「等待点选骨骼」，免得换个工具后第一次点击被旧等待态吃掉
     set({ tool, overlay, pendingWeightBone: null })

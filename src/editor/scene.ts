@@ -31,6 +31,7 @@ import {
 } from '@render/picking'
 import type { BoneHandleHit, BoneHit, GizmoPart, ShearEdge, VertexHit } from '@render/picking'
 import { ImageAlphaCache } from '@render/imageAlpha'
+import { AttachmentType } from '@core/model/types'
 
 /** 斜切包围盒：局部 AABB + 世界坐标四角（左上 → 右上 → 右下 → 左下） */
 export interface ShearBox {
@@ -77,6 +78,13 @@ export interface SceneViewState {
    * 没选中网格 / 网格没有绑定骨骼时为空数组。
    */
   weightBones: string[]
+  /**
+   * 网格工具（`ffd`）的隔离目标：**只渲染这个插槽的附件**，其余全部隐藏。
+   * 空串 = 不隔离（未选中网格 / 其它工具时显示全部）。
+   */
+  isolateMeshSlot: string
+  /** 隔离插槽上要显示的附件名（空串 = 沿用当前显示项） */
+  isolateMeshAttachment: string
 }
 
 export interface EditorSceneOptions {
@@ -118,6 +126,8 @@ export class EditorScene {
   private dirty = true
   private viewState: SceneViewState = {
     overlay: { bones: true, mesh: false, weight: false, ffd: false, constraints: true },
+    isolateMeshSlot: '',
+    isolateMeshAttachment: '',
     selectedBone: '',
     hoveredBone: '',
     weightBone: '',
@@ -214,6 +224,40 @@ export class EditorScene {
       this.viewport.contentLayer.addChild(this.view.container)
       this.markDirty()
     }
+  }
+
+  /**
+   * 网格工具的「隔离显示」：**只渲染当前选中的那个网格**，其余附件全部跳过。
+   *
+   * 复杂角色上十几个网格彼此遮挡，顶点 / 线框 / 贴图叠成一片，看不出在编哪一个；
+   * 隔离后画面里只剩目标网格，拖顶点、看权重都干净。未选中、选中的不是网格、
+   * 或换到别的工具时自动恢复显示全部。
+   *
+   * `isolateMeshSlot` 存的是插槽**名**（附件名会随皮肤切换变化，插槽名稳定），
+   * 每帧解析一次的开销可以忽略；`setIsolation` 内部做去重，值不变时不会触发重建。
+   */
+  private applyMeshIsolation(): void {
+    const view = this.view
+    if (!view) return
+    const name = this.viewState.isolateMeshSlot
+    let index = -1
+    let display = -1
+    if (name && this.bundle) {
+      const found = this.bundle.asset.slots.findIndex((slot) => slot.name === name)
+      if (found >= 0) {
+        // 优先用**选中的那个附件**（按名查显示下标）—— 选中不等于它在显示，
+        // 不指定的话隔离出来可能还是旧的显示项
+        const wanted = this.viewState.isolateMeshAttachment
+        const byName = wanted ? view.meshBuilder.attachmentIndexOf(found, wanted) : -1
+        const current = byName >= 0 ? byName : this.bundle.skeleton.slotDisplayIndex[found]
+        const attachment = this.attachmentAt(found, current)
+        if (attachment && attachment.type === AttachmentType.Mesh) {
+          index = found
+          display = byName
+        }
+      }
+    }
+    view.setIsolation(index, display)
   }
 
   setViewState(patch: Partial<SceneViewState>): void {
@@ -334,6 +378,9 @@ export class EditorScene {
       this.view.markDirty()
       this.dirty = true
     }
+
+    // 网格工具的隔离显示：只渲染当前选中的那个网格（值不变时内部直接返回）
+    this.applyMeshIsolation()
 
     if (this.view.isDirty) {
       this.view.update(this.bundle.skeleton)
@@ -827,7 +874,13 @@ export class EditorScene {
       }
     }
 
-    const showMesh = (state.overlay.mesh || state.overlay.weight || state.overlay.ffd) && bundle !== null
+    // 网格工具隔离中（只渲染选中的那个网格）：**强制显示它的线框与顶点**。
+    // 工具本身就是在编这个网格，「看不见网格线」说不过去 —— 这件事不该取决于
+    // 顶部「网格」开关的状态（那个开关管的是其它工具下的全局网格显示）。
+    const isolating = (this.view?.meshBuilder.isolateSlot ?? -1) >= 0
+
+    const showMesh =
+      (state.overlay.mesh || state.overlay.weight || state.overlay.ffd || isolating) && bundle !== null
     this.meshStroke.visible = showMesh
     this.meshFill.visible = showMesh
     if (!showMesh || !bundle) {
@@ -844,8 +897,8 @@ export class EditorScene {
       (slotIndex, displayIndex) => this.attachmentAt(slotIndex, displayIndex),
       {
         unitsPerPixel: unitPerPixel,
-        showWireframe: state.overlay.mesh || state.overlay.weight,
-        showVertices: state.overlay.weight || state.overlay.ffd,
+        showWireframe: state.overlay.mesh || state.overlay.weight || isolating,
+        showVertices: state.overlay.weight || state.overlay.ffd || isolating,
         weightBone: state.overlay.weight ? weightBone : -1,
         selectedVertices: new Set(state.selectedVertices),
         hoveredVertex: state.hoveredVertex

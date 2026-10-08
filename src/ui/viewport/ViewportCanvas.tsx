@@ -182,7 +182,11 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         speed: timeline.speed,
         loop: timeline.loop,
         time: timeline.time,
-        onionSkin: mode === 'animate' && timeline.onionSkin
+        onionSkin: mode === 'animate' && timeline.onionSkin,
+        // 网格工具：只显示当前选中的那个网格（其它附件隐藏，避免层层遮挡）。
+        // 选中项不是网格时由场景侧忽略（见 Scene.applyMeshIsolation）
+        isolateMeshSlot: tools.tool === 'ffd' && selection.kind === 'attachment' ? selection.slot : '',
+        isolateMeshAttachment: tools.tool === 'ffd' && selection.kind === 'attachment' ? selection.attachment : ''
       })
     }
     push()

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import DockLayout from './layout/DockLayout'
 import Splitter from './layout/Splitter'
 import MenuBar from './layout/MenuBar'
-import Toolbar from './layout/Toolbar'
 import StatusBar from './panels/StatusBar'
 import InspectorPanel from './panels/InspectorPanel'
 import AssetPanel from './panels/AssetPanel'
@@ -13,6 +12,7 @@ import TimelinePanel from './timeline/TimelinePanel'
 import HierarchyTree from './tree/HierarchyTree'
 import ViewportCanvas from './viewport/ViewportCanvas'
 import ModeSwitch from './viewport/ModeSwitch'
+import ViewportOverlays from './viewport/ViewportOverlays'
 import ViewportTools from './viewport/ViewportTools'
 import PanelShell from './widgets/PanelShell'
 import { pickAnimationForAnimate, useModeStore } from '@editor/store/modeStore'
@@ -552,14 +552,6 @@ export default function App() {
             onOpenRecent={(path) => run(openProjectAt(path))}
           />
         }
-        toolbar={
-          <Toolbar
-            zoom={zoom}
-            overlay={tools.overlay}
-            onToggleOverlay={tools.toggleOverlay}
-            onFitViewport={() => handleCommand('view:fitViewport')}
-          />
-        }
         left={
           <>
             <PanelShell
@@ -621,6 +613,13 @@ export default function App() {
             <div className="relative flex min-h-0 flex-1">
               <ViewportCanvas onSceneReady={onSceneReady} onStatus={flash} />
               <ModeSwitch mode={mode} onChange={setMode} />
+              {/* 右上角浮动面板：骨骼 / 约束开关 + 缩放与适配视野（原菜单栏下面那一行搬到这里） */}
+              <ViewportOverlays
+                zoom={zoom}
+                overlay={tools.overlay}
+                onToggleOverlay={tools.toggleOverlay}
+                onFitViewport={() => handleCommand('view:fitViewport')}
+              />
               <ViewportTools onStatus={flash} />
               {/* 关键帧的值：贴在视口正下方中间，改值时光看画面即可（仅 Animate 态出现） */}
               {mode === 'animate' ? <KeyframeValueBar /> : null}

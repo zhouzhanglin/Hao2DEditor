@@ -3,7 +3,8 @@ import Splitter from './Splitter'
 
 export interface DockLayoutProps {
   menuBar: React.ReactNode
-  toolbar: React.ReactNode
+  /** 菜单栏下面那一行（可选：现在已没有内容，留着这个槽备用） */
+  toolbar?: React.ReactNode
   left: React.ReactNode
   center: React.ReactNode
   /** 为 null 时整个右栏（含分隔条）不渲染，空间让给中间列（Animate 态收起属性面板） */
@@ -75,7 +76,8 @@ export default function DockLayout(props: DockLayoutProps) {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-ink-900">
       <div className="z-20 shrink-0">{props.menuBar}</div>
-      <div className="z-10 shrink-0">{props.toolbar}</div>
+      {/* 原来这里是一整行工具条（骨骼 / 约束 + 缩放）；那两块已并进视口右上角的浮动面板 */}
+      {props.toolbar ? <div className="z-10 shrink-0">{props.toolbar}</div> : null}
 
       <div className="flex min-h-0 flex-1">
         <aside

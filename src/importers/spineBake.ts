@@ -213,38 +213,83 @@ function dedupeColor<T extends { r: number; g: number; b: number; a: number }>(k
   return out
 }
 
+/** 骨骼通道名（`sourceChannels` 的键、`BakedBoneTrack` 的字段、源 JSON 的键三者一致） */
+const CHANNELS = ['translate', 'rotate', 'scale', 'shear'] as const
+
+/**
+ * 源动画里**显式带有动画数据**的通道集合：骨骼名 → { translate | rotate | scale | shear }。
+ *
+ * 官方的采样结果看不出「这条通道在源动画里到底存不存在」，但两者语义并不相同：
+ * 没有通道 = 保持 setup；有通道（哪怕值恰好恒等于 setup）= 该通道参与混合 / 叠加。
+ * 所以整条删通道不能只看采样值 —— 见 `compactConstantVec2`。
+ *
+ * 兼容两种导出格式：旧版把通道放在同一对象里（`translate` / `rotate` / `scale` / `shear`），
+ * 新版按通道拆开（`translateFrame` / `rotateFrame` / …）。空数组算「没有数据」。
+ */
+function sourceChannels(json: unknown, animationName: string): Map<string, Set<string>> {
+  const animations = (json as { animations?: Record<string, unknown> } | null | undefined)?.animations
+  const animation = animations?.[animationName] as { bones?: unknown } | undefined
+  const bones = animation?.bones
+  if (!bones || typeof bones !== 'object') return new Map()
+  const out = new Map<string, Set<string>>()
+  for (const [boneName, raw] of Object.entries(bones as Record<string, unknown>)) {
+    if (!raw || typeof raw !== 'object') continue
+    const timeline = raw as Record<string, unknown>
+    const channels = new Set<string>()
+    for (const channel of CHANNELS) {
+      const legacy = timeline[channel]
+      const split = timeline[`${channel}Frame`]
+      if ((Array.isArray(legacy) && legacy.length > 0) || (Array.isArray(split) && split.length > 0)) {
+        channels.add(channel)
+      }
+    }
+    if (channels.size > 0) out.set(boneName, channels)
+  }
+  return out
+}
+
 /**
  * 常量通道压缩（采样值全程相同）。运行期是**替换式**采样：没有轨道就保持 setup 值
- * （见 `player.ts` 的 `sampleInto`，buf 先填 setup，轨道只做覆盖）。所以：
+ * （见 `player.ts` 的 `sampleInto`，buf 先填 setup，轨道只做覆盖）。
  *
- * - 整段常量**且等于 setup** → 直接**删掉整条通道**，结果完全等价。这类通道占比最高
- *   （静止且停在 setup 的部件），删掉后时间轴上的轨道数也大幅减少。
  * - 整段常量但**不同于 setup**（如某部件全程保持一个偏置姿势）→ 只留 1 帧，
- *   采样器对单帧轨道恒取该值，同样等价。
+ *   采样器对单帧轨道恒取该值，等价。
+ * - 整段常量**且等于 setup** → 再看 `keep`：
+ *   - `keep = false`：源动画里**没有**这条通道的数据 → 整条删掉，结果完全等价。
+ *     这类通道占比最高（静止且停在 setup 的部件），删掉后轨道数与体积大幅下降。
+ *   - `keep = true`：源动画里**有**这条通道 → 只留 1 帧，通道保留。
+ *     值语义不变（仍是常量），但结构与源一致 —— 删掉的话，这条通道在混合 / 叠加时的
+ *     行为会跟着变，导入结果和源动画对不上。
  */
 function compactConstantVec2(
   keys: BakedVec2Key[],
   setupX: number,
   setupY: number,
-  eps: number
+  eps: number,
+  keep: boolean
 ): BakedVec2Key[] {
   if (keys.length === 0) return keys
   const first = keys[0]
   for (const key of keys) {
     if (Math.abs(key.x - first.x) > eps || Math.abs(key.y - first.y) > eps) return keys
   }
-  if (Math.abs(first.x - setupX) <= eps && Math.abs(first.y - setupY) <= eps) return []
+  if (!keep && Math.abs(first.x - setupX) <= eps && Math.abs(first.y - setupY) <= eps) return []
   return [first]
 }
 
 /** 常量通道压缩（单值），规则同 `compactConstantVec2` */
-function compactConstantScalar(keys: BakedScalarKey[], setup: number, eps: number): BakedScalarKey[] {
+function compactConstantScalar(
+  keys: BakedScalarKey[],
+  setup: number,
+  eps: number,
+  keep: boolean
+): BakedScalarKey[] {
   if (keys.length === 0) return keys
   const first = keys[0]
   for (const key of keys) {
     if (Math.abs(key.value - first.value) > eps) return keys
   }
-  if (Math.abs(first.value - setup) <= eps) return []
+  if (!keep && Math.abs(first.value - setup) <= eps) return []
   return [first]
 }
 
@@ -346,7 +391,11 @@ export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | n
       }
 
       // 采样后处理：① 还原阶跃语义 → ② 压掉能直线近似的冗余帧（阶跃段会被跳过）
-      // → ③ 常量通道压缩（全程停在 setup 的整条删掉，常量偏置只留 1 帧）
+      // → ③ 常量通道压缩（**源里没这条通道**才整条删掉，源里有则至少留 1 帧）
+      //
+      // ③ 的判据取自源 JSON 而不是采样值：采样结果看不出「这条通道在源动画里存不存在」，
+      // 而两者语义不同（无通道 = 保持 setup；有通道 = 参与混合 / 叠加）。
+      const animated = sourceChannels(input.json, animation.name)
       const bones: BakedBoneTrack[] = []
       for (const track of boneTracks.values()) {
         markSteppedVec2(track.translate, 0.1)
@@ -360,10 +409,30 @@ export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | n
 
         const setup = setupById.get(track.bone)
         if (setup) {
-          track.translate = compactConstantVec2(track.translate, setup.x, setup.y, 1e-4)
-          track.scale = compactConstantVec2(track.scale, setup.scaleX, setup.scaleY, 1e-4)
-          track.rotate = compactConstantScalar(track.rotate, setup.rotation, 0.05)
-          track.shear = compactConstantVec2(track.shear, setup.shearX, setup.shearY, 0.05)
+          // 「源里有这条通道的数据就不删」：常量值同样压成 1 帧（值语义不变），但通道保留
+          const channels = animated.get(input.boneNames[track.bone] ?? '')
+          track.translate = compactConstantVec2(
+            track.translate,
+            setup.x,
+            setup.y,
+            1e-4,
+            channels?.has('translate') ?? false
+          )
+          track.scale = compactConstantVec2(
+            track.scale,
+            setup.scaleX,
+            setup.scaleY,
+            1e-4,
+            channels?.has('scale') ?? false
+          )
+          track.rotate = compactConstantScalar(track.rotate, setup.rotation, 0.05, channels?.has('rotate') ?? false)
+          track.shear = compactConstantVec2(
+            track.shear,
+            setup.shearX,
+            setup.shearY,
+            0.05,
+            channels?.has('shear') ?? false
+          )
         }
         // 四条通道都被删掉的骨骼不再作为轨道出现（时间轴上也不该看到空轨道）
         if (track.translate.length + track.rotate.length + track.scale.length + track.shear.length > 0) {

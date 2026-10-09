@@ -28,7 +28,7 @@
 
   body {
     font-family: Inter, system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-    font-size: 12px;
+    font-size: 13px;
     background: var(--hao-bg-0);
     color: var(--hao-text-hi);
     user-select: none;

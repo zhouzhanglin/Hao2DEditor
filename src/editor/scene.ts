@@ -62,7 +62,13 @@ export interface SceneViewState {
   focusMeshSlot: string
   selectedBone: string
   hoveredBone: string
-  weightBone: string
+  /**
+   * 权重刷工具是否激活：**权重着色（顶点饼图）只在它激活时画**。
+   *
+   * 顶部「权重」开关已移除（与「网格」「FFD」同一处理）：这件事本身就等价于
+   * 「正在用权重刷」，不需要用户再手动同步一个开关。
+   */
+  weightTool: boolean
   selectedVertices: number[]
   hoveredVertex: number
   playing: boolean
@@ -150,14 +156,14 @@ export class EditorScene {
   private animationName: string | null = null
   private dirty = true
   private viewState: SceneViewState = {
-    // 网格显示不看开关：选择 / Pose 工具按选中项画（focusMeshSlot），顶点工具走隔离
-    overlay: { bones: true, weight: false, ffd: false, constraints: true },
+    // 网格 / FFD / 权重显示都不看开关：按选中项、工具与权重刷自动决定
+    overlay: { bones: true, constraints: true },
     focusMeshSlot: '',
     isolateMeshSlot: '',
     isolateMeshAttachment: '',
     selectedBone: '',
     hoveredBone: '',
-    weightBone: '',
+    weightTool: false,
     selectedVertices: [],
     hoveredVertex: -1,
     playing: false,
@@ -615,16 +621,30 @@ export class EditorScene {
   pickVertexAt(worldX: number, worldY: number): VertexHit | null {
     if (!this.bundle) return null
     // 只画选中的那一个时，也只让那一个的顶点可抓 —— 否则会拖到看不见（甚至没画出来）的顶点
-    return pickVertex(this.meshResult, worldX, worldY, this.viewport.pixelsToWorld(9), this.focusSlotIndex())
+    return pickVertex(this.meshResult, worldX, worldY, this.viewport.pixelsToWorld(9), this.editingSlotIndex())
   }
 
   /**
    * `focusMeshSlot` 对应的插槽下标（空串 / 名字不存在时 -1）。
    *
-   * 网格覆盖层与顶点拾取共用它：**画谁就让谁可抓**。
+   * 只有**选择 / Pose 工具**会填它 —— 用来把顶点圆点按网格尺寸定大小（见 drawOverlays）。
    */
   private focusSlotIndex(): number {
-    const name = this.viewState.focusMeshSlot
+    return this.slotIndexByName(this.viewState.focusMeshSlot)
+  }
+
+  /**
+   * **在编辑谁**的插槽下标（-1 = 不限制）。覆盖层「画谁」与顶点拾取「抓谁」共用它，
+   * 两处必须一致 —— 否则会拖到根本没画出来的顶点：
+   * - 选择 / Pose 工具：选中项（`focusMeshSlot`）；
+   * - 顶点工具：选中的附件（`isolateMeshSlot`）—— 即便它是 Region、不会真隔离
+   *  （见 applyMeshIsolation），也只画它自己的顶点；否则整个角色的顶点会一起铺出来。
+   */
+  private editingSlotIndex(): number {
+    return this.slotIndexByName(this.viewState.isolateMeshSlot || this.viewState.focusMeshSlot)
+  }
+
+  private slotIndexByName(name: string): number {
     if (!name || !this.bundle) return -1
     return this.bundle.asset.slots.findIndex((slot) => slot.name === name)
   }
@@ -1100,7 +1120,15 @@ export class EditorScene {
      */
     const isolating = (this.view?.meshBuilder.isolateSlot ?? -1) >= 0
     const focusSlot = this.focusSlotIndex()
-    const showMesh = (state.overlay.weight || state.overlay.ffd || isolating || focusSlot >= 0) && bundle !== null
+    /*
+     * **在编辑谁**：选择 / Pose 工具取选中项，顶点工具取选中的附件（见 editingSlotIndex）。
+     *
+     * 为什么不能只靠 `isolating`：隔离只对 **Mesh** 成立（见 applyMeshIsolation），Region 走不到
+     * 那里 —— 而顶点工具也要能编 Region（转网格前后都要看得到顶点）。原来这份「看得到」是靠顶部
+     * 「FFD」开关撑着的，那个开关已移除（与「网格」开关同一处理）：显示跟着工具走，不需要手动开。
+     */
+    const editingSlot = this.editingSlotIndex()
+    const showMesh = (editingSlot >= 0 || isolating) && bundle !== null
     this.meshStroke.visible = showMesh
     this.meshFill.visible = showMesh
     if (!showMesh || !bundle) {
@@ -1159,12 +1187,13 @@ export class EditorScene {
       (slotIndex, displayIndex) => this.attachmentAt(slotIndex, displayIndex),
       {
         unitsPerPixel: unitPerPixel,
-        showWireframe: isolating || state.overlay.weight || focusSlot >= 0,
-        showVertices: isolating || state.overlay.weight || state.overlay.ffd || focusSlot >= 0,
-        // 隔离本身就只构建了那一个插槽，不需要再过滤
-        onlySlot: isolating ? -1 : focusSlot,
+        showWireframe: isolating || editingSlot >= 0,
+        showVertices: isolating || editingSlot >= 0,
+        // 隔离本身就只构建了那一个插槽，不需要再过滤；顶点工具下的 Region 靠它只画选中那一个
+        onlySlot: isolating ? -1 : editingSlot,
         vertexRadius,
-        showWeights: state.overlay.weight,
+        // 权重着色（饼图）跟着权重刷工具走：顶部「权重」开关已移除
+        showWeights: state.weightTool,
         weightBoneColors,
         selectedVertices: new Set(state.selectedVertices),
         hoveredVertex: state.hoveredVertex

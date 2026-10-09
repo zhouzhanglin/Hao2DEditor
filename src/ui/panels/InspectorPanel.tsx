@@ -855,13 +855,16 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
           </FieldGroup>
         ) : null}
         {/*
-          网格 / FFD：密度 + 生成入口，放在属性面板**最下面**。
-          原先在右侧「工具选项」面板里 —— 那块面板限高 300px，参数被压成一小条，
-          而这个设置本身是作用于**选中的附件**（Region → 规则网格 / 沿轮廓重设为贴合网格），
-          跟着附件放在一起更顺手。
+          网格 / FFD：把选中的 displayObject 转成网格的入口 + 密度参数，放在属性面板**最下面**。
+
+          **只要选中的还不是 Mesh 就显示**，与当前工具无关 —— 想转网格时不必先切到网格工具；
+          已经转成 Mesh 的附件不再显示它，改由上面的网格编辑操作（删顶点 / 还原为 Region /
+          删除附件）接手。
+          密度 = 生成 / 重设网格时的栅格细分（Region → 规则栅格网格，或沿不透明轮廓重设为贴合网格）。
+
           Animate 态整个右栏是收起的（见 App），所以不必再写「请切到 Pose 态」的提示。
         */}
-        {tools.tool === 'ffd' ? (
+        {attachment && attachment.type !== 'mesh' ? (
           <FieldGroup title="网格 / FFD">
             <NumberField
               label="密度"

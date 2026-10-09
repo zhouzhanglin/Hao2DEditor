@@ -63,15 +63,18 @@ export const GIZMO_ORDER: ReadonlyArray<{ mode: GizmoMode; key: string; label: s
 /**
  * 视口叠加层开关。
  *
- * **刻意没有「网格」**：全局画所有附件的线框没法用（复杂角色会铺满线条），
- * 网格显示改成「选中哪个才画哪个」——
- * - 选择 / Pose 工具：按选中项自动显示（视口填 `focusMeshSlot`，见 Scene）
- * - 顶点工具：走网格隔离（只渲染正在编辑的那一个）
+ * **刻意只留「与在编辑谁无关」的两项**：骨骼骨架、约束手柄 —— 它们在任何工具下看的都是同一件事。
+ *
+ * 被移除的三项都是「跟着编辑对象 / 工具走」的，用户不需要手动同步：
+ * - **网格线框与顶点**：选择 / Pose 工具按选中项只画那一个（视口填 `focusMeshSlot`），
+ *   顶点工具走网格隔离（只渲染正在编辑的那一个）；
+ * - **FFD**：同上，顶点工具选中附件就显示；
+ * - **权重着色（饼图）**：只在权重刷工具激活时画（视口填 `weightTool`，见 Scene）。
+ *
+ * 手动开全局的那几个反而是负担：复杂角色会铺满线条与顶点（这正是它们被移除的原因）。
  */
 export interface OverlayState {
   bones: boolean
-  weight: boolean
-  ffd: boolean
   constraints: boolean
 }
 
@@ -106,24 +109,19 @@ export interface ToolState {
 export const useToolStore = create<ToolState>((set, get) => ({
   tool: 'select',
   gizmo: 'move',
-  overlay: { bones: true, weight: false, ffd: false, constraints: true },
+  overlay: { bones: true, constraints: true },
   brush: { radius: 40, strength: 0.5, mode: 'add' },
   gridDivisions: 4,
   pendingWeightBone: null,
 
-  // 选中绘制类工具时顺手打开对应显示层，否则「工具选了但看不到能编辑的东西」
+  /**
+   * 换工具**不再改任何显示层**：网格线框与顶点、FFD、权重着色都由工具与选中项驱动
+   *（视口把它们作为 `isolateMeshSlot` / `focusMeshSlot` / `weightTool` 推给场景，
+   * 见 Scene.drawOverlays）。这里的 overlay 只留给「骨架 / 约束」两个纯显示开关。
+   */
   setTool: (tool) => {
-    const overlay = { ...get().overlay }
-    if (tool === 'weight') overlay.weight = true
-    // 顶点编辑：打开「FFD」显示层（顶点方块 + 偏移虚线）。
-    //
-    // 网格线框不在开关里：它由**选中项**驱动 —— 选择 / Pose 工具只画选中的那一个
-    //（视口填 focusMeshSlot），顶点工具走网格隔离（只渲染正在编的那一个）。
-    if (tool === 'ffd') {
-      overlay.ffd = true
-    }
     // 换工具就放弃「等待点选骨骼」，免得换个工具后第一次点击被旧等待态吃掉
-    set({ tool, overlay, pendingWeightBone: null })
+    set({ tool, pendingWeightBone: null })
   },
   /**
    * 选择变换工具（移动/旋转/缩放/斜切）时**自动退出绘制类工具**，见 `isDrawTool`。

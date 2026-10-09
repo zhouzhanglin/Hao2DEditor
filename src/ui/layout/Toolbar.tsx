@@ -9,13 +9,13 @@ export interface ToolbarProps {
 }
 
 /**
- * 叠加层开关。**没有「网格」**：全局网格层会让整个角色铺满线框，
- * 现在改成「谁被选中才画谁」（选择 / Pose 工具按选中项自动显示，见 Scene.focusMeshSlot）。
+ * 叠加层开关。**只剩与「在编辑谁」无关的两项**：骨架与约束手柄 —— 任何工具下看的都是同一件事。
+ *
+ * 「网格 / FFD / 权重」都已移除：它们分别跟着选中项、顶点工具、权重刷工具自动显示，
+ * 手动开全局版只会把整个角色铺满线条与顶点，还得记着关回去。
  */
 const OVERLAYS: Array<{ key: keyof OverlayState; label: string }> = [
   { key: 'bones', label: '骨骼' },
-  { key: 'weight', label: '权重' },
-  { key: 'ffd', label: 'FFD' },
   { key: 'constraints', label: '约束' }
 ]
 

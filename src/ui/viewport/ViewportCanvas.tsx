@@ -200,7 +200,8 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         // Pose 工具要拖骨骼改绑定姿态（蒙皮随之变形），所以和选择工具一样给操作器
         showGizmo: tools.tool === 'select' || tools.tool === 'pose',
         selectedBone: selection.kind === 'bone' ? selection.bone : '',
-        weightBone: tools.overlay.weight ? selection.bone : '',
+        // 权重着色（饼图）跟着工具走：顶部「权重」开关已移除
+        weightTool: tools.tool === 'weight',
         weightBones,
         selectedVertices: selection.vertices,
         selectedAttachment,
@@ -437,7 +438,8 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     if (hit && scene.runtime) {
       const name = scene.runtime.asset.bones[hit.boneIndex]?.name ?? ''
       const tools = useToolStore.getState()
-      if (tools.overlay.ffd || tools.overlay.weight) {
+      // 顶点工具 / 权重刷下，骨骼体上若压着顶点就优先选顶点（这两类工具就是在编顶点）
+      if (tools.tool === 'ffd' || tools.tool === 'weight') {
         const vertex = scene.pickVertexAt(world.x, world.y)
         if (vertex) {
           selection.selectVertices([vertex.vertexIndex])

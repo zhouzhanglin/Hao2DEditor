@@ -207,8 +207,8 @@ export interface EditorMeta {
   viewport: { x: number; y: number; zoom: number }
   activeSkin: string
   activeAnimation: string
-  /** 视口叠加层开关（无「网格」：网格显示由选中项驱动） */
-  overlay: { bones: boolean; weight: boolean; ffd: boolean; constraints: boolean }
+  /** 视口叠加层开关（只留骨架与约束：网格 / FFD / 权重都由选中项与工具驱动） */
+  overlay: { bones: boolean; constraints: boolean }
   /** 权重画笔参数 */
   brush: { radius: number; strength: number; mode: 'add' | 'subtract' | 'replace' }
 }
@@ -241,7 +241,7 @@ export function createDefaultMeta(): EditorMeta {
     viewport: { x: 0, y: 0, zoom: 1 },
     activeSkin: '',
     activeAnimation: '',
-    overlay: { bones: true, weight: false, ffd: false, constraints: true },
+    overlay: { bones: true, constraints: true },
     brush: { radius: 40, strength: 0.5, mode: 'add' }
   }
 }

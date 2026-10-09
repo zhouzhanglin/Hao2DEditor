@@ -420,8 +420,6 @@ function normalizeMeta(raw: unknown): EditorMeta {
     activeAnimation: str(raw.activeAnimation),
     overlay: {
       bones: bool(overlay.bones, base.overlay.bones),
-      weight: bool(overlay.weight, base.overlay.weight),
-      ffd: bool(overlay.ffd, base.overlay.ffd),
       constraints: bool(overlay.constraints, base.overlay.constraints)
     },
     brush: {

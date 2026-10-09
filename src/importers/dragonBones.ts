@@ -477,7 +477,13 @@ export function importDragonBones(input: DragonBonesImportInput): DragonBonesImp
   }
 
   const skins: SkinData[] = (armature.skin ?? [{ name: 'default', slot: [] }]).map((skin, skinIdx) => ({
-    name: skin.name ?? (skinIdx === 0 ? 'default' : `skin${skinIdx}`),
+    /*
+     * DB 的默认皮肤常常写成空串（`"skin": [{ "name": "", ... }]`），而不是省掉 name ——
+     * 只判 `??` 会把这个空串原样带进来，皮肤面板上就是一个空白标签（实测 Demon 就是如此）。
+     * 空串要当成「没有名字」：首个皮肤叫 `default`（与 createEmptyDocument / 编译器的
+     * 默认皮肤查找口径一致），其余按序号。
+     */
+    name: (skin.name ?? '').trim() || (skinIdx === 0 ? 'default' : `skin${skinIdx}`),
     slots: (skin.slot ?? []).map((skinSlot: DbSkinSlotJson) => {
       const slotIndex = slotIndexByName.get(skinSlot.name ?? '')
       const boneIdx = slotIndex !== undefined ? slots[slotIndex].boneIndex : 0

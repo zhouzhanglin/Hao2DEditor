@@ -133,17 +133,28 @@ function toBoneData(ordered: readonly SpineBoneJson[], index: Map<string, number
   })
 }
 
-/** 统一 3.3/3.4（对象）与 3.8+（数组带 name）两代皮肤格式 */
+/**
+ * 统一 3.3/3.4（对象）与 3.8+（数组带 name）两代皮肤格式。
+ *
+ * 名字是**空串**时按「没有名字」处理（首个回落成 `default`）：3.8+ 的 JSON 里默认皮肤
+ * 常写成 `"name": ""`，直接带进来皮肤面板上就是一个空白标签。与 DB 导入同一口径，
+ * 也和 createEmptyDocument / 编译器查找默认皮肤的名字一致。
+ */
 function normalizeSkins(json: SpineJson): Array<{ name: string; attachments: Record<string, Record<string, SpineAttachmentJson>> }> {
+  const fallbackName = (name: string | undefined, index: number): string =>
+    (name ?? '').trim() || (index === 0 ? 'default' : `skin${index}`)
   const skins = json.skins
   if (!skins) return []
   if (Array.isArray(skins)) {
     return skins.map((skin, i) => ({
-      name: skin.name ?? `skin${i}`,
+      name: fallbackName(skin.name, i),
       attachments: skin.attachments ?? {}
     }))
   }
-  return Object.entries(skins).map(([name, attachments]) => ({ name, attachments }))
+  return Object.entries(skins).map(([name, attachments], index) => ({
+    name: fallbackName(name, index),
+    attachments
+  }))
 }
 
 function blendOf(blend: string | undefined): BlendMode {

@@ -555,7 +555,6 @@ export default function App() {
             mode={mode}
             projectPath={projectPath}
             onCommand={handleCommand}
-            onFitViewport={() => handleCommand('view:fitViewport')}
             onOpenRecent={(path) => run(openProjectAt(path))}
           />
         }

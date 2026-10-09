@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import {
   Bone,
   ChevronDown,
-  Crosshair,
   FilePlus2,
   FolderOpen,
   History,
@@ -23,7 +22,6 @@ export interface MenuBarProps {
   mode: EditorMode
   projectPath: string | null
   onCommand: (command: string) => void
-  onFitViewport: () => void
   onOpenRecent: (path: string) => void
 }
 
@@ -177,7 +175,6 @@ export default function MenuBar({
   mode,
   projectPath,
   onCommand,
-  onFitViewport,
   onOpenRecent
 }: MenuBarProps) {
   return (
@@ -221,14 +218,6 @@ export default function MenuBar({
           className="hao-tool-button"
         >
           <Redo2 size={14} />
-        </button>
-        <button
-          type="button"
-          title="适配视野 (F)"
-          onClick={onFitViewport}
-          className="hao-tool-button"
-        >
-          <Crosshair size={14} />
         </button>
       </div>
 

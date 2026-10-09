@@ -381,13 +381,19 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
 
   const mode = useModeStore((s) => s.mode)
   const currentAnimationName = useTimelineStore((s) => s.currentAnimation)
-  // 播放头时间走**节流**通道：这里只用它算「插槽当前显示的附件名」，
-  // 400ms 跟一次足够 —— 整棵骨架树每帧重渲染正是之前播放掉帧的主因之一
-  const timelineTime = useThrottledPlayheadTime(400)
   const activeAnimation = useMemo(
     () => document.animations.find((item) => item.name === currentAnimationName) ?? null,
     [document.animations, currentAnimationName]
   )
+
+  /**
+   * 播放头时间走**节流**通道，并且只在「当前动画真的有插槽显示轨」时才跟随：
+   * 这个值只用来算「插槽当前显示的附件名」，没有显示轨的动画（绝大多数骨骼动画）
+   * 里它根本不会变 —— 那就没必要按秒把整棵树重渲染一遍。
+   */
+  const showLiveNames =
+    mode === 'animate' && (activeAnimation?.slots.some((slot) => slot.displayIndex.length > 0) ?? false)
+  const timelineTime = useThrottledPlayheadTime(500, showLiveNames)
 
   /**
    * 当前显示的 display 名：Animate 态按**关键帧数据**采样（与运行期同一规则），Pose 态 setup 值就是权威。

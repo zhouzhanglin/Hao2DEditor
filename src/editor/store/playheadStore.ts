@@ -40,13 +40,18 @@ export function playheadTime(): number {
  * 节流版的播放头时间：给「需要跟着播放刷新、但不必每帧都刷」的面板用
  * （层级树里插槽当前显示的附件名、属性面板的当前时间读数…）。
  *
- * 每 `intervalMs` 最多触发一次重渲染 —— 这些面板整体重渲染不便宜，
- * 每帧都刷等于把刚拆掉的开销又搬回来。
+ * 每 `intervalMs` 最多触发一次重渲染 —— 这些面板整体重渲染不便宜
+ * （实测：播放期间每次唤醒的时间轴/层级树重绘，正是 4 秒里 1.3 秒 React 脚本时间的来源）。
+ *
+ * `enabled = false` 时**完全不跟随**（只在挂载时取一次值）：调用方用它表达
+ * 「当前这个动画根本没有会让本面板变化的数据」—— 例如当前动画没有任何插槽显示轨，
+ * 层级树里的附件名不可能变，那就没必要按秒唤醒整棵树。
  */
-export function useThrottledPlayheadTime(intervalMs = 250): number {
+export function useThrottledPlayheadTime(intervalMs = 250, enabled = true): number {
   const [value, setValue] = useState(() => usePlayheadStore.getState().time)
 
   useEffect(() => {
+    if (!enabled) return
     let timer = 0
     let pending = false
     const unsubscribe = usePlayheadStore.subscribe((state) => {
@@ -61,7 +66,7 @@ export function useThrottledPlayheadTime(intervalMs = 250): number {
       unsubscribe()
       window.clearTimeout(timer)
     }
-  }, [intervalMs])
+  }, [intervalMs, enabled])
 
   return value
 }

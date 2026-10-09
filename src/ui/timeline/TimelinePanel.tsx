@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Flag, KeyRound, Pause, Play, Repeat, SkipBack, SkipForward, Square, Timer, Trash2, Zap } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
-import { playheadTime, usePlayheadStore, useThrottledPlayheadTime } from '@editor/store/playheadStore'
+import { playheadTime, usePlayheadStore } from '@editor/store/playheadStore'
 import { useShallow } from 'zustand/react/shallow'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useModeStore } from '@editor/store/modeStore'
@@ -54,8 +54,16 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
       setSelectedTrack: s.setSelectedTrack
     }))
   )
-  /** 面板自身需要的时间（clamp / 跟随 / 初值）：120ms 跟一次足够 —— 播放头与帧号读数不靠它 */
-  const time = useThrottledPlayheadTime(120)
+  /**
+   * 面板**不订阅**播放时间：播放头、帧号/秒数读数、进度滑块全都由高频通道直接改 DOM
+   * （见下面几个 ref），因此播放期间时间轴面板与 DopeSheet **完全不重渲染**。
+   *
+   * 这里取一次快照只用于「首屏初值」（之后就被 ref 覆盖）。之前是 120ms 节流订阅 ——
+   * 每次唤醒都会把整个面板连同 DopeSheet（几十行轨道、上千个关键帧节点）重渲染一遍，
+   * 实测是播放卡顿的最大单一来源（LoAF 4s 窗口：脚本 1.3s，全部经 React 调度器的
+   * MessagePort 派发；关掉这一处后长帧与掉帧大幅下降）。
+   */
+  const time = playheadTime()
 
   const animation = document.animations.find((a) => a.name === timeline.currentAnimation) ?? null
   /** 动画时长（真实长度，决定播放与擦洗上限） */
@@ -69,10 +77,25 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
 
   // 时长会因为关键帧收缩而变小；播放头若停在旧的末尾之外，会与播放器按循环取模后的时间
   // 不一致（此时拖动骨骼写的关键帧不在画面上，看起来像「拖不动」）。收敛到时长内。
-  const currentTime = time
+  // 时长会因为关键帧收缩而变小；播放头若停在旧的末尾之外，会与播放器按循环取模后的时间
+  // 不一致（此时拖动骨骼写的关键帧不在画面上，看起来像「拖不动」）。收敛到时长内。
+  //
+  // 用订阅而不是「订阅时间 → 重渲染面板」：这里只是把越界的时间拉回来，没必要重画面板；
+  // 200ms 节流避免连续越界时反复写 store。
   useEffect(() => {
-    if (currentTime > duration + 1e-6) useTimelineStore.getState().setTime(duration)
-  }, [duration, currentTime])
+    let timer = 0
+    const unsubscribe = usePlayheadStore.subscribe((state) => {
+      if (state.time <= duration + 1e-6 || timer !== 0) return
+      timer = window.setTimeout(() => {
+        timer = 0
+        useTimelineStore.getState().setTime(duration)
+      }, 200)
+    })
+    return () => {
+      unsubscribe()
+      window.clearTimeout(timer)
+    }
+  }, [duration])
 
   const frame = Math.round(time * document.frameRate)
   const totalFrames = Math.max(1, Math.round(duration * document.frameRate))

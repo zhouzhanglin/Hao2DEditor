@@ -38,3 +38,22 @@ export function weightPaletteColorValue(index: number): number {
   const value = Number.parseInt(hex.slice(1), 16)
   return Number.isFinite(value) ? value : 0x8e8e93
 }
+
+/**
+ * 「权重骨骼列表」（有序）→ 骨骼索引 → 颜色。
+ *
+ * 配色按骨骼在列表里的**位置**取（见模块头）：第 1 行绿、第 2 行橙……
+ * 已经被删掉的骨骼（不在 `boneIndex` 里）不进映射 —— 但它**照样占着**自己的配色位，
+ * 否则它之后每一根的颜色都会跟面板里的行错开一格。
+ */
+export function weightBoneColorMap(
+  bones: readonly string[],
+  boneIndex: Readonly<Record<string, number>>
+): Map<number, number> {
+  const map = new Map<number, number>()
+  for (let i = 0; i < bones.length; i++) {
+    const index = boneIndex[bones[i]]
+    if (index !== undefined) map.set(index, weightPaletteColorValue(i))
+  }
+  return map
+}

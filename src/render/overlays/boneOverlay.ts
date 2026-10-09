@@ -15,10 +15,11 @@ export interface BoneOverlayOptions {
   showConstraints: boolean
   showSlots: boolean
   /**
-   * 当前选中网格**绑定的骨骼**索引：这几根换成高亮色画（未选中 / 未悬停时），
-   * 一眼看出这个网格跟哪几根骨骼有关。
+   * 当前选中网格**绑定的骨骼**：索引 → 颜色（取自「权重骨骼列表」的配色，见 weightPalette）。
+   * 这几根按各自的颜色画（未选中 / 未悬停时），于是「面板里哪一行」「视口里哪根骨骼」
+   * 「顶点饼图里的哪一瓣」用的是同一个色，一眼对得上。
    */
-  weightBones?: ReadonlySet<number>
+  weightBoneColors?: ReadonlyMap<number, number>
   /** 需要画成空心的骨骼名（来自编辑期模型的 hollow 选项，默认全是实心） */
   hollowBones?: ReadonlySet<string>
   /** 拖拽新建骨骼时的预览（世界坐标两点） */
@@ -31,8 +32,6 @@ export interface BoneOverlayOptions {
 const COLOR_BONE = 0xe0a45c
 const COLOR_BONE_SELECTED = 0x0a84ff
 const COLOR_BONE_HOVERED = 0x64d2ff
-/** 选中网格所绑定的骨骼：系统绿（与骨色橙、选中蓝、悬停青都拉得开） */
-const COLOR_BONE_WEIGHT = 0x30d158
 const COLOR_JOINT = 0xffd60a
 const COLOR_ROOT = 0xbf5af2
 const COLOR_CONSTRAINT = 0x40c8e0
@@ -303,9 +302,13 @@ export function drawBoneOverlay(
     const isHovered = i === options.hoveredBone
     const isRoot = skeleton.asset.bones[i].parentIndex < 0
     const active = isSelected || isHovered
-    // 选中网格所绑定的骨骼：换个色标出来（选中 / 悬停仍然优先用各自的强调色）
-    const isWeight = !active && (options.weightBones?.has(i) ?? false)
-    const color = active ? COLOR_BONE_SELECTED : isWeight ? COLOR_BONE_WEIGHT : COLOR_BONE
+    /*
+     * 选中网格所绑定的骨骼：用它在「权重骨骼列表」里的那个颜色（列表第 1 根绿、第 2 根橙……，
+     * 与检查器色块、顶点饼图同源，见 weightPalette）。选中 / 悬停仍然优先用各自的强调色。
+     */
+    const weightColor = active ? undefined : options.weightBoneColors?.get(i)
+    const isWeight = weightColor !== undefined
+    const color = active ? COLOR_BONE_SELECTED : (weightColor ?? COLOR_BONE)
 
     const dx = skeleton.world[o] * length
     const dy = skeleton.world[o + 1] * length
@@ -348,13 +351,7 @@ export function drawBoneOverlay(
       .poly(circlePolygon(x, y, r))
       .stroke({
         width: w * (isSelected ? 2.2 : 1.8),
-        color: isRoot
-          ? COLOR_ROOT
-          : active
-            ? COLOR_BONE_SELECTED
-            : isWeight
-              ? COLOR_BONE_WEIGHT
-              : COLOR_JOINT,
+        color: isRoot ? COLOR_ROOT : active ? COLOR_BONE_SELECTED : (weightColor ?? COLOR_JOINT),
         alpha: isRoot || active ? 1 : 0.9
       })
   }

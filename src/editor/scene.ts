@@ -18,7 +18,7 @@ import {
 } from '@render/overlays/boneOverlay'
 import type { GizmoDrawMode } from '@render/overlays/boneOverlay'
 import { drawMeshOverlay } from '@render/overlays/meshOverlay'
-import { weightPaletteColorValue } from '@core/weightPalette'
+import { weightBoneColorMap } from '@core/weightPalette'
 import {
   BONE_ORIGIN_RADIUS,
   attachmentGizmoFrame,
@@ -994,14 +994,17 @@ export class EditorScene {
     const showConstraints = state.overlay.constraints && bundle !== null
     const showBoneLayer = showSkeleton || showConstraints
     const selectedIndex = bundle ? (bundle.boneIndex[state.selectedBone] ?? -1) : -1
-    // 选中网格绑定的骨骼：名字 → 索引（已被删除的骨骼自动略过）
-    const weightBoneIndices = new Set<number>()
-    if (bundle) {
-      for (const name of state.weightBones) {
-        const index = bundle.boneIndex[name]
-        if (index !== undefined) weightBoneIndices.add(index)
-      }
-    }
+    /*
+     * 选中网格绑定的骨骼：名字 → 索引（已被删除的骨骼自动略过），并按它在「权重骨骼列表」
+     * 里的**位置**取配色（见 weightPalette）。
+     *
+     * 这份映射**两处共用**：骨骼覆盖层把这几根画成各自的颜色，网格覆盖层的权重饼图用同一组色
+     * —— 于是「面板里那一行的色块」「视口里那根骨骼」「顶点饼图里的那一瓣」三者一个色，
+     * 不用再靠记忆去对（原来骨骼是一个统一的绿，跟饼图对不上）。
+     */
+    const weightBoneColors = bundle
+      ? weightBoneColorMap(state.weightBones, bundle.boneIndex)
+      : new Map<number, number>()
     this.boneStroke.visible = showBoneLayer
     this.boneFill.visible = showBoneLayer
     if (showSkeleton && bundle && state.onionSkin) this.drawOnionSkin(this.boneStroke, unitPerPixel)
@@ -1010,7 +1013,7 @@ export class EditorScene {
         unitsPerPixel: unitPerPixel,
         selectedBone: selectedIndex,
         hoveredBone: bundle.boneIndex[state.hoveredBone] ?? -1,
-        weightBones: weightBoneIndices,
+        weightBoneColors,
         showBones: showSkeleton,
         showConstraints,
         showSlots: false,
@@ -1105,16 +1108,6 @@ export class EditorScene {
       this.meshFill.clear()
       return
     }
-    /*
-     * 权重着色用的骨骼配色：按骨骼在「权重骨骼列表」里的**位置**取（与检查器里的色块同源，
-     * 见 weightPalette）—— 列表外的骨骼留 0，叠加层会用兜底灰画它们。
-     */
-    const weightBoneColors: number[] = []
-    for (let i = 0; i < state.weightBones.length; i++) {
-      const boneIndex = bundle.boneIndex[state.weightBones[i]]
-      if (boneIndex !== undefined) weightBoneColors[boneIndex] = weightPaletteColorValue(i)
-    }
-
     /*
      * 顶点圆点的半径（世界单位）：
      * - **顶点工具（隔离中）**：固定 5 屏幕像素 —— 那是可拖的手柄，缩多远都要抓得住；

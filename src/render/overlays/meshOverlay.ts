@@ -30,10 +30,11 @@ export interface MeshOverlayOptions {
    */
   showWeights: boolean
   /**
-   * 每根骨骼的显示色（下标 = 骨骼索引，0 = 该骨骼不在权重列表里 → 兜底灰）。
-   * 由场景按「权重骨骼列表」的**位置**从 weightPalette 取，与检查器里的色块同源。
+   * 绑定骨骼的显示色：骨骼索引 → 颜色。由场景按骨骼在「权重骨骼列表」里的**位置**
+   * 从 weightPalette 取，与检查器里的色块同源。不在映射里的骨骼（老工程 / 手动刷过权重）
+   * 用兜底灰，避免那片顶点凭空消失。
    */
-  weightBoneColors: readonly number[]
+  weightBoneColors: ReadonlyMap<number, number>
   /** 选中的顶点下标集合（全局顶点缓冲下标） */
   selectedVertices: ReadonlySet<number>
   hoveredVertex: number
@@ -96,6 +97,7 @@ export function drawMeshOverlay(
     if (options.showWeights) {
       // 权重着色：每个顶点画成饼图，一瓣一根骨骼（角宽 = 权重）
       drawWeightPies(fills, result, skeleton, attachmentOf, options.weightBoneColors, options.onlySlot, w)
+      // 说明：配色由场景按「权重骨骼列表」的位置统一给出，与骨骼覆盖层同源
       // 选中 / 悬停改画圆环：实心大点会把饼整个盖住，权重分配就看不见了
       drawVertexRings(strokes, result, options.selectedVertices, options.hoveredVertex, options.onlySlot, w)
     } else {
@@ -150,7 +152,7 @@ function drawWeightPies(
   result: MeshBuildResult,
   skeleton: Skeleton,
   attachmentOf: (slotIndex: number, displayIndex: number) => AttachmentData | null,
-  boneColors: readonly number[],
+  boneColors: ReadonlyMap<number, number>,
   onlySlot: number,
   w: number
 ): void {
@@ -194,12 +196,11 @@ function drawWeightPies(
  *
  * 未列在权重骨骼列表里的骨骼（老工程 / 手动刷过权重）用兜底灰，避免那片顶点凭空消失。
  */
-function weightSlices(entry: WeightEntry, boneColors: readonly number[]): Array<{ color: number; weight: number }> {
+function weightSlices(entry: WeightEntry, boneColors: ReadonlyMap<number, number>): Array<{ color: number; weight: number }> {
   const raw: Array<{ color: number; weight: number }> = []
   const add = (bone: number, weight: number): void => {
     if (weight <= 0.0001) return
-    const listed = bone >= 0 && bone < boneColors.length ? boneColors[bone] : 0
-    raw.push({ color: listed > 0 ? listed : 0x8e8e93, weight })
+    raw.push({ color: boneColors.get(bone) ?? 0x8e8e93, weight })
   }
   add(entry.b0, entry.w0)
   add(entry.b1, entry.w1)

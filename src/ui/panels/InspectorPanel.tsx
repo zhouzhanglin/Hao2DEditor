@@ -472,11 +472,20 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
               value={attachment.color}
               onChange={(value) => update('修改附件颜色', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.color = value }))}
             />
-            <ToggleField
-              label="骨内FFD"
-              value={attachment.ffdInBoneSpace}
-              onChange={(value) => update('修改FFD空间', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.ffdInBoneSpace = value }))}
-            />
+            {/*
+              骨内FFD：**只在已经标成骨内空间时才出现**（正常流程不会产生 true）。
+              导入器（spine / DragonBones）与编辑器的 FFD 工具写的都是显示空间，导出时
+              compiler 还会把 true 换算回显示空间并清零（见 compile.normalizeBoneSpaceFfd）——
+              所以平时藏起来；只有旧工程 / 外部数据带着 true 时它才冒出来，让人能看着并关掉。
+            */}
+            {attachment.type === 'mesh' && attachment.ffdInBoneSpace ? (
+              <ToggleField
+                label="骨内FFD"
+                value={attachment.ffdInBoneSpace}
+                hint="偏移已按骨骼 bindpose 换算过；正常保持关闭"
+                onChange={(value) => update('修改FFD空间', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.ffdInBoneSpace = value }))}
+              />
+            ) : null}
             {attachment.type === 'mesh' ? (
               <p className="text-3xs leading-relaxed text-content-lo">
                 顶点 {attachment.vertices.length} · 三角面 {Math.floor(attachment.triangles.length / 3)} ·

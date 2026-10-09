@@ -132,7 +132,14 @@ export interface AttachmentData {
   /** 每顶点权重（Mesh）；Region 为空 */
   weights: VertexWeight[]
 
-  /** FFD 偏移是否已是骨内坐标（Spine = true；DragonBones = false，需经 bindpose 变方向） */
+  /**
+   * FFD 偏移是否已是骨内坐标。
+   *
+   * 口径（与实现一致）：**导入器一律写 false** —— spine 与 DragonBones 的 deform 偏移都是
+   * 「setup 姿态 / 显示空间」的位移，加权路径由运行期按 bindpose 做方向变换（见
+   * meshBuilder.accumulateWeighted）。`true` 只可能来自手动开关或旧工程 / 外部数据，
+   * 而且导出时会被 compile 的 normalizeBoneSpaceFfd 换算回显示空间并清零。
+   */
   ffdInBoneSpace: boolean
 
   linkedMeshSkin: string

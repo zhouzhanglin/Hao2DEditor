@@ -85,8 +85,10 @@ export interface AuthoringAttachment {
   hull: number
   /**
    * FFD 偏移所处空间（与 Runtime 语义一致）：
-   * - false（编辑器新建的附件默认）：偏移在附件显示空间，加权蒙皮时先经 bindpose 做方向变换
-   * - true：偏移已是骨内坐标（Spine 导入的附件）
+   * - false：偏移在附件**显示空间**，加权蒙皮时先经 bindpose 做方向变换 ——
+   *   编辑器新建的附件、以及 spine / DragonBones 导入的数据都是这一种；
+   * - true：偏移已是**骨内坐标**，直接叠加。正常编辑流程不会产生它，
+   *   只有手动开关或旧工程 / 外部数据会标成 true（导出时会被换算回显示空间并清零）。
    */
   ffdInBoneSpace: boolean
   linkedMeshSkin: string

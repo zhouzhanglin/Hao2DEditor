@@ -413,11 +413,13 @@ export interface ToggleFieldProps {
   value: boolean
   onChange: (value: boolean) => void
   disabled?: boolean
+  /** 悬停提示；给了也会在开关右侧显示一行说明（与 CheckboxField 一致） */
+  hint?: string
 }
 
-export function ToggleField({ label, value, onChange, disabled }: ToggleFieldProps) {
+export function ToggleField({ label, value, onChange, disabled, hint }: ToggleFieldProps) {
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-1.5" title={hint}>
       <span className="hao-label w-[52px] shrink-0">{label}</span>
       <button
         type="button"
@@ -436,6 +438,7 @@ export function ToggleField({ label, value, onChange, disabled }: ToggleFieldPro
           ].join(' ')}
         />
       </button>
+      {hint ? <span className="truncate text-3xs text-content-lo">{hint}</span> : null}
     </div>
   )
 }

@@ -683,7 +683,9 @@ export function deleteAttachment(doc: EditorDocument, slotName: string, attachme
  * - add / grow：在现有权重上叠加（grow 跳过还没受这根骨骼影响的顶点）
  * - subtract：衰减；replace：直接覆盖
  * - smooth：朝邻居的平均权重靠拢（与刷哪根骨骼无关）
- * - 刷完统一归一化到 1（目标骨骼权重为 1 时清空其它骨骼，避免出现 0 权重残留）
+ * - `normalize`（Unity 的 Normalize，默认开）：把其它骨骼按比例缩放，让权重和回到 1；
+ *   关掉时只改目标骨骼，权重和可以 ≠ 1 —— 渲染按相对比例算（见 meshBuilder），
+ *   导出也会重新归一化（见 compile.normalizeWeights），所以那是合法的编辑期状态。
  *
  * 返回被影响的顶点数。
  */
@@ -920,7 +922,9 @@ export function autoWeights(
 /**
  * 设置某个顶点在某根骨骼上的权重，其余骨骼**按比例**分享剩下的部分。
  *
- * 权重和必须保持 1：小于 1 时顶点会朝原点塌陷，大于 1 会过度外推（见 paintWeights 的同款约束）。规则：
+ * 这里维持「权重和 = 1」只是编辑期的整洁约定（面板滑块与画笔在 Normalize 打开时都这么改）；
+ * 渲染并不要求它 —— 网格构建按**相对比例**归一化（Σw ≠ 1 时除以 Σw，见 meshBuilder），
+ * 导出也会按 top-4 重新归一化（见 compile.normalizeWeights）。规则：
  * - 目标骨骼设成 1 → 清空其它骨骼（不留 0 权重残渣）
  * - 其它骨骼本来有权重 → 按原比例缩放到剩余的 `1 - v`
  * - 其它骨骼全是 0（这个顶点第一次拿到第二根骨骼）→ 剩余量交给**列表里的另一根**
@@ -945,7 +949,7 @@ export function setVertexWeight(
   if (!bound.includes(bone)) return false
 
   const before = vertex.weights.map((entry) => ({ ...entry }))
-  // 只绑了一根骨骼时它必然是 1：给半权重会让权和 < 1，顶点朝原点塌陷（UI 那边也会禁用滑块）
+  // 只绑了一根骨骼时它只能是 1：没有别的骨骼来配平剩下的部分（UI 那边也会禁用滑块）
   const target = bound.length < 2 ? 1 : Math.min(1, Math.max(0, value))
   /*
    * `applyVertexWeight` 只在**已有**的其它骨骼之间按比例分配剩余量；这个顶点的其余骨骼
@@ -1012,8 +1016,9 @@ export function addWeightBone(
 /**
  * 从权重骨骼列表移除一根骨骼，并清掉它在所有顶点上的权重。
  *
- * 剩下的权重会**重新归一化**（只按比例放大、方向不变）：否则权重和小于 1，
- * 顶点会朝原点塌陷，看起来像网格被压扁了。
+ * 剩下的权重会**重新归一化**（只按比例放大、方向不变）。渲染其实按相对比例算
+ *（见 meshBuilder），但归一化有两个实际好处：一是导出只带 **top-4** 骨骼，
+ * 权和大于 1 时截断再归一化会改变比例；二是面板里的百分比加起来正好 100%。
  */
 export function removeWeightBone(
   doc: EditorDocument,

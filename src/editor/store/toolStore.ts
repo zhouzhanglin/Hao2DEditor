@@ -39,7 +39,34 @@ export function isDrawTool(tool: EditorTool): boolean {
   return tool !== 'select' && tool !== 'bone' && tool !== 'pose'
 }
 
-export type BrushMode = 'add' | 'subtract' | 'replace'
+/**
+ * 权重刷的**模式**（与 Unity 2D Animation 的 Weight Brush「Mode」同名）：
+ *
+ * - `addSubtract`：影响选中骨骼周围**所有**顶点（增加；按住 Alt 减少）
+ * - `growShrink`：只影响**已经受该骨骼影响**的顶点（生长 / 收缩）
+ * - `smooth`：与邻居平均，让权重分布更平滑（与刷哪根骨骼无关）
+ */
+export type BrushModeSetting = 'addSubtract' | 'growShrink' | 'smooth'
+
+/**
+ * 权重刷参数 —— **与 Unity Weight Brush 面板同名**（Mode / Size / Hardness / Normalize），
+ * 面板在属性最下面的「权重刷」一栏（只在权重刷工具下出现）。
+ *
+ * 修饰键仍可临时改方向，落笔用的是**修饰键优先、其次这个 Mode**：
+ * Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长（见 brushModeFor）。
+ */
+export interface BrushState {
+  mode: BrushModeSetting
+  /** Unity: Size —— 笔刷光标大小（像素，视口里的圈就是它） */
+  size: number
+  /**
+   * Unity: Hardness —— 每次笔刷施加多少权重，0..100（100 = 一次到位）。
+   * 默认 1.5：一次划过约百分之几，需要来回刷才逐步加满（500 时代一次拖拽就冲满，手感"擦一下就满"）。
+   */
+  hardness: number
+  /** Unity: Normalize —— 刷过的顶点权重归一到 1；关掉则只改目标骨骼，权重和可能 ≠ 1 */
+  normalize: boolean
+}
 
 /**
  * 骨骼变换小坐标轴（gizmo）的操作模式：移动 / 旋转 / 缩放 / 斜切。
@@ -78,12 +105,6 @@ export interface OverlayState {
   constraints: boolean
 }
 
-export interface BrushState {
-  radius: number
-  strength: number
-  mode: BrushMode
-}
-
 export interface ToolState {
   tool: EditorTool
   /** 骨骼变换 gizmo 的当前模式 */
@@ -111,15 +132,13 @@ export const useToolStore = create<ToolState>((set, get) => ({
   gizmo: 'move',
   overlay: { bones: true, constraints: true },
   /*
-   * 笔刷参数（面板已移除，这里是实际生效值）：
-   * - 半径 40px（= 0.4 世界单位，视口里的绿圈就是它）；
-   * - **强度 0.015**：每移动一次叠加 0.015×衰减 —— 原来 0.5 时，一次拖拽里
-   *   顶点会被叠加十几次，几乎瞬间冲到 100%（手感就是「太强、擦一下就满」）。
-   *   0.15 还是偏快（实测一次划过就三四成），再降 90% 到 0.015：
-   *   一次划过约百分之几，需要来回刷才逐步加满，接近常规笔刷的累积手感。
-   * - mode 字段仍在数据里，但落笔用的是修饰键（Alt=减少 / Shift=覆盖，见 brushModeFor）。
+   * 笔刷参数：与 Unity Weight Brush 面板同名（Mode / Size / Hardness / Normalize），
+   * 面板见属性最下面的「权重刷」一栏。
+   * - Size 40px = 0.4 世界单位（视口里的圈就是它）；
+   * - Hardness 1.5（= 强度 0.015）：每移动一次叠加 0.015×衰减，一次划过约百分之几；
+   * - Normalize 默认开：刷完归一化到 1，避免出现权重和不等于 1 的顶点。
    */
-  brush: { radius: 40, strength: 0.015, mode: 'add' },
+  brush: { mode: 'addSubtract', size: 40, hardness: 1.5, normalize: true },
   gridDivisions: 4,
   pendingWeightBone: null,
 

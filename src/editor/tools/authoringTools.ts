@@ -25,6 +25,7 @@ import {
   uniqueName
 } from '../commands/authoringCommands'
 import type { BrushMode, VertexSample } from '../commands/authoringCommands'
+import type { BrushModeSetting } from '../store/toolStore'
 import { fitUvField, isInteriorVertex } from '@core/mesh/triangulate'
 
 export interface PointerInfo {
@@ -95,6 +96,13 @@ interface DragSession {
    *（History.end 无条件入栈，没有内容变化也不会被丢弃）。
    */
   paintStarted: boolean
+  /**
+   * 上一次落笔的世界坐标（权重刷）。
+   *
+   * 叠加**按移动距离推进**（见 moveActiveDrag）：同一段路径，快拖和慢拖叠出来的次数一致 ——
+   * 否则叠加次数取决于鼠标事件频率，手感会随速度飘（慢慢挪会一遍遍叠加、飞快划过反而只叠一两次）。
+   */
+  lastPaint: Vec2
   /** 新建骨骼：起点（已吸附）、当前终点与父骨骼名，松开时按起点→终点生成 */
   createStart: Vec2
   createEnd: Vec2
@@ -138,6 +146,7 @@ const IDLE: DragSession = {
   paintMode: 'replace',
   moved: false,
   paintStarted: false,
+  lastPaint: { x: 0, y: 0 },
   createStart: { x: 0, y: 0 },
   createEnd: { x: 0, y: 0 },
   createParent: '',
@@ -156,23 +165,45 @@ export function isDragging(): boolean {
 }
 
 /**
- * 权重刷的笔刷模式由**修饰键**决定（面板已移除）：
- * **Alt = 减少**、**Shift = 替换（直接覆盖）**、都不按 = 增加。
+ * 权重刷的笔刷模式由**修饰键**决定（参数面板已移除），对应 Unity 2D Animation 的
+ * Weight Brush「Mode」三项：
+ *
+ * | 修饰键 | 模式 | Unity 里的对应 |
+ * | --- | --- | --- |
+ * | 不按 | `add` 增加 | Add and Subtract（加半边） |
+ * | **Alt** | `subtract` 减少 | Add and Subtract（减半边） |
+ * | **Shift** | `replace` 覆盖 | ——（本工程额外保留的方向） |
+ * | **Ctrl** | `smooth` 平滑 | **Smooth**（朝邻居平均） |
+ * | **Ctrl+Shift** | `grow` 只加已受影响顶点 | **Grow and Shrink**（生长侧；配 Alt 即收缩） |
  *
  * 光标样式、半径圈颜色与真正落笔都走这一个出处 —— 三者说的必须是同一件事，
  * 否则会出现「光标画的是减号、实际却在加权重」这种最难受的错配。
  */
-export function brushModeFor(info: { alt: boolean; shift: boolean }): BrushMode {
+export function brushModeFor(
+  info: { alt: boolean; shift: boolean; ctrl?: boolean },
+  base: BrushMode = 'add'
+): BrushMode {
+  if (info.ctrl && info.shift) return info.alt ? 'subtract' : 'grow'
+  if (info.ctrl) return 'smooth'
   if (info.alt) return 'subtract'
   if (info.shift) return 'replace'
+  return base
+}
+
+/** Unity Weight Brush 的「Mode」下拉 → 落笔模式（没按修饰键时就用它） */
+export function baseBrushMode(mode: BrushModeSetting): BrushMode {
+  if (mode === 'growShrink') return 'grow'
+  if (mode === 'smooth') return 'smooth'
   return 'add'
 }
 
 /** 状态栏里的动作名（与 brushModeFor 一一对应） */
 export const BRUSH_ACTION: Record<BrushMode, string> = {
   add: '增加',
+  grow: '增长',
   subtract: '减少',
-  replace: '覆盖'
+  replace: '覆盖',
+  smooth: '平滑'
 }
 
 /** 指针按下：返回 true 表示工具已接管（调用方不要再做默认选择逻辑） */
@@ -205,8 +236,10 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
      * attachment，若仍按 kind 判定，点完顶点就没法接着拖刷了 —— 而「先选骨骼、再点顶点、
      * 拖一下刷它」正是权重工具的常态用法。骨骼名会写在状态栏里，不会悄悄刷错骨骼。
      */
+    const paintMode = brushModeFor(info, baseBrushMode(tools.brush.mode))
     const bone = useSelectionStore.getState().bone
-    if (!bone) {
+    // 平滑平均的是「全部骨骼」的权重，不需要目标骨骼；其余模式必须先在层级树里选一根
+    if (!bone && paintMode !== 'smooth') {
       host.status(
         vertexLabel
           ? `${vertexLabel}：在层级树里选一根骨骼后按住拖动即可刷权重`
@@ -218,14 +251,26 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       host.status('权重刷只在 Pose 状态可用（动画状态的角色姿态不是绑定姿态）')
       return true
     }
-    const paintMode = brushModeFor(info)
+    /*
+     * 只刷**选中的那个网格**（与官方工具「刷选中的网格」一致）。
+     * 原来没选附件时会对整个角色的顶点生效 —— 那既不直观，也容易在别的部件上留下看不见的改动。
+     */
+    if (!useSelectionStore.getState().slot || !useSelectionStore.getState().attachment) {
+      host.status('先在层级树里选中要刷权重的网格附件（Region 请先转为网格）')
+      return true
+    }
+    // 平滑平均的是全部骨骼的权重，说「刷某根骨骼」会误导
+    const action =
+      paintMode === 'smooth' ? '平滑权重（朝邻居平均）' : `${BRUSH_ACTION[paintMode]}「${bone}」的权重`
+    const target = paintMode === 'smooth' ? `权重刷` : `权重刷「${bone}」`
     host.status(
       vertexLabel
-        ? `${vertexLabel}：按住拖动${BRUSH_ACTION[paintMode]}「${bone}」的权重`
-        : `权重刷「${bone}」：按住拖动${BRUSH_ACTION[paintMode]}权重` +
-            `（半径 ${tools.brush.radius}px；Alt=减少 / Shift=覆盖）`
+        ? `${vertexLabel}：按住拖动${action}`
+        : `${target}：按住拖动${action}` +
+            `（Mode ${tools.brush.mode} / Size ${tools.brush.size}px / Hardness ${tools.brush.hardness}` +
+            `${tools.brush.normalize ? '' : ' / Normalize 关'}；临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长）`
     )
-    drag = { ...IDLE, kind: 'paint', bone, paintMode }
+    drag = { ...IDLE, kind: 'paint', bone, paintMode, lastPaint: { ...info.world } }
     return true
   }
 
@@ -997,11 +1042,22 @@ export function toolPointerMove(host: ToolHost, info: PointerInfo): void {
 /** 拖拽分发（从 toolPointerMove 拆出来，好让「网格跟随」在前后统一处理） */
 function moveActiveDrag(host: ToolHost, info: PointerInfo): void {
   if (drag.kind === 'paint') {
-    // 撤销事务在**第一次真正开刷**时才开：单击只是选中顶点看权重，不该留下空的撤销记录
-    if (!drag.paintStarted) {
+    /*
+     * 按**移动距离**节流：不足 2 屏幕像素就不再叠加。
+     * 不节流时叠加次数取决于鼠标事件频率 —— 慢慢挪会反复叠同一片、飞快划过只叠一两次，
+     * 同一段手势手感随速度飘。官方的刷子是「走到哪刷到哪」，与速度无关。
+     * 首次移动（按下后的第一下）不节流，保证点住拖一下就有反馈。
+     */
+    if (drag.paintStarted) {
+      const step = host.scene.viewport.pixelsToWorld(2)
+      const moved = Math.hypot(info.world.x - drag.lastPaint.x, info.world.y - drag.lastPaint.y)
+      if (moved < step) return
+    } else {
+      // 撤销事务在**第一次真正开刷**时才开：单击只是选中顶点看权重，不该留下空的撤销记录
       drag.paintStarted = true
       storeHandler.begin('权重刷')
     }
+    drag.lastPaint = { ...info.world }
     paintAt(host, info.world)
     return
   }
@@ -1212,49 +1268,11 @@ function createBoneFromDrag(host: ToolHost, start: Vec2, end: Vec2, parent: stri
   )
 }
 
-/** 自动权重（属性面板「权重刷」那一栏的按钮调用）：需要先选中骨骼与附件 */
-export function runAutoWeights(host: ToolHost, falloff: number): number {
-  const scene = host.scene
-  const bundle = scene.runtime
-  if (!bundle || host.mode !== 'pose') return 0
-  const bone = host.selection.kind === 'bone' ? host.selection.bone : ''
-  if (!bone) return 0
-
-  const samples = samplesFor(host, host.selection.slot, host.selection.attachment)
-  if (samples.length === 0) return 0
-
-  // 候选骨骼：被选中骨骼 + 它的直接子骨骼（简单且符合直觉的局部影响范围）
-  const candidates = candidateBones(host, bone)
-  const segments = candidates.map((item) => {
-    const offset = item.index * 16
-    const ox = bundle.skeleton.world[offset + 12]
-    const oy = bundle.skeleton.world[offset + 13]
-    const length = Math.max(0.001, bundle.asset.bones[item.index].length)
-    const angle = (bundle.skeleton.worldRot[item.index] * Math.PI) / 180
-    return {
-      name: item.name,
-      ax: ox,
-      ay: oy,
-      bx: ox + Math.cos(angle) * length,
-      by: oy + Math.sin(angle) * length
-    }
-  })
-
-  let touched = 0
-  useProjectStore.getState().update('自动权重', (draft) => {
-    touched = autoWeights(draft, samples, segments, { falloff, maxBones: 4 })
-  })
-  scene.setDocument(useProjectStore.getState().document, host.selection.skin)
-  scene.refresh()
-  return touched
-}
-
 /**
  * 自动权重（检查器「权重骨骼列表」的按钮调用）：只对**列表里绑定的骨骼**算权重。
  *
- * 与 `runAutoWeights` 的区别是不再依赖「当前选中骨骼 + 子骨骼」，而是按网格上显式
- * 绑定的骨骼集合来算 —— 列表外的骨骼不会被算进来，列表内每根都参与竞争（就近者权重高）。
- * 骨骼线段按当前姿态取（Pose 态即绑定姿态）。
+ * 按网格上显式绑定的骨骼集合来算 —— 列表外的骨骼不会被算进来，列表内每根都参与竞争
+ *（就近者权重高）。骨骼线段按当前姿态取（Pose 态即绑定姿态）。
  */
 export function runAutoWeightsForBones(
   host: ToolHost,
@@ -1339,19 +1357,37 @@ function currentAnimationName(host: ToolHost): string | null {
 }
 
 function paintAt(host: ToolHost, world: Vec2): void {
-  const selected = host.selection.slot !== '' && host.selection.attachment !== ''
-  const samples = samplesFor(host, host.selection.slot, host.selection.attachment, !selected)
+  /*
+   * 只刷**选中的那个附件**（与官方工具「刷选中的网格」一致）。
+   * `anySlot` 传 false：附件对不上就一个顶点都不取 —— 原来没选附件时会把整个角色的顶点
+   * 都刷上，等于在看不见的地方改了数据。
+   */
+  const samples = samplesFor(host, host.selection.slot, host.selection.attachment, false)
   if (samples.length === 0) return
   const brush = host.tools.brush
   let touched = 0
   useProjectStore.getState().updateSilent((draft) => {
-    touched = paintWeights(draft, samples, drag.bone, world, brush.radius / 100, brush.strength, drag.paintMode)
+    touched = paintWeights(
+      draft,
+      samples,
+      drag.bone,
+      world,
+      brush.size / 100,
+      brush.hardness / 100,
+      drag.paintMode,
+      brush.normalize
+    )
   })
   if (touched === 0) return
   const store = useProjectStore.getState()
   host.scene.setDocument(store.document, host.selection.skin)
   host.scene.refresh()
-  host.status(`已为 ${touched} 个顶点刷上「${drag.bone}」的权重`)
+  // 平滑动的是「全部骨骼」的权重，说刷某根骨骼会误导
+  host.status(
+    drag.paintMode === 'smooth'
+      ? `已平滑 ${touched} 个顶点的权重`
+      : `已为 ${touched} 个顶点刷上「${drag.bone}」的权重`
+  )
 }
 
 /**
@@ -1472,20 +1508,6 @@ function currentOffsets(
   return new Array<number>(vertexCount * 2).fill(0)
 }
 
-function candidateBones(host: ToolHost, bone: string): Array<{ name: string; index: number }> {
-  const bundle = host.scene.runtime
-  if (!bundle) return []
-  const result: Array<{ name: string; index: number }> = []
-  const push = (name: string): void => {
-    const index = bundle.boneIndex[name]
-    if (index !== undefined) result.push({ name, index })
-  }
-  push(bone)
-  for (const child of bundle.asset.bones) {
-    if (child.parentIndex === bundle.boneIndex[bone]) push(child.name)
-  }
-  return result
-}
 
 /** 收集目标附件的顶点样本（setup 世界坐标） */
 function samplesFor(host: ToolHost, slot: string, attachment: string, anySlot = false): VertexSample[] {

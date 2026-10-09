@@ -404,7 +404,17 @@ function normalizeMeta(raw: unknown): EditorMeta {
   const viewport = isRecord(raw.viewport) ? raw.viewport : {}
   const overlay = isRecord(raw.overlay) ? raw.overlay : {}
   const brush = isRecord(raw.brush) ? raw.brush : {}
-  const mode = str(brush.mode, 'add')
+  /*
+   * Mode 取 Unity 的三种。老工程里存的是 add / subtract / replace（方向语义），
+   * 它们都属于「影响选中骨骼周围的所有顶点」，统一归到 addSubtract。
+   */
+  const rawMode = str(brush.mode, base.brush.mode)
+  const mode: EditorMeta['brush']['mode'] =
+    rawMode === 'growShrink' || rawMode === 'grow'
+      ? 'growShrink'
+      : rawMode === 'smooth'
+        ? 'smooth'
+        : 'addSubtract'
   return {
     layout: isRecord(raw.layout)
       ? Object.fromEntries(
@@ -423,9 +433,11 @@ function normalizeMeta(raw: unknown): EditorMeta {
       constraints: bool(overlay.constraints, base.overlay.constraints)
     },
     brush: {
-      radius: num(brush.radius, base.brush.radius),
-      strength: num(brush.strength, base.brush.strength),
-      mode: mode === 'subtract' || mode === 'replace' ? mode : 'add'
+      mode,
+      size: num(brush.size, num(brush.radius, base.brush.size)),
+      // 老工程的 strength 是 0..1 的直接强度；换成 0..100 的 Hardness 要乘 100
+      hardness: num(brush.hardness, num(brush.strength, base.brush.hardness / 100) * 100),
+      normalize: bool(brush.normalize, base.brush.normalize)
     }
   }
 }

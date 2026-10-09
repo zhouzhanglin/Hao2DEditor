@@ -137,6 +137,18 @@
     @apply border-transparent bg-accent-deep text-white hover:bg-accent;
   }
 
+  /*
+   * 属性面板里的按钮统一「实心蓝 + 白字」—— 与工具条开关（骨骼 / 约束）的选中态
+   * 用同一个蓝（accent-deep，见 Toolbar）。面板窄、按钮小，原来的灰底在卡片里
+   * 不够显眼；实心蓝一眼就能看出「这里能点」。
+   *
+   * 破坏性按钮（删除附件）自己带了 `hover:border-danger/50 hover:text-danger`，
+   * 那些是 utilities 层，优先级高于这里，所以红色悬停照常生效。
+   */
+  .hao-inspector .hao-btn {
+    @apply bg-accent-deep text-white hover:bg-accent active:bg-accent-deep;
+  }
+
   .hao-btn:disabled {
     @apply cursor-default opacity-40 hover:bg-white/[0.08];
   }

@@ -641,7 +641,7 @@ export default function App() {
         right={
           mode === 'animate' ? null : (
             <>
-              {/* hao-inspector：面板内的按钮统一换成深青底 + 亮青描边（见 styles/index.css） */}
+              {/* hao-inspector：面板内的按钮统一换成「实心蓝 + 白字」，与工具条开关同色（见 styles/index.css） */}
               <PanelShell
                 title="属性"
                 grow

@@ -209,8 +209,13 @@ export interface EditorMeta {
   activeAnimation: string
   /** 视口叠加层开关（只留骨架与约束：网格 / FFD / 权重都由选中项与工具驱动） */
   overlay: { bones: boolean; constraints: boolean }
-  /** 权重画笔参数 */
-  brush: { radius: number; strength: number; mode: 'add' | 'subtract' | 'replace' }
+  /** 权重画笔参数（与 Unity Weight Brush 面板同名：Mode / Size / Hardness / Normalize） */
+  brush: {
+    mode: 'addSubtract' | 'growShrink' | 'smooth'
+    size: number
+    hardness: number
+    normalize: boolean
+  }
 }
 
 export const CURRENT_SCHEMA_VERSION = 1
@@ -242,7 +247,7 @@ export function createDefaultMeta(): EditorMeta {
     activeSkin: '',
     activeAnimation: '',
     overlay: { bones: true, constraints: true },
-    brush: { radius: 40, strength: 0.015, mode: 'add' }
+    brush: { mode: 'addSubtract', size: 40, hardness: 1.5, normalize: true }
   }
 }
 

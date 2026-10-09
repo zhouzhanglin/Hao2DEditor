@@ -80,7 +80,7 @@ export interface SceneViewState {
    * 画成一个圆：**圈有多大，刷一下就有多大**（半径与 paintAt 用的是同一个世界值），
    * 颜色跟着模式变（增加绿 / 减少红 / 覆盖蓝）。
    */
-  brushRing: { x: number; y: number; radius: number; mode: 'add' | 'subtract' | 'replace' } | null
+  brushRing: { x: number; y: number; radius: number; mode: BrushMode } | null
   playing: boolean
   speed: number
   loop: boolean

@@ -16,7 +16,16 @@ import type { AlphaMask } from '@core/mesh/autoMesh'
 /** 骨架单位 ↔ 像素（与导入 / 导出保持一致的 PPU） */
 export const PPU = 100
 
-export type BrushMode = 'add' | 'subtract' | 'replace'
+/**
+ * 权重刷的模式。前三个是本工程原有的方向/覆盖语义，后两个对齐 Unity 2D Animation 的
+ * Weight Brush「Mode」：
+ *
+ * - `add` / `subtract` / `replace`：增加 / 减少 / 覆盖（等价于 Unity 的 **Add and Subtract**）
+ * - `grow`：**只在已经受这根骨骼影响的顶点**上加权重（Unity 的 **Grow and Shrink** 的"生长"侧；
+ *   收缩侧就是 `subtract` —— 权重已经 0 的顶点本来就不会再被减）
+ * - `smooth`：把刷到的顶点权重朝**邻居的平均值**靠拢（Unity 的 **Smooth**，与刷哪根骨骼无关）
+ */
+export type BrushMode = 'add' | 'subtract' | 'replace' | 'grow' | 'smooth'
 
 export interface VertexSample {
   slot: string
@@ -669,9 +678,11 @@ export function deleteAttachment(doc: EditorDocument, slotName: string, attachme
 }
 
 /**
- * 权重刷：以世界坐标为中心、radius 为半径，对目标附件顶点刷指定骨骼的权重。
+ * 权重刷：以世界坐标为中心、radius 为半径，对目标附件顶点刷权重的权重（模式见 BrushMode）。
  *
- * - add：在现有权重上叠加；subtract：衰减；replace：直接覆盖
+ * - add / grow：在现有权重上叠加（grow 跳过还没受这根骨骼影响的顶点）
+ * - subtract：衰减；replace：直接覆盖
+ * - smooth：朝邻居的平均权重靠拢（与刷哪根骨骼无关）
  * - 刷完统一归一化到 1（目标骨骼权重为 1 时清空其它骨骼，避免出现 0 权重残留）
  *
  * 返回被影响的顶点数。
@@ -683,10 +694,15 @@ export function paintWeights(
   center: { x: number; y: number },
   radius: number,
   strength: number,
-  mode: BrushMode
+  mode: BrushMode,
+  normalize = true
 ): number {
-  if (!bone || radius <= 0) return 0
+  // 只有 smooth 不需要目标骨骼（它平均的是全部骨骼的权重）
+  if ((mode !== 'smooth' && !bone) || radius <= 0) return 0
   let touched = 0
+  /** 邻接表按附件懒建：只有真正刷到 smooth 时才需要邻居 */
+  const adjacency = new Map<string, Map<number, number[]>>()
+
   for (const sample of samples) {
     if (sample.slot === '' || sample.attachment === '') continue
     const attachment = findAttachment(doc, sample.slot, sample.attachment)
@@ -704,24 +720,135 @@ export function paintWeights(
     const delta = strength * falloff
     if (delta <= 0) continue
 
+    if (mode === 'smooth') {
+      const neighbors = adjacencyFor(adjacency, attachment, sample.slot, sample.attachment).get(sample.vertex)
+      if (!neighbors || neighbors.length === 0) continue
+      if (smoothVertex(attachment, sample.vertex, neighbors, Math.min(1, delta), normalize)) touched++
+      continue
+    }
+
     let current = vertex.weights.find((item) => item.bone === bone)?.weight ?? 0
-    if (mode === 'add') current = Math.min(1, current + delta)
+    // grow（Unity 的 Grow and Shrink）：只在**已经受这根骨骼影响**的顶点上生长
+    if (mode === 'grow' && current <= 1e-6) continue
+    if (mode === 'add' || mode === 'grow') current = Math.min(1, current + delta)
     else if (mode === 'subtract') current = Math.max(0, current - delta)
     else current = delta
 
-    applyVertexWeight(vertex.weights, bone, current)
+    applyVertexWeight(vertex.weights, bone, current, normalize)
     touched++
   }
   return touched
 }
 
-/** 把某个骨骼的权重写进稀疏权重表并归一化 */
+/** 附件内顶点 → 邻居顶点（只从三角面取；按 `slot\0attachment` 缓存，一次刷权重只建一次） */
+function adjacencyFor(
+  cache: Map<string, Map<number, number[]>>,
+  attachment: AuthoringAttachment,
+  slot: string,
+  name: string
+): Map<number, number[]> {
+  const key = `${slot}\u0000${name}`
+  const cached = cache.get(key)
+  if (cached) return cached
+
+  const map = new Map<number, number[]>()
+  const link = (a: number, b: number): void => {
+    let list = map.get(a)
+    if (!list) {
+      list = []
+      map.set(a, list)
+    }
+    if (!list.includes(b)) list.push(b)
+  }
+  const triangles = attachment.triangles
+  for (let i = 0; i + 2 < triangles.length; i += 3) {
+    const a = triangles[i]
+    const b = triangles[i + 1]
+    const c = triangles[i + 2]
+    link(a, b)
+    link(b, a)
+    link(b, c)
+    link(c, b)
+    link(a, c)
+    link(c, a)
+  }
+  cache.set(key, map)
+  return map
+}
+
+/**
+ * 把一个顶点的权重朝**邻居的平均权重**靠拢（Unity 的 Smooth 模式）。
+ *
+ * 权重是每顶点一张稀疏表，所以按「本顶点 + 邻居」的骨骼并集逐根算：取邻居的平均值，
+ * 再按 `t` 混合，最后归一化回 1（空表仍然保持空表）。返回权重是否真的变了。
+ */
+function smoothVertex(
+  attachment: AuthoringAttachment,
+  index: number,
+  neighbors: readonly number[],
+  t: number,
+  normalize: boolean
+): boolean {
+  const vertex = attachment.vertices[index]
+  if (!vertex) return false
+  const bones = new Set<string>()
+  for (const item of vertex.weights) bones.add(item.bone)
+  for (const neighbor of neighbors) {
+    const other = attachment.vertices[neighbor]
+    if (!other) continue
+    for (const item of other.weights) bones.add(item.bone)
+  }
+  if (bones.size === 0) return false
+
+  const weightOf = (list: readonly AuthoringWeight[], bone: string): number =>
+    list.find((item) => item.bone === bone)?.weight ?? 0
+
+  const next: AuthoringWeight[] = []
+  let total = 0
+  for (const bone of bones) {
+    let sum = 0
+    for (const neighbor of neighbors) {
+      const other = attachment.vertices[neighbor]
+      if (other) sum += weightOf(other.weights, bone)
+    }
+    const average = sum / neighbors.length
+    const blended = weightOf(vertex.weights, bone) * (1 - t) + average * t
+    if (blended > 1e-6) {
+      next.push({ bone, weight: blended })
+      total += blended
+    }
+  }
+  if (total <= 1e-6) return false
+  if (normalize && Math.abs(total - 1) > 1e-6) for (const item of next) item.weight /= total
+  if (sameWeights(vertex.weights, next)) return false
+  vertex.weights = next
+  return true
+}
+
+/**
+ * 把某个骨骼的权重写进稀疏权重表。
+ *
+ * `normalize = true`（默认）会把其它骨骼按比例缩放，让这张表总和回到 1；
+ * **`normalize = false`** 就是 Unity Weight Brush 里关掉 **Normalize** 的样子 ——
+ * 只改这根骨骼，别的原样不动，权重和可能 ≠ 1（导出时照原样写出去）。
+ */
 export function applyVertexWeight(
   weights: Array<{ bone: string; weight: number }>,
   bone: string,
-  value: number
+  value: number,
+  normalize = true
 ): void {
   const clamped = Math.max(0, Math.min(1, value))
+  if (!normalize) {
+    const item = weights.find((entry) => entry.bone === bone)
+    if (clamped <= 1e-6) {
+      if (item) weights.splice(weights.indexOf(item), 1)
+      return
+    }
+    if (item) item.weight = clamped
+    else weights.push({ bone, weight: clamped })
+    return
+  }
   const others = weights.filter((item) => item.bone !== bone)
   const otherTotal = others.reduce((sum, item) => sum + item.weight, 0)
 

@@ -1,8 +1,9 @@
-import { Brush, Grid3x3, Layers, Sparkles } from 'lucide-react'
+import { Brush, Grid3x3, Layers } from 'lucide-react'
 import { BlendMode } from '@core/model/types'
 import { curvePercent } from '@core/anim/interpolation'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
+import type { BrushModeSetting } from '@editor/store/toolStore'
 import { useToolStore } from '@editor/store/toolStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
@@ -21,7 +22,7 @@ import {
   setVertexWeight,
   weightBonesOf
 } from '@editor/commands/authoringCommands'
-import { runAutoWeights, runAutoWeightsForBones } from '@editor/tools/authoringTools'
+import { runAutoWeightsForBones } from '@editor/tools/authoringTools'
 import { buildGridMesh, buildOutlineMesh } from '@editor/commands/meshActions'
 import type { RenameKind } from '@editor/commands/authoringCommands'
 import { weightPaletteColor } from '@core/weightPalette'
@@ -134,30 +135,12 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
     onStatus(`「${oldName}」已重命名为「${next}」`)
   }
 
-  /** 权重刷的目标骨骼（层级树里选中的那根），也是「自动权重」的主骨骼 */
-  const brushBone = selection.kind === 'bone' && selection.bone ? selection.bone : ''
-
-  const doAutoWeights = (): void => {
-    const scene = getActiveScene()
-    if (!scene) return
-    if (!brushBone) {
-      onStatus('自动权重需要先在层级树里选中骨骼（作为主骨骼）')
-      return
-    }
-    if (!selection.slot || !selection.attachment) {
-      onStatus('自动权重需要先选中一个网格附件')
-      return
-    }
-    const touched = runAutoWeights(
-      { scene, selection, tools, mode, time, status: onStatus },
-      tools.brush.mode === 'subtract' ? 1 : 2
-    )
-    onStatus(
-      touched > 0
-        ? `已为重算 ${touched} 个顶点的权重`
-        : '权重没有变化（Region 请先转为网格；影响范围仍是「选中骨骼 + 其直接子骨骼」）'
-    )
-  }
+  /**
+   * 权重刷的目标骨骼 —— 就是选中数据里的 `bone` 字段，**与 `kind` 无关**：
+   * 刷权重时 kind 常常是 attachment（那才是要刷的网格），骨骼只作"刷哪一根"用；
+   * 这里若按 kind 过滤，面板的 Bone 就会在真正开刷时显示成「（未选）」。
+   */
+  const brushBone = selection.bone
 
   /**
    * 「工具选项」面板（已删除）里原本剩下的两块设置，并到属性面板底部。
@@ -175,46 +158,54 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
     <>
       {tools.tool === 'weight' && mode === 'pose' ? (
         <FieldGroup title="权重刷">
+          {/* 参数与 Unity 2D Animation 的 Weight Brush 面板同名：Mode / Bone / Normalize / Size / Hardness */}
+          <SelectField
+            label="Mode"
+            value={tools.brush.mode}
+            options={[
+              { value: 'addSubtract', label: 'Add and Subtract（增加 / Alt 减少）' },
+              { value: 'growShrink', label: 'Grow and Shrink（只动已受影响的顶点）' },
+              { value: 'smooth', label: 'Smooth（朝邻居平均）' }
+            ]}
+            onChange={(value) => tools.setBrush({ mode: value as BrushModeSetting })}
+          />
+          {/* Bone 只改「刷哪根骨骼」，不动当前选中对象 —— 权重刷要求附件保持选中（那才是要刷的网格） */}
+          <SelectField
+            label="Bone"
+            value={brushBone}
+            options={[
+              { value: '', label: '（未选）' },
+              ...document.bones.map((bone) => ({ value: bone.name, label: bone.name }))
+            ]}
+            onChange={(value) => useSelectionStore.getState().select({ bone: value })}
+          />
+          <CheckboxField
+            label="Normalize"
+            value={tools.brush.normalize}
+            onChange={(value) => tools.setBrush({ normalize: value })}
+            hint="刷过的顶点权重归一到 1；关掉就只改目标骨骼，权重和可能不等于 1"
+          />
           <NumberField
-            label="半径"
-            value={tools.brush.radius}
+            label="Size"
+            value={tools.brush.size}
             step={4}
             min={2}
             precision={0}
             suffix="px"
-            onChange={(value) => tools.setBrush({ radius: value })}
+            onChange={(value) => tools.setBrush({ size: value })}
           />
           <NumberField
-            label="强度"
-            value={tools.brush.strength}
-            step={0.05}
-            min={0.05}
-            max={1}
-            onChange={(value) => tools.setBrush({ strength: value })}
-          />
-          <SelectField
-            label="模式"
-            value={tools.brush.mode}
-            options={[
-              { value: 'add', label: '增加权重' },
-              { value: 'subtract', label: '减少权重' },
-              { value: 'replace', label: '替换（按衰减比例）' }
-            ]}
-            onChange={(value) => tools.setBrush({ mode: value as 'add' | 'subtract' | 'replace' })}
+            label="Hardness"
+            value={tools.brush.hardness}
+            step={0.5}
+            min={0.1}
+            max={100}
+            onChange={(value) => tools.setBrush({ hardness: value })}
           />
           <p className="flex items-center gap-1 text-3xs text-content-lo">
             <Brush size={10} />
-            目标骨骼：{brushBone || '（先在层级树选中骨骼）'}
+            Hardness 100 = 一次刷满；按住修饰键临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长
           </p>
-          <button
-            type="button"
-            className="hao-btn h-[20px] px-2 text-3xs"
-            title="按顶点到骨骼线段的距离衰减，自动分配到最近的 4 根骨骼（需要选中骨骼 + 网格附件，且处于 Pose 状态）"
-            onClick={doAutoWeights}
-          >
-            <Sparkles size={11} className="mr-1 inline" />
-            自动权重（选中骨骼 + 网格附件）
-          </button>
         </FieldGroup>
       ) : null}
       <FieldGroup title="显示">
@@ -612,26 +603,59 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
 
             {attachment.type === 'mesh' ? (
               <FieldGroup title="权重骨骼列表">
-                <button
-                  type="button"
-                  className="hao-btn h-[20px] w-full px-2 text-3xs"
-                  title={
-                    pickingWeightBone
-                      ? '结束绑定：已点选的骨骼会保留在列表里'
-                      : '进入绑定骨骼状态后，在视口里点选骨骼加入列表（可以连续点选多根），右键或再点这个按钮结束'
-                  }
-                  onClick={() => {
-                    if (pickingWeightBone) {
-                      tools.setPendingWeightBone(null)
-                      onStatus('已结束绑定骨骼')
-                      return
+                {/* 两个入口并排一行，都放在列表**上方**：绑定骨骼与按列表重算权重是这块的常用动作 */}
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    className="hao-btn h-[20px] flex-1 px-2 text-3xs"
+                    title={
+                      pickingWeightBone
+                        ? '结束绑定：已点选的骨骼会保留在列表里'
+                        : '进入绑定骨骼状态后，在视口里点选骨骼加入列表（可以连续点选多根），右键或再点这个按钮结束'
                     }
-                    tools.setPendingWeightBone({ slot: slot.name, attachment: attachment.name })
-                    onStatus('绑定骨骼：在视口里点选骨骼加入列表（可连续多根），完成后右键或再点这个按钮')
-                  }}
-                >
-                  {pickingWeightBone ? '完成绑定骨骼' : '添加绑定骨骼'}
-                </button>
+                    onClick={() => {
+                      if (pickingWeightBone) {
+                        tools.setPendingWeightBone(null)
+                        onStatus('已结束绑定骨骼')
+                        return
+                      }
+                      tools.setPendingWeightBone({ slot: slot.name, attachment: attachment.name })
+                      onStatus('绑定骨骼：在视口里点选骨骼加入列表（可连续多根），完成后右键或再点这个按钮')
+                    }}
+                  >
+                    {pickingWeightBone ? '完成绑定骨骼' : '添加绑定骨骼'}
+                  </button>
+                  <button
+                    type="button"
+                    className="hao-btn h-[20px] flex-1 px-2 text-3xs"
+                    disabled={weightBones.length === 0}
+                    title="按列表里的骨骼重算所有顶点权重：顶点离哪根骨骼近，它在那根骨骼上的权重就高（列表外的骨骼不参与）"
+                    onClick={() => {
+                      const scene = getActiveScene()
+                      if (!scene) return
+                      if (mode !== 'pose') {
+                        onStatus('自动计算权重写的是绑定姿态：请切到 Pose 状态')
+                        return
+                      }
+                      const touched = runAutoWeightsForBones(
+                        { scene, selection, tools, mode, time, status: onStatus },
+                        slot.name,
+                        attachment.name,
+                        weightBones,
+                        2
+                      )
+                      onStatus(
+                        touched > 0
+                          ? `已按绑定骨骼重算 ${touched} 个顶点的权重`
+                          : weightBones.length < 2
+                            ? `权重没有变化：列表里只有 ${weightBones.length} 根骨骼，结果就是全部 100%。先点「添加绑定骨骼」把相关骨骼加进来再算`
+                            : '权重没有变化：当前权重已是最新结果'
+                      )
+                    }}
+                  >
+                    自动计算权重
+                  </button>
+                </div>
                 {/*
                   不加高度上限、也不给滚动条：绑定骨骼可能十几根，列表被截断的话
                   得先滚动才看得到自己在调哪一根（尤其是选中顶点后每行都带滑块的时候）。
@@ -754,36 +778,6 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                     })
                   )}
                 </div>
-                <button
-                  type="button"
-                  className="hao-btn h-[20px] w-full px-2 text-3xs"
-                  disabled={weightBones.length === 0}
-                  title="按列表里的骨骼重算所有顶点权重：顶点离哪根骨骼近，它在那根骨骼上的权重就高（列表外的骨骼不参与）"
-                  onClick={() => {
-                    const scene = getActiveScene()
-                    if (!scene) return
-                    if (mode !== 'pose') {
-                      onStatus('自动计算权重写的是绑定姿态：请切到 Pose 状态')
-                      return
-                    }
-                    const touched = runAutoWeightsForBones(
-                      { scene, selection, tools, mode, time, status: onStatus },
-                      slot.name,
-                      attachment.name,
-                      weightBones,
-                      2
-                    )
-                    onStatus(
-                      touched > 0
-                        ? `已按绑定骨骼重算 ${touched} 个顶点的权重`
-                        : weightBones.length < 2
-                          ? `权重没有变化：列表里只有 ${weightBones.length} 根骨骼，结果就是全部 100%。先点「添加绑定骨骼」把相关骨骼加进来再算`
-                          : '权重没有变化：当前权重已是最新结果'
-                    )
-                  }}
-                >
-                  自动计算权重
-                </button>
               </FieldGroup>
             ) : null}
 

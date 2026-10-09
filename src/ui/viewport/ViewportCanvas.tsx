@@ -10,10 +10,17 @@ import { useToolStore } from '@editor/store/toolStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { usePlayheadStore } from '@editor/store/playheadStore'
-import { brushModeFor, isDragging, toolPointerDown, toolPointerMove, toolPointerUp } from '@editor/tools/authoringTools'
+import {
+  baseBrushMode,
+  brushModeFor,
+  isDragging,
+  toolPointerDown,
+  toolPointerMove,
+  toolPointerUp
+} from '@editor/tools/authoringTools'
 import type { ToolHost } from '@editor/tools/authoringTools'
 import { BRUSH_MODE_COLORS } from '@core/weightPalette'
-import type { BrushMode } from '@editor/store/toolStore'
+import type { BrushMode } from '@editor/commands/authoringCommands'
 import {
   addWeightBone,
   createRegionFromImage,
@@ -40,7 +47,13 @@ function brushCursor(mode: BrushMode): string {
       ? "<path d='M12 5v14M5 12h14'/>"
       : mode === 'subtract'
         ? "<path d='M5 12h14'/>"
-        : `<circle cx='12' cy='12' r='4.5' fill='${color}' stroke='none'/>`
+        : mode === 'grow'
+          ? // 生长：向上的箭头（只往已受影响的顶点上加）
+            "<path d='M12 19V6M7 11l5-5 5 5'/>"
+          : mode === 'smooth'
+            ? // 平滑：两道波浪（朝邻居平均）
+              "<path d='M4 10c2.5-3 5-3 7.5 0s5 3 7.5 0M4 15c2.5-3 5-3 7.5 0s5 3 7.5 0'/>"
+            : `<circle cx='12' cy='12' r='4.5' fill='${color}' stroke='none'/>`
   const svg =
     `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none'` +
     ` stroke='${color}' stroke-width='2.4' stroke-linecap='round'>` +
@@ -542,7 +555,10 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
      */
     if (useToolStore.getState().tool === 'weight') {
       const tools = useToolStore.getState()
-      const mode = brushModeFor({ alt: event.altKey, shift: event.shiftKey })
+      const mode = brushModeFor(
+        { alt: event.altKey, shift: event.shiftKey, ctrl: event.ctrlKey },
+        baseBrushMode(tools.brush.mode)
+      )
       const overBone =
         !scene.pickVertexAt(world.x, world.y) && scene.pickBoneAt(world.x, world.y) !== null
       const cursor = overBone ? 'pointer' : brushCursor(mode)
@@ -550,7 +566,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       scene.setViewState({
         brushRing: overBone
           ? null
-          : { x: world.x, y: world.y, radius: tools.brush.radius / 100, mode }
+          : { x: world.x, y: world.y, radius: tools.brush.size / 100, mode }
       })
       // 拖动超过阈值就不再算「点击」：这一次是刷权重，不是选骨骼（阈值同插点：6px）
       const click = pointer.current.boneClick

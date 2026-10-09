@@ -38,14 +38,16 @@ export function weightPaletteColor(index: number): string {
  * 同一份既给视口的「刷子半径圈」，也给鼠标光标 —— 两者必须同色，
  * 否则会出现「光标是减号、圈却是绿的」这种自相矛盾的提示。
  */
-export const BRUSH_MODE_COLORS: Record<'add' | 'subtract' | 'replace', string> = {
+export const BRUSH_MODE_COLORS: Record<'add' | 'subtract' | 'replace' | 'grow' | 'smooth', string> = {
   add: '#22C55E',
   subtract: '#EF4444',
-  replace: '#3B82F6'
+  replace: '#3B82F6',
+  grow: '#EAB308',
+  smooth: '#A855F7'
 }
 
 /** 上一份的 0xRRGGBB（Pixi 用） */
-export function brushModeColorValue(mode: 'add' | 'subtract' | 'replace'): number {
+export function brushModeColorValue(mode: 'add' | 'subtract' | 'replace' | 'grow' | 'smooth'): number {
   const value = Number.parseInt(BRUSH_MODE_COLORS[mode].slice(1), 16)
   return Number.isFinite(value) ? value : 0x8e8e93
 }

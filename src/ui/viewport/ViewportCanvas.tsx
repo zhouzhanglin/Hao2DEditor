@@ -6,7 +6,7 @@ import { ImageAlphaCache } from '@render/imageAlpha'
 import { getPlatform } from '@editor/platform'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
-import { useToolStore } from '@editor/store/toolStore'
+import { isMeshEditTool, useToolStore } from '@editor/store/toolStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { usePlayheadStore } from '@editor/store/playheadStore'
@@ -189,8 +189,9 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       scene.setViewState({
         overlay: tools.overlay,
         gizmo: tools.gizmo,
-        // 绘制类工具激活时操作器不可用，直接不画（否则是点不动的假手柄）
-        showGizmo: tools.tool === 'select',
+        // 绘制类工具激活时操作器不可用，直接不画（否则是点不动的假手柄）；
+        // Pose 工具要拖骨骼改绑定姿态（蒙皮随之变形），所以和选择工具一样给操作器
+        showGizmo: tools.tool === 'select' || tools.tool === 'pose',
         selectedBone: selection.kind === 'bone' ? selection.bone : '',
         weightBone: tools.overlay.weight ? selection.bone : '',
         weightBones,
@@ -212,10 +213,12 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         loop: timeline.loop,
         time: timeline.time,
         onionSkin: mode === 'animate' && timeline.onionSkin,
-        // 网格工具：只显示当前选中的那个网格（其它附件隐藏，避免层层遮挡）。
+        // 网格类工具（顶点 / Pose）：只显示当前选中的那个网格（其它附件隐藏，避免层层遮挡）。
         // 选中项不是网格时由场景侧忽略（见 Scene.applyMeshIsolation）
-        isolateMeshSlot: tools.tool === 'ffd' && selection.kind === 'attachment' ? selection.slot : '',
-        isolateMeshAttachment: tools.tool === 'ffd' && selection.kind === 'attachment' ? selection.attachment : ''
+        isolateMeshSlot:
+          isMeshEditTool(tools.tool) && selection.kind === 'attachment' ? selection.slot : '',
+        isolateMeshAttachment:
+          isMeshEditTool(tools.tool) && selection.kind === 'attachment' ? selection.attachment : ''
       })
     }
     push()

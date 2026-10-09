@@ -6,7 +6,38 @@ import { create } from 'zustand'
  * Animate 态是「FFD 顶点工具(D)」—— 两者本来就是同一段实现（见 authoringTools 的顶点拖拽分支），
  * 拆成两个按钮只会让人犹豫点哪个。
  */
-export type EditorTool = 'select' | 'bone' | 'weight' | 'ffd'
+export type EditorTool = 'select' | 'bone' | 'weight' | 'ffd' | 'pose'
+
+/**
+ * 「网格类」编辑工具：顶点/UV 编辑、网格隔离、顶点显示都归它们。
+ *
+ * - `ffd`：拖顶点改**几何**（Pose 改绑定网格 / Animate 写 FFD 帧），贴图跟着保持不动
+ * - `pose`：拖顶点只改**贴图坐标（UV）**，几何不动（调绑定姿态 / 修贴图用）
+ *
+ * 两者的骨骼变换都写进绑定姿态，所以视口里骨骼操作器对它们都开放。
+ */
+export function isMeshEditTool(tool: EditorTool): boolean {
+  return tool === 'ffd' || tool === 'pose'
+}
+
+/**
+ * 「绘制类」工具：鼠标按下即开始**绘制/涂抹**，会被它们自己吃掉。
+ *
+ * 只有这些工具在点变换工具（W/E/R/T）时才需要被顶掉成 `select` —— 否则会出现
+ * 「点了旋转却在刷权重」这种变换看起来完全没反应的情况。
+ *
+ * 反过来，下面这几个**不动**：
+ * - `select`：本来就是变换工具；
+ * - `bone`：画骨骼时常要顺手调一下骨骼姿态；
+ * - `pose`：Pose 工具的核心操作就是「拖骨骼改绑定姿态」，切 gizmo 只是换一种变换方式 ——
+ *   把工具顶掉的话，每换一次变换方式都得重新点一下 Pose 工具。
+ *
+ * 注意 `pose` 与 `ffd` 虽然都会拖顶点，但 `ffd` 的拖动是**写帧/改网格**（绘制语义），
+ * 而 `pose` 走的是「选中 + 变换」语义，所以两者分属不同阵营。
+ */
+export function isDrawTool(tool: EditorTool): boolean {
+  return tool !== 'select' && tool !== 'bone' && tool !== 'pose'
+}
 
 export type BrushMode = 'add' | 'subtract' | 'replace'
 
@@ -77,6 +108,10 @@ export const useToolStore = create<ToolState>((set, get) => ({
   setTool: (tool) => {
     const overlay = { ...get().overlay }
     if (tool === 'weight') overlay.weight = true
+    // Pose 工具编的是网格顶点 / UV：顺手打开网格层，否则「看不到能拖的顶点」。
+    // 这里不像 ffd 那样顾虑「全局线框铺满角色」—— 场景会把网格**隔离**到选中的那一个
+    //（见 ViewportCanvas 的 isolateMesh*，Pose 与 FFD 走同一套判定）。
+    if (tool === 'pose') overlay.mesh = true
     if (tool === 'ffd') {
       // 顶点编辑：打开「FFD」显示层（顶点方块 + 偏移虚线）。
       //
@@ -90,13 +125,15 @@ export const useToolStore = create<ToolState>((set, get) => ({
     set({ tool, overlay, pendingWeightBone: null })
   },
   /**
-   * 选择变换工具时**自动退出绘制类工具**（权重刷 / FFD / 网格 / 插槽 / 约束）。
-   * 否则鼠标会被绘制工具吃掉（点了「旋转」却在刷权重），变换看起来完全没反应。
+   * 选择变换工具（移动/旋转/缩放/斜切）时**自动退出绘制类工具**，见 `isDrawTool`。
    */
   setGizmo: (gizmo) => {
     const tool = get().tool
-    const painting = tool !== 'select' && tool !== 'bone'
-    set(painting ? { gizmo, tool: 'select', pendingWeightBone: null } : { gizmo, pendingWeightBone: null })
+    set(
+      isDrawTool(tool)
+        ? { gizmo, tool: 'select', pendingWeightBone: null }
+        : { gizmo, pendingWeightBone: null }
+    )
   },
   setOverlay: (overlay) => set({ overlay }),
   toggleOverlay: (key) => set({ overlay: { ...get().overlay, [key]: !get().overlay[key] } }),

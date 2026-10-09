@@ -187,7 +187,7 @@ export default function ToolOptionsPanel({ onStatus = () => undefined }: ToolOpt
         <FieldGroup title="工具选项">
           <p className="flex items-center gap-1 text-3xs text-content-lo">
             <Brush size={10} />
-            权重刷 / 网格 / 绑骨骼属于绑定工具，只在 Pose 状态可用（Tab 切换）
+            权重刷 / 网格 / Pose / 绑骨骼属于绑定工具，只在 Pose 状态可用（Tab 切换）
           </p>
         </FieldGroup>
       ) : null}

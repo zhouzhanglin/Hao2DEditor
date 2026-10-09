@@ -1083,7 +1083,16 @@ export class EditorScene {
       {
         unitsPerPixel: unitPerPixel,
         showWireframe: state.overlay.mesh || state.overlay.weight || isolating,
-        showVertices: state.overlay.weight || state.overlay.ffd || isolating,
+        /*
+         * 顶点方块：除了两个覆盖层开关，只要「网格类工具栏上有选中对象」就给
+         *（`isolateMeshSlot` 正是这个条件下被设上的，见 ViewportCanvas）。
+         *
+         * 为什么不能只靠 `isolating`：隔离只对 **Mesh** 成立（见 applyMeshIsolation），
+         * Region 走不到那里，于是 Pose 工具下点开一张图会「看不到任何可拖的顶点」。
+         * 这里用原始条件兜住它 —— 看不到顶点就没法编辑顶点。
+         */
+        showVertices:
+          state.overlay.weight || state.overlay.ffd || isolating || state.isolateMeshSlot !== '',
         weightBone: state.overlay.weight ? weightBone : -1,
         selectedVertices: new Set(state.selectedVertices),
         hoveredVertex: state.hoveredVertex

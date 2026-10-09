@@ -4,11 +4,12 @@ import {
   MousePointer2,
   Move,
   MoveDiagonal2,
+  PersonStanding,
   RotateCw,
   Scaling,
   Spline
 } from 'lucide-react'
-import { GIZMO_ORDER, useToolStore } from '@editor/store/toolStore'
+import { GIZMO_ORDER, isDrawTool, useToolStore } from '@editor/store/toolStore'
 import { useModeStore } from '@editor/store/modeStore'
 import type { EditorTool, GizmoMode } from '@editor/store/toolStore'
 
@@ -31,6 +32,13 @@ const EDIT_TOOLS: Array<{
   hint?: string
 }> = [
   { id: 'select', label: '选择工具', key: 'V', icon: MousePointer2, hint: '选中并变换骨骼 / 插槽 / 附件' },
+  {
+    id: 'pose',
+    label: 'Pose 工具',
+    key: 'P',
+    icon: PersonStanding,
+    hint: '调绑定：拖顶点只移动顶点（UV 不动）；拖骨骼改绑定姿态，蒙皮随之变形（仅 Pose 态）'
+  },
   {
     id: 'bone',
     label: '画骨骼工具',
@@ -157,7 +165,9 @@ export default function ViewportTools({ onStatus = () => undefined }: ViewportTo
             type="button"
             title={`${label}（${key}）\n${hint}`}
             onClick={() => {
-              const painting = tool !== 'select' && tool !== 'bone'
+              // 只有绘制类工具会被切 gizmo 顶掉（见 toolStore.isDrawTool）——
+              // Pose / 选择 / 画骨骼只是换一种变换方式，工具本身不动，所以也别提示「已退出」
+              const painting = isDrawTool(tool)
               setGizmo(mode)
               onStatus(
                 painting ? `骨骼工具：${label} · 已退出绘制工具，鼠标现在用于${label}骨骼` : `骨骼工具：${label}`

@@ -1,5 +1,5 @@
 import type { Vec2 } from '@core/math/matrix'
-import { invert, mulPoint, mulVector } from '@core/math/matrix'
+import { invert, mulPoint, mulVector, trs } from '@core/math/matrix'
 import { attachmentGizmoFrame, gizmoGeometry } from '@render/picking'
 import type { GizmoPart, ShearEdge } from '@render/picking'
 import { GIZMO_AXIS_LENGTH } from '@render/overlays/boneOverlay'
@@ -8,6 +8,7 @@ import type { EditorDocument } from '@core/model/authoring'
 import { createAuthoringBone } from '@core/model/authoring'
 import type { EditorScene } from '../scene'
 import type { Selection } from '../store/selectionStore'
+import { isMeshEditTool } from '../store/toolStore'
 import type { ToolState } from '../store/toolStore'
 import type { EditorMode } from '../store/modeStore'
 import type { GizmoMode } from '../store/toolStore'
@@ -198,34 +199,60 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     return true
   }
 
-  if (tools.tool === 'ffd') {
-    const vertex = scene.pickVertexAt(info.world.x, info.world.y)
-    if (!vertex) return false
-    const resolved = resolveVertex(host, vertex.vertexIndex)
-    if (!resolved || resolved.vertex < 0) {
-      host.status('该顶点不支持编辑（Region 请先转为网格）')
+  /*
+   * 网格类工具（顶点工具 / Pose 工具）都从「抓顶点」开始，但拖动的含义不同：
+   *   - 顶点工具 ffd：拖**几何**（Pose 改绑定网格 / Animate 写 FFD 帧），贴图留在原地
+   *   - Pose 工具 pose：**只移动顶点**（几何），UV 不重算、贴图不跟着跑
+   * 另外 Pose 工具没抓到顶点时要**继续往下走** —— 骨骼/操作器拖拽也得能用（见 applyCarry），
+   * 顶点工具则到此为止（它的活只有顶点）。
+   */
+  if (isMeshEditTool(tools.tool)) {
+    /*
+     * Pose 工具的顶点**只让位于真正的骨骼手柄**：指针落在骨骼**原点圈**（移动手柄）
+     * 或小坐标轴上时才优先抓骨骼 —— 与本工程「附件与骨骼重叠时骨骼优先」同一原则，
+     * 否则骨骼原点旁边只要有顶点，骨骼就再也抓不起来了。
+     *
+     * 不能拿 `pickBoneHandleAt` 的结果一概而论：它在没命中原点圈时会回退到**骨骼本体**
+     * （那是留给「点骨骼体 = 旋转」的），而骨骼本体常常整条压在网格顶点上 ——
+     * 那样顶点就永远拖不动（实测：离原点圈 29px 的顶点照样被判成骨骼）。
+     */
+    const boneHandle = tools.tool === 'pose' ? scene.pickBoneHandleAt(info.world.x, info.world.y) : null
+    const onGizmo = tools.tool === 'pose' && scene.pickGizmoAt(info.world.x, info.world.y) !== null
+    const bonePriority = boneHandle?.zone === 'origin' || onGizmo
+    const vertex = bonePriority ? null : scene.pickVertexAt(info.world.x, info.world.y)
+    if (vertex) {
+      const resolved = resolveVertex(host, vertex.vertexIndex)
+      if (!resolved || resolved.vertex < 0) {
+        host.status('该顶点不支持编辑（Region 请先转为网格）')
+        return true
+      }
+      const poseEdit = tools.tool === 'pose'
+      drag = {
+        ...IDLE,
+        kind: 'vertex',
+        slot: resolved.slot,
+        attachment: resolved.attachment,
+        vertex: resolved.vertex,
+        startWorld: { ...info.world },
+        // 顶点工具在 Pose 态先按邻居拟合 UV 场，拖动时把 UV 反算回原映射（贴图留在原地）；
+        // Pose 工具**只移动顶点**、不碰 UV，所以不给场。
+        uvField:
+          host.mode === 'animate' || poseEdit
+            ? null
+            : prepareUvField(resolved.slot, resolved.attachment, resolved.vertex)
+      }
+      storeHandler.begin(host.mode === 'animate' ? '编辑 FFD' : poseEdit ? '移动顶点' : '编辑网格顶点')
+      useSelectionStore.getState().select({
+        kind: 'attachment',
+        slot: resolved.slot,
+        attachment: resolved.attachment,
+        vertices: [vertex.vertexIndex]
+      })
+      host.status(`顶点 #${resolved.vertex}（${resolved.slot} / ${resolved.attachment}）`)
       return true
     }
-    drag = {
-      ...IDLE,
-      kind: 'vertex',
-      slot: resolved.slot,
-      attachment: resolved.attachment,
-      vertex: resolved.vertex,
-      startWorld: { ...info.world },
-      // 内部顶点：先按邻居拟合好 UV 场，拖动时用它把 UV 一起更新（贴图不变形）
-      uvField:
-        host.mode === 'animate' ? null : prepareUvField(resolved.slot, resolved.attachment, resolved.vertex)
-    }
-    storeHandler.begin(host.mode === 'animate' ? '编辑 FFD' : '编辑网格顶点')
-    useSelectionStore.getState().select({
-      kind: 'attachment',
-      slot: resolved.slot,
-      attachment: resolved.attachment,
-      vertices: [vertex.vertexIndex]
-    })
-    host.status(`顶点 #${resolved.vertex}（${resolved.slot} / ${resolved.attachment}）`)
-    return true
+    // 没抓到顶点：顶点工具到此为止；Pose 工具继续，让骨骼 / 操作器接管
+    if (tools.tool !== 'pose') return false
   }
 
   // 斜切模式：包围盒优先。鼠标落在包围盒的边上拖动 → 沿该方向掰轴
@@ -704,10 +731,208 @@ function dragAttachmentGizmo(host: ToolHost, world: Vec2): void {
   scene.refresh()
 }
 
+/*
+ * ─────────────────── Pose 工具拖骨骼：让蒙皮跟着骨骼走 ───────────────────
+ *
+ * 背景：本工程的绑定是**每次编辑骨骼后用当前 setup 反算**的（compile.ts：
+ * `vBind = setupWorld[slotBone] · TRS(att) · v`、`L_k = inverse(setupWorld[b_k]) · vBind`），
+ * 骨骼一动绑定跟着变，网格被**锁在世界坐标上**（实测：拖 spear3 位移 0.4，网格位移 0）。
+ * 那套语义适合「改骨架但别动美术」；Pose 工具要的是反过来的效果。
+ *
+ * 做法：拖拽期间把受影响网格的顶点按骨骼世界增量重新落位（烘焙进绑定网格），
+ * 于是渲染跟着骨骼走，而文档依然自洽（绑定网格与新的骨骼姿态匹配，可撤销、可导出）。
+ *
+ * 每个顶点的落位（与运行期蒙皮的线性混合一致）：
+ *   bind  = LOCAL_old · v                    // 拖拽开始时的世界位置
+ *   moved = lerp(bind, Δ · bind, w)          // w = 顶点落在被拖骨骼**子树**上的权重和
+ *   v'    = inv(LOCAL_new) · moved           // 换回附件局部空间
+ * 其中 Δ = Wnew[B] · inv(Wold[B])、LOCAL = W[slotBone] · TRS(att)。
+ * w=0 的顶点一点不动，w=1 的随骨骼刚性移动，中间按权重插值。
+ */
+
+interface CarryMesh {
+  slot: string
+  attachment: string
+  /** 插槽宿主骨骼下标（LOCAL 用它） */
+  slotBoneIndex: number
+  /** 拖拽开始时的顶点（每次移动都从它重算，避免误差累积） */
+  vertices: Vec2[]
+  /** 每个顶点在被拖骨骼子树上的权重和 */
+  weights: number[]
+}
+
+interface CarrySession {
+  /**
+   * 归属的拖拽会话（用 `drag` **对象身份**比较）。
+   *
+   * 不能用 `drag.startWorld` 之类字段当令牌：那些字段来自 `{...IDLE}` 展开，
+   * 对原点圈拖拽是**共享引用**，令牌永远相等 → 快照永不刷新，第二段拖拽会沿用
+   * 第一段的 world 基线，把两次位移累积到同一次落位里（实测 0.3 的拖拽落成 0.7）。
+   * `drag` 本身每段拖拽都是新对象（`drag = {...IDLE, ...}`），身份可靠。
+   */
+  token: DragSession
+  boneIndex: number
+  worldBefore: Float32Array
+  meshes: CarryMesh[]
+}
+
+let carry: CarrySession | null = null
+
+/** 该骨骼（或其祖先）是否是被拖骨骼 —— 子树里的骨骼刚性跟随，世界增量相同 */
+function inBoneSubtree(
+  bones: ReadonlyArray<{ parentIndex: number }>,
+  index: number,
+  root: number
+): boolean {
+  let current = index
+  for (let guard = 0; guard < bones.length; guard++) {
+    if (current === root) return true
+    if (current < 0 || current >= bones.length) return false
+    current = bones[current].parentIndex
+  }
+  return false
+}
+
+/** 拖拽开始时抓一份快照：会被骨骼带动的网格 + 它们的原始顶点与权重和 */
+function beginCarry(host: ToolHost, boneName: string, token: DragSession): CarrySession | null {
+  const bundle = host.scene.runtime
+  if (!bundle) return null
+  const root = bundle.boneIndex[boneName]
+  if (root === undefined) return null
+  const bones = bundle.asset.bones
+  const doc = useProjectStore.getState().document
+  const meshes: CarryMesh[] = []
+
+  for (const skin of doc.skins) {
+    for (const skinSlot of skin.slots) {
+      const slotIndex = bundle.slotIndex[skinSlot.slot] ?? -1
+      if (slotIndex < 0) continue
+      const slotBoneIndex = bundle.asset.slots[slotIndex]?.boneIndex ?? -1
+      for (const attachment of skinSlot.attachments) {
+        if (attachment.vertices.length === 0) continue
+        const weights: number[] = []
+        let affected = false
+        for (const vertex of attachment.vertices) {
+          let sum = 0
+          for (const weight of vertex.weights) {
+            const index = bundle.boneIndex[weight.bone]
+            if (index === undefined) continue
+            if (inBoneSubtree(bones, index, root)) sum += weight.weight
+          }
+          weights.push(sum)
+          if (sum > 1e-6) affected = true
+        }
+        if (!affected) continue
+        meshes.push({
+          slot: skinSlot.slot,
+          attachment: attachment.name,
+          slotBoneIndex,
+          vertices: attachment.vertices.map((vertex) => ({ x: vertex.x, y: vertex.y })),
+          weights
+        })
+      }
+    }
+  }
+  if (meshes.length === 0) return null
+  return { token, boneIndex: root, worldBefore: Float32Array.from(bundle.skeleton.world), meshes }
+}
+
+/** 按当前骨骼姿态重算网格顶点（每次移动都从快照重算，幂等） */
+function applyCarry(host: ToolHost): void {
+  const session = carry
+  const bundle = host.scene.runtime
+  if (!session || !bundle) return
+  const world = bundle.skeleton.world
+  if (world.length !== session.worldBefore.length) return
+
+  const slice = (buffer: Float32Array, index: number): Float32Array =>
+    buffer.subarray(index * 16, index * 16 + 16)
+  const invWoldRoot = invert(slice(session.worldBefore, session.boneIndex))
+
+  // 先算，确认真有变化再写 —— 免得每帧都触发一次文档更新 + 重编译
+  const updates: Array<{ slot: string; attachment: string; positions: Vec2[] }> = []
+  for (const mesh of session.meshes) {
+    const attachments = []
+    for (const skin of useProjectStore.getState().document.skins) {
+      const found = skin.slots.find((item) => item.slot === mesh.slot)
+      if (found) attachments.push(...found.attachments)
+    }
+    const attachment = attachments.find((item) => item.name === mesh.attachment)
+    if (!attachment) continue
+    const attTrs = trs(
+      attachment.position.x,
+      attachment.position.y,
+      attachment.rotation,
+      attachment.scale.x,
+      attachment.scale.y
+    )
+    const invAttTrs = invert(attTrs)
+    const oldLocal = slice(session.worldBefore, mesh.slotBoneIndex)
+    const newLocal = slice(world, mesh.slotBoneIndex)
+    const invWnewRoot = invert(slice(world, mesh.slotBoneIndex))
+
+    const positions: Vec2[] = []
+    let changed = false
+    attachment.vertices.forEach((vertex, i) => {
+      const w = mesh.weights[i] ?? 0
+      const source = mesh.vertices[i]
+      if (w <= 1e-6 || !source) {
+        positions.push({ x: vertex.x, y: vertex.y })
+        return
+      }
+      // bind = LOCAL_old · v
+      const bind = mulPoint(oldLocal, mulPoint(attTrs, source))
+      // Δ · bind = Wnew[B] · inv(Wold[B]) · bind
+      const moved = mulPoint(slice(world, session.boneIndex), mulPoint(invWoldRoot, bind))
+      const mixed = { x: bind.x + (moved.x - bind.x) * w, y: bind.y + (moved.y - bind.y) * w }
+      // v' = inv(LOCAL_new) · mixed
+      const next = mulPoint(invAttTrs, mulPoint(invWnewRoot, mixed))
+      if (Math.abs(next.x - vertex.x) > 1e-7 || Math.abs(next.y - vertex.y) > 1e-7) changed = true
+      positions.push(next)
+    })
+    if (changed) updates.push({ slot: mesh.slot, attachment: mesh.attachment, positions })
+  }
+  if (updates.length === 0) return
+
+  const store = useProjectStore.getState()
+  store.updateSilent((draft) => {
+    for (const update of updates) {
+      const attachment = findAttachment(draft, update.slot, update.attachment)
+      if (!attachment) continue
+      attachment.vertices.forEach((vertex, i) => {
+        const next = update.positions[i]
+        if (!next) return
+        vertex.x = next.x
+        vertex.y = next.y
+      })
+    }
+  })
+  host.scene.setDocument(store.document, host.selection.skin)
+  host.scene.refresh()
+}
+
+/** 骨头拖拽（含子树的刚性跟随）才需要「网格跟随」；其它拖拽一律清掉快照 */
+function beginCarryIfNeeded(host: ToolHost): void {
+  const isBoneDrag = drag.kind === 'gizmo' || drag.kind === 'bone-translate' || drag.kind === 'shear-box'
+  if (!isBoneDrag || host.tools.tool !== 'pose' || !drag.bone) {
+    carry = null
+    return
+  }
+  if (carry && carry.token === drag) return
+  carry = beginCarry(host, drag.bone, drag)
+}
+
 export function toolPointerMove(host: ToolHost, info: PointerInfo): void {
   if (drag.kind === 'none') return
   drag.moved = true
+  // 顺序很关键：先按拖拽开始时的姿态抓快照，再应用这次移动，最后按新姿态落位网格
+  beginCarryIfNeeded(host)
+  moveActiveDrag(host, info)
+  applyCarry(host)
+}
 
+/** 拖拽分发（从 toolPointerMove 拆出来，好让「网格跟随」在前后统一处理） */
+function moveActiveDrag(host: ToolHost, info: PointerInfo): void {
   if (drag.kind === 'paint') {
     paintAt(host, info.world)
     return
@@ -1115,6 +1340,20 @@ function dragVertex(host: ToolHost, world: Vec2): void {
   const editBind = host.mode !== 'animate'
   const store = useProjectStore.getState()
 
+  /*
+   * Pose 工具：**只改贴图坐标（UV）**，几何顶点一点不动。
+   *
+   * 语义与顶点工具正好相反 —— 顶点工具是「贴图不动、拖几何（再反算 UV）」，
+   * 这里是「几何不动、拖贴图」：把世界位移换算进附件空间，再按附件显示尺寸归一化成
+   * UV 增量（v 轴已翻转、方向与 y 一致，见 AttachmentData 的说明）。
+   */
+  /*
+   * Pose 工具与顶点工具在这里**走同一条路**：都只挪几何顶点。
+   *
+   * 唯一的差别在 `uvField`（拖拽开始时按工具决定）：顶点工具在 Pose 态会先按邻居
+   * 拟合出 UV 场，拖动时把 UV 反算回原映射（贴图留在原地，不跟着顶点跑）；
+   * Pose 工具的 `uvField` 是 null —— 顶点挪到哪就是哪，UV 一个分量都不改。
+   */
   if (editBind) {
     store.updateSilent((draft) => {
       const attachment = findAttachment(draft, drag.slot, drag.attachment)

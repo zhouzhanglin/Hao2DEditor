@@ -36,6 +36,7 @@ const GIZMO_LABEL: Record<GizmoMode, string> = { move: '移动', rotate: '旋转
  */
 const TOOL_KEYS: Record<string, EditorTool> = {
   v: 'select',
+  p: 'pose',
   b: 'bone',
   m: 'ffd',
   g: 'weight',
@@ -43,6 +44,7 @@ const TOOL_KEYS: Record<string, EditorTool> = {
 }
 const TOOL_LABEL: Record<EditorTool, string> = {
   select: '选择',
+  pose: 'Pose（拖顶点改贴图 / 拖骨骼改绑定）',
   bone: '画骨骼（拖拽连续绑定）',
   weight: '权重刷',
   ffd: '网格 / FFD 顶点'

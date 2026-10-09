@@ -7,6 +7,7 @@ import {
   FolderOpen,
   History,
   Import,
+  Package,
   Save,
   Share2,
   Undo2,
@@ -30,9 +31,26 @@ const QUICK_ACTIONS = [
   { command: 'project:new', label: '新建', icon: FilePlus2, hint: '新建工程 (Ctrl+N)' },
   { command: 'project:open', label: '打开', icon: FolderOpen, hint: '打开工程 (Ctrl+O)' },
   { command: 'project:save', label: '保存', icon: Save, hint: '保存工程 (Ctrl+S)' },
-  { command: 'project:importImages', label: '导入图片', icon: Import, hint: '导入或拖入碎图 (Ctrl+I)' },
-  { command: 'project:exportRuntime', label: '导出运行时', icon: Share2, hint: '导出 {名称}_ske.json + {名称}_atlas.json + 图集 png (Ctrl+E)' },
-  { command: 'project:exportHao2d', label: '导出 Unity', icon: Share2, hint: '导出给 Unity 的 .hao2d + 图集 png + 材质 (Ctrl+Shift+E)' }
+  { command: 'project:importImages', label: '导入图片', icon: Import, hint: '导入或拖入碎图 (Ctrl+I)' }
+]
+
+/**
+ * 导出：两个并排入口（运行时 / Unity）收进一个「导出」下拉。
+ * 菜单栏横向本来就紧张 —— 两个按钮各占一位，窄窗口下会把中间的文件名挤没。
+ */
+const EXPORT_ACTIONS = [
+  {
+    command: 'project:exportRuntime',
+    label: '导出运行时',
+    icon: Share2,
+    hint: '导出 {名称}_ske.json + {名称}_atlas.json + 图集 png (Ctrl+E)'
+  },
+  {
+    command: 'project:exportHao2d',
+    label: '导出 Unity',
+    icon: Package,
+    hint: '导出给 Unity 的 .hao2d + 图集 png + 材质 (Ctrl+Shift+E)'
+  }
 ]
 
 /** 顶部菜单栏：品牌 + 文档名 + 快捷动作 + Pose/Animate 二段式开关。 */
@@ -97,6 +115,55 @@ function RecentMenu({ onOpen }: { onOpen: (path: string) => void }) {
   )
 }
 
+/** 导出下拉：运行时 / Unity 两个入口。交互与 RecentMenu 一致（点外部关闭） */
+function ExportMenu({ onCommand }: { onCommand: (command: string) => void }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        title="导出"
+        onClick={() => setOpen((value) => !value)}
+        className={['hao-btn border-transparent bg-transparent', open ? 'text-content-hi' : ''].join(' ')}
+      >
+        <Share2 size={13} />
+        <span>导出</span>
+        <ChevronDown size={10} />
+      </button>
+      {open ? (
+        <>
+          <button
+            type="button"
+            className="fixed inset-0 z-40 cursor-default"
+            aria-label="关闭导出菜单"
+            onClick={() => setOpen(false)}
+          />
+          <div className="hao-window-no-drag absolute left-0 top-[26px] z-50 w-[260px] rounded border border-line bg-ink-800 py-1 shadow-lg shadow-black/40">
+            {EXPORT_ACTIONS.map(({ command, label, icon: Icon, hint }) => (
+              <button
+                key={command}
+                type="button"
+                title={hint}
+                className="block w-full cursor-pointer px-3 py-1 text-left text-3xs text-content-mid hover:bg-ink-700 hover:text-content-hi"
+                onClick={() => {
+                  setOpen(false)
+                  onCommand(command)
+                }}
+              >
+                <span className="flex items-center gap-2">
+                  <Icon size={12} className="shrink-0" />
+                  <span className="truncate">{label}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
 /**
  * 顶部菜单栏。
  *
@@ -136,6 +203,7 @@ export default function MenuBar({
             <span>{label}</span>
           </button>
         ))}
+        <ExportMenu onCommand={onCommand} />
         <RecentMenu onOpen={(path) => onOpenRecent(path)} />
         <div className="mx-0.5 h-[16px] w-px bg-line" />
         <button

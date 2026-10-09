@@ -1,3 +1,4 @@
+import { Grid3x3 } from 'lucide-react'
 import { BlendMode } from '@core/model/types'
 import { curvePercent } from '@core/anim/interpolation'
 import { useProjectStore } from '@editor/store/projectStore'
@@ -21,6 +22,7 @@ import {
   weightBonesOf
 } from '@editor/commands/authoringCommands'
 import { runAutoWeightsForBones } from '@editor/tools/authoringTools'
+import { buildGridMesh, buildOutlineMesh } from '@editor/commands/meshActions'
 import type { RenameKind } from '@editor/commands/authoringCommands'
 import { weightPaletteColor } from '@core/weightPalette'
 import {
@@ -93,7 +95,7 @@ function sampleNumberKeys(
   return a.value + (b.value - a.value) * t
 }
 
-/** 属性检查器：骨骼 / 插槽 / 附件 / 约束四类选中对象的属性编辑 */
+/** 属性：骨骼 / 插槽 / 附件 / 约束四类选中对象的属性编辑（网格 / FFD 的设置也在附件这栏的最下面） */
 export default function InspectorPanel({ onStatus = () => undefined }: InspectorPanelProps) {
   const document = useProjectStore((s) => s.document)
   const update = useProjectStore((s) => s.update)
@@ -743,6 +745,48 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                 }}
               >
                 删除附件
+              </button>
+            </div>
+          </FieldGroup>
+        ) : null}
+        {/*
+          网格 / FFD：密度 + 生成入口，放在属性面板**最下面**。
+          原先在右侧「工具选项」面板里 —— 那块面板限高 300px，参数被压成一小条，
+          而这个设置本身是作用于**选中的附件**（Region → 规则网格 / 沿轮廓重设为贴合网格），
+          跟着附件放在一起更顺手。
+          Animate 态整个右栏是收起的（见 App），所以不必再写「请切到 Pose 态」的提示。
+        */}
+        {tools.tool === 'ffd' ? (
+          <FieldGroup title="网格 / FFD">
+            <NumberField
+              label="密度"
+              value={tools.gridDivisions}
+              step={1}
+              min={1}
+              max={24}
+              precision={0}
+              onChange={(value) => tools.setGridDivisions(value)}
+            />
+            <p className="flex items-center gap-1 text-3xs text-content-lo">
+              <Grid3x3 size={10} />
+              生成 / 重设网格时的栅格细分（{tools.gridDivisions}×{tools.gridDivisions}）：越大顶点越密、越贴合形状
+            </p>
+            <div className="flex flex-wrap gap-1 pt-0.5">
+              <button
+                type="button"
+                className="hao-btn h-[20px] px-2 text-3xs"
+                title="把选中的图片（Region）按密度切分成规则栅格网格并三角化，之后可用权重刷 / 顶点工具编辑"
+                onClick={() => onStatus(buildGridMesh(tools.gridDivisions).message)}
+              >
+                转为网格（{tools.gridDivisions}×{tools.gridDivisions}）
+              </button>
+              <button
+                type="button"
+                className="hao-btn h-[20px] px-2 text-3xs"
+                title="沿图片不透明像素的轮廓生成贴合网格（透明区域不占三角形）；密度控制顶点数量级，也可用来重设手动编辑过的网格"
+                onClick={() => onStatus(buildOutlineMesh(tools.gridDivisions).message)}
+              >
+                自动生成网格
               </button>
             </div>
           </FieldGroup>

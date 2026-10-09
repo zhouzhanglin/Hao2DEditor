@@ -637,14 +637,14 @@ export default function App() {
             </div>
           </div>
         }
-        // Animate 态下右栏（属性检查器 / 工具选项）显示的绑定数据没意义，整栏收起，
+        // Animate 态下右栏（属性 / 工具选项）显示的绑定数据没意义，整栏收起，
         // 把空间让给视口与时间轴
         right={
           mode === 'animate' ? null : (
             <>
               {/* hao-inspector：面板内的按钮统一换成深青底 + 亮青描边（见 styles/index.css） */}
               <PanelShell
-                title="属性检查器"
+                title="属性"
                 grow
                 bodyClassName="hao-inspector"
                 actions={<span className="text-3xs text-content-lo">当前选中对象</span>}

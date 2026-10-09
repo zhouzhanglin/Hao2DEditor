@@ -7,11 +7,12 @@ import { signedArea, triangulatePolygon } from './triangulate'
  * 用途：把一张碎图转成网格附件时，只用**不透明像素的轮廓**做网格，
  * 透明区域不占三角形 —— 比规则栅格省一大截顶点，也让网格边界贴合图形本身。
  *
- * 流程：二值化（带降采样）→ 取面积最大的 4-连通区域（忽略碎块与内部孔洞）
- *       → 收集边界边并连成闭合轮廓 → Douglas-Peucker 简化到目标顶点数
+ * 流程：**按 uvRect 裁出本附件的像素** → 二值化（带降采样）→ 取面积最大的 4-连通区域
+ *       （忽略碎块与内部孔洞）→ 收集边界边并连成闭合轮廓 → Douglas-Peucker 简化到目标顶点数
  *       → 耳切三角化（复用 triangulatePolygon）。
  *
- * 纯函数、不依赖 DOM：像素遮罩由调用方（渲染层）从图片解码结果里取。
+ * 纯函数、不依赖 DOM：像素遮罩由调用方（渲染层）从图片解码结果里取 —— 注意它给的是
+ * **整张图片**（图集页）的遮罩，本附件只占其中一块，所以第一步必须先裁剪（见 cropToUvRect）。
  */
 
 /** 像素遮罩：行优先，`y = 0` 是图片**顶部**（与 canvas / ImageData 一致） */
@@ -71,7 +72,14 @@ const VERTICES_PER_DIVISION = 6
 export function buildAutoMesh(mask: AlphaMask, params: AutoMeshParams): AutoMeshResult | null {
   const threshold = params.threshold ?? DEFAULT_THRESHOLD
   const limit = Math.max(32, Math.round(params.maskLimit ?? DEFAULT_MASK_LIMIT))
-  const work = buildBinaryMask(mask, threshold, limit)
+  /*
+   * 先裁到本附件的 UV 矩形 —— 遮罩是**整张图片/图集页**的，不裁会错两处：
+   * ① 顶点按「整图占比」缩到一角（实测：只占页面 14% 的盾牌，网格只有应有尺寸的 13%）；
+   * ② 「面积最大的连通块」可能选到页面上别的更大的部件，整块网格都跑偏。
+   */
+  const cropped = cropToUvRect(mask, params.uvRect)
+  if (!cropped) return null
+  const work = buildBinaryMask(cropped, threshold, limit)
   if (!work) return null
 
   const component = largestComponent(work)
@@ -96,14 +104,16 @@ export function buildAutoMesh(mask: AlphaMask, params: AutoMeshParams): AutoMesh
   const vertices: Vec2[] = []
   const uvs: number[] = []
   const { size, uvRect } = params
+  const spanU = uvRect.u1 - uvRect.u0
+  const spanV = uvRect.v1 - uvRect.v0
   for (const point of contour) {
-    // 格点坐标 [0..W]×[0..H] → 归一化（x 向右、y 向下）
-    const nx = point.x / work.width
-    const ny = point.y / work.height
+    // 格点坐标 [0..W]×[0..H] → **矩形内**归一化（x 向右、y 向下；遮罩已裁到 UV 矩形）
+    const rx = point.x / work.width
+    const ry = point.y / work.height
     // 显示空间：中心为原点、y 向上
-    vertices.push({ x: (nx - 0.5) * size.x, y: (0.5 - ny) * size.y })
-    // 附件 UV：v 以图片底部为 0（与 alpha 的行方向相反），再映射进 region 的 uv 矩形
-    uvs.push(uvRect.u0 + nx * (uvRect.u1 - uvRect.u0), uvRect.v0 + (1 - ny) * (uvRect.v1 - uvRect.v0))
+    vertices.push({ x: (rx - 0.5) * size.x, y: (0.5 - ry) * size.y })
+    // 附件 UV：矩形内归一化 → 图集页坐标（v 以图片底部为 0，与 alpha 的行方向相反）
+    uvs.push(uvRect.u0 + rx * spanU, uvRect.v0 + (1 - ry) * spanV)
   }
 
   return {
@@ -125,6 +135,35 @@ export interface BinaryMask {
   height: number
   /** 1 = 不透明，0 = 透明；行优先，y = 0 在顶部 */
   data: Uint8Array
+}
+
+/**
+ * 把**整张图片**的遮罩裁到本附件的 UV 矩形上（像素级，向外取整，越界夹回来）。
+ *
+ * 为什么必须裁：调用方给的是整张图集页的遮罩，而一个附件只占其中一小块 ——
+ * - 顶点坐标若按整图归一化，生成出来的网格会按「占图比例」缩到一角
+ *   （实测：只占页面 14% 的盾牌，网格只有应有尺寸的 13%，且整体偏移）；
+ * - 「面积最大的连通块」也可能选到页面上别的更大的部件，网格彻底跑偏。
+ *
+ * 注意 v 与行方向相反：`v = 0` 在图片底部，而遮罩第 0 行是图片顶部，
+ * 所以矩形上边对应 `1 - v1`、下边对应 `1 - v0`。
+ */
+export function cropToUvRect(mask: AlphaMask, rect: UvRect): AlphaMask | null {
+  const width = Math.max(1, Math.floor(mask.width))
+  const height = Math.max(1, Math.floor(mask.height))
+  const x0 = Math.max(0, Math.min(width - 1, Math.floor(rect.u0 * width)))
+  const x1 = Math.max(x0 + 1, Math.min(width, Math.ceil(rect.u1 * width)))
+  const y0 = Math.max(0, Math.min(height - 1, Math.floor((1 - rect.v1) * height)))
+  const y1 = Math.max(y0 + 1, Math.min(height, Math.ceil((1 - rect.v0) * height)))
+  const outWidth = x1 - x0
+  const outHeight = y1 - y0
+  if (outWidth < 1 || outHeight < 1) return null
+  const alpha = new Uint8Array(outWidth * outHeight)
+  for (let y = 0; y < outHeight; y++) {
+    const from = (y0 + y) * width + x0
+    alpha.set(mask.alpha.subarray(from, from + outWidth), y * outWidth)
+  }
+  return { width: outWidth, height: outHeight, alpha }
 }
 
 /**

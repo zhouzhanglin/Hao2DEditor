@@ -785,39 +785,46 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                   那边能现场改密度，是生成网格的统一入口，这里不再重复第二份 */}
               {attachment.type === 'mesh' ? (
                 <>
-                  <button
-                    type="button"
-                    className="hao-btn h-[20px] px-2 text-3xs"
-                    disabled={selection.vertices.length === 0}
-                    title={
-                      selection.vertices.length === 0
-                        ? '先在视口里点选一个顶点（网格 / FFD 工具）'
-                        : '删除选中的顶点，并用它的邻居重新三角化补洞'
-                    }
-                    onClick={() => {
-                      const vertex = selection.vertices[0]
-                      if (vertex === undefined) return
-                      // 选中的是**共享缓冲**下标：换算成附件自己的顶点下标，
-                      // 并以它为准确定附件（点选顶点不会改「选中的附件」，可能还停在上一个）
-                      const ref = getActiveScene()?.vertexRefAt(vertex) ?? null
-                      if (!ref) {
-                        onStatus('顶点信息已过期：请在视口里重新点选顶点')
-                        return
+                  {/*
+                    删顶点是**顶点编辑**动作：只在网格 / FFD 工具下才显示。
+                    别的时候它永远是灰的（选不中顶点，自然也删不了），摆在面板里只是噪音。
+                    「还原为 Region / 删除附件」不算顶点编辑（不需要选中顶点），保持常显。
+                  */}
+                  {tools.tool === 'ffd' ? (
+                    <button
+                      type="button"
+                      className="hao-btn h-[20px] px-2 text-3xs"
+                      disabled={selection.vertices.length === 0}
+                      title={
+                        selection.vertices.length === 0
+                          ? '先在视口里点选一个顶点（网格 / FFD 工具）'
+                          : '删除选中的顶点，并用它的邻居重新三角化补洞'
                       }
-                      let removed = false
-                      update('删除网格顶点', (draft) => {
-                        removed = deleteMeshVertex(draft, ref.slot, ref.attachment, ref.vertex)
-                      })
-                      if (removed) selection.selectVertices([])
-                      onStatus(
-                        removed
-                          ? `已删除「${ref.attachment}」的顶点 #${ref.vertex}`
-                          : '删除失败：顶点不存在或网格至少需要保留 3 个顶点'
-                      )
-                    }}
-                  >
-                    删除选中顶点
-                  </button>
+                      onClick={() => {
+                        const vertex = selection.vertices[0]
+                        if (vertex === undefined) return
+                        // 选中的是**共享缓冲**下标：换算成附件自己的顶点下标，
+                        // 并以它为准确定附件（点选顶点不会改「选中的附件」，可能还停在上一个）
+                        const ref = getActiveScene()?.vertexRefAt(vertex) ?? null
+                        if (!ref) {
+                          onStatus('顶点信息已过期：请在视口里重新点选顶点')
+                          return
+                        }
+                        let removed = false
+                        update('删除网格顶点', (draft) => {
+                          removed = deleteMeshVertex(draft, ref.slot, ref.attachment, ref.vertex)
+                        })
+                        if (removed) selection.selectVertices([])
+                        onStatus(
+                          removed
+                            ? `已删除「${ref.attachment}」的顶点 #${ref.vertex}`
+                            : '删除失败：顶点不存在或网格至少需要保留 3 个顶点'
+                        )
+                      }}
+                    >
+                      删除选中顶点
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="hao-btn h-[20px] px-2 text-3xs"

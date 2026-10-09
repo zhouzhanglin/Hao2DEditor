@@ -783,6 +783,50 @@ export function autoWeights(
   return touched
 }
 
+/**
+ * 设置某个顶点在某根骨骼上的权重，其余骨骼**按比例**分享剩下的部分。
+ *
+ * 权重和必须保持 1：小于 1 时顶点会朝原点塌陷，大于 1 会过度外推（见 paintWeights 的同款约束）。规则：
+ * - 目标骨骼设成 1 → 清空其它骨骼（不留 0 权重残渣）
+ * - 其它骨骼本来有权重 → 按原比例缩放到剩余的 `1 - v`
+ * - 其它骨骼全是 0（这个顶点第一次拿到第二根骨骼）→ 剩余量交给**列表里的另一根**
+ * - 列表里只有这一根骨骼 → 它只能是 1（否则配不平）
+ *
+ * 返回是否真的改了（没变化就不该产生撤销记录）。
+ */
+export function setVertexWeight(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  vertexIndex: number,
+  bone: string,
+  value: number
+): boolean {
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment || attachment.type !== 'mesh') return false
+  const vertex = attachment.vertices[vertexIndex]
+  if (!vertex) return false
+  if (!doc.bones.some((item) => item.name === bone)) return false
+  const bound = weightBonesOf(attachment)
+  if (!bound.includes(bone)) return false
+
+  const before = vertex.weights.map((entry) => ({ ...entry }))
+  // 只绑了一根骨骼时它必然是 1：给半权重会让权和 < 1，顶点朝原点塌陷（UI 那边也会禁用滑块）
+  const target = bound.length < 2 ? 1 : Math.min(1, Math.max(0, value))
+  /*
+   * `applyVertexWeight` 只在**已有**的其它骨骼之间按比例分配剩余量；这个顶点的其余骨骼
+   * 全是 0 时（第一次给它加上第二根骨骼）没东西可分，权和会停在 target < 1 —— 于是先把
+   * 剩余量挂到列表里的另一根上，再交给它归一化（与画笔同样的「列表优先」口径）。
+   */
+  const hasOther = vertex.weights.some((entry) => entry.bone !== bone && entry.weight > 1e-6)
+  if (!hasOther && target < 1 - 1e-6) {
+    const fallback = bound.find((name) => name !== bone)
+    if (fallback) vertex.weights.push({ bone: fallback, weight: 1 - target })
+  }
+  applyVertexWeight(vertex.weights, bone, target)
+  return !sameWeights(before, vertex.weights)
+}
+
 /** 两组权重是否等价（骨骼一一对应且各自权重差在容差内） */
 function sameWeights(
   a: readonly { bone: string; weight: number }[],

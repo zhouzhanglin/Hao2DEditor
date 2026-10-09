@@ -18,6 +18,7 @@ import {
 } from '@render/overlays/boneOverlay'
 import type { GizmoDrawMode } from '@render/overlays/boneOverlay'
 import { drawMeshOverlay } from '@render/overlays/meshOverlay'
+import { weightPaletteColorValue } from '@core/weightPalette'
 import {
   BONE_ORIGIN_RADIUS,
   attachmentGizmoFrame,
@@ -177,12 +178,17 @@ export class EditorScene {
     this.textures = options.textures
     this.viewport = new Viewport(options.host)
     this.overlay.addChild(
-      this.meshFill,
       this.meshStroke,
       // 轮廓线压在最下面：骨骼与操作器都盖在它之上，手柄不会被描边挡住
       this.outlineStroke,
       this.boneFill,
       this.boneStroke,
+      /*
+       * 顶点色点（权重着色 / FFD 手柄）画在骨骼**之上**：加权网格的顶点本来就贴着骨骼走，
+       * 压在下面的话黄色关节与绿色高亮骨骼正好盖住色点 —— 实测采样到的是关节色而不是权重色。
+       * 仍然压在操作器之下，免得挡住 gizmo 的抓取。
+       */
+      this.meshFill,
       this.gizmoFill,
       this.gizmoStroke
     )
@@ -1099,7 +1105,59 @@ export class EditorScene {
       this.meshFill.clear()
       return
     }
-    const weightBone = state.weightBone ? (bundle.boneIndex[state.weightBone] ?? -1) : -1
+    /*
+     * 权重着色用的骨骼配色：按骨骼在「权重骨骼列表」里的**位置**取（与检查器里的色块同源，
+     * 见 weightPalette）—— 列表外的骨骼留 0，叠加层会用兜底灰画它们。
+     */
+    const weightBoneColors: number[] = []
+    for (let i = 0; i < state.weightBones.length; i++) {
+      const boneIndex = bundle.boneIndex[state.weightBones[i]]
+      if (boneIndex !== undefined) weightBoneColors[boneIndex] = weightPaletteColorValue(i)
+    }
+
+    /*
+     * 顶点圆点的半径（世界单位）：
+     * - **顶点工具（隔离中）**：固定 5 屏幕像素 —— 那是可拖的手柄，缩多远都要抓得住；
+     * - **选择 / Pose 工具**：按**网格自身尺寸**取固定值（顶点包围盒最长边的 2%），
+     *   不为视口缩放做补偿 —— 放大时点跟着网格一起变大，缩小时一起变小。
+     *   这两类工具下顶点只是"标出位置"，跟着内容走比固定屏幕尺寸更直观。
+     *   2% 是按「适配视口时直径约 10px」定的（与之前的屏幕恒定尺寸观感一致）。
+     */
+    let vertexRadius = unitPerPixel * 5
+    if (!isolating && focusSlot >= 0) {
+      /*
+       * 基准取**整个角色**的包围盒（不是选中的那个网格）：按网格算的话，切到一个零件网格
+       * （比如长矛前端的小块）点时大小会忽然变成针尖。这圈点只是"标出顶点在哪"，
+       * 同一屏里大小一致更重要。
+       */
+      const positions = this.meshResult?.positions
+      if (positions) {
+        let minX = Number.POSITIVE_INFINITY
+        let minY = Number.POSITIVE_INFINITY
+        let maxX = Number.NEGATIVE_INFINITY
+        let maxY = Number.NEGATIVE_INFINITY
+        const count = this.meshResult?.vertexCount ?? 0
+        for (let i = 0; i < count; i++) {
+          const x = positions[i * 2]
+          const y = positions[i * 2 + 1]
+          if (x < minX) minX = x
+          if (x > maxX) maxX = x
+          if (y < minY) minY = y
+          if (y > maxY) maxY = y
+        }
+        const extent = Math.max(maxX - minX, maxY - minY)
+        if (extent > 1e-6) {
+          /*
+           * 世界半径跟着网格走，但**屏幕尺寸夹在 6~14px 之间**：
+           * 高倍缩放下纯世界尺寸会失控（实测放大到局部时，点直径涨到好几百像素，整屏都被糊住），
+           * 缩得很远时又会小到看不见。夹取之后两头都保得住，中间段仍随缩放变化。
+           */
+          const zoom = this.viewport.zoom
+          const screenRadius = Math.min(3, Math.max(3, extent * 0.02 * zoom))
+          vertexRadius = screenRadius / Math.max(1e-6, zoom)
+        }
+      }
+    }
     drawMeshOverlay(
       this.meshStroke,
       this.meshFill,
@@ -1112,7 +1170,9 @@ export class EditorScene {
         showVertices: isolating || state.overlay.weight || state.overlay.ffd || focusSlot >= 0,
         // 隔离本身就只构建了那一个插槽，不需要再过滤
         onlySlot: isolating ? -1 : focusSlot,
-        weightBone: state.overlay.weight ? weightBone : -1,
+        vertexRadius,
+        showWeights: state.overlay.weight,
+        weightBoneColors,
         selectedVertices: new Set(state.selectedVertices),
         hoveredVertex: state.hoveredVertex
       }

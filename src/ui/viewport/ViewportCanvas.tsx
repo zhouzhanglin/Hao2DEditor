@@ -156,7 +156,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
        *（实测：皮肤切到 goblingirl 后再选 default 里的 spear，weightBones 变成空数组）。
        */
       const selectedAttachmentData =
-        selection.kind === 'attachment' && selection.slot && selection.attachment
+        selection.slot && selection.attachment
           ? resolveAttachment(
               useProjectStore.getState().document,
               selection.slot,
@@ -171,7 +171,14 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         position: { x: number; y: number }
         rotation: number
       } | null = null
-      if (tools.tool === 'select' && mode === 'pose' && selectedAttachmentData && scene.runtime) {
+      // 操作器仍要求 kind 是 attachment：否则「选了骨骼」时会在旧附件上冒出一个点不动的假手柄
+      if (
+        tools.tool === 'select' &&
+        mode === 'pose' &&
+        selection.kind === 'attachment' &&
+        selectedAttachmentData &&
+        scene.runtime
+      ) {
         const doc = useProjectStore.getState().document
         const slot = doc.slots.find((item) => item.name === selection.slot)
         const boneIndex = slot ? (scene.runtime.boneIndex[slot.bone] ?? -1) : -1
@@ -226,8 +233,12 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         isolateMeshSlot: tools.tool === 'ffd' && selection.kind === 'attachment' ? selection.slot : '',
         isolateMeshAttachment:
           tools.tool === 'ffd' && selection.kind === 'attachment' ? selection.attachment : '',
+        /*
+         * 只看 `slot`、不看 `kind`：权重工具里「先选骨骼、再点顶点刷」是常态，那时 kind 是 bone，
+         * 但 slot 仍指向要刷的网格 —— 按 kind 卡死会让权重着色与顶点一起消失。
+         */
         focusMeshSlot:
-          (tools.tool === 'select' || tools.tool === 'pose') && selection.kind === 'attachment'
+          (tools.tool === 'select' || tools.tool === 'pose' || tools.tool === 'weight') && selection.slot
             ? selection.slot
             : ''
       })

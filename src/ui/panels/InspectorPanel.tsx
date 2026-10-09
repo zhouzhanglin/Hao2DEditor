@@ -17,13 +17,16 @@ import {
   patchAttachment,
   removeWeightBone,
   resolveAttachment,
+  setVertexWeight,
   weightBonesOf
 } from '@editor/commands/authoringCommands'
 import { runAutoWeightsForBones } from '@editor/tools/authoringTools'
 import type { RenameKind } from '@editor/commands/authoringCommands'
+import { weightPaletteColor } from '@core/weightPalette'
 import {
   CheckboxField,
   ColorField,
+  CommitTextField,
   FieldGroup,
   NumberField,
   SelectField,
@@ -310,8 +313,6 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
     const attachment = resolveAttachment(document, slot.name, selection.attachment, selection.skin)
     // 权重骨骼列表：优先用附件上显式绑定的（老数据按顶点权重推断，见 weightBonesOf）
     const weightBones = attachment && attachment.type === 'mesh' ? weightBonesOf(attachment) : []
-    const boneColorOf = (name: string): string =>
-      document.bones.find((bone) => bone.name === name)?.color ?? '#F97316'
     /** 是否正在为**这个**附件等待点选骨骼（等待态是全局的，按钮只在目标附件上高亮） */
     const pickingWeightBone =
       tools.pendingWeightBone?.slot === selection.slot &&
@@ -523,14 +524,15 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                       还没有绑定骨骼：点上面的按钮进入绑定状态，再在视口里点选骨骼（可连续点选多根）
                     </span>
                   ) : (
-                    weightBones.map((name) => (
+                    weightBones.map((name, index) => (
                       <div
                         key={name}
                         className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-ink-700/60"
                       >
+                        {/* 色块与视口的顶点着色同源（按列表位置取色），两边能一眼对上 */}
                         <span
                           className="size-2.5 shrink-0 rounded-[2px] border border-black/40"
-                          style={{ background: boneColorOf(name) }}
+                          style={{ background: weightPaletteColor(index) }}
                         />
                         <span className="min-w-0 flex-1 truncate text-3xs" title={name}>
                           {name}
@@ -583,6 +585,47 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                 >
                   自动计算权重
                 </button>
+              </FieldGroup>
+            ) : null}
+
+            {/*
+              选中顶点的权重：权重工具里单击顶点（或 FFD 里选中单个顶点）时出现。
+              行序与配色都取自上面的「权重骨骼列表」（同一份 weightPalette），
+              所以「视口里那块颜色」与「面板里哪一行」能直接对上。
+            */}
+            {attachment.type === 'mesh' &&
+            selection.vertex >= 0 &&
+            selection.vertex < attachment.vertices.length ? (
+              <FieldGroup title={`顶点 #${selection.vertex} 权重`}>
+                {weightBones.length === 0 ? (
+                  <span className="text-3xs leading-relaxed text-content-lo">
+                    这个网格还没绑定骨骼：先在上面「添加绑定骨骼」里绑上，再刷权重
+                  </span>
+                ) : (
+                  weightBones.map((name, index) => {
+                    const vertex = attachment.vertices[selection.vertex]
+                    const weight = vertex.weights.find((item) => item.bone === name)?.weight ?? 0
+                    return (
+                      <VertexWeightRow
+                        key={name}
+                        index={index}
+                        name={name}
+                        value={weight}
+                        single={weightBones.length < 2}
+                        onInput={(next) =>
+                          useProjectStore.getState().updateSilent((draft) => {
+                            setVertexWeight(draft, slot.name, attachment.name, selection.vertex, name, next)
+                          })
+                        }
+                        onCommit={(next) =>
+                          update('修改顶点权重', (draft) => {
+                            setVertexWeight(draft, slot.name, attachment.name, selection.vertex, name, next)
+                          })
+                        }
+                      />
+                    )
+                  })
+                )}
               </FieldGroup>
             ) : null}
 
@@ -790,6 +833,73 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
           />
         </FieldGroup>
       ) : null}
+    </div>
+  )
+}
+
+/**
+ * 顶点权重的一行：色块 + 骨骼名 + 滑块 + 百分比。
+ *
+ * 色块与视口里的顶点色**同源**（weightPalette 按列表位置取），于是「视口里那块颜色」
+ * 和「面板里这一行」能一眼对上。滑块拖动期间走 `updateSilent` + 事务（整段拖动合成一条
+ * 撤销记录），右侧百分比框是一次性提交。网格只绑了一根骨骼时权重必然是 1，控件直接禁用。
+ */
+function VertexWeightRow({
+  index,
+  name,
+  value,
+  single,
+  onInput,
+  onCommit
+}: {
+  index: number
+  name: string
+  value: number
+  single: boolean
+  onInput: (value: number) => void
+  onCommit: (value: number) => void
+}) {
+  const percent = Math.round(value * 100)
+  const hint = single
+    ? '这个网格只绑了一根骨骼：它在每个顶点上必然是 100%'
+    : `「${name}」在这个顶点上的权重；拖动滑块或输入百分比（其余骨骼按比例分享剩余部分）`
+  return (
+    <div className="flex items-center gap-1.5" title={hint}>
+      <span
+        className="size-2.5 shrink-0 rounded-[2px] border border-black/40"
+        style={{ background: weightPaletteColor(index) }}
+      />
+      <span className="min-w-0 flex-1 truncate text-3xs" title={name}>
+        {name}
+      </span>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={percent}
+        disabled={single}
+        title={hint}
+        className="h-[14px] w-[84px] shrink-0 cursor-pointer accent-accent disabled:cursor-not-allowed disabled:opacity-40"
+        // 一次拖动 = 一条撤销记录：按下开事务，松开收尾，中途只 updateSilent
+        onPointerDown={() => useProjectStore.getState().beginTransaction('修改顶点权重')}
+        onPointerUp={() => useProjectStore.getState().endTransaction()}
+        onChange={(event) => onInput(Number(event.target.value) / 100)}
+      />
+      <CommitTextField
+        className="hao-field h-[20px] w-[46px] text-right font-mono text-3xs"
+        value={String(percent)}
+        disabled={single}
+        inputMode="numeric"
+        scrub
+        title="权重百分比：失焦 / 回车生效；中键左右拖动可调"
+        sanitize={(raw) => {
+          const next = Math.round(Number(raw))
+          return Number.isFinite(next) ? String(Math.min(100, Math.max(0, next))) : null
+        }}
+        onCommit={(next) => onCommit(Number(next) / 100)}
+      />
+      <span className="shrink-0 text-3xs text-content-lo">%</span>
     </div>
   )
 }

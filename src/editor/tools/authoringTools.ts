@@ -88,6 +88,13 @@ interface DragSession {
   uvField: ((x: number, y: number) => { u: number; v: number }) | null
   paintMode: BrushMode
   moved: boolean
+  /**
+   * 权重刷是否已经真正开刷（第一次移动）。
+   *
+   * 撤销事务要等到这时才开：单击只是「选中顶点看权重」，不该留下一条空的撤销记录
+   *（History.end 无条件入栈，没有内容变化也不会被丢弃）。
+   */
+  paintStarted: boolean
   /** 新建骨骼：起点（已吸附）、当前终点与父骨骼名，松开时按起点→终点生成 */
   createStart: Vec2
   createEnd: Vec2
@@ -130,6 +137,7 @@ const IDLE: DragSession = {
   uvField: null,
   paintMode: 'replace',
   moved: false,
+  paintStarted: false,
   createStart: { x: 0, y: 0 },
   createEnd: { x: 0, y: 0 },
   createParent: '',
@@ -153,18 +161,49 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   if (!scene.runtime) return false
 
   if (tools.tool === 'weight') {
-    const bone = host.selection.kind === 'bone' ? host.selection.bone : ''
+    /*
+     * 单击 = **选中顶点**（属性检查器随即显示它的权重），拖动才刷权重。
+     *
+     * 两个细节别漏：
+     * - 选顶点**不看有没有选中骨骼** —— 「这个顶点绑了哪几根骨骼」本来就不需要先挑一根骨骼；
+     * - 撤销事务挪到真正开刷时才开（见 moveActiveDrag），否则纯点击会留下一条空的「权重刷」记录。
+     */
+    const hit = scene.pickVertexAt(info.world.x, info.world.y)
+    const ref = hit ? scene.vertexRefAt(hit.vertexIndex) : null
+    if (hit && ref) {
+      useSelectionStore.getState().select({
+        kind: 'attachment',
+        slot: ref.slot,
+        attachment: ref.attachment,
+        vertices: [hit.vertexIndex],
+        vertex: ref.vertex
+      })
+    }
+    const vertexLabel = ref ? `顶点 #${ref.vertex}（${ref.slot} / ${ref.attachment}）` : null
+    /*
+     * 刷哪根骨骼取自 store 的 `bone` 字段（**不看 kind**）：选中顶点会把 kind 改成
+     * attachment，若仍按 kind 判定，点完顶点就没法接着拖刷了 —— 而「先选骨骼、再点顶点、
+     * 拖一下刷它」正是权重工具的常态用法。骨骼名会写在状态栏里，不会悄悄刷错骨骼。
+     */
+    const bone = useSelectionStore.getState().bone
     if (!bone) {
-      host.status('请先在层级树里选中要刷权重的骨骼')
+      host.status(
+        vertexLabel
+          ? `${vertexLabel}：在层级树里选一根骨骼后按住拖动即可刷权重`
+          : '请先在层级树里选中要刷权重的骨骼'
+      )
       return true
     }
     if (host.mode !== 'pose') {
       host.status('权重刷只在 Pose 状态可用（动画状态的角色姿态不是绑定姿态）')
       return true
     }
+    host.status(
+      vertexLabel
+        ? `${vertexLabel}：按住拖动刷「${bone}」的权重`
+        : `权重刷「${bone}」：按住拖动刷权重（半径 ${tools.brush.radius}px）`
+    )
     drag = { ...IDLE, kind: 'paint', bone, paintMode: tools.brush.mode }
-    storeHandler.begin('权重刷')
-    paintAt(host, info.world)
     return true
   }
 
@@ -246,7 +285,9 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
         kind: 'attachment',
         slot: resolved.slot,
         attachment: resolved.attachment,
-        vertices: [vertex.vertexIndex]
+        vertices: [vertex.vertexIndex],
+        // 附件内下标：属性检查器靠它显示这个顶点的权重（共享下标只能给叠加层画标记）
+        vertex: resolved.vertex
       })
       host.status(`顶点 #${resolved.vertex}（${resolved.slot} / ${resolved.attachment}）`)
       return true
@@ -934,6 +975,11 @@ export function toolPointerMove(host: ToolHost, info: PointerInfo): void {
 /** 拖拽分发（从 toolPointerMove 拆出来，好让「网格跟随」在前后统一处理） */
 function moveActiveDrag(host: ToolHost, info: PointerInfo): void {
   if (drag.kind === 'paint') {
+    // 撤销事务在**第一次真正开刷**时才开：单击只是选中顶点看权重，不该留下空的撤销记录
+    if (!drag.paintStarted) {
+      drag.paintStarted = true
+      storeHandler.begin('权重刷')
+    }
     paintAt(host, info.world)
     return
   }

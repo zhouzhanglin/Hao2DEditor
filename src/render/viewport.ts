@@ -1,5 +1,7 @@
 import { Application, Container } from 'pixi.js'
 import { Checkerboard, pickCellSize } from './checkerboard'
+// 缩放限位与「居中取景」的数学在 camera.ts（纯计算，不依赖 Pixi，可单测）
+import { clampZoom, framingCamera } from './camera'
 
 export interface ViewportBounds {
   minX: number
@@ -8,18 +10,8 @@ export interface ViewportBounds {
   maxY: number
 }
 
-/**
- * 缩放范围。骨架单位 ≈ 100 像素，因此 zoom = 100 表示「1:1 源图尺寸」，
- * 上限留到 800 才能看清小角色 / 局部细节。
- */
-const MIN_ZOOM = 0.02
-const MAX_ZOOM = 800
 /** 空场景（无内容可适配）时的默认缩放：PPU，1 单位 = 100px */
 const EMPTY_SCENE_ZOOM = 100
-
-function clampZoom(zoom: number): number {
-  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom))
-}
 
 export interface ViewportOptions {
   background?: string
@@ -253,6 +245,30 @@ export class Viewport {
     const reachX = Math.max(1e-6, Math.abs(bounds.minX), Math.abs(bounds.maxX))
     const reachY = Math.max(1e-6, Math.abs(bounds.minY), Math.abs(bounds.maxY))
     this.zoomValue = clampZoom(Math.min(halfWidth / reachX, halfHeight / reachY))
+    this.applyCamera()
+    this.onZoomChange(this.zoomValue)
+  }
+
+  /**
+   * 把世界点居中并缩放（层级树里双击节点聚焦）。
+   *
+   * 与 `fit` 的差别见 camera.ts 的 framingCamera：fit 把**世界原点**钉在屏幕中心，
+   * 这个把**目标点**摆到屏幕中心 —— 双击一个偏在角落的节点时它才会落在正中间。
+   * `fill` 是内容最多占视口的比例，默认 0.5（与 camera.ts 的 FRAME_FILL 一致）。
+   */
+  frame(worldX: number, worldY: number, contentWidth: number, contentHeight: number, fill = 0.5): void {
+    const camera = framingCamera({
+      width: this.width,
+      height: this.height,
+      worldX,
+      worldY,
+      contentWidth,
+      contentHeight,
+      fill
+    })
+    this.zoomValue = camera.zoom
+    this.offsetX = camera.offsetX
+    this.offsetY = camera.offsetY
     this.applyCamera()
     this.onZoomChange(this.zoomValue)
   }

@@ -437,6 +437,32 @@ export class EditorScene {
     this.viewport.render()
   }
 
+  /**
+   * 某插槽**当前显示附件**的世界矩阵（按插槽名取）。
+   *
+   * 与 `attachmentWorldAt` 的区别只是入参：那个要运行期下标，这个给面板用（面板手上只有名字）。
+   * 名字不存在或该插槽此刻不显示附件时返回 null —— 调用方可以退回宿主骨骼。
+   */
+  attachmentWorldByName(slotName: string): Float32Array | null {
+    const bundle = this.bundle
+    if (!bundle) return null
+    const index = bundle.asset.slots.findIndex((slot) => slot.name === slotName)
+    if (index < 0) return null
+    return this.attachmentWorldAt(index)
+  }
+
+  /**
+   * 把某块世界范围摆到视口**中央**（层级树里双击骨骼 / display / 约束时用）。
+   *
+   * 与 `fit` 的区别：fit 是「世界原点固定在屏幕中心、按内容半径定缩放」；
+   * 这里是「目标点居中」—— 双击一个偏在一角的节点，希望它出现在正中间。
+   */
+  frameContent(worldX: number, worldY: number, contentWidth: number, contentHeight: number, fill = 0.5): void {
+    this.viewport.frame(worldX, worldY, contentWidth, contentHeight, fill)
+    this.markDirty()
+    this.viewport.render()
+  }
+
   pickBoneAt(worldX: number, worldY: number): BoneHit | null {
     if (!this.bundle) return null
     return pickBone(this.bundle.skeleton, worldX, worldY, this.viewport.pixelsToWorld(8))

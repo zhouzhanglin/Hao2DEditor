@@ -28,6 +28,8 @@ import { keySlotDisplayNow, keyframeTargetsNow } from '@editor/timeline/actions'
 import { slotDisplayNameAt } from '@editor/timeline/model'
 import type { KeyframeTarget } from '@editor/timeline/model'
 import { getActiveScene } from '@editor/activeScene'
+import { focusNode } from '@editor/focusNode'
+import type { FocusTarget } from '@editor/focusNode'
 import { createIkConstraint, createPathConstraint, createTransformConstraint } from '@core/model/constraints'
 import type { AuthoringBone, AuthoringConstraint, AuthoringImage, EditorDocument } from '@core/model/authoring'
 import { createAuthoringBone, createAuthoringSlot } from '@core/model/authoring'
@@ -95,6 +97,11 @@ interface TreeRowProps {
   dragPayload?: TreeDragPayload
   /** 接收树内拖动的节点；position 区分「放进这一行」与「排到上/下沿」 */
   onDropNode?: (payload: TreeDragPayload, position: TreeDropPosition) => void
+  /**
+   * 双击行时聚焦视口的目标。**不传时按 `dragPayload` 推导** —— 骨骼 / 插槽 / display
+   * 三种拖动负载的形状与 FocusTarget 完全一致，所以只有约束行需要显式给。
+   */
+  focusTarget?: FocusTarget
 }
 
 /** 指针落在行的哪一段：上沿 / 中间（放进这一层）/ 下沿 */
@@ -126,13 +133,20 @@ function TreeRow({
   onDropImage,
   dataSlot,
   dragPayload,
-  onDropNode
+  onDropNode,
+  focusTarget
 }: TreeRowProps) {
   const [dropActive, setDropActive] = useState(false)
   /** 树内拖动时的高亮：放进行内 or 贴在上/下沿 */
   const [nodeHint, setNodeHint] = useState<TreeDropPosition | null>(null)
 
   const acceptsDrop = Boolean(onDropImage || onDropNode)
+
+  /**
+   * 双击聚焦的目标：显式给的优先（约束行），否则直接用拖动负载 ——
+   * 骨骼 / 插槽 / display 三种负载的形状与 FocusTarget 相同，不必逐行重复声明。
+   */
+  const focus: FocusTarget | undefined = focusTarget ?? dragPayload
 
   return (
     <div
@@ -148,6 +162,15 @@ function TreeRow({
       ].join(' ')}
       data-slot={dataSlot}
       onClick={onSelect}
+      onDoubleClick={
+        focus
+          ? (event) => {
+              // 双击行内按钮（展开箭头 / 锁 / 删除）是在操作那个按钮，不聚焦视口
+              if ((event.target as HTMLElement).closest('button')) return
+              focusNode(useProjectStore.getState().document, focus)
+            }
+          : undefined
+      }
       onContextMenu={onContextMenu}
       draggable={dragPayload ? true : undefined}
       onDragStart={
@@ -1005,6 +1028,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       depth={depth}
       label={constraint.name}
       active={selection.kind === 'constraint' && selection.constraint === constraint.name}
+      // 约束没有拖动负载，双击聚焦的目标只能显式给（骨骼 / 插槽 / display 都由负载推导）
+      focusTarget={{ kind: 'constraint', name: constraint.name }}
       icon={CONSTRAINT_ICON[constraint.type] ?? <Link2 size={11} />}
       meta={constraint.type === 'ik' ? `${CONSTRAINT_KIND.ik} ${constraint.bones.length}骨` : CONSTRAINT_KIND[constraint.type]}
       onSelect={() => selection.selectConstraint(constraint.name)}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, Eye, EyeOff, GripVertical, KeyRound } from 'lucide-react'
 import { useModeStore } from '@editor/store/modeStore'
 import { useProjectStore } from '@editor/store/projectStore'
+import { focusNode } from '@editor/focusNode'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { useShallow } from 'zustand/react/shallow'
@@ -224,6 +225,8 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
                 rowRefs.current.set(name, el)
               }}
               draggable
+              // 双击插槽行 = 视口聚焦到它（图层顺序列表里常常差着一屏，聚焦比滚动找更快）
+              onDoubleClick={() => focusNode(document, { kind: 'slot', name })}
               onDragStart={(event) => {
                 event.dataTransfer.setData(ORDER_MIME, name)
                 event.dataTransfer.effectAllowed = 'move'

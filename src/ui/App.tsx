@@ -90,7 +90,7 @@ import {
 import ExportDialog from '@ui/widgets/ExportDialog'
 import type { ExportMode } from '@ui/widgets/ExportDialog'
 import { deleteSelectedTrack, keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
-import { deleteMeshVertex } from '@editor/commands/authoringCommands'
+import { PPU, deleteMeshVertex } from '@editor/commands/authoringCommands'
 
 export default function App() {
   const mode = useModeStore((s) => s.mode)
@@ -276,7 +276,14 @@ export default function App() {
         texturesLoaded: images.filter((image) => scene.textures.has(image.name)).length,
         texturesTotal: images.length
       })
-      setZoom(Math.round(scene.viewport.zoom * 100))
+      /*
+       * 缩放读数 = **屏幕像素 ÷ 图像像素**，所以要先除 PPU。
+       *
+       * `viewport.zoom` 的单位是「每个世界单位画多少屏幕像素」，而 1 世界单位 = PPU(=100)
+       * 图像像素（见 importers/uv 与 Viewport 的空场景默认值）—— 100% 表示 1 图像像素
+       * 正好画 1 屏幕像素。直接 `zoom * 100` 会把「像素/单位」当成百分比，读数大 100 倍。
+       */
+      setZoom(Math.round((scene.viewport.zoom / PPU) * 100))
     }, 250)
     return () => window.clearInterval(timer)
   }, [])

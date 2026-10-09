@@ -229,7 +229,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
 
         <button
           type="button"
-          className="hao-btn h-[22px] shrink-0 whitespace-nowrap px-1.5 text-2xs"
+          className="hao-btn h-[20px] px-1.5 text-3xs"
           title="新建动画（建好自动切过去）"
           onClick={() => {
             let created = ''
@@ -260,7 +260,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
             autoFocus
             value={renaming}
             title="输入新名字，回车确认 / Esc 取消"
-            className="hao-field h-[22px] w-[110px]"
+            className="hao-field h-[20px] w-[110px]"
             onChange={(event) => setRenaming(event.target.value)}
             onBlur={commitRename}
             onKeyDown={(event) => {
@@ -272,7 +272,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
           <>
             <button
               type="button"
-              className="hao-btn h-[22px] shrink-0 whitespace-nowrap px-1.5 text-2xs"
+              className="hao-btn h-[20px] px-1.5 text-3xs"
               title="重命名当前动画"
               disabled={!animation}
               onClick={() => setRenaming(animation?.name ?? null)}
@@ -281,7 +281,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
             </button>
             <button
               type="button"
-              className="hao-btn h-[22px] shrink-0 whitespace-nowrap px-1.5 text-2xs"
+              className="hao-btn h-[20px] px-1.5 text-3xs"
               title="复制当前动画（连同全部关键帧）"
               disabled={!animation}
               onClick={duplicateAnimation}
@@ -290,7 +290,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
             </button>
             <button
               type="button"
-              className="hao-btn h-[22px] shrink-0 whitespace-nowrap px-1.5 text-2xs hover:border-danger/50 hover:text-danger"
+              className="hao-btn h-[20px] px-1.5 text-3xs hover:border-danger/50 hover:text-danger"
               title="删除当前动画（可撤销）"
               disabled={!animation}
               onClick={removeAnimation}
@@ -301,14 +301,14 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         )}
 
         <label
-          className="flex shrink-0 items-center gap-1 text-2xs text-content-mid"
+          className="flex shrink-0 items-center gap-1 text-3xs text-content-lo"
           title="动画时长（帧）。这是可编辑范围（改大就能在后面继续加帧）；播放与导出按最后一个关键帧算"
         >
           时长
           {/* 提交式输入：打字期间只改本地文本。逐字符提交会让时长在打字中途被写成中间态
               （输入 90 时先变 9 帧），撤销也会退回中间态而不是改之前的值 */}
           <CommitTextField
-            className="hao-field h-[22px] w-[56px] bg-ink-900 text-right font-mono disabled:opacity-40"
+            className="hao-field h-[20px] w-[56px] bg-ink-900 text-right font-mono disabled:opacity-40"
             disabled={!animation}
             inputMode="numeric"
             scrub
@@ -343,7 +343,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
             按钮标签被挤成竖排（关/键/帧）看着像坏了 */}
         <button
           type="button"
-          className="hao-btn h-[22px] shrink-0 whitespace-nowrap px-1.5 text-2xs"
+          className="hao-btn h-[20px] shrink-0 px-1.5 text-3xs"
           title="把当前姿态写成关键帧（K）"
           onClick={keyCurrent}
         >
@@ -352,7 +352,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         </button>
         <button
           type="button"
-          className="hao-btn h-[22px] shrink-0 whitespace-nowrap px-1.5 text-2xs"
+          className="hao-btn h-[20px] shrink-0 px-1.5 text-3xs"
           title="在当前时间插入事件帧（事件名 / 字符串 / 整数 / 浮点在视口下方的值栏里改）"
           onClick={keyEvent}
         >
@@ -361,7 +361,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         </button>
         <button
           type="button"
-          className="hao-btn h-[22px] shrink-0 whitespace-nowrap px-1.5 text-2xs"
+          className="hao-btn h-[20px] px-1.5 text-3xs"
           title="删除选中的关键帧（Delete）"
           onClick={removeSelected}
         >
@@ -394,7 +394,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         </button>
 
         <select
-          className="hao-field h-[22px] w-[62px] cursor-pointer bg-ink-900 font-mono text-3xs"
+          className="hao-field h-[20px] w-[62px] cursor-pointer bg-ink-900 font-mono text-3xs"
           value={String(timeline.speed)}
           onChange={(e) => timeline.setSpeed(Number(e.target.value))}
           title="播放倍速"
@@ -439,7 +439,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
           }}
         />
 
-        <span ref={timeReadoutRef} className="shrink-0 font-mono text-2xs text-content-mid">
+        <span ref={timeReadoutRef} className="shrink-0 font-mono text-3xs text-content-lo">
           {frame} / {totalFrames} 帧 · {time.toFixed(3)}s
         </span>
       </div>

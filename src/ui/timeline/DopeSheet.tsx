@@ -43,11 +43,11 @@ interface DragState {
   map: TimeMap
 }
 
-const ROW_HEIGHT = 24
+const ROW_HEIGHT = 22
 const LABEL_WIDTH = 172
-const RULER_HEIGHT = 26
+const RULER_HEIGHT = 30
 /** 相邻主刻度之间的最小像素间距，用于挑选刻度步长 */
-const MIN_TICK_GAP = 64
+const MIN_TICK_GAP = 58
 const FRAME_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 240, 600]
 const ZOOM_SENSITIVITY = 0.0016
 /**
@@ -604,8 +604,8 @@ export default function DopeSheet(props: DopeSheetProps) {
           className="flex shrink-0 flex-col justify-center gap-[1px] border-r border-line px-2"
           style={{ width: LABEL_WIDTH }}
         >
-          <span className="text-3xs text-content-mid">轨道 / 对象</span>
-          <span className="flex items-center gap-1 font-mono text-3xs text-content-mid">
+          <span className="text-3xs text-content-lo">轨道 / 对象</span>
+          <span className="flex items-center gap-1 font-mono text-3xs text-content-lo/70">
             {channelCount} 轨 · {totalKeys} 关键帧
             {zoomed ? (
               <button
@@ -669,7 +669,7 @@ export default function DopeSheet(props: DopeSheetProps) {
                 </span>
                 <span
                   className={[
-                    'font-mono text-3xs leading-[12px]',
+                    'font-mono text-[9px] leading-[10px]',
                     beyond ? 'text-content-lo/40' : 'text-content-lo'
                   ].join(' ')}
                 >
@@ -706,7 +706,7 @@ export default function DopeSheet(props: DopeSheetProps) {
                 type="button"
                 data-track-id={track.id}
                 className={[
-                  'relative flex w-full items-center gap-1 border-b border-line/40 pr-1.5 text-left text-2xs cursor-pointer',
+                  'relative flex w-full items-center gap-1 border-b border-line/40 pr-1.5 text-left text-3xs cursor-pointer',
                   track.isGroup
                     ? 'bg-ink-900/50 font-semibold text-content-hi hover:bg-ink-700'
                     : trackActive
@@ -758,7 +758,7 @@ export default function DopeSheet(props: DopeSheetProps) {
               )
             })}
             {visibleTracks.length === 0 ? (
-              <div className="px-2 py-3 text-3xs text-content-mid">
+              <div className="px-2 py-3 text-3xs text-content-lo">
                 没有轨道：在 Pose 状态调整骨骼/插槽后按 K 打关键帧
               </div>
             ) : null}
@@ -828,9 +828,9 @@ export default function DopeSheet(props: DopeSheetProps) {
                         key={marker.slot}
                         type="button"
                         className={[
-                          'absolute top-[6px] -translate-x-[1px] transition-transform duration-panel cursor-pointer',
+                          'absolute top-[4px] -translate-x-[1px] transition-transform duration-panel cursor-pointer',
                           selected
-                            ? 'scale-125 text-danger '
+                            ? 'scale-125 text-danger drop-shadow-[0_0_6px_rgba(248,113,113,0.9)]'
                             : 'text-danger/85 hover:text-danger'
                         ].join(' ')}
                         style={{ left: `${left}%` }}
@@ -846,9 +846,9 @@ export default function DopeSheet(props: DopeSheetProps) {
                       key={marker.slot}
                       type="button"
                       className={[
-                        'absolute top-[8px] h-[8px] w-[8px] -translate-x-1/2 rotate-45 border transition-transform duration-panel cursor-pointer',
+                        'absolute top-[7px] h-[8px] w-[8px] -translate-x-1/2 rotate-45 border transition-transform duration-panel cursor-pointer',
                         selected
-                          ? 'scale-125 border-accent bg-accent'
+                          ? 'scale-125 border-accent bg-accent shadow-[0_0_8px_rgba(34,211,238,0.7)]'
                           : 'border-accent/70 bg-accent/40 hover:bg-accent/70'
                       ].join(' ')}
                       style={{ left: `${left}%` }}

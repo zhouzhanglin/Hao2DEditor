@@ -568,12 +568,20 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
               step={0.1}
               onChange={(value) => update('修改附件缩放', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.scale = value }))}
             />
-            <Vector2Field
-              label="尺寸"
-              value={attachment.size}
-              step={0.05}
-              onChange={(value) => update('修改附件尺寸', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.size = value }))}
-            />
+            {/*
+              尺寸：**Region 的显示矩形** —— 渲染、选中轮廓、栅格网格都按它走。
+              网格附件不显示它：网格的形状完全由顶点决定（选中轮廓也走顶点），
+              改这个数在视口里看不出任何变化，只会在「自动生成网格」按它映射尺寸时
+              产生看不出来的偏差。原值仍留在数据里（「还原为 Region」与重新生成都要用）。
+            */}
+            {attachment.type !== 'mesh' ? (
+              <Vector2Field
+                label="尺寸"
+                value={attachment.size}
+                step={0.05}
+                onChange={(value) => update('修改附件尺寸', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.size = value }))}
+              />
+            ) : null}
             <ColorField
               label="颜色"
               value={attachment.color}

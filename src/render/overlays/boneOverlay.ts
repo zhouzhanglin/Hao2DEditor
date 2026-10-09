@@ -28,10 +28,10 @@ export interface BoneOverlayOptions {
   attachmentGizmo?: { boneIndex: number; position: { x: number; y: number }; rotation: number } | null
 }
 
-// 覆盖层配色统一取 macOS 系统色（暗色版），与主题令牌同源
+// 覆盖层配色统一取 macOS 系统色（暗色版），与主题令牌同源。
+// 注意：**没有「选中色 / 悬停色」** —— 骨骼靠透明度与线宽表示选中，颜色始终是它自己的
+//（见 drawBoneOverlay 里的 strength），这样「列表里哪一行」和「视口里哪根」永远同色。
 const COLOR_BONE = 0xe0a45c
-const COLOR_BONE_SELECTED = 0x0a84ff
-const COLOR_BONE_HOVERED = 0x64d2ff
 const COLOR_JOINT = 0xffd60a
 const COLOR_ROOT = 0xbf5af2
 const COLOR_CONSTRAINT = 0x40c8e0
@@ -301,14 +301,15 @@ export function drawBoneOverlay(
     const isSelected = i === options.selectedBone
     const isHovered = i === options.hoveredBone
     const isRoot = skeleton.asset.bones[i].parentIndex < 0
-    const active = isSelected || isHovered
     /*
-     * 选中网格所绑定的骨骼：用它在「权重骨骼列表」里的那个颜色（列表第 1 根绿、第 2 根橙……，
-     * 与检查器色块、顶点饼图同源，见 weightPalette）。选中 / 悬停仍然优先用各自的强调色。
+     * 强调 = **只改透明度与线宽，不改颜色**：骨骼永远用自己的颜色
+     *（绑定了权重的骨骼用「权重骨骼列表」里的色，其余用默认橙），选中就压实到不透明。
+     * 以前选中 / 悬停会把整根换成蓝 / 青，颜色一换就看不出「这根是列表里的哪个颜色」。
      */
-    const weightColor = active ? undefined : options.weightBoneColors?.get(i)
+    const strength = isSelected ? 2 : isHovered ? 1 : 0
+    const weightColor = options.weightBoneColors?.get(i)
     const isWeight = weightColor !== undefined
-    const color = active ? COLOR_BONE_SELECTED : (weightColor ?? COLOR_BONE)
+    const color = weightColor ?? COLOR_BONE
 
     const dx = skeleton.world[o] * length
     const dy = skeleton.world[o + 1] * length
@@ -337,22 +338,23 @@ export function drawBoneOverlay(
         sy - py * halfW // 右肩
       ]
       const hollow = options.hollowBones?.has(skeleton.asset.bones[i].name) ?? false
-      if (!hollow) fills.poly(quad).fill({ color, alpha: active ? 0.55 : 0.4 })
+      // 选中接近实心（0.9）、悬停次之（0.6）、普通 0.4 —— 三个档位只看透明度就知道谁被选中
+      if (!hollow) fills.poly(quad).fill({ color, alpha: strength === 2 ? 0.9 : strength === 1 ? 0.6 : 0.4 })
       strokes
         .poly(quad)
-        .stroke({ width: w * (isSelected ? 1.8 : isWeight ? 1.5 : 1.2), color, alpha: hollow ? 1 : 0.9 })
+        .stroke({ width: w * (isSelected ? 1.8 : isWeight ? 1.5 : 1.2), color, alpha: hollow || strength > 0 ? 1 : 0.9 })
 
     }
 
-    // 原点（骨骼头）画一个圈：空心环，根骨骼 / 选中骨骼用各自的强调色。
-    // 半径与拾取用的 BONE_ORIGIN_RADIUS 一致（拖这个圈 = 移动骨骼）
+    // 原点（骨骼头）画一个圈：空心环，颜色不变（根骨骼紫 / 绑定骨骼用列表色 / 其余黄），
+    // 选中只是画得更粗、更实。半径与拾取用的 BONE_ORIGIN_RADIUS 一致（拖这个圈 = 移动骨骼）
     const r = (isSelected ? BONE_ORIGIN_RADIUS + 1.5 : BONE_ORIGIN_RADIUS - 0.5) * w
     strokes
       .poly(circlePolygon(x, y, r))
       .stroke({
         width: w * (isSelected ? 2.2 : 1.8),
-        color: isRoot ? COLOR_ROOT : active ? COLOR_BONE_SELECTED : (weightColor ?? COLOR_JOINT),
-        alpha: isRoot || active ? 1 : 0.9
+        color: isRoot ? COLOR_ROOT : (weightColor ?? COLOR_JOINT),
+        alpha: isRoot || strength > 0 ? 1 : 0.9
       })
   }
 

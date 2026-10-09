@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { KeyRound, Pause, Play, Repeat, SkipBack, SkipForward, Square, Timer, Trash2, Zap } from 'lucide-react'
+import { Flag, KeyRound, Pause, Play, Repeat, SkipBack, SkipForward, Square, Timer, Trash2, Zap } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { playheadTime, usePlayheadStore, useThrottledPlayheadTime } from '@editor/store/playheadStore'
@@ -10,7 +10,7 @@ import { animationDuration } from '@editor/runtime'
 import { getActiveScene } from '@editor/activeScene'
 import { buildTimeline, lastKeyTime, setKeysTimes } from '@editor/timeline/model'
 import { uniqueName } from '@editor/commands/authoringCommands'
-import { keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
+import { keyEventNow, keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
 import type { KeyKind, KeySelector, TimelineTrack } from '@editor/timeline/model'
 import DopeSheet from './DopeSheet'
 import { CommitTextField } from '@ui/widgets/fields'
@@ -175,6 +175,10 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
     onStatus(result.message)
   }
 
+  const keyEvent = (): void => {
+    onStatus(keyEventNow().message)
+  }
+
   const removeSelected = (): void => {
     const result = removeSelectedKeys()
     if (result.ok) onStatus(result.message)
@@ -312,14 +316,25 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
           帧
         </label>
 
+        {/* 这两个按钮 shrink-0：窗口窄时该由右侧的进度滑块（flex-1）让位，
+            按钮标签被挤成竖排（关/键/帧）看着像坏了 */}
         <button
           type="button"
-          className="hao-btn h-[20px] px-1.5 text-3xs"
+          className="hao-btn h-[20px] shrink-0 px-1.5 text-3xs"
           title="把当前姿态写成关键帧（K）"
           onClick={keyCurrent}
         >
           <KeyRound size={11} className="mr-1 inline" />
           关键帧
+        </button>
+        <button
+          type="button"
+          className="hao-btn h-[20px] shrink-0 px-1.5 text-3xs"
+          title="在当前时间插入事件帧（事件名 / 字符串 / 整数 / 浮点在视口下方的值栏里改）"
+          onClick={keyEvent}
+        >
+          <Flag size={11} className="mr-1 inline" />
+          事件帧
         </button>
         <button
           type="button"

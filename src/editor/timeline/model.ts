@@ -128,7 +128,8 @@ export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrac
       easing: Easing.Stepped,
       curve: null
     }))
-    tracks.push(makeTrack('event', `事件（${animation.events.length}）`, '', 'event', keys))
+    // 通道名固定叫「事件」：帧数在右侧轨道行里看得到，标题里再挂个（1）反而像编号/序号
+    tracks.push(makeTrack('event', '事件', '', 'event', keys))
   }
 
   // 骨骼：一行分组标题 + 每个有帧的通道各一行子轨道（位置 / 旋转 / 缩放 / 斜切）

@@ -6,9 +6,9 @@ import type { ActionResult } from '@editor/timeline/actions'
 import { autoGenerateRegionMesh, convertRegionToMesh, findAttachment } from './authoringCommands'
 
 /**
- * 网格生成 / 重设的一次性动作 —— 右侧工具选项与属性检查器共用同一实现，两个入口行为一致。
+ * 网格生成 / 重设的一次性动作 —— 属性面板「网格 / FFD」那一栏的按钮调用。
  *
- * 「密度」= 工具选项里的 `gridDivisions`（1..24）：规则栅格网格与轮廓贴合网格都用它；
+ * 「密度」= 工具里的 `gridDivisions`（1..24）：规则栅格网格与轮廓贴合网格都用它；
  * 手动编辑（Alt+插点 / 拖顶点）改乱了，也可以用同一个密度一键重设回去。
  */
 

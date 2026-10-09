@@ -1190,7 +1190,7 @@ function createBoneFromDrag(host: ToolHost, start: Vec2, end: Vec2, parent: stri
   )
 }
 
-/** 自动权重（工具选项面板按钮调用）：需要先选中骨骼与附件 */
+/** 自动权重（属性面板「权重刷」那一栏的按钮调用）：需要先选中骨骼与附件 */
 export function runAutoWeights(host: ToolHost, falloff: number): number {
   const scene = host.scene
   const bundle = scene.runtime

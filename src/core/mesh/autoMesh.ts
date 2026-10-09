@@ -35,7 +35,7 @@ export interface AutoMeshParams {
   size: Vec2
   /** 原 region 在图集页里的 UV 矩形：新网格的 UV 会按比例映射进去 */
   uvRect: UvRect
-  /** 细分数（复用工具选项里的 gridDivisions）：决定采样精度与目标顶点数量级 */
+  /** 细分数（取工具里的 gridDivisions）：决定采样精度与目标顶点数量级 */
   divisions: number
   /** 不透明阈值（0..255），默认 128 */
   threshold?: number

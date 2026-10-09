@@ -1,4 +1,4 @@
-import { Grid3x3 } from 'lucide-react'
+import { Brush, Grid3x3, Layers, Sparkles } from 'lucide-react'
 import { BlendMode } from '@core/model/types'
 import { curvePercent } from '@core/anim/interpolation'
 import { useProjectStore } from '@editor/store/projectStore'
@@ -21,7 +21,7 @@ import {
   setVertexWeight,
   weightBonesOf
 } from '@editor/commands/authoringCommands'
-import { runAutoWeightsForBones } from '@editor/tools/authoringTools'
+import { runAutoWeights, runAutoWeightsForBones } from '@editor/tools/authoringTools'
 import { buildGridMesh, buildOutlineMesh } from '@editor/commands/meshActions'
 import type { RenameKind } from '@editor/commands/authoringCommands'
 import { weightPaletteColor } from '@core/weightPalette'
@@ -133,6 +133,109 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
     options?.reselect?.()
     onStatus(`「${oldName}」已重命名为「${next}」`)
   }
+
+  /** 权重刷的目标骨骼（层级树里选中的那根），也是「自动权重」的主骨骼 */
+  const brushBone = selection.kind === 'bone' && selection.bone ? selection.bone : ''
+
+  const doAutoWeights = (): void => {
+    const scene = getActiveScene()
+    if (!scene) return
+    if (!brushBone) {
+      onStatus('自动权重需要先在层级树里选中骨骼（作为主骨骼）')
+      return
+    }
+    if (!selection.slot || !selection.attachment) {
+      onStatus('自动权重需要先选中一个网格附件')
+      return
+    }
+    const touched = runAutoWeights(
+      { scene, selection, tools, mode, time, status: onStatus },
+      tools.brush.mode === 'subtract' ? 1 : 2
+    )
+    onStatus(
+      touched > 0
+        ? `已为重算 ${touched} 个顶点的权重`
+        : '权重没有变化（Region 请先转为网格；影响范围仍是「选中骨骼 + 其直接子骨骼」）'
+    )
+  }
+
+  /**
+   * 「工具选项」面板（已删除）里原本剩下的两块设置，并到属性面板底部。
+   *
+   * - **权重刷**：只在权重刷工具 + Pose 态显示 —— 工具本身只在 Pose 态可用，其余时候摆出来是噪音；
+   * - **显示 / 整体染色**：随时可调，用来快速检查插槽色 / 附件色的叠加效果。
+   *
+   * 原面板里另外两块 ——「重置当前时间点的 FFD」与「权重刷 / 网格 / Pose 属于绑定工具」的提示 ——
+   * **没有搬**：它们只在 Animate 态 / 非 Pose 态出现，而 Animate 态整个右栏是收起的（见 App），
+   * 搬过来也永远不会渲染。
+   *
+   * 未选中对象时（`none` 分支）也不显示：那时没有权重刷的目标，「未选中对象」的空状态居中更好看。
+   */
+  const toolSections = (
+    <>
+      {tools.tool === 'weight' && mode === 'pose' ? (
+        <FieldGroup title="权重刷">
+          <NumberField
+            label="半径"
+            value={tools.brush.radius}
+            step={4}
+            min={2}
+            precision={0}
+            suffix="px"
+            onChange={(value) => tools.setBrush({ radius: value })}
+          />
+          <NumberField
+            label="强度"
+            value={tools.brush.strength}
+            step={0.05}
+            min={0.05}
+            max={1}
+            onChange={(value) => tools.setBrush({ strength: value })}
+          />
+          <SelectField
+            label="模式"
+            value={tools.brush.mode}
+            options={[
+              { value: 'add', label: '增加权重' },
+              { value: 'subtract', label: '减少权重' },
+              { value: 'replace', label: '替换（按衰减比例）' }
+            ]}
+            onChange={(value) => tools.setBrush({ mode: value as 'add' | 'subtract' | 'replace' })}
+          />
+          <p className="flex items-center gap-1 text-3xs text-content-lo">
+            <Brush size={10} />
+            目标骨骼：{brushBone || '（先在层级树选中骨骼）'}
+          </p>
+          <button
+            type="button"
+            className="hao-btn h-[20px] px-2 text-3xs"
+            title="按顶点到骨骼线段的距离衰减，自动分配到最近的 4 根骨骼（需要选中骨骼 + 网格附件，且处于 Pose 状态）"
+            onClick={doAutoWeights}
+          >
+            <Sparkles size={11} className="mr-1 inline" />
+            自动权重（选中骨骼 + 网格附件）
+          </button>
+        </FieldGroup>
+      ) : null}
+      <FieldGroup title="显示">
+        <ColorField
+          label="整体染色"
+          value="#FFFFFFFF"
+          onChange={(value) => {
+            const scene = getActiveScene()
+            if (!scene) return
+            const hex = value.replace('#', '')
+            const at = (i: number): number => parseInt(hex.slice(i, i + 2), 16) / 255
+            scene.setTint({ r: at(0), g: at(2), b: at(4), a: hex.length >= 8 ? at(6) : 1 })
+          }}
+        />
+        <p className="flex items-center gap-1 text-3xs text-content-lo">
+          <Layers size={10} />
+          染色与插槽色、附件色相乘，用于快速检查叠加效果
+        </p>
+      </FieldGroup>
+    </>
+  )
 
   if (selection.kind === 'none') {
     return (
@@ -302,6 +405,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             }
           />
         </FieldGroup>
+        {toolSections}
       </div>
     )
   }
@@ -676,8 +780,9 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             ) : null}
 
             <div className="flex flex-wrap gap-1 pt-0.5">
-              {/* 「转为网格 / 自动生成网格」只在网格工具的工具选项面板里（那边能现场改密度，
-                  也是生成网格的统一入口）；检查器这里不再重复一份，只留网格编辑操作 */}
+              {/* 这里只留网格编辑操作（删顶点 / 还原为 Region / 删附件）；
+                  「转为网格 / 自动生成网格」在同一面板最下面的「网格 / FFD」那一栏 ——
+                  那边能现场改密度，是生成网格的统一入口，这里不再重复第二份 */}
               {attachment.type === 'mesh' ? (
                 <>
                   <button
@@ -791,6 +896,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             </div>
           </FieldGroup>
         ) : null}
+        {toolSections}
       </div>
     )
   }
@@ -921,6 +1027,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
           />
         </FieldGroup>
       ) : null}
+      {toolSections}
     </div>
   )
 }

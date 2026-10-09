@@ -7,7 +7,6 @@ import StatusBar from './panels/StatusBar'
 import InspectorPanel from './panels/InspectorPanel'
 import AssetPanel from './panels/AssetPanel'
 import SlotOrderPanel from './panels/SlotOrderPanel'
-import ToolOptionsPanel from './panels/ToolOptionsPanel'
 import CurvePanel from './panels/CurvePanel'
 import KeyframeValueBar from './panels/KeyframeValueBar'
 import TimelinePanel from './timeline/TimelinePanel'
@@ -637,7 +636,7 @@ export default function App() {
             </div>
           </div>
         }
-        // Animate 态下右栏（属性 / 工具选项）显示的绑定数据没意义，整栏收起，
+        // Animate 态下右栏（属性）显示的绑定数据没意义，整栏收起，
         // 把空间让给视口与时间轴
         right={
           mode === 'animate' ? null : (
@@ -650,9 +649,6 @@ export default function App() {
                 actions={<span className="text-3xs text-content-lo">当前选中对象</span>}
               >
                 <InspectorPanel onStatus={flash} />
-              </PanelShell>
-              <PanelShell title="工具选项" grow={false} bodyClassName="max-h-[300px]">
-                <ToolOptionsPanel onStatus={flash} />
               </PanelShell>
             </>
           )

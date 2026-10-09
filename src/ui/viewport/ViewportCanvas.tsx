@@ -189,6 +189,17 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         weightBones,
         selectedVertices: selection.vertices,
         selectedAttachment,
+        // 选中 display 的轮廓：与操作器不同，**任何模式 / 工具下都给**（动画态也要看得出选的是谁）
+        selectedDisplay:
+          selection.kind === 'attachment' && selection.slot && selection.attachment
+            ? { slot: selection.slot, attachment: selection.attachment }
+            : null,
+        /*
+         * 悬停轮廓平时由 pointermove 直接写（频率远高于帧率，不该走 React 状态）。
+         * 这里只做一件事：**工具不是选择工具时清掉** —— 否则切工具会留下一圈卡住的悬停预览。
+         * 是选择工具时原样带过去（写着同一个值，不会造成多余重绘）。
+         */
+        hoveredDisplay: tools.tool === 'select' ? (scene.state.hoveredDisplay ?? null) : null,
         playing: mode === 'animate' && timeline.playing,
         speed: timeline.speed,
         loop: timeline.loop,
@@ -449,6 +460,24 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     const name = hit && scene.runtime ? (scene.runtime.asset.bones[hit.boneIndex]?.name ?? '') : ''
     if (scene.state.hoveredBone !== name) scene.setViewState({ hoveredBone: name })
 
+    /*
+     * 悬停预览：把「鼠标底下的 display」也标出来，点下去之前就知道会选中谁。
+     *
+     * 两个约束：
+     * ① 只在选择工具下算 —— 其它工具点下去干的是别的事（刷权重 / 插顶点），提示会误导；
+     * ② 只在**变化时**写状态 —— pointermove 的频率远高于帧率，每次都写会白重绘。
+     */
+    const hovered = useToolStore.getState().tool === 'select' ? scene.pickAttachmentAt(world.x, world.y) : null
+    const previous = scene.state.hoveredDisplay ?? null
+    const sameHover =
+      previous === null
+        ? hovered === null
+        : hovered !== null && previous.slot === hovered.slot && previous.attachment === hovered.attachment
+    if (!sameHover) {
+      scene.setViewState({ hoveredDisplay: hovered })
+      scene.markDirty()
+    }
+
     // 按住 Alt（网格 / FFD 工具 + 已选网格附件）：光标变「复制」——提示这里点一下会插顶点
     if (
       event.altKey &&
@@ -634,6 +663,12 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       onPointerLeave={() => {
         // 鼠标离开视口就把跟随图标藏起来（下次进来随手一动，它又回到鼠标旁边）
         if (bindIconRef.current) bindIconRef.current.style.visibility = 'hidden'
+        // 悬停轮廓也要清掉：鼠标已经不在视口里了，留着会像「卡住的选中态」
+        const scene = sceneRef.current
+        if (scene?.state.hoveredDisplay) {
+          scene.setViewState({ hoveredDisplay: null })
+          scene.markDirty()
+        }
       }}
       onWheel={onWheel}
       onDoubleClick={(event) => {

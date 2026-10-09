@@ -182,6 +182,57 @@ export function drawShearBox(
   }
 }
 
+/** 选中 display 的轮廓色：与附件操作器同族（琥珀），一眼看出「这是附件」 */
+const COLOR_DISPLAY_OUTLINE = 0xfbbf24
+
+/** 轮廓样式：默认是「已选中」外观（亮线），悬停预览传更弱的一档 */
+export interface DisplayOutlineStyle {
+  color?: number
+  strokeAlpha?: number
+  /** 描边宽度（屏幕像素） */
+  width?: number
+}
+
+/** 一条轮廓路径（世界坐标）：Region 传闭合矩形四角，Mesh 传一条边界边（两个点） */
+export type DisplayOutlinePath = ReadonlyArray<{ x: number; y: number }>
+
+/**
+ * display 的轮廓：沿对象**真实形状**描线，**不填色**。
+ *
+ * 为什么要有这个：附件操作器（十字轴）只指示**轴心**，轴心常常落在对象外面
+ * （比如贴图相对骨骼偏移很远），所以光看操作器分不清到底选中了哪一个；
+ * 沿形状描一圈才是一眼可辨的反馈。
+ *
+ * 为什么只描线不填色：填色会盖住贴图本身的颜色与细节，比对（尤其是调位置 /
+ * 看 UV 是否正确）时反而碍事；线框只按边界提示范围。
+ *
+ * 多条路径用 `moveTo / lineTo` 拼成**一次** stroke：网格的边界是几十条短线段，
+ * 逐条 `poly().stroke()` 会为每条边生成一份几何，白白多出几十次绘制调用。
+ */
+export function drawDisplayOutline(
+  stroke: Graphics,
+  paths: ReadonlyArray<DisplayOutlinePath>,
+  unitsPerPixel: number,
+  style: DisplayOutlineStyle = {}
+): void {
+  let drawn = 0
+  for (const path of paths) {
+    if (path.length < 2) continue
+    stroke.moveTo(path[0].x, path[0].y)
+    for (let i = 1; i < path.length; i++) stroke.lineTo(path[i].x, path[i].y)
+    // 只在三点以上闭合：两点的线段闭合是空操作，但会多一次 closePath
+    if (path.length > 2) stroke.closePath()
+    drawn++
+  }
+  if (drawn === 0) return
+  const w = unitsPerPixel
+  stroke.stroke({
+    width: w * (style.width ?? 1.6),
+    color: style.color ?? COLOR_DISPLAY_OUTLINE,
+    alpha: style.strokeAlpha ?? 0.95
+  })
+}
+
 /** 斜切包围盒边缘的拾取容差（px） */
 export const SHEAR_EDGE_TOLERANCE = 8
 

@@ -12,6 +12,7 @@ import {
   drawAttachmentGizmo,
   drawBoneGizmo,
   drawBoneOverlay,
+  drawDisplayOutline,
   drawGhostBones,
   drawShearBox
 } from '@render/overlays/boneOverlay'
@@ -73,6 +74,19 @@ export interface SceneViewState {
    */
   selectedAttachment: { boneIndex: number; position: { x: number; y: number }; rotation: number } | null
   /**
+   * 选中的 display（插槽名 + 附件名）：叠加层沿对象**真实形状**画一圈轮廓。
+   *
+   * 与 `selectedAttachment`（操作器）分开，是因为两者可见条件不同：轮廓在任何
+   * 模式 / 工具下都要画（动画态也得看得出选的是谁），操作器只在 Pose + 选择工具下。
+   * null = 不画轮廓。
+   */
+  selectedDisplay: { slot: string; attachment: string } | null
+  /**
+   * 鼠标底下的 display（悬停预览）：画一圈**更弱**的轮廓，点下去之前就知道会选中谁。
+   * 只在选择工具下计算（其它工具点下去干的是别的事）；null = 不画。
+   */
+  hoveredDisplay: { slot: string; attachment: string } | null
+  /**
    * 当前选中网格**绑定的骨骼**名（检查器「权重骨骼列表」里的那些）：
    * 叠加层把它们换成高亮色画，一眼看出这个网格跟哪几根骨骼有关。
    * 没选中网格 / 网格没有绑定骨骼时为空数组。
@@ -111,6 +125,8 @@ export class EditorScene {
   private readonly meshFill = new Graphics()
   private readonly boneStroke = new Graphics()
   private readonly boneFill = new Graphics()
+  /** display 轮廓线（选中 + 悬停共用；只描线不填色，画在骨骼之下、网格之上） */
+  private readonly outlineStroke = new Graphics()
   /** 骨骼变换小坐标轴（描边 / 填充分开，同 pixi v8 的路径规则） */
   private readonly gizmoStroke = new Graphics()
   private readonly gizmoFill = new Graphics()
@@ -142,6 +158,8 @@ export class EditorScene {
     showGizmo: true,
     pendingBone: null,
     selectedAttachment: null,
+    selectedDisplay: null,
+    hoveredDisplay: null,
     weightBones: []
   }
 
@@ -151,6 +169,8 @@ export class EditorScene {
     this.overlay.addChild(
       this.meshFill,
       this.meshStroke,
+      // 轮廓线压在最下面：骨骼与操作器都盖在它之上，手柄不会被描边挡住
+      this.outlineStroke,
       this.boneFill,
       this.boneStroke,
       this.gizmoFill,
@@ -682,6 +702,111 @@ export class EditorScene {
   }
 
   /**
+   * display 的轮廓路径（**世界坐标**），给轮廓叠加层用。
+   *
+   * - **Region**：`size` 的矩形四角。区域顶点按 ±size/2 生成（见 meshBuilder），
+   *   所以局部四角是固定的，乘附件世界矩阵即可 —— 矩形跟着附件旋转，不是轴对齐框。
+   * - **Mesh**：从**已构建的三角形**里求「边界边」—— 只被一个三角形用到的边就是外轮廓。
+   *   坐标取已构建的顶点：加权蒙皮的顶点位置只有那里是对的，附件里的 `vertices`
+   *   是绑定空间数据，直接变换会画到别处。
+   *
+   * **不能按 `hull` 取前 N 个顶点连折线**：自动建网会把 hull 写成顶点总数
+   * （见 autoMesh.ts 的 `hull: vertices.length`），那样连线会穿过内部顶点，
+   * 在网格内部画出一团交叉线（这正是之前那个皇冠的样子）。
+   *
+   * 顶点按世界坐标焊接：UV 接缝处常有位置重复的顶点，不合并就会算出假边界。
+   * 选中项此刻没显示（displayIndex 被关键帧切走）或数据不全时返回 null（不画）。
+   */
+  private displayOutlinePaths(
+    slotName: string,
+    attachmentName: string
+  ): Array<Array<{ x: number; y: number }>> | null {
+    const bundle = this.bundle
+    if (!bundle) return null
+    const slotIndex = bundle.asset.slots.findIndex((slot) => slot.name === slotName)
+    if (slotIndex < 0) return null
+    const displayIndex = bundle.skeleton.slotDisplayIndex[slotIndex]
+    const attachment = this.attachmentAt(slotIndex, displayIndex)
+    // 选中的那个此刻没显示就别画，免得轮廓圈在别的对象上
+    if (!attachment || attachment.name !== attachmentName) return null
+    const world = this.attachmentWorldAt(slotIndex)
+    if (!world) return null
+
+    if (attachment.vertices.length === 0) {
+      const halfWidth = attachment.size.x * 0.5
+      const halfHeight = attachment.size.y * 0.5
+      const corners = [
+        { x: -halfWidth, y: -halfHeight },
+        { x: halfWidth, y: -halfHeight },
+        { x: halfWidth, y: halfHeight },
+        { x: -halfWidth, y: halfHeight }
+      ]
+      const rect = corners.map((corner) => ({
+        x: world[0] * corner.x + world[4] * corner.y + world[12],
+        y: world[1] * corner.x + world[5] * corner.y + world[13]
+      }))
+      return [rect]
+    }
+
+    const result = this.meshResult
+    if (!result || result.vertexCount === 0) return null
+
+    // 本插槽的顶点 → 世界坐标 + 焊接 id（同一位置只留一份）
+    const weldOfBuilt = new Map<number, number>()
+    const weldedAt: Array<{ x: number; y: number }> = []
+    const idByKey = new Map<string, number>()
+    for (let i = 0; i < result.vertexCount; i++) {
+      if (result.sourceSlot[i] !== slotIndex) continue
+      const x = result.positions[i * 2]
+      const y = result.positions[i * 2 + 1]
+      const key = `${Math.round(x * 1000)}:${Math.round(y * 1000)}`
+      let id = idByKey.get(key)
+      if (id === undefined) {
+        id = weldedAt.length
+        idByKey.set(key, id)
+        weldedAt.push({ x, y })
+      }
+      weldOfBuilt.set(i, id)
+    }
+    if (weldedAt.length < 3) return null
+
+    // 统计边：三角形三条边各记一次，最后只出现一次的即边界（内部边被两个三角形共享）
+    const edgeCount = new Map<string, number>()
+    const edgeEnds = new Map<string, [number, number]>()
+    for (const group of result.groups) {
+      const indices = group.indices
+      for (let i = 0; i + 2 < group.indexCount; i += 3) {
+        const a = weldOfBuilt.get(indices[i])
+        const b = weldOfBuilt.get(indices[i + 1])
+        const c = weldOfBuilt.get(indices[i + 2])
+        // 三角形跨插槽（同图集页多附件混排）时跳过：只统计完全属于本插槽的
+        if (a === undefined || b === undefined || c === undefined) continue
+        const tri: Array<[number, number]> = [
+          [a, b],
+          [b, c],
+          [c, a]
+        ]
+        for (const [u, v] of tri) {
+          const key = u < v ? `${u}-${v}` : `${v}-${u}`
+          edgeCount.set(key, (edgeCount.get(key) ?? 0) + 1)
+          if (!edgeEnds.has(key)) edgeEnds.set(key, [u, v])
+        }
+      }
+    }
+
+    const paths: Array<Array<{ x: number; y: number }>> = []
+    for (const [key, count] of edgeCount) {
+      if (count !== 1) continue
+      const ends = edgeEnds.get(key)
+      if (!ends) continue
+      const from = weldedAt[ends[0]]
+      const to = weldedAt[ends[1]]
+      if (from && to) paths.push([from, to])
+    }
+    return paths.length > 0 ? paths : null
+  }
+
+  /**
    * 选中骨骼的**斜切包围盒**：把挂在它下面的插槽附件（Mesh 顶点 / Region 尺寸）
    * 换算进骨骼局部空间求 AABB，再变换成世界坐标四角。
    *
@@ -868,6 +993,38 @@ export class EditorScene {
     } else {
       this.boneStroke.clear()
       this.boneFill.clear()
+    }
+
+    /*
+     * display 轮廓线：选中（亮）与悬停（弱）**共用同一个 Graphics** —— 两条路径可以同时存在，
+     * 「选中 A、鼠标悬在 B 上」时两个圈都在，谁是选中的一眼可辨。
+     *
+     * 只描线不填色：填色会盖住贴图本身的颜色与细节，调位置 / 看 UV 时反而碍事。
+     * 轮廓压在最下面（骨骼与操作器都盖在它之上），任何模式 / 工具下都给。
+     */
+    this.outlineStroke.clear()
+    const selectedDisplay = state.selectedDisplay
+    const hoveredDisplay = state.hoveredDisplay
+    const outlineVisible =
+      showBoneLayer && bundle !== null && (selectedDisplay !== null || hoveredDisplay !== null)
+    this.outlineStroke.visible = outlineVisible
+    if (outlineVisible) {
+      if (selectedDisplay) {
+        const outline = this.displayOutlinePaths(selectedDisplay.slot, selectedDisplay.attachment)
+        if (outline) drawDisplayOutline(this.outlineStroke, outline, unitPerPixel)
+      }
+      // 悬停预览用同一套形状计算，只是更弱、更细；正悬在已选中那个上就跳过（那圈已经够亮）
+      const hoveredIsSelected =
+        hoveredDisplay !== null &&
+        selectedDisplay !== null &&
+        hoveredDisplay.slot === selectedDisplay.slot &&
+        hoveredDisplay.attachment === selectedDisplay.attachment
+      if (hoveredDisplay && !hoveredIsSelected) {
+        const outline = this.displayOutlinePaths(hoveredDisplay.slot, hoveredDisplay.attachment)
+        if (outline) {
+          drawDisplayOutline(this.outlineStroke, outline, unitPerPixel, { strokeAlpha: 0.5, width: 1.2 })
+        }
+      }
     }
 
     // 小坐标轴 / 斜切包围盒 / 附件操作器画在最上层（骨骼、网格之后），保证手柄始终可点可看

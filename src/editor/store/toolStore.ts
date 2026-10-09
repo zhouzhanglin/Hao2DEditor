@@ -60,9 +60,16 @@ export const GIZMO_ORDER: ReadonlyArray<{ mode: GizmoMode; key: string; label: s
   }
 ]
 
+/**
+ * 视口叠加层开关。
+ *
+ * **刻意没有「网格」**：全局画所有附件的线框没法用（复杂角色会铺满线条），
+ * 网格显示改成「选中哪个才画哪个」——
+ * - 选择 / Pose 工具：按选中项自动显示（视口填 `focusMeshSlot`，见 Scene）
+ * - 顶点工具：走网格隔离（只渲染正在编辑的那一个）
+ */
 export interface OverlayState {
   bones: boolean
-  mesh: boolean
   weight: boolean
   ffd: boolean
   constraints: boolean
@@ -99,7 +106,7 @@ export interface ToolState {
 export const useToolStore = create<ToolState>((set, get) => ({
   tool: 'select',
   gizmo: 'move',
-  overlay: { bones: true, mesh: false, weight: false, ffd: false, constraints: true },
+  overlay: { bones: true, weight: false, ffd: false, constraints: true },
   brush: { radius: 40, strength: 0.5, mode: 'add' },
   gridDivisions: 4,
   pendingWeightBone: null,
@@ -108,17 +115,11 @@ export const useToolStore = create<ToolState>((set, get) => ({
   setTool: (tool) => {
     const overlay = { ...get().overlay }
     if (tool === 'weight') overlay.weight = true
-    // Pose 工具编的是网格顶点 / UV：顺手打开网格层，否则「看不到能拖的顶点」。
-    // 这里不像 ffd 那样顾虑「全局线框铺满角色」—— 场景会把网格**隔离**到选中的那一个
-    //（见 ViewportCanvas 的 isolateMesh*，Pose 与 FFD 走同一套判定）。
-    if (tool === 'pose') overlay.mesh = true
+    // 顶点编辑：打开「FFD」显示层（顶点方块 + 偏移虚线）。
+    //
+    // 网格线框不在开关里：它由**选中项**驱动 —— 选择 / Pose 工具只画选中的那一个
+    //（视口填 focusMeshSlot），顶点工具走网格隔离（只渲染正在编的那一个）。
     if (tool === 'ffd') {
-      // 顶点编辑：打开「FFD」显示层（顶点方块 + 偏移虚线）。
-      //
-      // **不**顺手打开「网格」：网格层是**全局**的（画所有附件的线框），而且切回别的
-      // 工具后它仍然亮着 —— 整个角色会铺满线框，而这并不是使用者要的「只看我选中的
-      // 那个网格」。网格工具本身已经只渲染选中的那个网格（见 Scene.applyMeshIsolation），
-      // 需要线框时手动点一下「网格」按钮即可（此时也只有那一个网格有线框）。
       overlay.ffd = true
     }
     // 换工具就放弃「等待点选骨骼」，免得换个工具后第一次点击被旧等待态吃掉

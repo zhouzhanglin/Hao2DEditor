@@ -1,15 +1,19 @@
 import { Crosshair } from 'lucide-react'
+import type { OverlayState } from '@editor/store/toolStore'
 
 export interface ToolbarProps {
   zoom: number
-  overlay: { bones: boolean; mesh: boolean; weight: boolean; ffd: boolean; constraints: boolean }
-  onToggleOverlay: (key: keyof ToolbarProps['overlay']) => void
+  overlay: OverlayState
+  onToggleOverlay: (key: keyof OverlayState) => void
   onFitViewport: () => void
 }
 
-const OVERLAYS: Array<{ key: keyof ToolbarProps['overlay']; label: string }> = [
+/**
+ * 叠加层开关。**没有「网格」**：全局网格层会让整个角色铺满线框，
+ * 现在改成「谁被选中才画谁」（选择 / Pose 工具按选中项自动显示，见 Scene.focusMeshSlot）。
+ */
+const OVERLAYS: Array<{ key: keyof OverlayState; label: string }> = [
   { key: 'bones', label: '骨骼' },
-  { key: 'mesh', label: '网格' },
   { key: 'weight', label: '权重' },
   { key: 'ffd', label: 'FFD' },
   { key: 'constraints', label: '约束' }

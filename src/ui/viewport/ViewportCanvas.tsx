@@ -6,7 +6,7 @@ import { ImageAlphaCache } from '@render/imageAlpha'
 import { getPlatform } from '@editor/platform'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
-import { isMeshEditTool, useToolStore } from '@editor/store/toolStore'
+import { useToolStore } from '@editor/store/toolStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { usePlayheadStore } from '@editor/store/playheadStore'
@@ -213,12 +213,23 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         loop: timeline.loop,
         time: timeline.time,
         onionSkin: mode === 'animate' && timeline.onionSkin,
-        // 网格类工具（顶点 / Pose）：只显示当前选中的那个网格（其它附件隐藏，避免层层遮挡）。
-        // 选中项不是网格时由场景侧忽略（见 Scene.applyMeshIsolation）
-        isolateMeshSlot:
-          isMeshEditTool(tools.tool) && selection.kind === 'attachment' ? selection.slot : '',
+        /*
+         * 网格显示分两套：
+         * - **顶点工具（FFD）**：隔离 —— 只渲染正在编辑的那一个网格（其它附件一起隐藏，
+         *   否则十几层网格互相遮挡，线框与纹理叠在一起根本看不清）；
+         * - **选择 / Pose 工具**：不隔离，只把线框与顶点限制在选中的那个插槽上（focusMeshSlot）。
+         *   这两件事必须分开：隔离会让角色"掉图层"，而这两个工具只是不想让所有
+         *   displayObject 都铺线框 —— 其余部分照常显示。
+         *
+         * 选中项不是网格时由场景侧忽略（见 Scene.applyMeshIsolation）。
+         */
+        isolateMeshSlot: tools.tool === 'ffd' && selection.kind === 'attachment' ? selection.slot : '',
         isolateMeshAttachment:
-          isMeshEditTool(tools.tool) && selection.kind === 'attachment' ? selection.attachment : ''
+          tools.tool === 'ffd' && selection.kind === 'attachment' ? selection.attachment : '',
+        focusMeshSlot:
+          (tools.tool === 'select' || tools.tool === 'pose') && selection.kind === 'attachment'
+            ? selection.slot
+            : ''
       })
     }
     push()

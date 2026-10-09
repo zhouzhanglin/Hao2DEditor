@@ -293,11 +293,14 @@ export function pickVertex(
   result: MeshBuildResult | null,
   x: number,
   y: number,
-  tolerance: number
+  tolerance: number,
+  /** 只在这个插槽里找（-1 = 不限）。与覆盖层的 `onlySlot` 配套：只画谁，就只让谁可抓 */
+  onlySlot = -1
 ): VertexHit | null {
   if (!result || result.vertexCount === 0) return null
   let best: VertexHit | null = null
   for (let i = 0; i < result.vertexCount; i++) {
+    if (onlySlot >= 0 && result.sourceSlot[i] !== onlySlot) continue
     const distance = Math.hypot(x - result.positions[i * 2], y - result.positions[i * 2 + 1])
     if (distance > tolerance) continue
     if (!best || distance < best.distance) best = { vertexIndex: i, distance }

@@ -51,6 +51,14 @@ import type { OverlayState } from './store/toolStore'
 
 export interface SceneViewState {
   overlay: OverlayState
+  /**
+   * 网格线框 / 顶点**只画这个插槽**（'' = 不限制）。
+   *
+   * 选择 / Pose 工具由视口按当前选中项填 —— 这两个工具「选中哪个才画哪个」，
+   * 而不是把整个角色的 displayObject 都铺上线框。顶点工具不走这里（它用网格隔离，
+   * 连其它附件一起隐藏，为的是不被十几层网格互相遮挡）。
+   */
+  focusMeshSlot: string
   selectedBone: string
   hoveredBone: string
   weightBone: string
@@ -141,7 +149,9 @@ export class EditorScene {
   private animationName: string | null = null
   private dirty = true
   private viewState: SceneViewState = {
-    overlay: { bones: true, mesh: false, weight: false, ffd: false, constraints: true },
+    // 网格显示不看开关：选择 / Pose 工具按选中项画（focusMeshSlot），顶点工具走隔离
+    overlay: { bones: true, weight: false, ffd: false, constraints: true },
+    focusMeshSlot: '',
     isolateMeshSlot: '',
     isolateMeshAttachment: '',
     selectedBone: '',
@@ -598,7 +608,19 @@ export class EditorScene {
 
   pickVertexAt(worldX: number, worldY: number): VertexHit | null {
     if (!this.bundle) return null
-    return pickVertex(this.meshResult, worldX, worldY, this.viewport.pixelsToWorld(9))
+    // 只画选中的那一个时，也只让那一个的顶点可抓 —— 否则会拖到看不见（甚至没画出来）的顶点
+    return pickVertex(this.meshResult, worldX, worldY, this.viewport.pixelsToWorld(9), this.focusSlotIndex())
+  }
+
+  /**
+   * `focusMeshSlot` 对应的插槽下标（空串 / 名字不存在时 -1）。
+   *
+   * 网格覆盖层与顶点拾取共用它：**画谁就让谁可抓**。
+   */
+  private focusSlotIndex(): number {
+    const name = this.viewState.focusMeshSlot
+    if (!name || !this.bundle) return -1
+    return this.bundle.asset.slots.findIndex((slot) => slot.name === name)
   }
 
   /**
@@ -1059,13 +1081,17 @@ export class EditorScene {
       }
     }
 
-    // 网格工具隔离中（只渲染选中的那个网格）：**强制显示它的线框与顶点**。
-    // 工具本身就是在编这个网格，「看不见网格线」说不过去 —— 这件事不该取决于
-    // 顶部「网格」开关的状态（那个开关管的是其它工具下的全局网格显示）。
+    /*
+     * 网格层什么时候画、画谁：
+     *
+     * - **顶点工具（隔离中）**：强制显示 —— 工具本身就在编这个网格，「看不见网格线」说不过去；
+     * - **选择 / Pose 工具**：只画**选中的那个插槽**（`focusMeshSlot`，视口按选中项填）。
+     *   原来有个全局「网格」开关，一开就是把所有 displayObject 都铺上线框，已移除；
+     * - **权重 / FFD 显示层**：照旧全局（那两层的语义是看权重、看 FFD 偏移，不是选谁画谁）。
+     */
     const isolating = (this.view?.meshBuilder.isolateSlot ?? -1) >= 0
-
-    const showMesh =
-      (state.overlay.mesh || state.overlay.weight || state.overlay.ffd || isolating) && bundle !== null
+    const focusSlot = this.focusSlotIndex()
+    const showMesh = (state.overlay.weight || state.overlay.ffd || isolating || focusSlot >= 0) && bundle !== null
     this.meshStroke.visible = showMesh
     this.meshFill.visible = showMesh
     if (!showMesh || !bundle) {
@@ -1082,17 +1108,10 @@ export class EditorScene {
       (slotIndex, displayIndex) => this.attachmentAt(slotIndex, displayIndex),
       {
         unitsPerPixel: unitPerPixel,
-        showWireframe: state.overlay.mesh || state.overlay.weight || isolating,
-        /*
-         * 顶点方块：除了两个覆盖层开关，只要「网格类工具栏上有选中对象」就给
-         *（`isolateMeshSlot` 正是这个条件下被设上的，见 ViewportCanvas）。
-         *
-         * 为什么不能只靠 `isolating`：隔离只对 **Mesh** 成立（见 applyMeshIsolation），
-         * Region 走不到那里，于是 Pose 工具下点开一张图会「看不到任何可拖的顶点」。
-         * 这里用原始条件兜住它 —— 看不到顶点就没法编辑顶点。
-         */
-        showVertices:
-          state.overlay.weight || state.overlay.ffd || isolating || state.isolateMeshSlot !== '',
+        showWireframe: isolating || state.overlay.weight || focusSlot >= 0,
+        showVertices: isolating || state.overlay.weight || state.overlay.ffd || focusSlot >= 0,
+        // 隔离本身就只构建了那一个插槽，不需要再过滤
+        onlySlot: isolating ? -1 : focusSlot,
         weightBone: state.overlay.weight ? weightBone : -1,
         selectedVertices: new Set(state.selectedVertices),
         hoveredVertex: state.hoveredVertex

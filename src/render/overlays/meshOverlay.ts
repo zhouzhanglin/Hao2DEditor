@@ -8,6 +8,13 @@ export interface MeshOverlayOptions {
   unitsPerPixel: number
   showWireframe: boolean
   showVertices: boolean
+  /**
+   * 只画这个插槽的线框与顶点（-1 = 全部）。
+   *
+   * 「选择 / Pose 工具里只显示选中的那一个网格」靠它：所有 displayObject 都铺线框没法看，
+   * 但也**不能**用网格隔离（隔离会把角色其余部分一起藏掉，而这里其余部分照常显示）。
+   */
+  onlySlot: number
   /** 按骨骼显示权重热力图；-1 = 关闭 */
   weightBone: number
   /** 选中的顶点下标集合（全局顶点缓冲下标） */
@@ -45,6 +52,8 @@ export function drawMeshOverlay(
       const indices = group.indices
       const count = group.indexCount
       for (let i = 0; i + 2 < count; i += 3) {
+        // 一个三角面的三个顶点同属一个插槽（见 meshBuilder 的分组建法），按首顶点判定即可
+        if (options.onlySlot >= 0 && result.sourceSlot[indices[i]] !== options.onlySlot) continue
         const a = indices[i] * 2
         const b = indices[i + 1] * 2
         const c = indices[i + 2] * 2
@@ -62,6 +71,7 @@ export function drawMeshOverlay(
     const selected: number[] = []
     const hovered: number[] = []
     for (let i = 0; i < result.vertexCount; i++) {
+      if (options.onlySlot >= 0 && result.sourceSlot[i] !== options.onlySlot) continue
       const x = result.positions[i * 2]
       const y = result.positions[i * 2 + 1]
       if (i === options.hoveredVertex) hovered.push(x, y)

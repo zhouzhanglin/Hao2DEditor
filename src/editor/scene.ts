@@ -1,4 +1,4 @@
-import { Container, Graphics } from 'pixi.js'
+import { Container, FillGradient, Graphics } from 'pixi.js'
 import { MAT4_LENGTH, invert, mul, mulPoint, trs } from '@core/math/matrix'
 import type { Vec2 } from '@core/math/matrix'
 import { Viewport } from '@render/viewport'
@@ -16,9 +16,12 @@ import {
   drawGhostBones,
   drawShearBox
 } from '@render/overlays/boneOverlay'
+import { circlePolygon } from '@render/overlays/shapes'
 import type { GizmoDrawMode } from '@render/overlays/boneOverlay'
 import { drawMeshOverlay } from '@render/overlays/meshOverlay'
-import { weightBoneColorMap } from '@core/weightPalette'
+import { BRUSH_MODE_COLORS, brushModeColorValue, weightBoneColorMap } from '@core/weightPalette'
+import { BRUSH_FALLOFF_STOPS } from '@editor/commands/authoringCommands'
+import type { BrushMode } from '@editor/commands/authoringCommands'
 import {
   BONE_ORIGIN_RADIUS,
   attachmentGizmoFrame,
@@ -71,6 +74,13 @@ export interface SceneViewState {
   weightTool: boolean
   selectedVertices: number[]
   hoveredVertex: number
+  /**
+   * 权重刷的刷子指示（世界坐标 + 半径 + 模式），null = 不显示。
+   *
+   * 画成一个圆：**圈有多大，刷一下就有多大**（半径与 paintAt 用的是同一个世界值），
+   * 颜色跟着模式变（增加绿 / 减少红 / 覆盖蓝）。
+   */
+  brushRing: { x: number; y: number; radius: number; mode: 'add' | 'subtract' | 'replace' } | null
   playing: boolean
   speed: number
   loop: boolean
@@ -147,6 +157,10 @@ export class EditorScene {
   private readonly gizmoFill = new Graphics()
   /** 坐标轴：画在棋盘格之上、角色之下 */
   private readonly axes = new Graphics()
+  /** 权重刷的刷子指示（软边圆 + 中心点）：画在最上层，它就是个「跟着鼠标的光标」 */
+  private readonly brushRing = new Graphics()
+  /** 软边圆用的径向渐变（按模式缓存：颜色与停止点都是固定的，与半径无关） */
+  private readonly brushGradients = new Map<BrushMode, FillGradient>()
   /** 需要画成空心的骨骼名集合（编辑期模型才有 hollow 字段） */
   private hollowBones = new Set<string>()
   private bundle: RuntimeBundle | null = null
@@ -166,6 +180,7 @@ export class EditorScene {
     weightTool: false,
     selectedVertices: [],
     hoveredVertex: -1,
+    brushRing: null,
     playing: false,
     speed: 1,
     loop: true,
@@ -196,7 +211,8 @@ export class EditorScene {
        */
       this.meshFill,
       this.gizmoFill,
-      this.gizmoStroke
+      this.gizmoStroke,
+      this.brushRing
     )
     this.viewport.overlayLayer.addChild(this.overlay)
     this.viewport.axisLayer.addChild(this.axes)
@@ -316,6 +332,8 @@ export class EditorScene {
       this.markDirty()
     }
     if (patch.overlay || patch.selectedVertices || patch.hoveredVertex !== undefined) this.markDirty()
+    // 刷子半径圈跟着鼠标走，每帧都可能变（拖动 / 修饰键切换模式）
+    if (patch.brushRing !== undefined) this.markDirty()
 
     // 外部改时间（拖时间轴 / 逐帧 / 切关键帧）→ 立即 seek 到播放器并重建一帧。
     // 播放中同样生效，这样「拖时间轴时画面跟着走」和「继续播放」不会互相打架。
@@ -1002,6 +1020,34 @@ export class EditorScene {
     g.stroke({ width, color: 0x000000, alpha: 1 })
   }
 
+  /**
+   * 软边圆用的径向渐变（按模式缓存）。
+   *
+   * 停止点取自落笔的衰减曲线（`BRUSH_FALLOFF_STOPS`：距圆心比例 → 相对强度），强度折算成
+   * alpha —— 于是**屏幕上看到的那团明暗就是实际刷出来的强度分布**，改曲线两边一起变。
+   * 颜色用 8 位十六进制（`#RRGGBBAA`）把 alpha 编进去：渐变的颜色停止点没有独立的 alpha 字段。
+   * 坐标按形状包围盒归一化（0..1），与半径、缩放无关 —— 所以一个模式只建一次就够。
+   */
+  private brushGradient(mode: BrushMode): FillGradient {
+    const cached = this.brushGradients.get(mode)
+    if (cached) return cached
+    const rgb = BRUSH_MODE_COLORS[mode].slice(1)
+    /** 圆心处的不透明度：够看清这团软边，又不遮住底下要刷的图 */
+    const maxAlpha = 0.38
+    const gradient = new FillGradient({
+      type: 'radial',
+      center: { x: 0.5, y: 0.5 },
+      innerRadius: 0,
+      outerRadius: 0.5,
+      colorStops: BRUSH_FALLOFF_STOPS.map(([offset, strength]) => {
+        const byte = Math.round(Math.max(0, Math.min(1, strength)) * maxAlpha * 255)
+        return { offset, color: `#${rgb}${byte.toString(16).padStart(2, '0')}` }
+      })
+    })
+    this.brushGradients.set(mode, gradient)
+    return gradient
+  }
+
   private drawOverlays(): void {
     const bundle = this.bundle
     const state = this.viewState
@@ -1108,6 +1154,30 @@ export class EditorScene {
       } else {
         drawBoneGizmo(this.gizmoStroke, this.gizmoFill, bundle.skeleton, selectedIndex, state.gizmo, unitPerPixel)
       }
+    }
+
+    /*
+     * 权重刷的刷子指示：**圈有多大，刷一下就有多大**（半径与 paintAt 用的是同一个世界值），
+     * 颜色 = 当前模式（增加绿 / 减少红 / 覆盖蓝，与鼠标光标同源，见 BRUSH_MODE_COLORS）。
+     * 画在最上层 —— 它本质是个「跟着鼠标走的光标」。
+     */
+    const ring = state.brushRing
+    this.brushRing.clear()
+    this.brushRing.visible = ring !== null
+    if (ring) {
+      const color = brushModeColorValue(ring.mode)
+      /*
+       * Photoshop 那样的软边圆：**一整片径向渐变**（中心浓、边缘透明），不做等强线分层。
+       * 明暗分布直接取落笔的衰减曲线（见 BRUSH_FALLOFF_STOPS），且按形状包围盒归一化，
+       * 所以半径 / 缩放怎么变，这团软边的相对形状都一样。
+       * 外沿再描一圈实线当边界 —— 圈外一个顶点都不碰。
+       */
+      this.brushRing
+        .poly(circlePolygon(ring.x, ring.y, ring.radius))
+        .fill(this.brushGradient(ring.mode))
+        .stroke({ width: unitPerPixel * 1.2, color, alpha: 0.8 })
+      // 落点（鼠标精确位置）
+      this.brushRing.poly(circlePolygon(ring.x, ring.y, unitPerPixel * 2)).fill({ color, alpha: 0.85 })
     }
 
     /*

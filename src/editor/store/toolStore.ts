@@ -110,7 +110,16 @@ export const useToolStore = create<ToolState>((set, get) => ({
   tool: 'select',
   gizmo: 'move',
   overlay: { bones: true, constraints: true },
-  brush: { radius: 40, strength: 0.5, mode: 'add' },
+  /*
+   * 笔刷参数（面板已移除，这里是实际生效值）：
+   * - 半径 40px（= 0.4 世界单位，视口里的绿圈就是它）；
+   * - **强度 0.015**：每移动一次叠加 0.015×衰减 —— 原来 0.5 时，一次拖拽里
+   *   顶点会被叠加十几次，几乎瞬间冲到 100%（手感就是「太强、擦一下就满」）。
+   *   0.15 还是偏快（实测一次划过就三四成），再降 90% 到 0.015：
+   *   一次划过约百分之几，需要来回刷才逐步加满，接近常规笔刷的累积手感。
+   * - mode 字段仍在数据里，但落笔用的是修饰键（Alt=减少 / Shift=覆盖，见 brushModeFor）。
+   */
+  brush: { radius: 40, strength: 0.015, mode: 'add' },
   gridDivisions: 4,
   pendingWeightBone: null,
 

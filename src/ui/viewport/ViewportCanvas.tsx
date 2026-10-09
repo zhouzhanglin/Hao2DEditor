@@ -10,8 +10,10 @@ import { useToolStore } from '@editor/store/toolStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { usePlayheadStore } from '@editor/store/playheadStore'
-import { isDragging, toolPointerDown, toolPointerMove, toolPointerUp } from '@editor/tools/authoringTools'
+import { brushModeFor, isDragging, toolPointerDown, toolPointerMove, toolPointerUp } from '@editor/tools/authoringTools'
 import type { ToolHost } from '@editor/tools/authoringTools'
+import { BRUSH_MODE_COLORS } from '@core/weightPalette'
+import type { BrushMode } from '@editor/store/toolStore'
 import {
   addWeightBone,
   createRegionFromImage,
@@ -23,6 +25,29 @@ import {
 import { hasImageDrag, readImageDrag } from '@ui/widgets/dragDrop'
 import { gridDropLayout } from '@ui/viewport/dropLayout'
 import type { AuthoringImage } from '@core/model/authoring'
+
+/**
+ * 权重刷的鼠标光标：**形状本身就是提示** —— 加号=增加、减号=减少、圆点=覆盖（直接替换）。
+ *
+ * 用内联 SVG 画成 data URI：颜色与视口里的「刷子半径圈」同源（见 BRUSH_MODE_COLORS），
+ * 热点固定在中心；末尾的 crosshair 是不支持图片光标时的兜底。
+ * 为什么非要换光标：默认的十字看不出这一下是在加还是在减 —— 那是最容易刷反的地方。
+ */
+function brushCursor(mode: BrushMode): string {
+  const color = BRUSH_MODE_COLORS[mode].replace('#', '%23')
+  const glyph =
+    mode === 'add'
+      ? "<path d='M12 5v14M5 12h14'/>"
+      : mode === 'subtract'
+        ? "<path d='M5 12h14'/>"
+        : `<circle cx='12' cy='12' r='4.5' fill='${color}' stroke='none'/>`
+  const svg =
+    `<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none'` +
+    ` stroke='${color}' stroke-width='2.4' stroke-linecap='round'>` +
+    `<circle cx='12' cy='12' r='9' stroke='%23000000' stroke-opacity='0.5' stroke-width='1'/>` +
+    `${glyph}</svg>`
+  return `url("data:image/svg+xml;utf8,${svg}") 12 12, crosshair`
+}
 
 export interface ViewportCanvasProps {
   onSceneReady: (scene: EditorScene) => void
@@ -281,11 +306,18 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     lastY: number
     /** Alt+点击的**待定插点**：松手时没拖动过才真的插入（拖了就转成平移，见 onPointerMove） */
     insert: { clientX: number; clientY: number; rect: DOMRect } | null
+    /**
+     * 权重刷的**待定选骨骼**：按下时点在骨骼上（且没压着顶点）就记下来，
+     * 松手时仍未拖动 → 把它设为刷的目标骨骼。这样「点击选骨骼」与「拖动刷权重」
+     * 互不打架（工具按下必接管，不先记一笔的话骨骼怎么都点不中）。
+     */
+    boneClick: { bone: string; clientX: number; clientY: number } | null
   }>({
     panning: false,
     lastX: 0,
     lastY: 0,
-    insert: null
+    insert: null,
+    boneClick: null
   })
 
   /** 每次事件都从 store 现取状态，避免拖拽过程中持有过期快照 */
@@ -372,7 +404,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       }
       // 中键仍然平移视口：绑骨骼时经常要挪一下视角，去找被网格 / 其它骨骼挡住的骨骼
       if (event.button === 1) {
-        pointer.current = { panning: true, lastX: event.clientX, lastY: event.clientY, insert: null }
+        pointer.current = { panning: true, lastX: event.clientX, lastY: event.clientY, insert: null, boneClick: null }
         event.currentTarget.setPointerCapture(event.pointerId)
         return
       }
@@ -401,8 +433,10 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
 
     // Alt+点击 = 插入顶点。这里只**记下待定插点**（不在这里判工具 / 选中：松手时才决定
     // 是插点还是解释为什么不插），真正插入放到松手时 —— 期间没拖动过才算「点击」，
-    // 所以 Alt 拖动依旧是平移，不会一按下去就多出一个顶点
-    if (event.altKey) {
+    // 所以 Alt 拖动依旧是平移，不会一按下去就多出一个顶点。
+    //
+    // 权重刷除外：那里 Alt = 减少权重（见 brushModeFor），必须落到工具手里，否则刷不了。
+    if (event.altKey && useToolStore.getState().tool !== 'weight') {
       pointer.current = {
         panning: false,
         lastX: event.clientX,
@@ -411,7 +445,8 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
           clientX: event.clientX,
           clientY: event.clientY,
           rect: event.currentTarget.getBoundingClientRect()
-        }
+        },
+        boneClick: null
       }
       event.currentTarget.setPointerCapture(event.pointerId)
       event.preventDefault()
@@ -420,12 +455,26 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     // 平移视口只认中键。右键不再参与平移（绑定骨骼状态下它是「结束绑定」，
     // 平时则什么都不做），避免右键误拖把视口挪走。
     if (event.button === 1) {
-      pointer.current = { panning: true, lastX: event.clientX, lastY: event.clientY, insert: null }
+      pointer.current = { panning: true, lastX: event.clientX, lastY: event.clientY, insert: null, boneClick: null }
       event.currentTarget.setPointerCapture(event.pointerId)
       return
     }
     const world = toWorld(event)
     if (!world) return
+
+    /*
+     * 权重刷：按下时「点在骨骼上、且没压着顶点」就记一笔待定选骨骼 ——
+     * 松手时若没拖动过，就把它设成刷的目标骨骼（见 releasePointer）。
+     *
+     * 为什么要记在 pointer 上：工具是「按下必接管」的（要开始刷），
+     * 由它自己判骨骼会把「在网格上起笔」也吃掉。分开判就不会互相干扰：
+     * 点击 = 选骨骼，拖动 = 刷权重。
+     */
+    if (useToolStore.getState().tool === 'weight' && !scene.pickVertexAt(world.x, world.y)) {
+      const hitBone = scene.pickBoneAt(world.x, world.y)
+      const name = hitBone && scene.runtime ? (scene.runtime.asset.bones[hitBone.boneIndex]?.name ?? '') : ''
+      pointer.current.boneClick = name ? { bone: name, clientX: event.clientX, clientY: event.clientY } : null
+    }
 
     const host = buildHost()
     if (host && toolPointerDown(host, { world, shift: event.shiftKey, ctrl: event.ctrlKey, alt: event.altKey })) {
@@ -485,6 +534,37 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     }
     const world = toWorld(event)
     if (!world) return
+
+    /*
+     * 权重刷：光标与「刷子半径圈」都跟着**模式**走 —— Alt=减少（红）、Shift=覆盖（蓝）、
+     * 默认增加（绿）。圈画在场景里、用的是世界半径（与真正落笔同一个值），所见即所得；
+     * 悬在骨骼上时给 pointer 光标并收起圈，提示「点一下就把这根设成刷的目标骨骼」。
+     */
+    if (useToolStore.getState().tool === 'weight') {
+      const tools = useToolStore.getState()
+      const mode = brushModeFor({ alt: event.altKey, shift: event.shiftKey })
+      const overBone =
+        !scene.pickVertexAt(world.x, world.y) && scene.pickBoneAt(world.x, world.y) !== null
+      const cursor = overBone ? 'pointer' : brushCursor(mode)
+      if (event.currentTarget.style.cursor !== cursor) event.currentTarget.style.cursor = cursor
+      scene.setViewState({
+        brushRing: overBone
+          ? null
+          : { x: world.x, y: world.y, radius: tools.brush.radius / 100, mode }
+      })
+      // 拖动超过阈值就不再算「点击」：这一次是刷权重，不是选骨骼（阈值同插点：6px）
+      const click = pointer.current.boneClick
+      if (click && Math.hypot(event.clientX - click.clientX, event.clientY - click.clientY) > 6) {
+        pointer.current.boneClick = null
+      }
+      if (isDragging()) {
+        const host = buildHost()
+        if (host) toolPointerMove(host, { world, shift: event.shiftKey, ctrl: event.ctrlKey, alt: event.altKey })
+      }
+      return
+    }
+    if (scene.state.brushRing) scene.setViewState({ brushRing: null })
+
     if (isDragging()) {
       const host = buildHost()
       if (host) toolPointerMove(host, { world, shift: event.shiftKey, ctrl: event.ctrlKey, alt: event.altKey })
@@ -576,6 +656,17 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     }
     const host = buildHost()
     if (isDragging() && host) toolPointerUp(host)
+    /*
+     * 权重刷：这一下没拖动过（待定选骨骼还在）、且按下时确实点在骨骼上 →
+     * 把它设成刷的目标骨骼。工具本身仍拿不到骨骼就没法刷（状态栏会提示去层级树选），
+     * 所以这一步是权重刷「在视口里选骨骼」的唯一入口。
+     */
+    const boneClick = pointer.current.boneClick
+    pointer.current.boneClick = null
+    if (boneClick && useToolStore.getState().tool === 'weight') {
+      useSelectionStore.getState().selectBone(boneClick.bone)
+      onStatus(`权重刷目标骨骼：「${boneClick.bone}」——按住拖动刷权重（Alt=减少 / Shift=覆盖）`)
+    }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
@@ -703,6 +794,9 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
           scene.setViewState({ hoveredDisplay: null })
           scene.markDirty()
         }
+        // 刷子半径圈同理：它是跟着鼠标走的光标，鼠标出去了就该收起来
+        if (scene?.state.brushRing) scene.setViewState({ brushRing: null })
+        pointer.current.boneClick = null
       }}
       onWheel={onWheel}
       onDoubleClick={(event) => {

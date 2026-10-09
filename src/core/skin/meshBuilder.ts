@@ -419,7 +419,12 @@ export class MeshBuilder {
     const hasBind = bindposes.length > 0
     const deform = skeleton.deformOffsets[slotIndex]
     const deformBase = skeleton.deformOffsetBase[slotIndex]
-    const rigid = weighted ? null : this.attachmentWorld(skeleton, slotIndex, attachment)
+    /*
+     * 刚性变换：**未加权网格**整块用它；加权网格里「四根骨骼权重全为 0」的个别顶点也要用它
+     * —— 那是把影响的骨骼都刷到 0 之后的合法状态（见 applyVertexWeight），
+     * 该顶点不受任何骨骼影响，应当留在原地而不是塌到附件原点。
+     */
+    const rigid = this.attachmentWorld(skeleton, slotIndex, attachment)
 
     for (let i = 0; i < count; i++) {
       const vx = vertices[i * 2]
@@ -446,8 +451,25 @@ export class MeshBuilder {
         accumulateWeighted(skeleton, bindposes, hasBind, attachment.ffdInBoneSpace, ffdX, ffdY, w.w1, w.b1, w.lx1, w.ly1)
         accumulateWeighted(skeleton, bindposes, hasBind, attachment.ffdInBoneSpace, ffdX, ffdY, w.w2, w.b2, w.lx2, w.ly2)
         accumulateWeighted(skeleton, bindposes, hasBind, attachment.ffdInBoneSpace, ffdX, ffdY, w.w3, w.b3, w.lx3, w.ly3)
-        x = ACC_X
-        y = ACC_Y
+        const total = w.w0 + w.w1 + w.w2 + w.w3
+        if (total <= 1e-6) {
+          // 零权重顶点：不受任何骨骼影响 → 留在绑定位置（不能塌到原点）
+          const px = vx + ffdX
+          const py = vy + ffdY
+          x = rigid ? rigid[0] * px + rigid[4] * py + rigid[12] : px
+          y = rigid ? rigid[1] * px + rigid[5] * py + rigid[13] : py
+        } else if (Math.abs(total - 1) > 1e-6) {
+          /*
+           * 权重和不是 1（编辑期的中间状态，例如某根骨骼被刷到 0.4 而其它骨骼全是 0）：
+           * 按**相对比例**归一化，而不是原样累加 —— 原样累加会把顶点朝原点拽过去
+           *（权重和 0.4 时只剩四成距离），看起来就像"网格被吸进去了"。
+           */
+          x = ACC_X / total
+          y = ACC_Y / total
+        } else {
+          x = ACC_X
+          y = ACC_Y
+        }
       } else if (rigid) {
         const px = vx + ffdX
         const py = vy + ffdY

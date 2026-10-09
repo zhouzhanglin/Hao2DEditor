@@ -736,7 +736,14 @@ export function applyVertexWeight(
       const scaled = otherTotal > 1e-6 ? (item.weight / otherTotal) * remainder : 0
       if (scaled > 1e-6) next.push({ bone: item.bone, weight: scaled })
     }
-    if (next.length === 0) next.push({ bone, weight: 1 })
+    /*
+     * 走到这里 next 为空 = 这根骨骼被刷到 0、且没有别的骨骼接手 —— 结果就是**空权重表**：
+     * 该顶点不受任何骨骼影响（留在原地、不塌陷，见 meshBuilder 的零权重保护）。
+     *
+     * 这里**不能**把权重塞回 1：那会让「一直减到底」在最后一刻突然跳回 100%
+     *（实测就是这个现象：某根骨骼减到 0 又变成 100%）。空表是合法状态 ——
+     * 与 Spine 里「该顶点 0 根骨骼」一致，也正是「擦掉这根骨骼的影响」应有的结果。
+     */
   }
 
   weights.length = 0
@@ -947,6 +954,21 @@ export function uvRect(uvs: readonly number[]): { u0: number; u1: number; v0: nu
   }
   return { u0, u1, v0, v1 }
 }
+
+/**
+ * 笔刷衰减的**采样点**：`[距圆心的比例, 相对强度]`，从圆心到边缘等距取样（9 档，中间由 GPU 插值）。
+ *
+ * 直接由落笔用的 `smoothStep(1 - t)` 算出，所以**改衰减曲线时视口里的软边跟着一起变** ——
+ * 屏幕上看到的明暗，就是真正刷出来的强度分布。
+ * 用途：权重刷那团软边圆的填充渐变（见 Scene.drawOverlays / brushGradient）。
+ */
+export const BRUSH_FALLOFF_STOPS: ReadonlyArray<readonly [number, number]> = Array.from(
+  { length: 9 },
+  (_, index) => {
+    const t = index / 8
+    return [t, smoothStep(1 - t)] as const
+  }
+)
 
 function smoothStep(t: number): number {
   const x = Math.max(0, Math.min(1, t))

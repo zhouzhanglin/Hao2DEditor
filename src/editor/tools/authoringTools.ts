@@ -155,6 +155,26 @@ export function isDragging(): boolean {
   return drag.kind !== 'none'
 }
 
+/**
+ * 权重刷的笔刷模式由**修饰键**决定（面板已移除）：
+ * **Alt = 减少**、**Shift = 替换（直接覆盖）**、都不按 = 增加。
+ *
+ * 光标样式、半径圈颜色与真正落笔都走这一个出处 —— 三者说的必须是同一件事，
+ * 否则会出现「光标画的是减号、实际却在加权重」这种最难受的错配。
+ */
+export function brushModeFor(info: { alt: boolean; shift: boolean }): BrushMode {
+  if (info.alt) return 'subtract'
+  if (info.shift) return 'replace'
+  return 'add'
+}
+
+/** 状态栏里的动作名（与 brushModeFor 一一对应） */
+export const BRUSH_ACTION: Record<BrushMode, string> = {
+  add: '增加',
+  subtract: '减少',
+  replace: '覆盖'
+}
+
 /** 指针按下：返回 true 表示工具已接管（调用方不要再做默认选择逻辑） */
 export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   const { tools, scene } = host
@@ -198,12 +218,14 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       host.status('权重刷只在 Pose 状态可用（动画状态的角色姿态不是绑定姿态）')
       return true
     }
+    const paintMode = brushModeFor(info)
     host.status(
       vertexLabel
-        ? `${vertexLabel}：按住拖动刷「${bone}」的权重`
-        : `权重刷「${bone}」：按住拖动刷权重（半径 ${tools.brush.radius}px）`
+        ? `${vertexLabel}：按住拖动${BRUSH_ACTION[paintMode]}「${bone}」的权重`
+        : `权重刷「${bone}」：按住拖动${BRUSH_ACTION[paintMode]}权重` +
+            `（半径 ${tools.brush.radius}px；Alt=减少 / Shift=覆盖）`
     )
-    drag = { ...IDLE, kind: 'paint', bone, paintMode: tools.brush.mode }
+    drag = { ...IDLE, kind: 'paint', bone, paintMode }
     return true
   }
 

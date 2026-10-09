@@ -1,13 +1,13 @@
 import {
   Bone,
+  ChartPie,
   Grid3x3,
   MousePointer2,
   Move,
   MoveDiagonal2,
   PersonStanding,
   RotateCw,
-  Scaling,
-  Spline
+  Scaling
 } from 'lucide-react'
 import { GIZMO_ORDER, isDrawTool, useToolStore } from '@editor/store/toolStore'
 import { useModeStore } from '@editor/store/modeStore'
@@ -46,7 +46,14 @@ const EDIT_TOOLS: Array<{
     icon: Bone,
     hint: '在视口拖拽画骨骼：起点落在骨骼上会吸附并以它为父，接着拖就能连成骨骼链（仅 Pose 态）'
   },
-  { id: 'weight', label: '权重刷工具', key: 'G', icon: Spline },
+  {
+    id: 'weight',
+    label: '权重刷工具',
+    key: 'G',
+    // 饼图图标：刷权重时顶点就画成饼图（哪根骨骼占多少），一眼对应得上
+    icon: ChartPie,
+    hint: '刷权重：先在层级树或视口里点一根骨骼作为目标，按住拖动刷权重（Alt=减少 / Shift=覆盖）；单击只选中顶点看它的权重'
+  },
   {
     id: 'ffd',
     label: '顶点工具',

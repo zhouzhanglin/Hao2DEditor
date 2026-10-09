@@ -242,7 +242,7 @@ export function createDefaultMeta(): EditorMeta {
     activeSkin: '',
     activeAnimation: '',
     overlay: { bones: true, constraints: true },
-    brush: { radius: 40, strength: 0.5, mode: 'add' }
+    brush: { radius: 40, strength: 0.015, mode: 'add' }
   }
 }
 

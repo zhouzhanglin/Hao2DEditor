@@ -16,6 +16,7 @@ import {
   deleteMeshVertex,
   patchAttachment,
   removeWeightBone,
+  resolveAttachment,
   weightBonesOf
 } from '@editor/commands/authoringCommands'
 import { runAutoWeightsForBones } from '@editor/tools/authoringTools'
@@ -305,7 +306,8 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
     if (!slot) return <PanelEmpty title="插槽不存在" description="该插槽可能已被删除，请重新选择。" />
     const skinSlot = document.skins.find((s) => s.name === selection.skin)?.slots.find((s) => s.slot === slot.name)
       ?? document.skins[0]?.slots.find((s) => s.slot === slot.name)
-    const attachment = skinSlot?.attachments.find((a) => a.name === selection.attachment)
+    // 附件解析走「皮肤优先、跨皮肤兜底」：切过皮肤后不该让检查器整段空掉（与视口同一套规则）
+    const attachment = resolveAttachment(document, slot.name, selection.attachment, selection.skin)
     // 权重骨骼列表：优先用附件上显式绑定的（老数据按顶点权重推断，见 weightBonesOf）
     const weightBones = attachment && attachment.type === 'mesh' ? weightBonesOf(attachment) : []
     const boneColorOf = (name: string): string =>

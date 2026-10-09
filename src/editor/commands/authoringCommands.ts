@@ -52,6 +52,33 @@ export function findAttachment(
   return null
 }
 
+/**
+ * 按选中状态解析附件：**先按当前皮肤找，找不到再跨皮肤兜底**。
+ *
+ * 为什么不能只按当前皮肤找：皮肤是用户切出来的，选中的附件完全可能在别的皮肤里
+ * （Spine 多皮肤资源很常见，比如 default 里是 `spear`、goblingirl 里是另一套手部）。
+ *
+ * 早先各处写的是「按当前皮肤找，找不到就退回 `skins[0]`」—— 当当前皮肤**存在但里面
+ * 没有这个附件**时，`??` 兜底根本不生效，于是附件操作器、权重骨骼高亮、检查器一起失效
+ * （实测：皮肤切到 goblingirl 后再选 default 皮肤里的 spear，权重骨骼高亮整段消失）。
+ */
+export function resolveAttachment(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  skinName = ''
+): AuthoringAttachment | null {
+  if (skinName) {
+    const skin = doc.skins.find((item) => item.name === skinName)
+    const scoped = skin?.slots
+      .find((item) => item.slot === slotName)
+      ?.attachments.find((item) => item.name === attachmentName)
+    if (scoped) return scoped
+  }
+  // 当前皮肤里没有（或没指定皮肤）→ 跨皮肤找，保证「切过皮肤」不会让已选中的对象失效
+  return findAttachment(doc, slotName, attachmentName)
+}
+
 /** 附件清单要落到哪个皮肤：优先指定皮肤，找不到就退回第一个（default） */
 function targetSkin(doc: EditorDocument, name?: string): AuthoringSkin {
   if (doc.skins.length === 0) doc.skins.push({ name: 'default', slots: [] })

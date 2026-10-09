@@ -17,6 +17,7 @@ import {
   createRegionFromImage,
   insertMeshVertex,
   PPU,
+  resolveAttachment,
   weightBonesOf
 } from '@editor/commands/authoringCommands'
 import { hasImageDrag, readImageDrag } from '@ui/widgets/dragDrop'
@@ -146,39 +147,45 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       const tools = useToolStore.getState()
       const timeline = useTimelineStore.getState()
       const mode = useModeStore.getState().mode
+      /*
+       * 选中的附件只解析**一次**，给「操作器」与「权重骨骼高亮」共用。
+       *
+       * 解析走 resolveAttachment：先按当前皮肤找，找不到跨皮肤兜底。皮肤是用户切出来的，
+       * 选中的附件可能在别的皮肤里；早先写的是「按当前皮肤找、找不到退回 skins[0]」，
+       * 于是「当前皮肤里没有这个附件」时兜底不生效 —— 操作器与权重骨骼高亮一起失效
+       *（实测：皮肤切到 goblingirl 后再选 default 里的 spear，weightBones 变成空数组）。
+       */
+      const selectedAttachmentData =
+        selection.kind === 'attachment' && selection.slot && selection.attachment
+          ? resolveAttachment(
+              useProjectStore.getState().document,
+              selection.slot,
+              selection.attachment,
+              selection.skin
+            )
+          : null
+
       // 选中附件的操作器（仅 Pose 态 + 选择工具）：中心 = 附件 position，轴 = 附件旋转叠加骨骼
       let selectedAttachment: {
         boneIndex: number
         position: { x: number; y: number }
         rotation: number
       } | null = null
-      if (tools.tool === 'select' && mode === 'pose' && selection.kind === 'attachment' && scene.runtime) {
+      if (tools.tool === 'select' && mode === 'pose' && selectedAttachmentData && scene.runtime) {
         const doc = useProjectStore.getState().document
         const slot = doc.slots.find((item) => item.name === selection.slot)
         const boneIndex = slot ? (scene.runtime.boneIndex[slot.bone] ?? -1) : -1
-        const skin =
-          doc.skins.find((item) => item.name === selection.skin) ?? doc.skins[0]
-        const attachment = skin?.slots
-          .find((item) => item.slot === selection.slot)
-          ?.attachments.find((item) => item.name === selection.attachment)
-        if (slot && boneIndex >= 0 && attachment) {
+        if (slot && boneIndex >= 0) {
           selectedAttachment = {
             boneIndex,
-            position: { ...attachment.position },
-            rotation: attachment.rotation
+            position: { ...selectedAttachmentData.position },
+            rotation: selectedAttachmentData.rotation
           }
         }
       }
       // 选中网格所绑定的骨骼：叠加层用高亮色画出来（权重骨骼列表里有哪几根就画哪几根）
       let weightBones: string[] = []
-      if (selection.kind === 'attachment' && selection.slot && selection.attachment) {
-        const doc = useProjectStore.getState().document
-        const skin = doc.skins.find((item) => item.name === selection.skin) ?? doc.skins[0]
-        const attachment = skin?.slots
-          .find((item) => item.slot === selection.slot)
-          ?.attachments.find((item) => item.name === selection.attachment)
-        if (attachment?.type === 'mesh') weightBones = weightBonesOf(attachment)
-      }
+      if (selectedAttachmentData?.type === 'mesh') weightBones = weightBonesOf(selectedAttachmentData)
       scene.setViewState({
         overlay: tools.overlay,
         gizmo: tools.gizmo,

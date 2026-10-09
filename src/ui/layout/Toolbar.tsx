@@ -32,10 +32,8 @@ export default function Toolbar(props: ToolbarProps) {
             type="button"
             onClick={() => props.onToggleOverlay(key)}
             className={[
-              'h-[22px] rounded px-1.5 text-3xs uppercase tracking-[0.06em] transition-colors duration-panel cursor-pointer',
-              overlay[key]
-                ? 'bg-accent/15 text-accent ring-1 ring-accent/30'
-                : 'text-content-lo hover:bg-ink-600 hover:text-content-mid'
+              'h-[22px] rounded-[5px] px-2 text-2xs transition-colors duration-panel cursor-pointer',
+              overlay[key] ? 'bg-accent-deep text-white' : 'text-content-mid hover:bg-ink-600 hover:text-content-hi'
             ].join(' ')}
           >
             {label}

@@ -122,13 +122,13 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
                 className={[
                   'h-[20px] rounded border px-1.5 text-3xs transition-colors duration-panel cursor-pointer',
                   active
-                    ? 'border-accent/50 bg-accent/15 text-accent'
+                    ? 'border-transparent bg-accent-deep text-white'
                     : 'border-line bg-ink-900/60 text-content-mid hover:text-content-hi'
                 ].join(' ')}
                 title={`${attachments} 个附件`}
               >
                 {skin.name}
-                <span className="ml-1 text-content-lo">{attachments}</span>
+                <span className={active ? 'ml-1 text-white/70' : 'ml-1 text-content-lo'}>{attachments}</span>
               </button>
             )
           })}

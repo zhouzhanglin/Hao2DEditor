@@ -27,8 +27,8 @@ export function createSampleDocument(): EditorDocument {
     createAuthoringBone({ name: 'root', parent: '', rotation: 90, length: 0.55, color: '#8B5CF6' }),
     createAuthoringBone({ name: 'chest', parent: 'root', localPosition: { x: 0.55, y: 0 }, rotation: 0, length: 0.35, color: '#F97316' }),
     createAuthoringBone({ name: 'head', parent: 'chest', localPosition: { x: 0.35, y: 0 }, rotation: 0, length: 0.3, color: '#FBBF24' }),
-    createAuthoringBone({ name: 'armL', parent: 'chest', localPosition: { x: 0.3, y: 0 }, rotation: 55, length: 0.5, color: '#22D3EE' }),
-    createAuthoringBone({ name: 'armR', parent: 'chest', localPosition: { x: 0.3, y: 0 }, rotation: -55, length: 0.5, color: '#22D3EE' }),
+    createAuthoringBone({ name: 'armL', parent: 'chest', localPosition: { x: 0.3, y: 0 }, rotation: 55, length: 0.5, color: '#0A84FF' }),
+    createAuthoringBone({ name: 'armR', parent: 'chest', localPosition: { x: 0.3, y: 0 }, rotation: -55, length: 0.5, color: '#0A84FF' }),
     createAuthoringBone({ name: 'legL', parent: 'root', localPosition: { x: 0, y: 0 }, rotation: -70, length: 0.62, color: '#34D399' }),
     createAuthoringBone({ name: 'legR', parent: 'root', localPosition: { x: 0, y: 0 }, rotation: -110, length: 0.62, color: '#34D399' })
   ]

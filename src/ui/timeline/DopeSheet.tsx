@@ -611,7 +611,7 @@ export default function DopeSheet(props: DopeSheetProps) {
               <button
                 type="button"
                 title="当前已缩放，点击恢复「完整适配」"
-                className="flex items-center gap-0.5 rounded bg-accent/15 px-1 text-accent hover:bg-accent/25 cursor-pointer"
+                className="flex items-center gap-0.5 rounded bg-accent-deep px-1 text-white hover:bg-accent cursor-pointer"
                 onClick={() => {
                   applyView({ start: 0, zoom: 1 })
                   props.onZoom(1)
@@ -710,7 +710,7 @@ export default function DopeSheet(props: DopeSheetProps) {
                   track.isGroup
                     ? 'bg-ink-900/50 font-semibold text-content-hi hover:bg-ink-700'
                     : trackActive
-                      ? 'bg-accent/15 font-semibold text-accent'
+                      ? 'bg-accent-deep font-semibold text-white'
                       : 'text-content-mid hover:bg-ink-700',
                   // 刚打帧的行短暂高亮：帧大概率埋在列表下方，光靠滚动还不够醒目
                   flashTrackId === track.id ? 'bg-accent/30' : ''

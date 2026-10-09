@@ -5,8 +5,8 @@ import { Texture, TilingSprite } from 'pixi.js'
  * 比面板底色亮一档，方便一眼看出「这里是透明画布」；深浅相差不大，长时间盯着不刺眼。
  * 想调整观感直接改这两个常量即可。
  */
-const LIGHT = '#3a3a4a'
-const DARK = '#2c2c38'
+const LIGHT = '#3a3a3c'
+const DARK = '#2c2c2e'
 
 /**
  * 视口棋盘格背景。

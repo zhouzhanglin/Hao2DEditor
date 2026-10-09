@@ -5,17 +5,17 @@
 @layer base {
   :root {
     color-scheme: dark;
-    --hao-bg-0: #101018;
-    --hao-bg-1: #16161f;
-    --hao-bg-2: #1e1e28;
-    --hao-bg-3: #262632;
-    --hao-line: #2a2a38;
-    --hao-text-hi: #e8e8f2;
-    --hao-text-mid: #a0a0b8;
-    --hao-text-lo: #6b6b82;
-    --hao-accent: #22d3ee;
-    --hao-accent-deep: #0ea5e9;
-    --hao-violet: #8b5cf6;
+    --hao-bg-0: #1a1a1c;
+    --hao-bg-1: #242426;
+    --hao-bg-2: #2c2c2e;
+    --hao-bg-3: #37373a;
+    --hao-line: #333335;
+    --hao-text-hi: #f0f0f2;
+    --hao-text-mid: #a1a1a6;
+    --hao-text-lo: #6e6e73;
+    --hao-accent: #0a84ff;
+    --hao-accent-deep: #1e5cca;
+    --hao-violet: #bf5af2;
   }
 
   html,
@@ -27,7 +27,9 @@
   }
 
   body {
-    font-family: Inter, system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    /* macOS 系统字：-apple-system 在 mac 上即 SF Pro，13px 对应列表正文级 */
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', 'PingFang SC',
+      'Microsoft YaHei', sans-serif;
     font-size: 13px;
     background: var(--hao-bg-0);
     color: var(--hao-text-hi);
@@ -36,7 +38,7 @@
   }
 
   ::selection {
-    background: rgba(34, 211, 238, 0.28);
+    background: rgba(10, 132, 255, 0.35);
   }
 }
 
@@ -68,29 +70,39 @@
     app-region: no-drag;
   }
 
-  /* 面板通用外观：1px 描边 + 极弱明暗差分层 */
+  /* 面板通用外观：1px 描边 + 极弱明暗差分层（macOS 靠发丝线分隔窗口，不靠立体感） */
   .hao-panel {
     @apply flex flex-col min-h-0 min-w-0 bg-ink-800 border border-line;
   }
 
   .hao-panel-header {
-    @apply flex items-center justify-between h-[26px] px-2 shrink-0
+    @apply flex items-center justify-between h-[24px] px-2 shrink-0
            bg-ink-700 border-b border-line;
   }
 
+  /*
+   * macOS 的标题不做「大写 + 字距」那套（那是上一版 Pro Tool 主题的写法）：
+   * 系统 UI 里标题就是小写、常规字重、靠字号与颜色分层级。
+   */
+  /* 面板标题用近白 + 半粗：原来 11px/中灰在深底上太淡，「层级结构 / 曲线」这类标签看不清 */
   .hao-panel-title {
-    @apply text-3xs uppercase tracking-[0.08em] text-content-lo font-semibold;
+    @apply text-2xs font-semibold text-content-hi;
   }
 
+  .hao-label {
+    @apply text-3xs text-content-mid;
+  }
+
+  /* 工具按钮：macOS 工具条按钮是「无边框的圆角悬停底」 */
   .hao-tool-button {
-    @apply flex items-center justify-center w-[26px] h-[22px] rounded text-content-mid
+    @apply flex items-center justify-center w-[26px] h-[22px] rounded-[5px] text-content-mid
            transition-colors duration-panel cursor-pointer
            hover:bg-ink-600 hover:text-content-hi;
   }
 
+  /* 选中态统一「实心蓝 + 白字」：半透明蓝底配蓝字（蓝压蓝）对比度太低，看不清 */
   .hao-tool-button-active {
-    @apply bg-gradient-to-b from-accent/25 to-accent-deep/10 text-accent
-           ring-1 ring-accent/40 shadow-[0_0_10px_-2px_rgba(34,211,238,0.6)];
+    @apply bg-accent-deep text-white;
   }
 
   .hao-splitter-v {
@@ -103,56 +115,43 @@
            hover:bg-accent/40 active:bg-accent/60;
   }
 
-  .hao-field {
-    @apply w-full h-[22px] px-1.5 rounded bg-ink-900/70 border border-line text-content-hi text-panel
-           outline-none transition-colors duration-panel
-           focus:border-accent/70 focus:bg-ink-900;
-  }
-
-  .hao-label {
-    @apply text-3xs uppercase tracking-[0.06em] text-content-lo;
-  }
-
-  .hao-btn {
-    @apply h-[22px] px-2 inline-flex items-center gap-1 rounded border border-line bg-ink-700
-           text-panel text-content-mid cursor-pointer transition-colors duration-panel
-           hover:bg-ink-600 hover:text-content-hi active:bg-ink-500;
-  }
-
-  .hao-btn-accent {
-    @apply border-accent/40 bg-accent/15 text-accent hover:bg-accent/25 hover:text-accent;
-  }
-
-  /**
-   * 属性检查器里的按钮：统一换成「开启态开关」的配色 —— 深青底 + 亮青描边。
-   * 用作用域选择器而不是给几十处 JSX 逐个加类；`:not(.hao-btn-accent)` 给已经
-   * 用了强调色的按钮留出空间，hover 的具体色值也由各自工具类（如删除按钮的红）覆盖。
+  /*
+   * 输入框：macOS 原生控件是「无描边的半透明白填充」，聚焦时套一圈蓝色光环
+   * （不是换边框颜色 —— 那是 Web 表单的观感）。
    */
-  .hao-inspector .hao-btn:not(.hao-btn-accent) {
-    @apply border-accent/50;
-    background-color: #274a54;
+  .hao-field {
+    @apply w-full h-[22px] px-2 rounded-[5px] bg-white/[0.06] border border-transparent text-content-hi text-panel
+           outline-none transition-colors duration-panel
+           focus:bg-white/[0.09] focus:border-accent/70 focus:ring-2 focus:ring-accent/25;
   }
-  .hao-inspector .hao-btn:not(.hao-btn-accent):hover {
-    background-color: #2f5965;
+
+  /* 按钮：同上是半透明白填充 + 圆角，悬停/按下只调亮度 */
+  .hao-btn {
+    @apply h-[22px] px-2.5 inline-flex items-center gap-1 rounded-[5px] border border-transparent
+           bg-white/[0.08] text-panel text-content-hi cursor-pointer transition-colors duration-panel
+           hover:bg-white/[0.14] active:bg-white/[0.18];
   }
-  .hao-inspector .hao-btn:not(.hao-btn-accent):active {
-    background-color: #37636f;
+
+  /* 主按钮：macOS 的强调蓝实底 + 白字，悬停提亮 */
+  .hao-btn-accent {
+    @apply border-transparent bg-accent-deep text-white hover:bg-accent;
   }
-  /* 禁用态压暗，免得青底看起来像还能点 */
-  .hao-inspector .hao-btn:disabled {
-    opacity: 0.45;
+
+  .hao-btn:disabled {
+    @apply cursor-default opacity-40 hover:bg-white/[0.08];
   }
 }
 
 @layer utilities {
+  /* macOS 覆盖式滚动条：细、圆头、半透明白，不占布局宽度 */
   .hao-scroll {
     scrollbar-width: thin;
-    scrollbar-color: #3a3a4a transparent;
+    scrollbar-color: rgba(255, 255, 255, 0.26) transparent;
   }
 
   .hao-scroll::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 9px;
+    height: 9px;
   }
 
   .hao-scroll::-webkit-scrollbar-track {
@@ -160,41 +159,41 @@
   }
 
   .hao-scroll::-webkit-scrollbar-thumb {
-    background: #343444;
-    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.24);
+    border-radius: 999px;
     border: 2px solid transparent;
     background-clip: content-box;
   }
 
   .hao-scroll::-webkit-scrollbar-thumb:hover {
-    background: #45455a;
+    background: rgba(255, 255, 255, 0.42);
     background-clip: content-box;
   }
 
   /* 视口占位棋盘格：canvas 就绪前显示，色值/密度与渲染层的世界棋盘格保持一致 */
   .hao-checkerboard {
     background-image:
-      linear-gradient(45deg, #3a3a4a 25%, transparent 25%),
-      linear-gradient(-45deg, #3a3a4a 25%, transparent 25%),
-      linear-gradient(45deg, transparent 75%, #3a3a4a 75%),
-      linear-gradient(-45deg, transparent 75%, #3a3a4a 75%);
+      linear-gradient(45deg, #3a3a3c 25%, transparent 25%),
+      linear-gradient(-45deg, #3a3a3c 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #3a3a3c 75%),
+      linear-gradient(-45deg, transparent 75%, #3a3a3c 75%);
     background-size: 48px 48px;
     background-position:
       0 0,
       0 24px,
       24px -24px,
       -24px 0px;
-    background-color: #2c2c38;
+    background-color: #2c2c2e;
   }
 
   /* 缩略图用的小棋盘格：格子更密，小尺寸下也能看出透明区域 */
   .hao-checkerboard-sm {
-    background-color: #2c2c38;
+    background-color: #2c2c2e;
     background-image:
-      linear-gradient(45deg, #3a3a4a 25%, transparent 25%),
-      linear-gradient(-45deg, #3a3a4a 25%, transparent 25%),
-      linear-gradient(45deg, transparent 75%, #3a3a4a 75%),
-      linear-gradient(-45deg, transparent 75%, #3a3a4a 75%);
+      linear-gradient(45deg, #3a3a3c 25%, transparent 25%),
+      linear-gradient(-45deg, #3a3a3c 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #3a3a3c 75%),
+      linear-gradient(-45deg, transparent 75%, #3a3a3c 75%);
     background-size: 12px 12px;
     background-position:
       0 0,

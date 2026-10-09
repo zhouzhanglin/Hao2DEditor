@@ -6,38 +6,51 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Pro Dark Tool 主题：深灰蓝底 + 青蓝强调
+        /**
+         * macOS 暗色（Finder 观感）取色。
+         *
+         * 取值来自 Finder 暗色窗口截图**实拍采样**：内容底 #232323~#2B2B2B（受窗口
+         * 透明度影响会有偏移，这里归一到中性灰）、正文近白 #D7D8D7、选中蓝 #1E5CCA、
+         * 文件夹图标蓝 #79CBF8。其余用 macOS 系统色暗色版（蓝 #0A84FF / 绿 #30D158 /
+         * 黄橙 #FF9F0A / 红 #FF453A / 紫 #BF5AF2）。
+         *
+         * 强调色拆成两个是**必须**的：`accent` 当文字/线条用（播放头、关键帧、激活
+         * 图标），要在 #242426 上可读（对比度 ≈ 5.2:1）；而整行选中要的是实拍那个
+         * 更深的 #1E5CCA（`accent-deep`），拿它当文字几乎看不见。
+         */
         ink: {
-          900: '#101018',
-          800: '#16161F',
-          700: '#1E1E28',
-          600: '#262632',
-          500: '#2F2F3D'
+          900: '#1A1A1C', // 最深：视口井、输入框内底
+          800: '#242426', // 面板底（窗口内容底色）
+          700: '#2C2C2E', // 工具条 / 表头 / 输入框
+          600: '#37373A', // hover（≈ 白色 8% 叠加）
+          500: '#48484A' // pressed
         },
-        line: '#2A2A38',
+        line: '#333335',
         content: {
-          hi: '#E8E8F2',
-          mid: '#A0A0B8',
-          lo: '#6B6B82'
+          // 比 macOS 原生次级灰再亮一档：编辑器信息密度高，太淡会看不清
+          hi: '#F0F0F2',
+          mid: '#B4B4B9',
+          lo: '#8E8E93'
         },
         accent: {
-          DEFAULT: '#22D3EE',
-          deep: '#0EA5E9',
-          violet: '#8B5CF6'
+          DEFAULT: '#0A84FF',
+          deep: '#1E5CCA',
+          violet: '#BF5AF2'
         },
-        ok: '#34D399',
-        warn: '#FBBF24',
-        danger: '#F87171',
-        bone: '#F97316'
+        ok: '#30D158',
+        warn: '#FF9F0A',
+        danger: '#FF453A',
+        bone: '#E0A45C'
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'PingFang SC', 'Microsoft YaHei', 'sans-serif'],
+        // macOS 系统字：-apple-system 在 mac 上就是 SF Pro，无需再排 Inter
+        sans: ['-apple-system', 'BlinkMacSystemFont', 'SF Pro Text', 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', 'sans-serif'],
         mono: ['SFMono-Regular', 'Menlo', 'Consolas', 'monospace']
       },
       fontSize: {
-        '2xs': ['10px', '14px'],
-        '3xs': ['9px', '12px'],
-        'panel': ['11px', '16px']
+        '2xs': ['11px', '15px'],
+        '3xs': ['10px', '13px'],
+        panel: ['12px', '16px']
       },
       transitionDuration: {
         panel: '150ms'

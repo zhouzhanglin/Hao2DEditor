@@ -185,7 +185,7 @@ export default function MenuBar({
       <div className="flex items-center gap-1.5">
         <Bone size={14} className="text-accent" />
         <span className="text-panel font-semibold tracking-wide text-content-hi">Hao2D</span>
-        <span className="text-3xs uppercase tracking-[0.12em] text-content-lo">Editor</span>
+        <span className="text-3xs text-content-lo">Editor</span>
       </div>
 
       <div className="mx-1 h-[16px] w-px bg-line" />
@@ -243,10 +243,8 @@ export default function MenuBar({
       <div className="flex items-center gap-1.5">
         <span
           className={[
-            'flex h-[20px] items-center gap-1 rounded border px-2 text-3xs font-semibold uppercase tracking-[0.08em]',
-            mode === 'animate'
-              ? 'border-accent/40 bg-accent/10 text-accent'
-              : 'border-line bg-ink-900/60 text-content-lo'
+            'flex h-[20px] items-center gap-1 rounded-[5px] px-2 text-2xs font-medium',
+            mode === 'animate' ? 'bg-accent-deep text-white' : 'bg-white/[0.07] text-content-mid'
           ].join(' ')}
           title="当前编辑状态（切换按钮在视口左上角）"
         >

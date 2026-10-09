@@ -234,8 +234,9 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
                 setDropIndex(null)
               }}
               className={[
-                'group relative flex h-[22px] cursor-grab items-center gap-1 px-1.5 text-panel active:cursor-grabbing',
-                active ? 'bg-accent/12 text-yellow-400' : 'text-content-mid hover:bg-ink-700',
+                // 与层级树一致：macOS 列表行 + 圆角选中块
+                'group relative mx-1 flex h-[24px] cursor-grab items-center gap-1 rounded-[5px] px-1.5 text-panel active:cursor-grabbing',
+                active ? 'bg-accent-deep text-white' : 'text-content-hi hover:bg-white/[0.07]',
                 dragging === name ? 'opacity-40' : '',
                 slot.visible ? '' : 'opacity-55'
               ].join(' ')}

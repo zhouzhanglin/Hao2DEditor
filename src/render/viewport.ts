@@ -123,7 +123,7 @@ export class Viewport {
   async init(options: ViewportOptions = {}): Promise<void> {
     await this.app.init({
       canvas: this.canvas,
-      background: options.background ?? '#13131b',
+      background: options.background ?? '#1a1a1c',
       antialias: true,
       autoDensity: true,
       resolution: Math.min(2, globalThis.devicePixelRatio || 1),

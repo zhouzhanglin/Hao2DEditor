@@ -89,18 +89,18 @@ export default function CurveEditor({ selectedKeys, easing, curve, onChange, sho
           const c = toScreen(0, t)
           const d = toScreen(1, t)
           return (
-            <g key={t} stroke="#262632" strokeWidth={1}>
+            <g key={t} stroke="#2C2C2E" strokeWidth={1}>
               <line x1={a.cx} y1={a.cy} x2={b.cx} y2={b.cy} />
               <line x1={c.cx} y1={c.cy} x2={d.cx} y2={d.cy} />
             </g>
           )
         })}
-        <rect x={PAD} y={PAD} width={SIZE - PAD * 2} height={SIZE - PAD * 2} fill="none" stroke="#3a3a4a" />
+        <rect x={PAD} y={PAD} width={SIZE - PAD * 2} height={SIZE - PAD * 2} fill="none" stroke="#3A3A3C" />
         {easing === Easing.Bezier ? (
           <>
-            <path d={path} fill="none" stroke="#22D3EE" strokeWidth={1.6} />
-            <line x1={p0.cx} y1={p0.cy} x2={p1.cx} y2={p1.cy} stroke="#8B5CF6" strokeDasharray="3 3" />
-            <line x1={p3.cx} y1={p3.cy} x2={p2.cx} y2={p2.cy} stroke="#8B5CF6" strokeDasharray="3 3" />
+            <path d={path} fill="none" stroke="#0A84FF" strokeWidth={1.6} />
+            <line x1={p0.cx} y1={p0.cy} x2={p1.cx} y2={p1.cy} stroke="#BF5AF2" strokeDasharray="3 3" />
+            <line x1={p3.cx} y1={p3.cy} x2={p2.cx} y2={p2.cy} stroke="#BF5AF2" strokeDasharray="3 3" />
           </>
         ) : (
           <path
@@ -110,12 +110,12 @@ export default function CurveEditor({ selectedKeys, easing, curve, onChange, sho
                 : `M ${p0.cx} ${p0.cy} L ${p3.cx} ${p3.cy}`
             }
             fill="none"
-            stroke="#22D3EE"
+            stroke="#0A84FF"
             strokeWidth={1.6}
           />
         )}
-        <circle cx={p0.cx} cy={p0.cy} r={3} fill="#6B6B82" />
-        <circle cx={p3.cx} cy={p3.cy} r={3} fill="#6B6B82" />
+        <circle cx={p0.cx} cy={p0.cy} r={3} fill="#8E8E93" />
+        <circle cx={p3.cx} cy={p3.cy} r={3} fill="#8E8E93" />
         {enabled && easing === Easing.Bezier ? (
           <>
             {[1, 2].map((index) => {
@@ -126,7 +126,7 @@ export default function CurveEditor({ selectedKeys, easing, curve, onChange, sho
                   cx={point.cx}
                   cy={point.cy}
                   r={5}
-                  fill="#8B5CF6"
+                  fill="#BF5AF2"
                   className="cursor-grab"
                   onPointerDown={(event) => {
                     event.stopPropagation()
@@ -158,7 +158,7 @@ export default function CurveEditor({ selectedKeys, easing, curve, onChange, sho
                   !enabled
                     ? 'cursor-not-allowed border-line text-content-lo/50'
                     : isActive
-                      ? 'cursor-pointer border-accent/50 bg-accent/15 text-accent'
+                      ? 'cursor-pointer border-transparent bg-accent-deep text-white'
                       : 'cursor-pointer border-line bg-ink-900/60 text-content-mid hover:text-content-hi'
                 ].join(' ')}
                 onClick={() => onChange(preset.easing, preset.curve)}

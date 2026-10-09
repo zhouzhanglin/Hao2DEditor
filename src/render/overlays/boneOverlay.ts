@@ -27,24 +27,25 @@ export interface BoneOverlayOptions {
   attachmentGizmo?: { boneIndex: number; position: { x: number; y: number }; rotation: number } | null
 }
 
-const COLOR_BONE = 0xf97316
-const COLOR_BONE_SELECTED = 0x22d3ee
-const COLOR_BONE_HOVERED = 0x0ea5e9
-/** 选中网格所绑定的骨骼：亮黄绿（与普通橙、选中青、悬停蓝都拉得开） */
-const COLOR_BONE_WEIGHT = 0xa3e635
-const COLOR_JOINT = 0xfbbf24
-const COLOR_ROOT = 0x8b5cf6
-const COLOR_CONSTRAINT = 0x34d399
-const COLOR_LINK = 0x6b6b82
+// 覆盖层配色统一取 macOS 系统色（暗色版），与主题令牌同源
+const COLOR_BONE = 0xe0a45c
+const COLOR_BONE_SELECTED = 0x0a84ff
+const COLOR_BONE_HOVERED = 0x64d2ff
+/** 选中网格所绑定的骨骼：系统绿（与骨色橙、选中蓝、悬停青都拉得开） */
+const COLOR_BONE_WEIGHT = 0x30d158
+const COLOR_JOINT = 0xffd60a
+const COLOR_ROOT = 0xbf5af2
+const COLOR_CONSTRAINT = 0x40c8e0
+const COLOR_LINK = 0x8e8e93
 
-/** 小坐标轴：X 轴红、Y 轴绿、中心蓝（与参考图一致） */
-const COLOR_AXIS_X = 0xef4444
-const COLOR_AXIS_Y = 0x22c55e
-const COLOR_AXIS_CENTER = 0x60a5fa
+/** 小坐标轴：X 轴红、Y 轴绿、中心蓝（macOS 系统色） */
+const COLOR_AXIS_X = 0xff453a
+const COLOR_AXIS_Y = 0x30d158
+const COLOR_AXIS_CENTER = 0x0a84ff
 /** 斜切包围盒（紫） */
-const COLOR_SHEAR_BOX = 0xc084fc
+const COLOR_SHEAR_BOX = 0xbf5af2
 /** 拖拽新建骨骼的虚线预览 */
-const COLOR_PENDING = 0xa78bfa
+const COLOR_PENDING = 0xbf5af2
 
 /** 小坐标轴的模式（与 editor/store/toolStore 的 GizmoMode 一致，避免循环依赖这里重复声明） */
 export type GizmoDrawMode = 'move' | 'rotate' | 'scale' | 'shear'

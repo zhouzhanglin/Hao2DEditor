@@ -18,7 +18,7 @@ const ITEMS: Array<{ mode: EditorMode; label: string; hint: string; icon: typeof
  */
 export default function ModeSwitch({ mode, onChange }: ModeSwitchProps) {
   return (
-    <div className="pointer-events-auto absolute left-3 top-3 z-20 flex items-center gap-1 rounded-lg border border-line bg-ink-900/85 p-1 shadow-lg shadow-black/40 backdrop-blur-sm">
+    <div className="pointer-events-auto absolute left-3 top-3 z-20 flex items-center gap-0.5 rounded-[7px] border border-white/10 bg-ink-900/70 p-0.5 shadow-lg shadow-black/30 backdrop-blur-md">
       {ITEMS.map(({ mode: item, label, hint, icon: Icon }) => {
         const active = mode === item
         return (
@@ -28,13 +28,14 @@ export default function ModeSwitch({ mode, onChange }: ModeSwitchProps) {
             title={hint}
             onClick={() => onChange(item)}
             className={[
-              'flex h-[34px] min-w-[112px] items-center justify-center gap-2 rounded-md px-3 text-xs font-semibold uppercase tracking-[0.08em] transition-all duration-panel cursor-pointer',
+              // macOS 分段控件：轨道是半透明圆角底，选中段是实心蓝 + 白字（不是渐变 + 光晕）
+              'flex h-[30px] min-w-[104px] items-center justify-center gap-2 rounded-[5px] px-3 text-panel font-medium transition-colors duration-panel cursor-pointer',
               active
-                ? 'bg-gradient-to-b from-accent/30 to-accent-deep/10 text-accent shadow-[0_0_14px_-2px_rgba(34,211,238,0.75)]'
-                : 'text-content-lo hover:bg-ink-700 hover:text-content-mid'
+                ? 'bg-accent-deep text-white'
+                : 'text-content-mid hover:bg-white/[0.08] hover:text-content-hi'
             ].join(' ')}
           >
-            <Icon size={16} />
+            <Icon size={15} />
             <span>{label}</span>
           </button>
         )

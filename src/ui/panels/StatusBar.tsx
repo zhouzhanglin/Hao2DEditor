@@ -36,7 +36,7 @@ export default function StatusBar({
   const time = usePlayheadStore((s) => s.time)
   const frame = Math.round(time * frameRate)
   return (
-    <footer className="flex h-[22px] items-center gap-3 border-t border-line bg-ink-800 px-2 text-3xs text-content-lo">
+    <footer className="flex h-[22px] items-center gap-3 border-t border-line bg-ink-800 px-2 text-2xs text-content-lo">
       <span className="flex items-center gap-2 font-mono">
         <Stat label="骨骼" value={stats.bones} />
         <Stat label="插槽" value={stats.slots} />

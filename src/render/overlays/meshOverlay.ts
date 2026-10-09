@@ -15,12 +15,12 @@ export interface MeshOverlayOptions {
   hoveredVertex: number
 }
 
-const COLOR_WIRE = 0x22d3ee
-const COLOR_VERTEX = 0xa0a0b8
-const COLOR_VERTEX_SELECTED = 0x22d3ee
-const COLOR_VERTEX_HOVERED = 0xfbbf24
-const COLOR_FFD = 0x8b5cf6
-const COLOR_FFD_BASE = 0x6b6b82
+const COLOR_WIRE = 0x0a84ff
+const COLOR_VERTEX = 0x8e8e93
+const COLOR_VERTEX_SELECTED = 0x0a84ff
+const COLOR_VERTEX_HOVERED = 0xffd60a
+const COLOR_FFD = 0xbf5af2
+const COLOR_FFD_BASE = 0x8e8e93
 
 /**
  * 网格线框 + 顶点手柄 + 权重热力图 + FFD 偏移可视化。

@@ -66,13 +66,13 @@ export default function ContextMenu({ x, y, title, items, onClose }: ContextMenu
   return createPortal(
     <div
       ref={ref}
-      className="fixed z-[999] min-w-[196px] rounded border border-line bg-ink-800 py-1 shadow-xl shadow-black/50"
+      className="fixed z-[999] min-w-[196px] rounded-[6px] border border-white/10 bg-ink-700/95 px-1 py-1 shadow-2xl shadow-black/60 backdrop-blur-xl"
       style={{ left: position.left, top: position.top }}
       onPointerDown={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
     >
       {title ? (
-        <div className="truncate border-b border-line/60 px-2 pb-1 text-3xs uppercase tracking-[0.08em] text-content-lo">
+        <div className="truncate px-2 pb-1 text-3xs text-content-lo">
           {title}
         </div>
       ) : null}
@@ -86,12 +86,12 @@ export default function ContextMenu({ x, y, title, items, onClose }: ContextMenu
             disabled={item.disabled}
             title={item.hint}
             className={[
-              'flex w-full items-center gap-2 px-2 py-[5px] text-left text-xs transition-colors duration-panel',
+              'flex w-full items-center gap-2 rounded-[4px] px-2 py-[5px] text-left text-panel transition-colors duration-panel',
               item.disabled
                 ? 'cursor-not-allowed text-content-lo/50'
                 : item.danger
-                  ? 'cursor-pointer text-danger/90 hover:bg-danger/15'
-                  : 'cursor-pointer text-content-mid hover:bg-ink-700 hover:text-content-hi'
+                  ? 'cursor-pointer text-danger hover:bg-danger/20'
+                  : 'cursor-pointer text-content-hi hover:bg-accent-deep hover:text-white'
             ].join(' ')}
             onClick={() => {
               onClose()

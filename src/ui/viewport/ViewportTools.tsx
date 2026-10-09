@@ -88,11 +88,15 @@ const GIZMO_ICONS: Record<GizmoMode, typeof Move> = {
   shear: MoveDiagonal2
 }
 
+/**
+ * 激活色：色调与视口里的小坐标轴含义对齐（移动红 / 旋转蓝 / 缩放绿 / 斜切紫）。
+ * 用**加深的实底 + 白图标**，不用「彩字配同色半透明底」—— 那样在深色面板上糊成一片。
+ */
 const GIZMO_TONE: Record<GizmoMode, string> = {
-  move: 'text-[#f87171] border-[#ef4444]/60 bg-[#ef4444]/15',
-  rotate: 'text-[#60a5fa] border-[#60a5fa]/60 bg-[#60a5fa]/15',
-  scale: 'text-[#22c55e] border-[#22c55e]/60 bg-[#22c55e]/15',
-  shear: 'text-[#c084fc] border-[#c084fc]/60 bg-[#c084fc]/15'
+  move: 'border-transparent bg-[#C93B33] text-white',
+  rotate: 'border-transparent bg-accent-deep text-white',
+  scale: 'border-transparent bg-[#2E9E4B] text-white',
+  shear: 'border-transparent bg-[#8E44C9] text-white'
 }
 
 export interface ViewportToolsProps {
@@ -113,10 +117,10 @@ export default function ViewportTools({ onStatus = () => undefined }: ViewportTo
     mode === 'animate' ? EDIT_TOOLS.filter((item) => item.id === 'select' || item.id === 'ffd') : EDIT_TOOLS
 
   const buttonClass =
-    'flex h-[28px] w-[28px] items-center justify-center rounded-md border transition-all duration-panel cursor-pointer'
+    'flex h-[28px] w-[28px] items-center justify-center rounded-[6px] border transition-colors duration-panel cursor-pointer'
 
   return (
-    <div className="pointer-events-auto absolute left-3 top-[58px] z-20 flex flex-col gap-0.5 rounded-lg border border-line bg-ink-900/85 p-1 shadow-lg shadow-black/40 backdrop-blur-sm">
+    <div className="pointer-events-auto absolute left-3 top-[58px] z-20 flex flex-col gap-0.5 rounded-[8px] border border-white/10 bg-ink-900/70 p-1 shadow-lg shadow-black/30 backdrop-blur-md">
       {editTools.map((rawItem) => {
         // 顶点工具按当前模式换名字：Pose = 网格工具(M)，Animate = FFD 顶点工具(D)
         const { id, label, key, hint, icon: Icon } = withVertexToolView(rawItem, mode)
@@ -134,7 +138,7 @@ export default function ViewportTools({ onStatus = () => undefined }: ViewportTo
               buttonClass,
               active
                 ? 'border-accent/60 bg-accent/15 text-accent'
-                : 'border-transparent text-content-lo hover:bg-ink-700 hover:text-content-mid'
+                : 'border-transparent text-content-mid hover:bg-white/[0.08] hover:text-content-hi'
             ].join(' ')}
           >
             <Icon size={15} />
@@ -161,7 +165,7 @@ export default function ViewportTools({ onStatus = () => undefined }: ViewportTo
             }}
             className={[
               buttonClass,
-              active ? GIZMO_TONE[mode] : 'border-transparent text-content-lo hover:bg-ink-700 hover:text-content-mid'
+              active ? GIZMO_TONE[mode] : 'border-transparent text-content-mid hover:bg-white/[0.08] hover:text-content-hi'
             ].join(' ')}
           >
             <Icon size={15} />

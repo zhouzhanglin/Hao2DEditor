@@ -493,6 +493,18 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
     attIndexBySlot.set(skinSlot.slotName, map)
   }
 
+  /**
+   * spine 4.2 起贝塞尔 `curve` 从「归一化 0..1 控制点」改成「(时间, 值) 绝对坐标」，
+   * 两者只能靠**版本**区分 —— 数值上会撞车：scale 通道的值本来就在 1 附近，绝对控制点
+   * 很容易整组落进 [0,1]（spineboy-pro 的 `idle-turn/front-fist.scale` 就是），
+   * 只看数值会把它们当成已归一化，实测带来 1.5% 的缩放偏差。
+   * 版本缺失（老工程 / 手写 JSON）时给 null，让解析侧回退到数值启发式。
+   */
+  const curveVersion = /^(\d+)\.(\d+)/.exec(String((json as { skeleton?: { spine?: unknown } }).skeleton?.spine ?? ''))
+  const absoluteCurve = curveVersion
+    ? Number(curveVersion[1]) > 4 || (Number(curveVersion[1]) === 4 && Number(curveVersion[2]) >= 2)
+    : null
+
   const animations: AnimData[] = Object.entries(json.animations ?? {}).map(([name, animation]) =>
     importSpineAnimations(name, animation, {
       boneIndex,
@@ -503,6 +515,7 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
       regions: ctx.regions,
       pageSizes: ctx.pageSizes,
       deformBase,
+      absoluteCurve,
       warnings
     })
   )

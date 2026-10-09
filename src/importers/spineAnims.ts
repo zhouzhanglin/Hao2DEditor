@@ -35,6 +35,11 @@ export interface SpineAnimContext {
   pageSizes: PageSizes
   /** 网格顶点基线：key = `slot\u0000attachment` */
   deformBase: ReadonlyMap<string, SpineDeformBase>
+  /**
+   * 贝塞尔 `curve` 的坐标系：`true` = 绝对值（spine ≥ 4.2 的「(时间, 值) 控制点」），
+   * `false` = 归一化 0..1 控制点（≤ 4.1），`null` = 版本未知（回退数值启发式）。
+   */
+  absoluteCurve: boolean | null
   warnings: string[]
 }
 
@@ -82,7 +87,7 @@ export function importSpineAnimations(
       const nraw = next ? numberOr(next.angle ?? next.value, 0) : raw
       // 缓动的归一化必须用**曲线所在的原始值空间**（角度 / 像素 / 倍数），
       // 不能换成叠加过 setup、除过 PPU 的最终值 —— 控制点是同一空间的绝对坐标
-      const e = curveOfChannel(key.curve, 0, timeOf(key), next ? timeOf(next) : timeOf(key), raw, nraw)
+      const e = curveOfChannel(key.curve, 0, timeOf(key), next ? timeOf(next) : timeOf(key), raw, nraw, ctx.absoluteCurve)
       track.rotate.push({ time: timeOf(key), value: bone.rotation + raw, ...e })
       duration = Math.max(duration, timeOf(key))
     }
@@ -94,7 +99,7 @@ export function importSpineAnimations(
       const rawX = numberOr(key.x, 0)
       const nrawX = next ? numberOr(next.x, 0) : rawX
       // 多通道 curve 里 x / y 各占一组，而模型每帧只存一个 easing —— 用 x 通道（编辑器默认两通道一致）
-      const e = curveOfChannel(key.curve, 0, timeOf(key), next ? timeOf(next) : timeOf(key), rawX, nrawX)
+      const e = curveOfChannel(key.curve, 0, timeOf(key), next ? timeOf(next) : timeOf(key), rawX, nrawX, ctx.absoluteCurve)
       track.translate.push({
         time: timeOf(key),
         value: {
@@ -112,7 +117,7 @@ export function importSpineAnimations(
       const next = scKeys[i + 1]
       const rawX = numberOr(key.x, 1)
       const nrawX = next ? numberOr(next.x, 1) : rawX
-      const e = curveOfChannel(key.curve, 0, timeOf(key), next ? timeOf(next) : timeOf(key), rawX, nrawX)
+      const e = curveOfChannel(key.curve, 0, timeOf(key), next ? timeOf(next) : timeOf(key), rawX, nrawX, ctx.absoluteCurve)
       track.scale.push({
         time: timeOf(key),
         value: { x: bone.localScale.x * rawX, y: bone.localScale.y * numberOr(key.y, 1) },
@@ -126,7 +131,7 @@ export function importSpineAnimations(
       const next = shKeys[i + 1]
       const rawX = numberOr(key.x, 0)
       const nrawX = next ? numberOr(next.x, 0) : rawX
-      const e = curveOfChannel(key.curve, 0, timeOf(key), next ? timeOf(next) : timeOf(key), rawX, nrawX)
+      const e = curveOfChannel(key.curve, 0, timeOf(key), next ? timeOf(next) : timeOf(key), rawX, nrawX, ctx.absoluteCurve)
       // 与参考库一致：shear 帧**原样保留**（不叠加 setup）
       // —— 参考的注释明确写着「setup 里没有 shear，且运行期不采样它，原样保留」
       track.shear.push({
@@ -385,14 +390,20 @@ function expandDrawOrder(
 /**
  * 帧缓动：把 Spine 的 `curve` 归一化成 0..1 的 cubic-bezier 控制点。
  *
- * 关键：Spine 的 curve 是**控制点在 (时间, 值) 空间的绝对坐标** —— 每通道 4 个数
- * `[t1, v1, t2, v2]`，多通道轨道（translate / scale）按 x / y 依次排列成 8 个数
- * （见参考库 `ReadCurve`，它按通道逐个 SetBezier）。早先当成「归一化的
- * cubic-bezier 控制点」直接用，等于把 `v1=68.265` 这种绝对坐标塞进 0..1 的
- * 求值器 → 中间帧插值爆炸，网格会被瞬间拽到很远的地方。
+ * 每通道 4 个数，多通道轨道（translate / scale / shear）按 x / y 依次排列成 8 个数
+ * （见官方 `ReadCurve`：`const i = value << 2`，再按通道逐个 `setBezier`）。
  *
- * 这里用「本帧 → 下一帧」的时间与取值把控制点归一化；`channel` 选第几组
- * （0 = x / rotate，1 = y）。`curve` 为 `"stepped"` 时阶跃，缺省 / `"linear"` 为线性。
+ * 两个时代的坐标系不同，**只能靠版本区分**（`SpineAnimContext.absoluteCurve`）：
+ * - ≤ 4.1：`[cx1, cy1, cx2, cy2]` 是**归一化 0..1 控制点**，可直接交给求值器；
+ * - ≥ 4.2：是 **(时间, 值) 空间的绝对坐标**，必须按「本帧 → 下一帧」的区间归一化。
+ *   贝塞尔对仿射变换不变，所以归一化后的形状与官方完全等价。
+ *
+ * 数值启发式（四个分量是否都落在 [0,1]）**会误判**：scale 通道的值本来就在 1 附近，
+ * 绝对控制点很容易整组落进 [0,1]（正例见 spineboy-pro 的 `idle-turn/front-fist.scale`）。
+ * 所以只在版本缺失（`null`）时才回退到它。
+ *
+ * `channel` 选第几组（0 = x / rotate，1 = y）。`curve` 为 `"stepped"` 时阶跃，
+ * 缺省 / 非数组为线性。
  */
 function curveOfChannel(
   curve: unknown,
@@ -400,14 +411,15 @@ function curveOfChannel(
   time1: number,
   time2: number,
   value1: number,
-  value2: number
+  value2: number,
+  absolute: boolean | null
 ): { easing: Easing; curve: number[] | null } {
   if (curve === 'stepped') return { easing: Easing.Stepped, curve: null }
   if (!Array.isArray(curve)) return { easing: Easing.Linear, curve: null }
   const base = channel * 4
   if (curve.length < base + 4) {
     // 单通道轨道只给 4 个数：第二通道复用第一组
-    if (channel > 0 && curve.length >= 4) return curveOfChannel(curve, 0, time1, time2, value1, value2)
+    if (channel > 0 && curve.length >= 4) return curveOfChannel(curve, 0, time1, time2, value1, value2, absolute)
     return { easing: Easing.Linear, curve: null }
   }
   const c1t = numberOr(curve[base], 0)
@@ -416,11 +428,12 @@ function curveOfChannel(
   const c2v = numberOr(curve[base + 3], 0)
   const dt = time2 - time1
   if (Math.abs(dt) < 1e-9) return { easing: Easing.Linear, curve: null }
-  // 旧版（≤ 4.1）的 curve 是**归一化**的 0..1 控制点，四个分量都落在 [0,1]，可直接交给运行时；
-  // 4.2+ 的 curve 换成了「(时间, 值) 空间的绝对坐标」—— 量级会明显超出 [0,1]
-  //（例如值的控制点 81.5、角度的 30），必须按帧区间归一化。用分量范围区分两种写法。
+
   const in01 = (value: number): boolean => value >= -1e-6 && value <= 1 + 1e-6
-  if (in01(c1t) && in01(c1v) && in01(c2t) && in01(c2v)) {
+  const looksNormalized = in01(c1t) && in01(c1v) && in01(c2t) && in01(c2v)
+  // 版本明确时以版本为准；歧义（版本缺失）时才看数值
+  const treatAsNormalized = absolute === true ? false : absolute === false ? true : looksNormalized
+  if (treatAsNormalized && looksNormalized) {
     return { easing: Easing.Bezier, curve: [c1t, c1v, c2t, c2v] }
   }
   const dv = value2 - value1

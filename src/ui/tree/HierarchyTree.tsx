@@ -152,7 +152,7 @@ function TreeRow({
     <div
       className={[
         // macOS 列表行：24px 行高；选中是「左右留白的圆角色块」（Finder 的选中不是通栏色块）
-        'group relative mx-1 flex h-[24px] items-center gap-1 rounded-[5px] px-1 text-panel transition-colors duration-panel cursor-pointer',
+        'group relative mx-1 flex h-[22px] items-center gap-1 rounded-[5px] px-1 text-panel transition-colors duration-panel cursor-pointer',
         active ? 'bg-accent-deep text-white' : 'text-content-hi hover:bg-white/[0.07]',
         dropActive ? 'ring-1 ring-inset ring-accent/70 bg-accent/10 text-content-hi' : '',
         nodeHint === 'inside' ? 'bg-accent/20 text-content-hi' : '',

@@ -187,7 +187,8 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
                 draggable
                 title="拖到视口 = 在落点新建插槽（先多选可以一次拖多张）；拖到层级树的插槽行 = 给该插槽加一个 display"
                 className={[
-                  'flex cursor-grab items-center gap-1.5 rounded border px-1.5 py-1 active:cursor-grabbing',
+                  // 行高比其他面板的列表项再矮一档：这里的缩略图本身就撑高度，内边距收紧 4px 正好
+                  'flex cursor-grab items-center gap-1.5 rounded border px-1.5 py-0.5 active:cursor-grabbing',
                   selectedSet.has(image.name)
                     ? 'border-accent/60 bg-accent/15'
                     : 'border-line/60 bg-ink-900/40 hover:border-accent/40'
@@ -215,7 +216,7 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
                 }
               >
                 <ImageThumb path={image.path} size={22} />
-                <span className="min-w-0 flex-1 truncate">{image.name}</span>
+                <span className="min-w-0 flex-1 truncate text-2xs">{image.name}</span>
                 <span className="shrink-0 font-mono text-3xs text-content-lo">
                   {image.width}×{image.height}
                 </span>

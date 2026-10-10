@@ -3,6 +3,7 @@ import { Bone } from 'lucide-react'
 import { EditorScene } from '@editor/scene'
 import { TextureStore } from '@render/material'
 import { ImageAlphaCache } from '@render/imageAlpha'
+import { ImageSourceRegistry } from '@render/imageSourceRegistry'
 import { getPlatform } from '@editor/platform'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
@@ -152,6 +153,9 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       observer.disconnect()
       scene.destroy()
       textures.clear()
+      scene.imageAlpha.clear()
+      // 记账一起清掉：否则重新挂载时会以为贴图还在，跳过加载
+      imageSources.clear()
       sceneRef.current = null
     }
   }, [onSceneReady, onStatus])
@@ -888,6 +892,12 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
   )
 }
 
+/**
+ * 图集页来源记账（名字 → 源路径）。模块级单例：它只是记账，真正占资源的是贴图 / 像素缓存。
+ * 视图卸载与下一次挂载都会清 / 重建，见 `imageSources.clear()`。
+ */
+const imageSources = new ImageSourceRegistry()
+
 async function loadTextures(
   store: TextureStore | null,
   document: ReturnType<typeof useProjectStore.getState>['document'],
@@ -895,18 +905,31 @@ async function loadTextures(
 ): Promise<void> {
   if (!store && !imageAlpha) return
   const platform = getPlatform()
+  /*
+   * 先释放「换了源路径 / 已不在清单里」的图集页。
+   *
+   * 不同资源的图集页常常**同名**（DragonBones 示例里 Dragon / DragonOpening / Ubbie_MeshAnim /
+   * Demon 都叫 `texture.png`），而两个缓存都按名字做键：不释放就会继续用上一份贴图，
+   * 新资源的 UV 是按新页尺寸归一化的，贴到旧图上整块错位 —— 看起来就像「零件位置不对」。
+   */
+  for (const name of imageSources.sync(document.images)) {
+    store?.delete(name)
+    imageAlpha?.delete(name)
+  }
   // 并行加载：串行时一张张排队，最后一张读完前面才全部就绪（视口里先是白块，等得越久越明显）
   await Promise.all(
     document.images.map(async (image) => {
       // 纹理与 alpha 缓存的就绪状态分开判断：纹理已加载不代表像素拾取能采样了
-      const needTexture = store !== null && !store.has(image.name)
-      const needAlpha = imageAlpha !== null && !imageAlpha.has(image.name)
+      const ready = imageSources.has(image)
+      const needTexture = store !== null && !(ready && store.has(image.name))
+      const needAlpha = imageAlpha !== null && !(ready && imageAlpha.has(image.name))
       if (!needTexture && !needAlpha) return
       // imageUrl：Electron 会读文件字节给同源 blob:（协议 URL 跨源，WebGL 用不了）
       const url = await platform.imageUrl(image.path)
       if (!url) return
       if (needTexture && store) await store.load(image.name, url)
       if (needAlpha && imageAlpha) imageAlpha.ensure(image.name, url)
+      imageSources.markLoaded(image)
     })
   )
 }

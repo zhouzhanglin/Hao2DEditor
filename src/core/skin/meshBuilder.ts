@@ -392,10 +392,17 @@ export class MeshBuilder {
     const hw = attachment.size.x * 0.5
     const hh = attachment.size.y * 0.5
     const uvs = attachment.uvs
+    /*
+     * 裁剪偏移在**附件自身坐标轴**里叠加：内容中心相对原图中心（= 附件原点）的位移。
+     * 放在这里而不是加进 `position`，是因为 position 会被骨骼的旋转带着转 ——
+     * 那个位移是图片坐标轴里的量，只能随附件的旋转走（Rooster 的下嘴就栽在这上面）。
+     */
+    const ox = attachment.contentOffset.x
+    const oy = attachment.contentOffset.y
 
     for (let i = 0; i < 4; i++) {
-      const sx = i === 1 || i === 2 ? hw : -hw
-      const sy = i >= 2 ? hh : -hh
+      const sx = (i === 1 || i === 2 ? hw : -hw) + ox
+      const sy = (i >= 2 ? hh : -hh) + oy
       const u = uvs.length > i * 2 ? uvs[i * 2] : 0
       const v = uvs.length > i * 2 + 1 ? uvs[i * 2 + 1] : 0
       this.writeVertex(m0 * sx + m4 * sy + m12, m1 * sx + m5 * sy + m13, u, v, color, slotIndex, i)

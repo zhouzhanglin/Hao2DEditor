@@ -98,6 +98,9 @@ function decompileAttachment(
     rotation: attachment.rotation,
     scale: { ...attachment.scale },
     size: { ...attachment.size },
+    // 原图（含裁剪留白）尺寸与内容偏移：编辑器画框 / 渲染局部偏移都要
+    frameSize: { ...attachment.frameSize },
+    contentOffset: { ...attachment.contentOffset },
     color: rgbaToHex(attachment.color),
     vertices,
     uvs: Array.from(attachment.uvs),

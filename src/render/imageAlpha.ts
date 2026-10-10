@@ -91,6 +91,18 @@ export class ImageAlphaCache {
     }
   }
 
+  /**
+   * 释放某张图的像素缓存。
+   *
+   * 换资源时必须用：图集页**同名**很常见（DragonBones 示例里 4 个角色都叫 `texture.png`），
+   * 不释放会继续按旧像素做拾取判断（点不中 / 点错零件）。
+   */
+  delete(name: string): void {
+    this.entries.delete(name)
+    this.failed.delete(name)
+    this.pending.delete(name)
+  }
+
   clear(): void {
     this.entries.clear()
     this.failed.clear()

@@ -100,6 +100,20 @@ export class TextureStore {
     return this.get(name)
   }
 
+  /**
+   * 释放一张纹理。
+   *
+   * 换资源时必须用：不同角色的图集页常常**同名**（DragonBones 示例里 4 个角色都叫 `texture.png`），
+   * 只按名字判断「已加载」会继续用上一份贴图 —— 表现就是新导入的零件张冠李戴。
+   */
+  delete(name: string): void {
+    const texture = this.textures.get(name)
+    if (!texture) return
+    this.textures.delete(name)
+    texture.destroy(true)
+    this.notify()
+  }
+
   clear(): void {
     for (const texture of this.textures.values()) texture.destroy(true)
     this.textures.clear()

@@ -113,8 +113,25 @@ export interface AttachmentData {
   /** 度 */
   rotation: number
   scale: Vec2
-  /** Region 的显示尺寸（宽, 高） */
+  /** Region 的显示尺寸（宽, 高）—— 内容的四边形按它绘制 */
   size: Vec2
+  /**
+   * 未裁剪原图（DB 的 frame / Spine 的 orig）的尺寸；`x <= 0` 表示没被裁剪过（此时原图尺寸就是 `size`）。
+   *
+   * 为什么要有它：被裁剪的图（图集里只存了「有像素的那块」）在编辑器里应当**按原图尺寸画框 / 命中**——
+   * 否则框会比图小一圈，看起来像「没算空白区域」。渲染仍然只按 `size`（内容）走，空白不会被画出来。
+   *
+   * `position` 指的就是**原图中心**（= DB 的显示变换），所以框以附件原点为中心。
+   */
+  frameSize: Vec2
+  /**
+   * 内容中心相对附件原点（= 原图中心）的位移，**在附件自身的坐标轴里**（y 向上）。
+   *
+   * 为什么强调「自身坐标轴」：这个位移来自裁剪（左/上裁掉多少），是**图片坐标轴**里的量。
+   * 若把它加进 `position`，就会被**骨骼**的旋转带着转（实测 Rooster 的下嘴因此跑到上嘴上方 0.3）；
+   * 正确做法是渲染四边形时在附件局部坐标里偏移（见 `meshBuilder.emitRegion`）。
+   */
+  contentOffset: Vec2
 
   color: RGBA
   /** 对应图集中的纹理名（= 图集页 png 名） */
@@ -191,6 +208,8 @@ export function createAttachmentData(partial?: Partial<AttachmentData>): Attachm
     rotation: 0,
     scale: { x: 1, y: 1 },
     size: { x: 0, y: 0 },
+    frameSize: { x: 0, y: 0 },
+    contentOffset: { x: 0, y: 0 },
     color: { ...WHITE },
     textureName: '',
     uvs: new Float32Array(8),
@@ -204,4 +223,22 @@ export function createAttachmentData(partial?: Partial<AttachmentData>): Attachm
     linkedMeshAttachment: '',
     ...partial
   }
+}
+
+/**
+ * 附件在**原图坐标系**里的框（局部坐标，以附件原点 = 原图中心为中心）：编辑器画选中轮廓、
+ * 算包围盒、取景都按它。
+ *
+ * - 没被裁剪（`frameSize` 缺省 / 非正）：就是内容框（`size`）；
+ * - 被裁剪：原图框（`frameSize`）—— 内容按 `contentOffset` 落在它内部的某处。
+ *
+ * 渲染不受影响：`meshBuilder.emitRegion` 只按 `size`（内容）画四边形，原图空白不会被画出来。
+ */
+export function attachmentFrameBox(attachment: {
+  size: Vec2
+  frameSize?: Vec2
+}): { center: Vec2; size: Vec2 } {
+  const frame = attachment.frameSize
+  if (frame && frame.x > 1e-6 && frame.y > 1e-6) return { center: { x: 0, y: 0 }, size: frame }
+  return { center: { x: 0, y: 0 }, size: attachment.size }
 }

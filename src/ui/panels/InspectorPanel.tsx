@@ -560,7 +560,9 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
               onChange={(value) => update('修改附件缩放', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.scale = value }))}
             />
             {/*
-              尺寸：**Region 的显示矩形** —— 渲染、选中轮廓、栅格网格都按它走。
+              尺寸：**Region 的内容矩形**（图集里那块有像素的区域）—— 渲染的四边形与栅格网格按它走。
+              被裁剪过的图，选中轮廓 / 变换手柄按**原图尺寸**走（下面那行只读提示），
+              于是框包含被裁掉的空白 —— 与 DragonBones / Spine 编辑器的显示一致。
               网格附件不显示它：网格的形状完全由顶点决定（选中轮廓也走顶点），
               改这个数在视口里看不出任何变化，只会在「自动生成网格」按它映射尺寸时
               产生看不出来的偏差。原值仍留在数据里（「还原为 Region」与重新生成都要用）。
@@ -572,6 +574,15 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                 step={0.05}
                 onChange={(value) => update('修改附件尺寸', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.size = value }))}
               />
+            ) : null}
+            {attachment.frameSize.x > 1e-4 &&
+            attachment.frameSize.y > 1e-4 &&
+            (Math.abs(attachment.frameSize.x - attachment.size.x) > 1e-4 ||
+              Math.abs(attachment.frameSize.y - attachment.size.y) > 1e-4) ? (
+              <p className="text-3xs text-content-lo">
+                原图（含裁剪留白）：{attachment.frameSize.x.toFixed(2)} × {attachment.frameSize.y.toFixed(2)} ——
+                选中轮廓/手柄按它走，渲染仍只有上面「尺寸」那块
+              </p>
             ) : null}
             <ColorField
               label="颜色"

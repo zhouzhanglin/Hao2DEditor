@@ -273,6 +273,9 @@ function normalizeAttachment(raw: Record<string, unknown>): AuthoringAttachment 
     rotation: num(raw.rotation),
     scale: vec2(raw.scale, 1, 1),
     size: vec2(raw.size, 100, 100),
+    // 未裁剪原图（含留白）尺寸与内容偏移；老工程没有这两个字段 → 0（= 没裁剪过，框就是 size）
+    frameSize: vec2(raw.frameSize, 0, 0),
+    contentOffset: vec2(raw.contentOffset, 0, 0),
     color: str(raw.color, '#FFFFFFFF'),
     vertices: arr(raw.vertices).map((item) => normalizeVertex(isRecord(item) ? item : {})),
     uvs: arr(raw.uvs).map((v) => num(v)),

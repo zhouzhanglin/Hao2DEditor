@@ -73,8 +73,20 @@ export interface AuthoringAttachment {
   /** 度 */
   rotation: number
   scale: Vec2
-  /** Region 显示尺寸 */
+  /** Region 显示尺寸（内容四边形） */
   size: Vec2
+  /**
+   * 未裁剪原图尺寸（DB 的 frame / Spine 的 orig）；`x <= 0` = 没裁剪过。
+   *
+   * 被裁剪的图（图集里只存有像素的那块）在编辑器里按**原图**画框 / 命中，渲染仍按 `size`（内容）。
+   * 见 `core/model/types.ts` 的 `AttachmentData.frameSize`。
+   */
+  frameSize: Vec2
+  /**
+   * 内容中心相对附件原点（= 原图中心）的位移，**在附件自身坐标轴里**；未裁剪为 0。
+   * 渲染时在局部坐标里偏移（`meshBuilder.emitRegion`），不能加进 `position`（那会被骨骼旋转带偏）。
+   */
+  contentOffset: Vec2
   color: string
   /** Mesh 顶点（含权重）；Region 为空 */
   vertices: AuthoringVertex[]
@@ -298,6 +310,9 @@ export function createAuthoringAttachment(partial?: Partial<AuthoringAttachment>
     rotation: 0,
     scale: { x: 1, y: 1 },
     size: { x: 100, y: 100 },
+    // 0 = 没被裁剪过（框就是 size）
+    frameSize: { x: 0, y: 0 },
+    contentOffset: { x: 0, y: 0 },
     color: '#FFFFFFFF',
     vertices: [],
     uvs: [],

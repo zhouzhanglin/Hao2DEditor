@@ -117,7 +117,14 @@ export function regionGeometry(
   region: AtlasRegion,
   displayWidthPx?: number,
   displayHeightPx?: number
-): { width: number; height: number; offsetX: number; offsetY: number } {
+): {
+  width: number
+  height: number
+  contentWidth: number
+  contentHeight: number
+  offsetX: number
+  offsetY: number
+} {
   /*
    * 区域尺寸**不按图集旋转交换**：`bounds` 的宽高就是区域自身的宽高，`rotate` 只描述它在图集页里
    * 怎么摆（由 UV 映射承担，见 mapRegionRelativeUvs）。这一点对齐官方运行库
@@ -136,6 +143,9 @@ export function regionGeometry(
   return {
     width: pxToUnit(origW * kx),
     height: pxToUnit(origH * ky),
+    // 内容（图集里那块有像素的区域）的显示尺寸：渲染四边形按它画，裁剪留白靠 offsetX/offsetY 定位
+    contentWidth: pxToUnit(region.width * kx),
+    contentHeight: pxToUnit(region.height * ky),
     // 未裁剪区域这里是 0（区域中心 = 附件位置）；裁剪时按 (bounds − orig)/2 补回中心
     offsetX: pxToUnit((region.offsetX + region.width * 0.5 - origW * 0.5) * kx),
     offsetY: pxToUnit(-(region.offsetY + region.height * 0.5 - origH * 0.5) * ky)

@@ -341,7 +341,14 @@ function convertDisplay(
   const frameHeight = subTexture ? (subTexture.frameHeight || subTexture.height) : 0
   const packedWidth = subTexture?.width ?? 0
   const packedHeight = subTexture?.height ?? 0
-  // 裁剪偏移：裁剪块中心相对原图中心（y 向上）
+  /*
+   * 裁剪（trim）：区域中心相对原图中心的位移，y 向上，**图片自身坐标轴**里的量。
+   *
+   * DB 的 frameX/frameY 与 Spine atlas 的 offset 同号同值（frameX = -左裁量），所以
+   * 裁剪块在原图里的位置直接由它们给出；DB 的显示原点默认取**原图中心**。
+   * 这个位移必须写成 `contentOffset`（渲染时在附件局部坐标里叠加），**不能**加进 `position`
+   * —— position 会被骨骼的旋转带着转，位移就跟着歪（Rooster 的下嘴跑到上嘴上方就是栽在这）。
+   */
   const centerX = (packedWidth - frameWidth) * 0.5 - (subTexture?.frameX ?? 0)
   const centerY = (frameHeight - packedHeight) * 0.5 + (subTexture?.frameY ?? 0)
   void slotBoneIndex
@@ -350,11 +357,23 @@ function convertDisplay(
     ...base,
     type: AttachmentType.Region,
     textureName: subTexture?.textureName ?? '',
-    position: {
-      x: base.position.x + pxToUnit(centerX),
-      y: base.position.y + pxToUnit(centerY)
-    },
-    size: { x: pxToUnit(frameWidth || packedWidth), y: pxToUnit(frameHeight || packedHeight) },
+    // position = 显示变换（= 原图中心）；裁剪块的位置交给 contentOffset（见上）
+    position: { x: base.position.x, y: base.position.y },
+    /*
+     * 尺寸取**图集区域**尺寸，而不是未裁剪的 frame 尺寸。
+     *
+     * Region 的四边形就是 `size × size`（见 meshBuilder.emitRegion），UV 又只覆盖区域本身 ——
+     * 用 frame 尺寸等于把裁掉的部分一起拉长：Rooster 的 beak_lower（区域 39×14 塞在
+     * 73×53 的逻辑帧里）会被拉成 73×53，看上去就像「位置和旋转都错了」。
+     *
+     * 未裁剪时 frame 尺寸 == 区域尺寸，行为不变；与 C# DragonBonesConverter 的
+     * `size = float2(rw, rh)` 一致（那边注释：矩形中心 = frameOffset，尺寸 = 图集区域）。
+     */
+    size: { x: pxToUnit(packedWidth), y: pxToUnit(packedHeight) },
+    // 原图尺寸（含裁剪留白）与内容偏移：前者给编辑器画框 / 变换手柄，后者渲染时在附件局部叠加。
+    // 未裁剪时 frameX/Y = 0 且 frame 尺寸 == 区域尺寸，两个字段等价于无效果。
+    frameSize: { x: pxToUnit(frameWidth), y: pxToUnit(frameHeight) },
+    contentOffset: { x: pxToUnit(centerX), y: pxToUnit(centerY) },
     uvs: subTexture
       ? Float32Array.from([
           subTexture.x / subTexture.textureWidth,

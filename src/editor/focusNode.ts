@@ -1,4 +1,5 @@
 import type { AuthoringAttachment, EditorDocument } from '@core/model/authoring'
+import { attachmentFrameBox } from '@core/model/types'
 import { MAT4_LENGTH, mul, trs } from '@core/math/matrix'
 import { getActiveScene } from './activeScene'
 
@@ -67,7 +68,8 @@ function attachmentsOfSlot(doc: EditorDocument, slotName: string): AuthoringAtta
 /** 附件在文档里的显示尺寸（Mesh 顶点范围也能算，但顶点可能为空，故留兜底） */
 function spanOfAttachment(attachment: AuthoringAttachment | undefined): { width: number; height: number } | null {
   if (!attachment) return null
-  const size = attachment.size
+  // 被裁剪的图按**原图**取景：与选中轮廓 / 变换包围盒用同一个框
+  const size = attachmentFrameBox(attachment).size
   if (size && size.x > 1e-4 && size.y > 1e-4) return { width: size.x, height: size.y }
   const vertices = attachment.vertices
   if (vertices.length > 0) {

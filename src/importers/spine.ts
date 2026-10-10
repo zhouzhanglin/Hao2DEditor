@@ -374,13 +374,15 @@ function convertAttachment(
     ...base,
     type: AttachmentType.Region,
     textureName: region ? region.page : '',
-    position: {
-      x: base.position.x + (geometry ? geometry.offsetX : 0),
-      y: base.position.y + (geometry ? geometry.offsetY : 0)
-    },
+    // position = 附件声明的显示位置（= 原图中心）；裁剪块的位置交给 contentOffset（附件局部坐标）
+    position: { x: base.position.x, y: base.position.y },
     size: geometry
-      ? { x: geometry.width, y: geometry.height }
+      ? { x: geometry.contentWidth, y: geometry.contentHeight }
       : { x: pxToUnit(attachment.width ?? 0), y: pxToUnit(attachment.height ?? 0) },
+    // 原图（含留白）尺寸给编辑器画框；内容偏移是「裁剪块中心相对原图中心」，随附件旋转走。
+    // 未裁剪时 frameSize.x 为 0（框退回 size）、contentOffset 为 0，行为与以前一致。
+    frameSize: geometry ? { x: geometry.width, y: geometry.height } : { x: 0, y: 0 },
+    contentOffset: geometry ? { x: geometry.offsetX, y: geometry.offsetY } : { x: 0, y: 0 },
     uvs: region ? regionUvs(region, ctx.pageSizes) : Float32Array.from([0, 0, 1, 0, 1, 1, 0, 1])
   })
 }

@@ -36,7 +36,7 @@ import {
 } from '@render/picking'
 import type { BoneHandleHit, BoneHit, GizmoPart, ShearEdge, VertexHit } from '@render/picking'
 import { ImageAlphaCache } from '@render/imageAlpha'
-import { AttachmentType } from '@core/model/types'
+import { AttachmentType, attachmentFrameBox } from '@core/model/types'
 
 /** 斜切包围盒：局部 AABB + 世界坐标四角（左上 → 右上 → 右下 → 左下） */
 export interface ShearBox {
@@ -808,13 +808,19 @@ export class EditorScene {
     if (!world) return null
 
     if (attachment.vertices.length === 0) {
-      const halfWidth = attachment.size.x * 0.5
-      const halfHeight = attachment.size.y * 0.5
+      /*
+       * 画的是**原图框**：被裁剪的图（图集里只存了有像素的那块）按原图尺寸 + 中心位移画，
+       * 轮廓 / 变换手柄于是包含被裁掉的空白 —— 与 DragonBones / Spine 编辑器里的显示一致。
+       * 渲染不受影响：四边形仍按 `size`（内容）画，空白不会被画出来。
+       */
+      const box = attachmentFrameBox(attachment)
+      const halfWidth = box.size.x * 0.5
+      const halfHeight = box.size.y * 0.5
       const corners = [
-        { x: -halfWidth, y: -halfHeight },
-        { x: halfWidth, y: -halfHeight },
-        { x: halfWidth, y: halfHeight },
-        { x: -halfWidth, y: halfHeight }
+        { x: box.center.x - halfWidth, y: box.center.y - halfHeight },
+        { x: box.center.x + halfWidth, y: box.center.y - halfHeight },
+        { x: box.center.x + halfWidth, y: box.center.y + halfHeight },
+        { x: box.center.x - halfWidth, y: box.center.y + halfHeight }
       ]
       const rect = corners.map((corner) => ({
         x: world[0] * corner.x + world[4] * corner.y + world[12],
@@ -946,13 +952,15 @@ export class EditorScene {
       }
       const vertices = attachment.vertices
       for (let i = 0; i + 1 < vertices.length; i += 2) push(vertices[i], vertices[i + 1])
-      if (attachment.size.x > 0 && attachment.size.y > 0) {
-        const hw = attachment.size.x * 0.5
-        const hh = attachment.size.y * 0.5
-        push(-hw, -hh)
-        push(hw, -hh)
-        push(hw, hh)
-        push(-hw, hh)
+      // 被裁剪的图按**原图**算包围盒（含空白），否则变换框会比图小一圈
+      const box = attachmentFrameBox(attachment)
+      if (box.size.x > 0 && box.size.y > 0) {
+        const hw = box.size.x * 0.5
+        const hh = box.size.y * 0.5
+        push(box.center.x - hw, box.center.y - hh)
+        push(box.center.x + hw, box.center.y - hh)
+        push(box.center.x + hw, box.center.y + hh)
+        push(box.center.x - hw, box.center.y + hh)
       }
     }
 

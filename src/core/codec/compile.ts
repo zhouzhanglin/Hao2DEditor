@@ -208,6 +208,9 @@ function convertAttachment(att: AuthoringAttachment, ctx: AttachmentContext): Re
     rotation: att.rotation,
     scale: { ...att.scale },
     size: { ...att.size },
+    // 原图信息给编辑器画框用；内容偏移给渲染在附件局部坐标里叠加
+    frameSize: { ...(att.frameSize ?? { x: 0, y: 0 }) },
+    contentOffset: { ...(att.contentOffset ?? { x: 0, y: 0 }) },
     color: hexToRgba(att.color),
     textureName: att.image,
     uvs,

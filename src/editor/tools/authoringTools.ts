@@ -55,19 +55,19 @@ interface MultiBoneStart {
   pos: Vec2
   /** 按下时的本地缩放 */
   scale: Vec2
-  /** 父骨骼世界矩阵（按下时）：把世界位移换算到这一根的父空间要用它；根骨骼为 null */
-  parentWorld: Float32Array | null
+  /** 按下时的本地斜切（度） */
+  shear: Vec2
 }
 
 interface DragSession {
   kind: DragKind
   bone: string
   /**
-   * 这次拖拽要一起改的骨骼（旋转 / 移动 / 缩放同时作用于它们）。
+   * 这次拖拽要一起改的骨骼（旋转 / 移动 / 缩放 / 斜切同时作用于它们）。
    *
-   * 内容 = 当前选中集合去掉「祖先也在集合里」的子孙（见 `pickDragRoots`）：父骨骼动了，
-   * 子骨骼本来就会跟着动，再写一遍子骨骼的本地值等于动双倍。单根选中时就是它自己，
-   * 走的写入路径与以前完全一致。
+   * 每根骨骼都**各自**在自己的本地值上加同一个增量 —— 谁也不替谁代劳：
+   * 父子同选时子骨骼会自己再转 / 再移一次，这正是「分别变换」的语义。
+   * 单根选中时就是它自己，写入路径与以前完全一致。
    */
   bones: MultiBoneStart[]
   /**
@@ -520,30 +520,6 @@ function boneLocked(name: string): boolean {
 }
 
 /**
- * 从选中集合里挑出**真正要写本地值的骨骼**：祖先也在集合里的那些要剔除。
- *
- * 父骨骼旋转 / 平移时子骨骼本来就会跟着动，再给子骨骼写一遍它自己的本地值 = 动双倍。
- * 剔除之后剩下的互不为祖先，一起改就是一次刚体式的整体变换。
- */
-export function pickDragRoots(
-  names: readonly string[],
-  parentOf: (name: string) => string | undefined
-): string[] {
-  return names.filter((name) => {
-    const seen = new Set<string>([name])
-    let parent = parentOf(name)
-    while (parent) {
-      if (names.includes(parent)) return false
-      // 脏数据（父子成环）时直接停下，别让这里转不出来
-      if (seen.has(parent)) break
-      seen.add(parent)
-      parent = parentOf(parent)
-    }
-    return true
-  })
-}
-
-/**
  * 把角度差收进 (-180, 180]。
  *
  * `atan2` 的返回值在 ±180° 处断开：指针从 170° 划到 −170°（实际是 +20°）直接相减会得到 −340°。
@@ -553,30 +529,11 @@ export function wrapDegrees(degrees: number): number {
   return ((degrees % 360) + 540) % 360 - 180
 }
 
-/**
- * 父空间是否镜像：行列式为负 → -1。
- *
- * 镜像的父骨骼（例如翻转过来的手）下，同样的**世界**转角要写成**反号**的本地转角才对得上；
- * 多选时先把这次的实际世界转角还原出来，再按各自父坐标系的镜像方向写进每根骨骼。
- */
-function mirroredSign(parentWorld: Float32Array | null): number {
-  if (!parentWorld) return 1
-  return parentWorld[0] * parentWorld[5] - parentWorld[4] * parentWorld[1] < 0 ? -1 : 1
-}
-
 /** 收集这次拖拽要一起改的骨骼：当前选中集合（锁定 / 找不到的剔除）+ 按下的这根 */
 function collectDragBones(host: ToolHost, boneName: string): MultiBoneStart[] {
   const bundle = host.scene.runtime
   if (!bundle) return []
   const skeleton = bundle.skeleton
-  const asset = bundle.asset
-  const indexOf = (name: string): number => bundle.boneIndex[name] ?? -1
-  const parentOf = (name: string): string | undefined => {
-    const index = indexOf(name)
-    if (index < 0) return undefined
-    const parentIndex = asset.bones[index].parentIndex
-    return parentIndex >= 0 ? asset.bones[parentIndex].name : undefined
-  }
   // 直接读 store：视口按下时可能刚把点击的骨骼选上，host 里的 selection 是按下那一刻的快照
   const current = useSelectionStore.getState()
   const selected = current.kind === 'bone' ? current.bones : []
@@ -584,17 +541,15 @@ function collectDragBones(host: ToolHost, boneName: string): MultiBoneStart[] {
   const names = selected.includes(boneName) ? selected : [...selected, boneName]
 
   const out: MultiBoneStart[] = []
-  for (const name of pickDragRoots(names, parentOf)) {
-    const index = indexOf(name)
+  for (const name of names) {
+    const index = bundle.boneIndex[name] ?? -1
     if (index < 0 || boneLocked(name)) continue
-    const parentIndex = asset.bones[index].parentIndex
     out.push({
       name,
       rot: skeleton.localRot[index],
       pos: { x: skeleton.localPos[index * 2], y: skeleton.localPos[index * 2 + 1] },
       scale: { x: skeleton.localScale[index * 2], y: skeleton.localScale[index * 2 + 1] },
-      parentWorld:
-        parentIndex >= 0 ? skeleton.world.slice(parentIndex * 16, parentIndex * 16 + 16) : null
+      shear: { x: skeleton.localShear[index * 2], y: skeleton.localShear[index * 2 + 1] }
     })
   }
   return out
@@ -706,10 +661,12 @@ function beginShearBoxDrag(host: ToolHost, boneName: string, edge: ShearEdge, wo
   const xAngle = toRad(startLocal.rot + startLocal.shear.x)
   const yAngle = toRad(startLocal.rot + 90 + startLocal.shear.y)
   const parentWorld = parent >= 0 ? skeleton.world.slice(parent * 16, parent * 16 + 16) : null
+  const bones = collectDragBones(host, boneName)
   drag = {
     ...IDLE,
     kind: 'shear-box',
     bone: boneName,
+    bones,
     origin: { x: box.corners[0].x, y: box.corners[0].y },
     startLocal,
     parentWorld,
@@ -722,7 +679,8 @@ function beginShearBoxDrag(host: ToolHost, boneName: string, edge: ShearEdge, wo
   storeHandler.begin('斜切骨骼')
   const suffix = host.mode === 'animate' ? '（写入关键帧）' : '（修改 setup）'
   const edgeLabel = edge === 'top' ? '上边' : edge === 'bottom' ? '下边' : edge === 'left' ? '左边' : '右边'
-  host.status(`斜切骨骼「${boneName}」${suffix} · 拖动包围盒${edgeLabel}`)
+  const together = bones.length > 1 ? `（同时作用于 ${bones.length} 根选中骨骼）` : ''
+  host.status(`斜切骨骼「${boneName}」${suffix} · 拖动包围盒${edgeLabel}${together}`)
   return true
 }
 
@@ -755,8 +713,15 @@ function dragShearBox(host: ToolHost, world: Vec2): void {
     next.y = clampShear(drag.startLocal.shear.y - (along / denominator) * RAD2DEG)
   }
 
+  // 被拖那根的增量（度）：每根选中骨骼各自加到自己的起始斜切上（各自夹在 ±85° 内）
+  const delta = { x: next.x - drag.startLocal.shear.x, y: next.y - drag.startLocal.shear.y }
   useProjectStore.getState().updateSilent((draft) => {
-    writeBoneValue(draft, animation, host.time, drag.bone, 'shear', next)
+    for (const item of drag.bones) {
+      writeBoneValue(draft, animation, host.time, item.name, 'shear', {
+        x: clampShear(item.shear.x + delta.x),
+        y: clampShear(item.shear.y + delta.y)
+      })
+    }
   })
   const after = useProjectStore.getState()
   scene.setDocument(after.document, host.selection.skin)
@@ -799,22 +764,19 @@ function dragGizmo(host: ToolHost, world: Vec2): void {
     /*
      * 旋转按**指针绕骨骼原点的角度变化**加减，不是「指到哪就转到哪」：
      * 每帧只累计这一帧转过的角度（`wrapDegrees` 修掉 atan2 的 ±180° 回绕），
-     * 骨骼在按下时的起始旋转上加这个累计值 —— 抓在旋转圈任意位置按下都不会先跳一下，
+     * 每根选中骨骼各自在**自己按下时的旋转**上加这个增量 —— 抓在旋转圈任意位置按下都不会先跳一下，
      * 连续转好几圈也不会被打断，每一度都由鼠标实际划过的弧决定。
      *
-     * 角度在**父空间**里量（与骨骼本地旋转同一个空间），镜像父骨骼下方向也自动一致：
-     * 多选时先把这次的实际世界转角还原出来，再按各自父坐标系的镜像方向写进去。
-     * 「祖先也在集合里」的子孙已在 collectDragBones 里剔除，不会出现转两次的双倍。
+     * 增量在**父空间**里量（与骨骼本地旋转同一个空间），所以写进每根骨骼的本地值是对得上的。
      */
     const angle =
       Math.atan2(pointerLocal.y - drag.startLocal.pos.y, pointerLocal.x - drag.startLocal.pos.x) *
       (180 / Math.PI)
     drag.sweep += wrapDegrees(angle - drag.lastAngle)
     drag.lastAngle = angle
-    const sweep = drag.sweep * mirroredSign(drag.parentWorld)
     store.updateSilent((draft) => {
       for (const item of drag.bones) {
-        writeBoneValue(draft, animation, host.time, item.name, 'rotate', item.rot + sweep * mirroredSign(item.parentWorld))
+        writeBoneValue(draft, animation, host.time, item.name, 'rotate', item.rot + drag.sweep)
       }
     })
   } else if (mode === 'move') {
@@ -828,16 +790,10 @@ function dragGizmo(host: ToolHost, world: Vec2): void {
       const along = moved.x * axis.x + moved.y * axis.y
       next = { x: start.x + axis.x * along, y: start.y + axis.y * along }
     }
-    // 多选：`moved` 是按下那根骨骼**父空间**里的位移，先换成世界位移，再各自换算进自己的父空间
-    const worldDelta = drag.parentWorld
-      ? mulVector(drag.parentWorld, { x: next.x - start.x, y: next.y - start.y })
-      : { x: next.x - start.x, y: next.y - start.y }
+    // 多选：同一个位移增量（按下那根骨骼父空间里的位移）加到每根选中骨骼各自的本地位置上
+    const delta = { x: next.x - start.x, y: next.y - start.y }
     store.updateSilent((draft) => {
       for (const item of drag.bones) {
-        // 根骨骼没有父矩阵 → 父空间就是世界空间（与 beginGizmoDrag 的约定一致）
-        const delta = item.parentWorld
-          ? mulVector(invert(item.parentWorld), worldDelta)
-          : worldDelta
         writeBoneValue(draft, animation, host.time, item.name, 'translate', {
           x: item.pos.x + delta.x,
           y: item.pos.y + delta.y
@@ -1266,19 +1222,10 @@ function moveActiveDrag(host: ToolHost, info: PointerInfo): void {
   const local = bone.parentIndex >= 0
     ? mulPoint(invert(skeleton.world.slice(parentOffset, parentOffset + 16)), info.world)
     : info.world
-  /*
-   * 多选：按下那根照旧「原点吸到指针」（拖原点圈的原有手感），其余骨骼按**同一世界位移**
-   * 各自换算进自己的父空间 —— 这样它们跟着走，不会被指针位置拽得乱跳。
-   */
-  const pointerDelta = { x: local.x - drag.startPointerLocal.x, y: local.y - drag.startPointerLocal.y }
-  const worldDelta = drag.parentWorld ? mulVector(drag.parentWorld, pointerDelta) : pointerDelta
+  // 多选：同一个位移增量（按下那根骨骼父空间里的位移）加到每根选中骨骼各自的本地位置上
+  const delta = { x: local.x - drag.startPointerLocal.x, y: local.y - drag.startPointerLocal.y }
   store.updateSilent((draft) => {
     for (const item of drag.bones) {
-      if (item.name === drag.bone) {
-        writeBoneValue(draft, animation, host.time, item.name, 'translate', local)
-        continue
-      }
-      const delta = item.parentWorld ? mulVector(invert(item.parentWorld), worldDelta) : worldDelta
       writeBoneValue(draft, animation, host.time, item.name, 'translate', {
         x: item.pos.x + delta.x,
         y: item.pos.y + delta.y

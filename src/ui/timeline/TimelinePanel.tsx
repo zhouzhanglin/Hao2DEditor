@@ -512,6 +512,10 @@ function selectionTargets(selection: ReturnType<typeof useSelectionStore.getStat
   if (selection.kind === 'attachment' && selection.slot && selection.attachment) {
     return [{ kind: 'deform', target: selection.slot, attachment: selection.attachment }]
   }
+  // 约束：与「打关键帧」按钮 / K 键走同一套目标映射（IK 的 mix 是可做动画的）
+  if (selection.kind === 'constraint' && selection.constraint) {
+    return [{ kind: 'constraint', target: selection.constraint, attachment: '' }]
+  }
   return []
 }
 

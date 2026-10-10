@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useProjectStore } from '@editor/store/projectStore'
+import { hasTreeDrag, readTreeDrag } from './dragDrop'
 
 /**
  * 拖动步长的**兜底**：调用方没声明 `step` 时，按当前值是否是整数猜（整数 ±1、浮点 ±0.1）。
@@ -481,17 +482,66 @@ export interface SelectFieldProps {
   options: Array<{ value: string; label: string }>
   onChange: (value: string) => void
   disabled?: boolean
+  /** 选择框右侧的附加控件（例如「定位到目标骨骼」按钮），与选择框同一行 */
+  trailing?: React.ReactNode
+  /** 接受从层级树拖来的骨骼：拖到选择框上松手时回调骨骼名 */
+  onDropBone?: (name: string) => void
 }
 
-export function SelectField({ label, value, options, onChange, disabled }: SelectFieldProps) {
+/**
+ * 下拉选择。
+ *
+ * `onDropBone` 打开「从层级树拖骨骼进来」的落点（目标骨骼 / 受约束骨链这类**选骨骼**的框）：
+ * dragover 阶段浏览器只肯暴露 MIME、读不到内容，所以先按 `TREE_MIME` 放行并高亮，
+ * 是不是骨骼要等 drop 读 payload 才知道 —— 插槽 / display 拖进来静默忽略。
+ */
+export function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+  disabled,
+  trailing,
+  onDropBone
+}: SelectFieldProps) {
+  const [boneOver, setBoneOver] = useState(false)
+
   return (
     <label className="flex items-center gap-1.5">
       <span className="hao-label w-[52px] shrink-0">{label}</span>
       <select
-        className="hao-field cursor-pointer bg-ink-900 disabled:cursor-not-allowed disabled:opacity-40"
+        className={[
+          'hao-field cursor-pointer bg-ink-900 disabled:cursor-not-allowed disabled:opacity-40',
+          boneOver ? 'ring-1 ring-inset ring-accent/70' : ''
+        ].join(' ')}
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value)}
+        onDragOver={
+          onDropBone
+            ? (event) => {
+                if (!hasTreeDrag(event.dataTransfer)) return
+                // 内部拖拽就地处理：不拦的话会冒泡到视口 / 整窗的兜底处理，松手时可能不派发 drop
+                event.preventDefault()
+                event.stopPropagation()
+                event.dataTransfer.dropEffect = 'move'
+                if (!boneOver) setBoneOver(true)
+              }
+            : undefined
+        }
+        onDragLeave={onDropBone ? () => setBoneOver(false) : undefined}
+        onDrop={
+          onDropBone
+            ? (event) => {
+                setBoneOver(false)
+                if (!hasTreeDrag(event.dataTransfer)) return
+                event.preventDefault()
+                event.stopPropagation()
+                const payload = readTreeDrag(event.dataTransfer)
+                if (payload?.kind === 'bone') onDropBone(payload.name)
+              }
+            : undefined
+        }
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -499,6 +549,7 @@ export function SelectField({ label, value, options, onChange, disabled }: Selec
           </option>
         ))}
       </select>
+      {trailing}
     </label>
   )
 }

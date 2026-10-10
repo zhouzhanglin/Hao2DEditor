@@ -249,6 +249,17 @@ export class AnimationPlayer {
     return this.fading
   }
 
+  /**
+   * 与 `asset.constraints` 对齐的**当前**约束状态（下标越界返回 null）。
+   *
+   * 给编辑器打关键帧用：画面上正在生效的 mix / 偏移就是这里存的值（动画轨道驱动过的也一样），
+   * 读它打帧才是所见即所得。返回副本，调用方改不到运行期状态。
+   */
+  constraintStateAt(index: number): ConstraintState | null {
+    const state = this.states[index]
+    return state ? { ...state } : null
+  }
+
   // ---------------- 采样核心 ----------------
 
   private indexOf(name: string): number {

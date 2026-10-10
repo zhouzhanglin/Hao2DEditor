@@ -198,6 +198,35 @@
     background-color: #2c2c2e;
   }
 
+  /*
+   * 「定位」闪烁：层级树里滚到的那根骨骼，名字短暂变亮 + 放大一下。
+   *
+   * 定位只提示位置、不改选中，反馈必须短促：一眼看到「就是这一行」，随即恢复常态，
+   * 免得留下一个「好像被选中了」的错觉。100% 只写 transform，颜色 / 光晕靠缺省值
+   * 自动回到行原本的样式（不用手动写回颜色，改主题也不会跑偏）。
+   */
+  @keyframes hao-reveal-flash {
+    0% {
+      color: #ffffff;
+      text-shadow: 0 0 10px rgba(10, 132, 255, 0.9);
+      transform: scale(1);
+    }
+    35% {
+      color: #ffffff;
+      text-shadow: 0 0 12px rgba(10, 132, 255, 0.95);
+      transform: scale(1.18);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+
+  .hao-reveal-flash {
+    /* 从左边放大：文字与行首图标对齐的那一侧不动，行内其余内容不会被推着走 */
+    transform-origin: left center;
+    animation: hao-reveal-flash 700ms ease-out;
+  }
+
   /* 缩略图用的小棋盘格：格子更密，小尺寸下也能看出透明区域 */
   .hao-checkerboard-sm {
     background-color: #2c2c2e;

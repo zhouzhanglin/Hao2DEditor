@@ -27,6 +27,10 @@ export function selectionTargets(selection: Selection): Array<{ kind: KeyKind; t
   if (selection.kind === 'attachment' && selection.slot && selection.attachment) {
     return [{ kind: 'deform', target: selection.slot, attachment: selection.attachment }]
   }
+  // 约束：IK 的混合（mix）等参数是可做动画的，选中约束按 K 就给它的全部通道打帧
+  if (selection.kind === 'constraint' && selection.constraint) {
+    return [{ kind: 'constraint', target: selection.constraint, attachment: '' }]
+  }
   return []
 }
 
@@ -77,7 +81,11 @@ function snapshotPose(bundle: RuntimeBundle): PoseSnapshot {
     slotVisible: bundle.skeleton.slotVisible,
     deformOffsets: bundle.skeleton.deformOffsets,
     boneIndex: bundle.boneIndex,
-    slotIndex: bundle.slotIndex
+    slotIndex: bundle.slotIndex,
+    // 约束打帧读的是**画面上正在生效**的值（动画轨道驱动过的 mix 也在里面），
+    // 所以取运行期状态而不是工程文件里的静态参数
+    constraintStates: bundle.asset.constraints.map((_, index) => bundle.player.constraintStateAt(index) ?? undefined),
+    constraintIndex: bundle.constraintIndex
   }
 }
 
@@ -238,7 +246,7 @@ export function keyframeNow(): ActionResult {
         }
       ]
     : selectionTargets(useSelectionStore.getState())
-  if (targets.length === 0) return { ok: false, message: '请先选中骨骼、插槽或网格附件' }
+  if (targets.length === 0) return { ok: false, message: '请先选中骨骼、插槽、网格附件或约束' }
   const trackLabel = focusedTrack ? `「${focusedTrack.target} · ${focusedTrack.channel}」` : ''
 
   let count = 0

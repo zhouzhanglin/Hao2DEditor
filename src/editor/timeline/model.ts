@@ -1,7 +1,10 @@
-import { Easing } from '@core/model/animation'
+import { Easing, emptyFloatKeyframe, upsertKeyframe } from '@core/model/animation'
+import type { FloatKeyframe } from '@core/model/animation'
 import { lastKeyTime } from '@core/model/authoring'
-import type { AuthoringAnimData, AuthoringSlotAnim, EditorDocument } from '@core/model/authoring'
+import type { AuthoringAnimData, AuthoringConstraintAnim, AuthoringSlotAnim, EditorDocument } from '@core/model/authoring'
+import type { ConstraintState } from '@core/constraints/solver'
 import {
+  ensureConstraintAnim,
   keyBoneChannel,
   keyDeform,
   keySlotColor,
@@ -446,6 +449,37 @@ export interface PoseSnapshot {
   deformOffsets: Array<number[] | null>
   boneIndex: Record<string, number>
   slotIndex: Record<string, number>
+  /**
+   * 运行期**当前**约束状态（与 `asset.constraints` 一一对齐），约束打帧时读它取值。
+   * 旧调用方可以不给：缺了它约束打帧会直接跳过，不会写进错的数值。
+   */
+  constraintStates?: ReadonlyArray<ConstraintState | undefined>
+  /** 约束名 → `constraintStates` 的下标 */
+  constraintIndex?: Record<string, number>
+}
+
+/**
+ * 每类约束可打关键帧的通道 —— 名字与 `constraintFrames` / `ConstraintState` 的字段一致。
+ * 参考库的 `.hao2d` 只导出 IK 的 mix，其余通道只有本工程运行期用得上。
+ */
+export const CONSTRAINT_CHANNELS: Record<string, readonly string[]> = {
+  ik: ['mix'],
+  transform: [
+    'mixRotate',
+    'mixX',
+    'mixY',
+    'mixScaleX',
+    'mixScaleY',
+    'mixShearY',
+    'offsetRotate',
+    'offsetX',
+    'offsetY',
+    'offsetScaleX',
+    'offsetScaleY',
+    'offsetShearY'
+  ],
+  path: ['position', 'spacing', 'rotateMix', 'translateMix'],
+  physics: []
 }
 
 /**
@@ -528,10 +562,66 @@ export function keyframeTargets(
       if (!offsets) continue
       keyDeform(animation, target.target, target.attachment, time, offsets)
       count++
+      continue
+    }
+    if (target.kind === 'constraint') {
+      const item = doc.constraints.find((c) => c.name === target.target)
+      if (!item) continue
+      const stateIndex = pose.constraintIndex?.[target.target]
+      const state = stateIndex === undefined ? undefined : pose.constraintStates?.[stateIndex]
+      if (!state) continue
+      const allowed = CONSTRAINT_CHANNELS[item.type] ?? []
+      // 指定通道（时间轴点了某条子轨）时只打那一条；否则打该类型支持的全部通道。
+      // 先过滤再建轨道：该类型没有的通道（比如给 IK 打 spacing）不该留下一条空轨道
+      const channels = (target.channel ? [target.channel] : allowed).filter((channel) => allowed.includes(channel))
+      if (channels.length === 0) continue
+      const track = ensureConstraintAnim(animation, target.target)
+      let keyed = false
+      for (const channel of channels) {
+        const keys = constraintKeysOf(track, channel)
+        const value = (state as unknown as Record<string, number>)[channel]
+        if (!keys || typeof value !== 'number' || !Number.isFinite(value)) continue
+        upsertKeyframe(keys, emptyFloatKeyframe(time, value))
+        keyed = true
+      }
+      if (keyed) count++
     }
   }
   if (count > 0) syncDuration(animation)
   return count
+}
+
+/** 约束通道的中文名（右键菜单 / 时间轴共用） */
+export const CONSTRAINT_CHANNEL_LABEL: Record<string, string> = {
+  mix: '混合',
+  mixRotate: '旋转混合',
+  mixX: 'X 位移混合',
+  mixY: 'Y 位移混合',
+  mixScaleX: 'X 缩放混合',
+  mixScaleY: 'Y 缩放混合',
+  mixShearY: '斜切混合',
+  offsetRotate: '旋转偏移',
+  offsetX: 'X 位移偏移',
+  offsetY: 'Y 位移偏移',
+  offsetScaleX: 'X 缩放偏移',
+  offsetScaleY: 'Y 缩放偏移',
+  offsetShearY: '斜切偏移',
+  position: '位置',
+  spacing: '间距',
+  rotateMix: '旋转混合',
+  translateMix: '位移混合'
+}
+
+/**
+ * 取约束轨道里某条通道的关键帧数组。
+ *
+ * 通道名来自约束数据本身（`constraintFrames` / `ConstraintState` 同名），
+ * 这里按**名字**查而不是按已知字段直取：调用方可能传进该约束类型没有的通道名，
+ * 直取会拿到 undefined 直接崩，按名字查则统一走「拿不到就跳过」。
+ */
+function constraintKeysOf(track: AuthoringConstraintAnim, channel: string): FloatKeyframe[] | null {
+  const value = (track as unknown as Record<string, unknown>)[channel]
+  return Array.isArray(value) ? (value as FloatKeyframe[]) : null
 }
 
 export { GROUP_LABEL }

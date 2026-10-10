@@ -1,4 +1,4 @@
-import { Brush, Grid3x3, Layers } from 'lucide-react'
+import { Brush, Crosshair, Grid3x3, Layers } from 'lucide-react'
 import { BlendMode } from '@core/model/types'
 import { curvePercent } from '@core/anim/interpolation'
 import { useProjectStore } from '@editor/store/projectStore'
@@ -9,6 +9,7 @@ import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { useThrottledPlayheadTime } from '@editor/store/playheadStore'
 import { getActiveScene } from '@editor/activeScene'
+import { useRevealStore } from '@editor/store/revealStore'
 import { keyBoneChannel, keySlotDisplay, keySlotVisible } from '@editor/commands/animationCommands'
 import {
   applyRename,
@@ -108,6 +109,8 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   const currentAnimation = useTimelineStore((s) => s.currentAnimation)
   /** Animate 态切显示附件 = 打 displayIndex 关键帧；Pose 态才是改绑定姿态 */
   const animating = mode === 'animate' && !!currentAnimation
+  /** 「定位」：让层级树滚到某根骨骼并闪一下（只提示位置，不改选中 —— 见 locateBone） */
+  const revealBone = useRevealStore((s) => s.revealBone)
 
   /**
    * 重命名当前选中对象（骨骼 / 插槽 / 附件 / 约束）。
@@ -927,6 +930,46 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   const constraint = document.constraints.find((c) => c.name === selection.constraint)
   if (!constraint) return <PanelEmpty title="约束不存在" description="该约束可能已被删除，请重新选择。" />
 
+  /**
+   * 受约束骨骼链（IK 按「链根 → 链尾」顺序驱动，顺序直接影响求解结果）。
+   *
+   * 链必须可编辑：新建约束时只带得上「右键那一根」骨骼，两骨 IK（腿 / 手臂）
+   * 要在这里把链尾补进来 —— 缺了它，IK 永远只有一根骨，等于配不出来。
+   */
+  const chainBones = constraint.bones
+  const chainCandidates = document.bones.filter((bone) => !chainBones.includes(bone.name))
+  const targetBoneExists = constraint.target !== '' && document.bones.some((bone) => bone.name === constraint.target)
+
+  /** 「目标」的写入口：下拉选择与「从层级树拖骨骼进来」共用（拖进来的骨骼一定存在） */
+  const setTargetBone = (name: string): void => {
+    if (name === constraint.target) return
+    update('修改约束目标', (draft) => {
+      const item = draft.constraints.find((c) => c.name === constraint.name)
+      if (item) item.target = name
+    })
+  }
+
+  /** 「定位到目标骨骼」：层级树滚到它并闪一下（目标常挂在脚 / 手这些离得远的部位） */
+  const locateTargetBone = (): void => {
+    if (targetBoneExists) revealBone(constraint.target)
+  }
+
+  const editChain = (label: string, mutate: (bones: string[]) => void): void => {
+    update(label, (draft) => {
+      const item = draft.constraints.find((c) => c.name === constraint.name)
+      if (item) mutate(item.bones)
+    })
+  }
+
+  /** 链内换位：越靠前越接近链根，越靠后越接近链尾 */
+  const moveChainBone = (from: number, to: number) => (): void => {
+    editChain('调整受约束骨骼顺序', (bones) => {
+      if (from < 0 || from >= bones.length || to < 0 || to >= bones.length) return
+      const [moved] = bones.splice(from, 1)
+      bones.splice(to, 0, moved)
+    })
+  }
+
   return (
     <div className="flex flex-col">
       <FieldGroup title={`${CONSTRAINT_LABEL[constraint.type]}约束`}>
@@ -956,12 +999,110 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
           label="目标"
           value={constraint.target}
           options={[{ value: '', label: '（无）' }, ...document.bones.map((b) => ({ value: b.name, label: b.name }))]}
-          onChange={(value) => update('修改约束目标', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t) t.target = value })}
+          onChange={setTargetBone}
+          onDropBone={setTargetBone}
+          trailing={
+            <button
+              type="button"
+              disabled={!targetBoneExists}
+              title={
+                targetBoneExists
+                  ? `在层级树里定位「${constraint.target}」`
+                  : '还没有可定位的目标骨骼'
+              }
+              className="flex h-[22px] w-[22px] shrink-0 cursor-pointer items-center justify-center rounded-[5px] text-content-lo transition-colors duration-panel hover:bg-white/[0.14] hover:text-content-hi disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-content-lo"
+              onClick={locateTargetBone}
+            >
+              <Crosshair size={13} />
+            </button>
+          }
         />
-        <p className="text-3xs text-content-lo">
-          受约束骨骼：{constraint.bones.join(' → ') || '（未设置）'}
-          {constraint.type === 'physics' ? ' · 物理约束仅保留数据，不参与求解' : ''}
-        </p>
+        <div className="flex flex-col gap-1">
+          {/*
+            IK 静默失效的两个坑：「没选目标」和「链是空的」——求解器直接返回，
+            视口里看不出任何异常。这里就地提醒，比等编译告警直观
+          */}
+          {constraint.type === 'ik' && !targetBoneExists ? (
+            <span className="text-3xs text-warn">
+              {constraint.target ? `目标骨骼「${constraint.target}」不存在，IK 不会生效` : '没有目标骨骼，IK 不会生效'}
+            </span>
+          ) : null}
+          {constraint.type === 'ik' && chainBones.length === 0 ? (
+            <span className="text-3xs text-warn">受约束骨骼链是空的，IK 不会生效</span>
+          ) : null}
+          <span className="text-3xs text-content-lo">
+            受约束骨骼链（
+            {constraint.type === 'ik' ? '链根 → 链尾，IK 按这个顺序驱动，至少要有链根与链尾两根骨骼' : '按顺序排布'}
+            ）
+            {constraint.type === 'physics' ? ' · 物理约束仅保留数据，不参与求解' : ''}
+          </span>
+          {chainBones.length === 0 ? <span className="text-3xs text-content-lo">（未设置）</span> : null}
+          {chainBones.map((name, index) => (
+            <div key={`${index}:${name}`} className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-ink-700/60">
+              <span className="w-[10px] shrink-0 text-right font-mono text-3xs text-content-lo">{index + 1}</span>
+              <span className="min-w-0 flex-1 truncate text-3xs" title={name}>
+                {name}
+              </span>
+              {/* 链里的每根骨骼同样能定位：长链里要挨个确认链根 / 链尾时很好用 */}
+              <button
+                type="button"
+                className="shrink-0 text-content-lo hover:text-content-hi"
+                title={`在层级树里定位「${name}」`}
+                onClick={() => revealBone(name)}
+              >
+                <Crosshair size={11} />
+              </button>
+              <button
+                type="button"
+                className="shrink-0 text-3xs text-content-lo hover:text-content-hi disabled:opacity-30 disabled:hover:text-content-lo"
+                disabled={index === 0}
+                title="上移（越靠前越接近链根）"
+                onClick={moveChainBone(index, index - 1)}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                className="shrink-0 text-3xs text-content-lo hover:text-content-hi disabled:opacity-30 disabled:hover:text-content-lo"
+                disabled={index === chainBones.length - 1}
+                title="下移（越靠后越接近链尾）"
+                onClick={moveChainBone(index, index + 1)}
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                className="shrink-0 text-3xs text-content-lo hover:text-danger"
+                title="从受约束骨骼链里移除（约束本身不受影响）"
+                onClick={() => editChain('移除受约束骨骼', (bones) => {
+                  const at = bones.indexOf(name)
+                  if (at >= 0) bones.splice(at, 1)
+                })}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          <SelectField
+            label="添加骨骼"
+            value=""
+            disabled={chainCandidates.length === 0}
+            options={[
+              { value: '', label: chainCandidates.length > 0 ? '（选择骨骼加到链尾）' : '（没有可添加的骨骼）' },
+              ...chainCandidates.map((bone) => ({ value: bone.name, label: bone.name }))
+            ]}
+            onChange={(value) => {
+              if (!value) return
+              editChain('添加受约束骨骼', (bones) => bones.push(value))
+            }}
+            // 从层级树直接拖骨骼过来 = 加到链尾，省得在下拉里翻
+            onDropBone={(name) => {
+              if (chainBones.includes(name)) return
+              editChain('添加受约束骨骼', (bones) => bones.push(name))
+            }}
+          />
+          <span className="text-3xs text-content-lo">「目标」和「添加骨骼」都能从层级树拖骨骼进来</span>
+        </div>
       </FieldGroup>
 
       {constraint.type === 'ik' ? (

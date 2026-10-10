@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   Bone,
@@ -22,11 +22,12 @@ import {
 import type { AuthoringAttachmentType } from '@core/model/authoring'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
+import { useRevealStore } from '@editor/store/revealStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { useThrottledPlayheadTime } from '@editor/store/playheadStore'
 import { keySlotDisplayNow, keyframeTargetsNow } from '@editor/timeline/actions'
-import { slotDisplayNameAt } from '@editor/timeline/model'
+import { CONSTRAINT_CHANNEL_LABEL, CONSTRAINT_CHANNELS, slotDisplayNameAt } from '@editor/timeline/model'
 import type { KeyframeTarget } from '@editor/timeline/model'
 import { getActiveScene } from '@editor/activeScene'
 import { focusNode } from '@editor/focusNode'
@@ -106,6 +107,10 @@ interface TreeRowProps {
    * 三种拖动负载的形状与 FocusTarget 完全一致，所以只有约束行需要显式给。
    */
   focusTarget?: FocusTarget
+  /** 骨骼行用 `data-bone` 标出名字：定位（滚过来 + 闪一下）靠它查这一行 */
+  dataBone?: string
+  /** 非 0 时这行的名字闪一下（值本身只用来当 key，重播动画） */
+  flashKey?: number
 }
 
 /** 指针落在行的哪一段：上沿 / 中间（放进这一层）/ 下沿 */
@@ -139,6 +144,8 @@ function TreeRow({
   dragPayload,
   onDropNode,
   focusTarget,
+  dataBone,
+  flashKey,
   secondary
 }: TreeRowProps) {
   const [dropActive, setDropActive] = useState(false)
@@ -170,6 +177,7 @@ function TreeRow({
         dragPayload ? 'cursor-grab active:cursor-grabbing' : ''
       ].join(' ')}
       data-slot={dataSlot}
+      data-bone={dataBone}
       onClick={onSelect}
       onDoubleClick={
         focus
@@ -317,7 +325,15 @@ function TreeRow({
         ) : (
           <span className="flex h-[14px] w-[14px] shrink-0 items-center justify-center text-content-lo">{icon}</span>
         )}
-        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {/*
+          key 跟着闪烁序号走：同一根骨骼被再次定位时字符串类名不变，靠重挂载才能重播动画
+        */}
+        <span
+          key={flashKey ?? 0}
+          className={['min-w-0 flex-1 truncate', flashKey ? 'hao-reveal-flash' : ''].join(' ')}
+        >
+          {label}
+        </span>
         {meta ? <span className="shrink-0 font-mono text-3xs text-content-lo">{meta}</span> : null}
         {trailing}
         {onDelete ? (
@@ -418,6 +434,48 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   const [query, setQuery] = useState('')
   /** 树列表容器：拖放兜底判定要用它量各行的位置 */
   const listRef = useRef<HTMLDivElement | null>(null)
+  /** 检查器里的「定位」请求：滚到那根骨骼并闪一下（见下面两个 effect） */
+  const revealTarget = useRevealStore((s) => s.bone)
+  const revealNonce = useRevealStore((s) => s.nonce)
+  const handledReveal = useRef(0)
+  /** 正在闪烁的骨骼行 */
+  const [flash, setFlash] = useState<{ name: string; nonce: number } | null>(null)
+
+  /**
+   * 收到定位请求：清掉搜索过滤、展开祖先链，并记下要闪的那一行。
+   *
+   * 展开与「记下要闪的行」必须同批提交 —— 下一次渲染里那一行才存在，紧接着的滚动
+   * effect 才找得到它。同一个序号只处理一次，否则之后每次编辑骨骼都会重放一遍动画。
+   */
+  useEffect(() => {
+    if (revealNonce === 0 || handledReveal.current === revealNonce) return
+    handledReveal.current = revealNonce
+    // 搜索过滤期间目标多半被筛掉了：定位的语义就是「让我看到它」
+    setQuery('')
+    const bones = useProjectStore.getState().document.bones
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      let parent = bones.find((bone) => bone.name === revealTarget)?.parent ?? ''
+      while (parent) {
+        next.delete(parent)
+        parent = bones.find((bone) => bone.name === parent)?.parent ?? ''
+      }
+      return next
+    })
+    setFlash({ name: revealTarget, nonce: revealNonce })
+  }, [revealTarget, revealNonce])
+
+  /** 行渲染出来之后再滚动（上面那批状态已生效），闪完自动收尾 */
+  useEffect(() => {
+    if (!flash) return
+    const row = listRef.current?.querySelector(`[data-bone="${CSS.escape(flash.name)}"]`)
+    row?.scrollIntoView({ block: 'nearest' })
+    const timer = window.setTimeout(
+      () => setFlash((current) => (current && current.nonce === flash.nonce ? null : current)),
+      900
+    )
+    return () => window.clearTimeout(timer)
+  }, [flash])
 
   const bonesByParent = useMemo(() => groupBones(document.bones), [document.bones])
   // 插槽按 zOrder 倒序排：列表**上面的行画在更前面**（与 Photoshop / Figma 的图层列表一致），
@@ -710,11 +768,34 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     if (bone) setCollapsed((prev) => (prev.has(bone) ? new Set([...prev].filter((n) => n !== bone)) : prev))
   }
 
+  /**
+   * 「添加 IK 约束」菜单项的副标题：把**这一次**会配出的受约束骨链显示出来。
+   * 多选父→子连续的骨骼时链会一次配好，只选一根时顺带提示链尾可以在检查器里补。
+   */
+  const ikChainHint = (host: string): string => {
+    if (!host) return '未指定驱动骨骼'
+    const chain = selection.bones.includes(host) ? chainFromSelection(document, selection.bones, host) : [host]
+    return chain.length > 1
+      ? `受约束骨链：${chain.join(' → ')}`
+      : `驱动骨骼：「${host}」（多选父→子连续的骨骼可一次配好整条链）`
+  }
+
   const addConstraint = (kind: AuthoringConstraint['type'], bone = selectedBone()): void => {
     update('新建约束', (draft) => {
       const driver = bone || draft.bones[0]?.name || ''
       const name = uniqueName(draft.constraints.map((c) => c.name), kind)
-      const base = { name, order: draft.constraints.length, enabled: true, bones: driver ? [driver] : [], target: '' }
+      /*
+       * IK 真正有用的是「链根 → 链尾」两根以上的骨链，只带右键那一根等于配不出腿 / 手臂。
+       * 多选父→子连续的骨骼时一次把整条链配好；只选一根就退回单骨，
+       * 链尾之后可以在检查器的「受约束骨骼链」里补。
+       */
+      const bones =
+        kind === 'ik' && driver && selection.bones.includes(driver)
+          ? chainFromSelection(draft, selection.bones, driver)
+          : driver
+            ? [driver]
+            : []
+      const base = { name, order: draft.constraints.length, enabled: true, bones, target: '' }
       if (kind === 'ik') draft.constraints.push({ ...createIkConstraint(), ...base, type: 'ik' })
       else if (kind === 'transform') {
         draft.constraints.push({ ...createTransformConstraint(), ...base, type: 'transform' })
@@ -738,8 +819,18 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     event.stopPropagation()
     // Animate 态根层没有关键帧操作：不开空菜单（比弹一个空框更清楚）
     if (useModeStore.getState().mode === 'animate' && target.kind === 'root') return
-    if (target.kind === 'bone') selection.selectBone(target.name)
-    else if (target.kind === 'slot') selection.selectSlot(target.name)
+    if (target.kind === 'bone') {
+      if (selection.bones.length > 1 && selection.bones.includes(target.name)) {
+        /*
+         * 已多选时保持整组选中：右键就是「对选中的这组骨骼做什么」，
+         * 新建 IK 正是拿这组骨骼当受约束骨链用（见 addConstraint）。
+         * 只把右键那一根挪到组末 —— 组末是主选中（检查器显示它）。
+         */
+        selection.selectBones([...selection.bones.filter((name) => name !== target.name), target.name])
+      } else {
+        selection.selectBone(target.name)
+      }
+    } else if (target.kind === 'slot') selection.selectSlot(target.name)
     else if (target.kind === 'constraint') selection.selectConstraint(target.name)
     setMenu({ x: event.clientX, y: event.clientY, target })
   }
@@ -796,7 +887,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   /**
    * Animate 态的菜单：只给「打关键帧」。
    * 加骨骼 / 插槽 / 约束、删除这些改的是 setup（绑定）数据，动画状态里动它们会污染动画基线。
-   * 约束是例外：它本来就没有关键帧轨道，右键只留「删除」（见下面的分支）。
+   * 约束行同样给打关键帧（IK 的混合是可做动画的），删除放在最后（见下面的分支）。
    */
   const keyframeMenuItems = (target: MenuTarget): ContextMenuItem[] => {
     if (target.kind === 'bone') {
@@ -837,11 +928,32 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     }
     if (target.kind === 'constraint') {
       /*
-       * 约束：右键菜单**只留「删除」**。
-       * 它的 mix / offset 是检查器里的编辑值（不在运行时姿态里），既没有关键帧轨道可打，
-       * 其余「添加骨骼 / 添加插槽」对约束行也没有意义 —— 摆着只会是噪音。
+       * 约束：Animate 态给「打关键帧」，参数之外的操作（添加骨骼 / 插槽）对约束行没有意义。
+       * IK 的混合（mix）本来就是可做动画的（时间轴有它的轨道、`.hao2d` 也导出 iks 段），
+       * 这里不给入口的话权重动画就只能手改工程文件。物理约束没有可做动画的参数（只保留数据、
+       * 不参与求解），菜单仍只留「删除」。
        */
-      return [deleteItem(target)]
+      const name = target.name
+      const constraint = document.constraints.find((item) => item.name === name)
+      const channels = constraint ? CONSTRAINT_CHANNELS[constraint.type] ?? [] : []
+      if (channels.length === 0) return [deleteItem(target)]
+      const labelOf = (channel: string): string => CONSTRAINT_CHANNEL_LABEL[channel] ?? channel
+      const keyAll: KeyframeTarget[] = [{ kind: 'constraint', target: name, attachment: '' }]
+      const keyOne = (channel: string): KeyframeTarget[] => [
+        { kind: 'constraint', target: name, attachment: '', channel }
+      ]
+      const items: ContextMenuItem[] =
+        channels.length === 1
+          ? [keyframeItem('k-constraint-0', `${labelOf(channels[0])}关键帧`, `${name} · ${labelOf(channels[0])}`, keyAll)]
+          : [
+              keyframeItem('k-constraint-all', '全部参数关键帧', `${name} · 全部参数`, keyAll),
+              { key: 'sep-kc', label: '', separator: true },
+              ...channels.map((channel) =>
+                keyframeItem(`k-constraint-${channel}`, `${labelOf(channel)}关键帧`, `${name} · ${labelOf(channel)}`, keyOne(channel))
+              )
+            ]
+      items.push({ key: 'sep-kc2', label: '', separator: true }, deleteItem(target))
+      return items
     }
     return []
   }
@@ -875,7 +987,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             {
               key: 'ik',
               label: '添加 IK 约束',
-              hint: host ? `驱动骨骼：「${host}」` : '未指定驱动骨骼',
+              // 多选父→子连续的骨骼时，链会一次配好；只选一根就提示怎么配出两骨 IK
+              hint: ikChainHint(host),
               icon: <IkConstraintIcon size={12} />,
               onSelect: () => addConstraint('ik', host)
             },
@@ -964,6 +1077,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     rows.push(
       <TreeRow
         key={`bone:${bone.name}`}
+        dataBone={bone.name}
+        flashKey={flash?.name === bone.name ? flash.nonce : 0}
         dragPayload={{ kind: 'bone', name: bone.name }}
         onDropNode={(payload, position) => handleNodeDrop(payload, { kind: 'bone', name: bone.name }, position)}
         depth={depth}
@@ -1381,6 +1496,28 @@ function uniqueName(existing: readonly string[], base: string): string {
   let index = 2
   while (existing.includes(`${base}_${index}`)) index++
   return `${base}_${index}`
+}
+
+/**
+ * 从当前多选里整理出受约束骨骼链（IK 用）。
+ *
+ * 只接受「父 → 子」连续的几根骨骼 —— 乱七八糟的多选（选了两条腿）拿去当链只会配出错的 IK。
+ * 选反了（链尾在前）也接受，翻转后同样连续就用翻转的结果：IK 的链根必须排在前面。
+ * 都不满足时退回 `fallback` 单骨。
+ */
+function chainFromSelection(doc: EditorDocument, names: readonly string[], fallback: string): string[] {
+  const picked = names.filter(Boolean)
+  const isChain = (list: readonly string[]): boolean =>
+    list.length >= 2 &&
+    list.every((name, index) => {
+      if (index === 0) return doc.bones.some((bone) => bone.name === name)
+      const bone = doc.bones.find((item) => item.name === name)
+      return !!bone && bone.parent === list[index - 1]
+    })
+  if (isChain(picked)) return [...picked]
+  const reversed = [...picked].reverse()
+  if (isChain(reversed)) return reversed
+  return fallback ? [fallback] : []
 }
 
 function toCss(hex: string): string {

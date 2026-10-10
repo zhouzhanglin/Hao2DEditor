@@ -325,6 +325,14 @@ function compileConstraints(
       continue
     }
     const target = item.target ? (boneIndex.get(item.target) ?? -1) : -1
+    /*
+     * IK 求解必须有目标（求解器拿到 -1 会直接返回，约束等于不存在），
+     * 而「配好链、忘了选目标」正是最容易踩的一步：这里明确告警，别让它静默失效。
+     */
+    if (item.type === 'ik') {
+      if (item.target && target === -1) warnings.push(`IK 约束「${item.name}」的目标骨骼不存在，不会生效`)
+      else if (!item.target) warnings.push(`IK 约束「${item.name}」没有目标骨骼，不会生效`)
+    }
     index[item.name] = constraints.length
 
     if (item.type === 'ik') {

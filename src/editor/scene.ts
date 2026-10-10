@@ -276,6 +276,13 @@ export class EditorScene {
         const resumed = Math.max(0, Math.min(previousTime, animationDuration(doc, this.animationName)))
         this.viewState.time = resumed
         this.bundle.player.time = resumed
+      } else {
+        /*
+         * Pose 态（没选动画）：没有人推进播放器，而**新建出来的运行时不会自己求解约束**
+         * —— 不补这一步，新建 / 编辑 IK 约束后视口永远看不到效果（表现为「IK 完全没反应」）。
+         * `refresh()` 在没有当前动画时就是「重算 FK + 求解约束」，不会动绑定姿态。
+         */
+        this.bundle.player.refresh()
       }
       this.markDirty()
     }
@@ -380,6 +387,9 @@ export class EditorScene {
     if (this.animationName) {
       this.bundle.player.play(this.animationName, this.viewState.loop)
       this.bundle.player.time = this.viewState.time
+    } else {
+      // 同上：换皮肤也是重建运行时，Pose 态得补一次约束求解
+      this.bundle.player.refresh()
     }
     this.markDirty()
   }
@@ -466,6 +476,10 @@ export class EditorScene {
 
   /** 立即重建一帧（编辑后调用，不等下一帧）：连网格一起重建 */
   refresh(): void {
+    // Pose 态没有动画在推进播放器，而约束只在「播放器走一帧」时求解
+    //（新建的运行时更是完全没求解过）：编辑完补一次，视口里的 IK 才跟得上改动
+    const player = this.bundle?.player
+    if (player && !player.currentAnimation) player.refresh()
     this.invalidateSkin()
     this.update(0)
   }

@@ -30,11 +30,13 @@ export interface BoneOverlayOptions {
 }
 
 // 覆盖层配色统一取 macOS 系统色（暗色版），与主题令牌同源。
-// 注意：**没有「选中色 / 悬停色」** —— 骨骼靠透明度与线宽表示选中，颜色始终是它自己的
-//（见 drawBoneOverlay 里的 strength），这样「列表里哪一行」和「视口里哪根」永远同色。
+// 骨骼的**填充与关节圈**始终用自己的颜色（见 drawBoneOverlay 里的 strength），
+// 这样「列表里哪一行」和「视口里哪根」永远同色；只有**选中时的描边**换成黑色，用来强调。
 const COLOR_BONE = 0xe0a45c
 const COLOR_JOINT = 0xffd60a
 const COLOR_ROOT = 0xbf5af2
+/** 选中骨骼的描边色（黑色硬描边，跟骨骼自己的颜色形成对比） */
+const COLOR_SELECTED = 0x000000
 const COLOR_CONSTRAINT = 0x40c8e0
 const COLOR_LINK = 0x8e8e93
 
@@ -341,9 +343,17 @@ export function drawBoneOverlay(
       const hollow = options.hollowBones?.has(skeleton.asset.bones[i].name) ?? false
       // 选中接近实心（0.9）、悬停次之（0.6）、普通 0.4 —— 三个档位只看透明度就知道谁被选中
       if (!hollow) fills.poly(quad).fill({ color, alpha: strength === 2 ? 0.9 : strength === 1 ? 0.6 : 0.4 })
-      strokes
-        .poly(quad)
-        .stroke({ width: w * (isSelected ? 1.8 : isWeight ? 1.5 : 1.2), color, alpha: hollow || strength > 0 ? 1 : 0.9 })
+      /*
+       * 选中：描边换成**黑色并加粗**（2.6 倍像素宽），本体颜色留在填充里。
+       *
+       * 原来选中只是「加粗一点点 + 透明度压实」，在浅色素材 / 一堆骨骼挨在一起时几乎看不出来；
+       * 黑描边跟骨骼自己的颜色（橙 / 权重色）形成硬对比，多选时也能一眼数清选了几根。
+       */
+      strokes.poly(quad).stroke({
+        width: w * (isSelected ? 2.6 : isWeight ? 1.5 : 1.2),
+        color: isSelected ? COLOR_SELECTED : color,
+        alpha: hollow || strength > 0 ? 1 : 0.9
+      })
 
     }
 
@@ -353,7 +363,7 @@ export function drawBoneOverlay(
     strokes
       .poly(circlePolygon(x, y, r))
       .stroke({
-        width: w * (isSelected ? 2.2 : 1.8),
+        width: w * (isSelected ? 2.0 : 1.8),
         color: isRoot ? COLOR_ROOT : (weightColor ?? COLOR_JOINT),
         alpha: isRoot || strength > 0 ? 1 : 0.9
       })

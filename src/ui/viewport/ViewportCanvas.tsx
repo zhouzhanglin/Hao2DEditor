@@ -491,6 +491,35 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       pointer.current.boneClick = name ? { bone: name, clientX: event.clientX, clientY: event.clientY } : null
     }
 
+    /*
+     * Shift / Cmd / Ctrl + 点骨骼 = 加选 / 减选，与层级树同一套规则。
+     *
+     * 这一步必须排在工具**前面**：选择 / Pose 工具点中骨骼就会开始拖拽并 return true，
+     * 根本走不到下面的点选分支 —— 只在那儿判修饰键，视口里就永远只是单选。
+     * Alt 不参与（视口里它是插顶点 / 权重工具里是「减少」），权重刷与绑骨骼工具也不参与。
+     */
+    const multiSelect = event.shiftKey || event.metaKey || event.ctrlKey
+    const activeTool = useToolStore.getState().tool
+    if (
+      multiSelect &&
+      !event.altKey &&
+      scene.runtime &&
+      (activeTool === 'select' || activeTool === 'pose')
+    ) {
+      const hitBone = scene.pickBoneAt(world.x, world.y)
+      const name = hitBone ? (scene.runtime.asset.bones[hitBone.boneIndex]?.name ?? '') : ''
+      if (name) {
+        useSelectionStore.getState().toggleBone(name)
+        const after = useSelectionStore.getState()
+        onStatus(
+          after.bones.length > 0
+            ? `已选中 ${after.bones.length} 根骨骼（主选中「${after.bone}」；Shift / Cmd 点击可加选 / 减选）`
+            : '已取消骨骼选择'
+        )
+        return
+      }
+    }
+
     const host = buildHost()
     if (host && toolPointerDown(host, { world, shift: event.shiftKey, ctrl: event.ctrlKey, alt: event.altKey })) {
       event.currentTarget.setPointerCapture(event.pointerId)
@@ -511,15 +540,8 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
           return
         }
       }
-      // Shift / Cmd / Ctrl 点击 = 加选 / 减选；点**已选中**的骨骼保留整批（接着拖 = 一起动）
-      if (event.shiftKey || event.metaKey || event.ctrlKey) selection.toggleBone(name)
-      else if (!selection.bones.includes(name)) selection.selectBone(name)
-      const after = useSelectionStore.getState()
-      onStatus(
-        after.bones.length > 1
-          ? `选中 ${after.bones.length} 根骨骼（主选中「${after.bone}」）`
-          : `选中骨骼「${name}」（骨骼体=旋转 / 原点圈=移动 / 末端方块=缩放）`
-      )
+      selection.selectBone(name)
+      onStatus(`选中骨骼「${name}」（骨骼体=旋转 / 原点圈=移动 / 末端方块=缩放）`)
     } else {
       selection.clear()
       onStatus('已取消选择')

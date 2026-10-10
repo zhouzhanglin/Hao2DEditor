@@ -14,7 +14,6 @@ import {
   Maximize2,
   Plus,
   Route,
-  Target,
   Trash2,
   Unlock
 } from 'lucide-react'
@@ -342,12 +341,45 @@ function worldMatrixOfBone(boneName: string): Float32Array | null {
   return getActiveScene()?.worldMatrixOf(boneName) ?? null
 }
 
+/**
+ * IK 约束图标：**准星**（靶环 + 四向凸点 + 内环 + 中心横杆），与视口叠加层里画的约束手柄同形
+ *（`boneOverlay.drawConstraintLinks`）—— 一眼能对上「树里这条约束」和「视口里那个手柄」。
+ *
+ * 用内联 SVG 而不是 lucide 的 `Target`：后者只有同心圆 + 十字，没有四向凸点与中心横杆，
+ * 跟视口里的记号对不上。
+ */
+function IkConstraintIcon({ size = 13 }: { size?: number }): React.ReactNode {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.4}
+      strokeLinecap="round"
+      /* 约束红：与视口叠加层里的约束标记同色（boneOverlay 的 COLOR_CONSTRAINT） */
+      className="text-[#e4572e]"
+      aria-hidden
+    >
+      {/* 靶环 */}
+      <circle cx="12" cy="12" r="6.8" />
+      {/* 四向凸点（上下左右探出环外） */}
+      <path d="M12 3.6v2.4M12 20.4v-2.4M3.6 12h2.4M20.4 12h-2.4" />
+      {/* 内环：细一圈、淡一点，小尺寸下也不糊成一团 */}
+      <circle cx="12" cy="12" r="4.4" strokeWidth={1.3} opacity={0.4} />
+      {/* 中心横杆：指向被约束骨骼的求解方向 */}
+      <path d="M12 12h6" />
+    </svg>
+  )
+}
+
 const CONSTRAINT_ICON: Record<AuthoringConstraint['type'], React.ReactNode> = {
-  ik: <Target size={11} className="text-accent/80" />,
-  transform: <Maximize2 size={11} className="text-ok/80" />,
-  path: <Route size={11} className="text-warn/80" />,
+  ik: <IkConstraintIcon />,
+  transform: <Maximize2 size={13} className="text-ok/80" />,
+  path: <Route size={13} className="text-warn/80" />,
   // 物理约束仅在导入时保留数据（不参与求解），用弱化图标区分
-  physics: <Activity size={11} className="text-content-lo" />
+  physics: <Activity size={13} className="text-content-lo" />
 }
 
 const CONSTRAINT_KIND: Record<AuthoringConstraint['type'], string> = {
@@ -722,9 +754,37 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     }
   }
 
+  /** 「删除」菜单项：骨骼 / 插槽 / 约束共用一份（约束行的整条菜单就是它，见下面两处） */
+  const deleteItem = (target: MenuTarget): ContextMenuItem => ({
+    key: 'delete',
+    label: `删除「${target.name}」`,
+    danger: true,
+    disabled: target.kind === 'bone' && document.bones.length <= 1,
+    hint: target.kind === 'bone' && document.bones.length <= 1 ? '至少保留一根骨骼' : undefined,
+    icon: <Trash2 size={12} />,
+    onSelect: () => {
+      if (target.kind === 'slot') {
+        update('删除插槽', (draft) => {
+          deleteSlot(draft, target.name)
+        })
+        return
+      }
+      if (target.kind === 'constraint') {
+        removeConstraint(update, target.name)
+        return
+      }
+      update('删除骨骼', (draft) => {
+        draft.bones = draft.bones.filter((b) => b.name !== target.name)
+        for (const child of draft.bones) if (child.parent === target.name) child.parent = ''
+        draft.slots = draft.slots.filter((s) => s.bone !== target.name)
+      })
+    }
+  })
+
   /**
    * Animate 态的菜单：只给「打关键帧」。
    * 加骨骼 / 插槽 / 约束、删除这些改的是 setup（绑定）数据，动画状态里动它们会污染动画基线。
+   * 约束是例外：它本来就没有关键帧轨道，右键只留「删除」（见下面的分支）。
    */
   const keyframeMenuItems = (target: MenuTarget): ContextMenuItem[] => {
     if (target.kind === 'bone') {
@@ -764,17 +824,12 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       ]
     }
     if (target.kind === 'constraint') {
-      // 约束的 mix / offset 是检查器里的编辑值（不在运行时姿态里），打帧暂未支持 ——
-      // 明说比点了没反应好
-      return [
-        {
-          key: 'k-constraint',
-          label: '约束关键帧（暂未支持）',
-          hint: '约束参数请在检查器里编辑；打帧目前支持骨骼 / 插槽 / display',
-          icon: <KeyRound size={12} />,
-          disabled: true
-        }
-      ]
+      /*
+       * 约束：右键菜单**只留「删除」**。
+       * 它的 mix / offset 是检查器里的编辑值（不在运行时姿态里），既没有关键帧轨道可打，
+       * 其余「添加骨骼 / 添加插槽」对约束行也没有意义 —— 摆着只会是噪音。
+       */
+      return [deleteItem(target)]
     }
     return []
   }
@@ -782,6 +837,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   const menuItems = (target: MenuTarget): ContextMenuItem[] => {
     // Animate 态：菜单换成打关键帧（绑定类操作属于 setup，见上面的说明）
     if (useModeStore.getState().mode === 'animate') return keyframeMenuItems(target)
+    // 约束行：整条菜单只有「删除」（参数在检查器里改，「添加骨骼 / 插槽」对它也没有意义）
+    if (target.kind === 'constraint') return [deleteItem(target)]
     const host = target.kind === 'bone' ? target.name : target.bone
     const where = target.kind === 'bone' ? `挂在「${target.name}」下` : host ? `挂在「${host}」下` : '挂在根层'
     const items: ContextMenuItem[] = [
@@ -807,7 +864,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
               key: 'ik',
               label: '添加 IK 约束',
               hint: host ? `驱动骨骼：「${host}」` : '未指定驱动骨骼',
-              icon: <Target size={12} />,
+              icon: <IkConstraintIcon size={12} />,
               onSelect: () => addConstraint('ik', host)
             },
             {
@@ -828,34 +885,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         : [])
     ]
     if (target.kind !== 'root') {
-      items.push(
-        { key: 'sep2', label: '', separator: true },
-        {
-          key: 'delete',
-          label: `删除「${target.name}」`,
-          danger: true,
-          disabled: target.kind === 'bone' && document.bones.length <= 1,
-          hint: target.kind === 'bone' && document.bones.length <= 1 ? '至少保留一根骨骼' : undefined,
-          icon: <Trash2 size={12} />,
-          onSelect: () => {
-            if (target.kind === 'slot') {
-              update('删除插槽', (draft) => {
-                deleteSlot(draft, target.name)
-              })
-              return
-            }
-            if (target.kind === 'constraint') {
-              removeConstraint(update, target.name)
-              return
-            }
-            update('删除骨骼', (draft) => {
-              draft.bones = draft.bones.filter((b) => b.name !== target.name)
-              for (const child of draft.bones) if (child.parent === target.name) child.parent = ''
-              draft.slots = draft.slots.filter((s) => s.bone !== target.name)
-            })
-          }
-        }
-      )
+      items.push({ key: 'sep2', label: '', separator: true }, deleteItem(target))
     }
     return items
   }
@@ -1090,7 +1120,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           className="hao-btn h-[18px] px-1.5 text-3xs"
           onClick={() => addConstraint('ik')}
         >
-          <Target size={11} />
+          <IkConstraintIcon size={14} />
         </button>
         <button
           type="button"
@@ -1098,7 +1128,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           className="hao-btn h-[18px] px-1.5 text-3xs"
           onClick={() => addConstraint('transform')}
         >
-          <Maximize2 size={11} />
+          <Maximize2 size={14} />
         </button>
         <button
           type="button"
@@ -1106,7 +1136,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           className="hao-btn h-[18px] px-1.5 text-3xs"
           onClick={() => addConstraint('path')}
         >
-          <Route size={11} />
+          <Route size={14} />
         </button>
         <span className="ml-auto font-mono text-3xs text-content-lo">{rows.length}</span>
       </div>

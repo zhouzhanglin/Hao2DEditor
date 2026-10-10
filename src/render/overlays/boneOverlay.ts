@@ -37,7 +37,8 @@ const COLOR_JOINT = 0xffd60a
 const COLOR_ROOT = 0xbf5af2
 /** 选中骨骼的描边色（黑色硬描边，跟骨骼自己的颜色形成对比） */
 const COLOR_SELECTED = 0x000000
-const COLOR_CONSTRAINT = 0x40c8e0
+/** 约束（连线 + 准星手柄）的红：与层级树里 IK 图标的颜色一致（HierarchyTree 的 IkConstraintIcon） */
+const COLOR_CONSTRAINT = 0xe4572e
 const COLOR_LINK = 0x8e8e93
 
 /** 小坐标轴：X 轴红、Y 轴绿、中心蓝（macOS 系统色） */
@@ -437,9 +438,24 @@ function drawConstraintLinks(
       g.stroke({ width: w * 1.2, color: COLOR_CONSTRAINT, alpha: 0.7 })
     }
 
-    const size = w * 5
-    g.moveTo(targetX - size, targetY).lineTo(targetX + size, targetY)
-    g.moveTo(targetX, targetY - size).lineTo(targetX, targetY + size)
-    g.stroke({ width: w * 1.2, color: COLOR_CONSTRAINT, alpha: 0.85 })
+    /*
+     * IK 目标点画成**准星**：靶环 + 四向凸点 + 内环 + 中心横杆 ——
+     * 与层级树里的 IK 图标同形（HierarchyTree 的 IkConstraintIcon），
+     * 「树里这条约束」和「视口里这个手柄」一眼能对上。
+     * 原来只是一横一竖的十字，混在骨骼手柄里区分度太低。
+     */
+    const ring = w * 8
+    const nubIn = ring + w * 0.7
+    const nubOut = ring + w * 4.2
+    g.poly(circlePolygon(targetX, targetY, ring))
+    g.moveTo(targetX, targetY - nubOut).lineTo(targetX, targetY - nubIn)
+    g.moveTo(targetX, targetY + nubIn).lineTo(targetX, targetY + nubOut)
+    g.moveTo(targetX - nubOut, targetY).lineTo(targetX - nubIn, targetY)
+    g.moveTo(targetX + nubIn, targetY).lineTo(targetX + nubOut, targetY)
+    g.moveTo(targetX, targetY).lineTo(targetX + ring * 0.82, targetY)
+    g.stroke({ width: w * 2.4, color: COLOR_CONSTRAINT, alpha: 0.95, cap: 'round', join: 'round' })
+    // 内环：细一圈、淡一点
+    g.poly(circlePolygon(targetX, targetY, ring * 0.58))
+    g.stroke({ width: w * 1.1, color: COLOR_CONSTRAINT, alpha: 0.45 })
   }
 }

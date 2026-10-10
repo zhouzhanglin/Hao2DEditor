@@ -156,7 +156,7 @@ export default function ViewportTools({ onStatus = () => undefined }: ViewportTo
                 : 'border-transparent text-content-mid hover:bg-white/[0.08] hover:text-content-hi'
             ].join(' ')}
           >
-            <Icon size={15} />
+            <Icon size={17} />
           </button>
         )
       })}
@@ -185,7 +185,7 @@ export default function ViewportTools({ onStatus = () => undefined }: ViewportTo
               active ? GIZMO_TONE[mode] : 'border-transparent text-content-mid hover:bg-white/[0.08] hover:text-content-hi'
             ].join(' ')}
           >
-            <Icon size={15} />
+            <Icon size={17} />
           </button>
         )
       })}

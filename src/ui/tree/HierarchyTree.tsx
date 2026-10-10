@@ -1024,6 +1024,16 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
               if (target) target.visible = !target.visible
             })
         }}
+        // 锁定列（行首第二列）：与骨骼一致 —— 锁上后视口里点不中它，层级树里照常可操作
+        lockSwitch={{
+          on: slot.locked,
+          title: slot.locked ? '解锁（视口中可再次选中）' : '锁定（视口中不可选中）',
+          onToggle: () =>
+            update('切换插槽锁定', (draft) => {
+              const target = draft.slots.find((s) => s.name === slot.name)
+              if (target) target.locked = !target.locked
+            })
+        }}
         onDelete={() =>
           update('删除插槽', (draft) => {
             deleteSlot(draft, slot.name)

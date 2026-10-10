@@ -14,6 +14,7 @@ import {
   baseBrushMode,
   brushModeFor,
   isDragging,
+  slotLocked,
   toolPointerDown,
   toolPointerMove,
   toolPointerUp
@@ -628,7 +629,9 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
      * ① 只在选择工具下算 —— 其它工具点下去干的是别的事（刷权重 / 插顶点），提示会误导；
      * ② 只在**变化时**写状态 —— pointermove 的频率远高于帧率，每次都写会白重绘。
      */
-    const hovered = useToolStore.getState().tool === 'select' ? scene.pickAttachmentAt(world.x, world.y) : null
+    const picked = useToolStore.getState().tool === 'select' ? scene.pickAttachmentAt(world.x, world.y) : null
+    // 锁定的插槽不参与悬停高亮 —— 与「视口里点不中」保持一致，不然会看着能选却选不上
+    const hovered = picked && slotLocked(picked.slot) ? null : picked
     const previous = scene.state.hoveredDisplay ?? null
     const sameHover =
       previous === null

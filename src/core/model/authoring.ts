@@ -127,6 +127,11 @@ export interface AuthoringSlot {
   /** setup pose 显示的附件名，空串 = 不显示 */
   attachment: string
   visible: boolean
+  /**
+   * 锁定：视口里**点不中**它（与骨骼锁一致，属于绑定期的防误操作开关）。
+   * 层级树里仍然可以选中 / 改属性 / 解锁 —— 锁住的只是「在视口里随手点选」这条路径。
+   */
+  locked: boolean
 }
 
 export interface AuthoringImage {
@@ -279,6 +284,7 @@ export function createAuthoringSlot(partial?: Partial<AuthoringSlot>): Authoring
     z: 0,
     attachment: '',
     visible: true,
+    locked: false,
     ...partial
   }
 }

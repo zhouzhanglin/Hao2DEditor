@@ -438,6 +438,11 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     }
     // 骨骼命中时不抢选附件，交给下面的骨骼分支处理
     const att = hit ? null : scene.pickAttachmentAt(info.world.x, info.world.y)
+    // 锁定的插槽在视口里不响应点选（占位拦下并说明原因，别让人以为「点坏了」）
+    if (att && slotLocked(att.slot)) {
+      host.status(`插槽「${att.slot}」已锁定：在层级树里解锁后才能选中`)
+      return true
+    }
     if (att) {
       const isNew = att.slot !== sel.slot || att.attachment !== sel.attachment
       if (isNew) useSelectionStore.getState().selectAttachment(att.slot, att.attachment)
@@ -517,6 +522,15 @@ function axisFactor(current: number, start: number): number {
 function boneLocked(name: string): boolean {
   const bone = useProjectStore.getState().document.bones.find((item) => item.name === name)
   return bone?.locked === true
+}
+
+/**
+ * 插槽是否锁定：锁上后**视口里点不中它**（附件 / 显示都不可选、不可拖）。
+ * 层级树里仍然可以选中 / 改属性 / 解锁 —— 锁的只是「在视口里随手点选」这条路。
+ */
+export function slotLocked(name: string): boolean {
+  const slot = useProjectStore.getState().document.slots.find((item) => item.name === name)
+  return slot?.locked === true
 }
 
 /**
@@ -843,6 +857,11 @@ function beginAttachmentGizmoDrag(
   const scene = host.scene
   const bundle = scene.runtime
   if (!bundle) return false
+  // 插槽锁定 = 视口里不可选中 / 不可拖（与骨骼锁一致：拦下并说明原因）
+  if (slotLocked(slotName)) {
+    host.status(`插槽「${slotName}」已锁定：在层级树里解锁后才能拖动`)
+    return true
+  }
   const doc = useProjectStore.getState().document
   const slot = doc.slots.find((item) => item.name === slotName)
   const attachment = findAttachment(doc, slotName, attachmentName)

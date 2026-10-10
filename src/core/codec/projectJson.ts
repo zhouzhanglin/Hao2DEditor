@@ -320,7 +320,8 @@ function normalizeSlot(raw: Record<string, unknown>): AuthoringSlot {
     zOrder: Math.round(num(raw.zOrder)),
     z: num(raw.z),
     attachment: str(raw.attachment),
-    visible: bool(raw.visible, true)
+    visible: bool(raw.visible, true),
+    locked: bool(raw.locked)
   }
 }
 

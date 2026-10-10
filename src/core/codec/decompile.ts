@@ -203,7 +203,8 @@ export function decompileAsset(asset: RuntimeAsset, activeSkin = ''): EditorDocu
     zOrder: slot.defaultZOrder,
     z: slot.z,
     attachment: slot.setupAttachment,
-    visible: true
+    visible: true,
+    locked: false
   }))
 
   const constraints = asset.constraints.map((constraint) => decompileConstraint(constraint, asset))

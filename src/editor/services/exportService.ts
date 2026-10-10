@@ -1,6 +1,7 @@
 import { getPlatform, baseName, dirName, joinPath, stripExtension } from '../platform'
 import { useProjectStore } from '../store/projectStore'
 import { compileDocument } from '@core/codec/compile'
+import { projectNameFromPath } from '@core/codec/projectJson'
 import { collectHao2dWarnings, writeHao2d } from '@core/codec/hao2dWriter'
 import { RUNTIME_PPU, serializeRuntimeAtlas, serializeRuntimeSke } from '@core/codec/runtimeSkeJson'
 import type { RuntimeAtlasJson, RuntimeAtlasPage, RuntimeAtlasRegion } from '@core/codec/runtimeSkeJson'
@@ -29,94 +30,155 @@ export interface ExportResult {
   files: string[]
 }
 
+/**
+ * 一页的产物。
+ *
+ * - `packed`：碎图打包出来的**新页**，需要按计划用 canvas 拼图 + 编码；
+ * - `copy`：**本来就是图集**的页，直接把源文件复制过去（像素与原文件逐字节一致），
+ *   不重打包也不重编码 —— UV 保持原样即可（它们已经是这一页里的归一化坐标）。
+ */
+export type PageSource =
+  | { kind: 'packed'; plan: PageEncodePlan }
+  | { kind: 'copy'; path: string; sourceName: string }
+
 interface PackedAtlas {
   atlas: RuntimeAtlasJson
-  /** 页名（新） */
+  /** 页名（新）：一律 `<项目名>_<序号><扩展名>` */
   pageFiles: string[]
-  plans: PageEncodePlan[]
-  /** 源图名 → 新页下标与放置 */
+  pageSources: PageSource[]
+  /** 源图名 → 新页下标与放置（**只含打包的碎图**，它们需要重映射 UV） */
   placementOf: Map<string, { page: number; placement: Placement }>
+  /** 源图名 → 页下标（本来就是图集的那些：整页照搬，只需换 textureName） */
+  passthroughOf: Map<string, number>
   warnings: string[]
 }
 
+/** 源文件扩展名（小写，带点）；没有扩展名时按 png 处理（复制的页得带对扩展名） */
+function extensionOf(path: string): string {
+  const name = baseName(path)
+  const dot = name.lastIndexOf('.')
+  return dot > 0 ? name.slice(dot).toLowerCase() : '.png'
+}
+
 /**
- * 图集打包：把工程里用到的所有图片按**整图**重新装进新页。
- * 整图打包的收益是 UV 重映射只是仿射变换，且不会丢裁剪信息（原始 trim 偏移仍按附件数据保留）。
+ * 图集打包。
  *
- * `scale` 会按比例缩小每个图块在页里的占位（同时 png 编码时也绘制成这个尺寸）：
- * 用来把放不下的碎图塞进更少的页里 —— 附件自身的世界尺寸不变，画面大小不变，
- * 只是纹理分辨率降低。
+ * **本来就是图集的图（`loose === false`，即导入 Spine / DragonBones 时带进来的图集页）
+ * 不再重新打包**：直接整页复制源文件当一页用 —— 不重编码（像素与美术给的图一致，
+ * 也省掉一次解码 + 编码），页名仍然按项目名编号。它们的 UV 是这一页内的归一化坐标，
+ * 不重映射也照样对得上。
+ *
+ * 只有**碎图**（`loose === true`，从「导入图片」进来、需要拼页的散图）才走原来的打包流程：
+ * 按**整图**装进新页，UV 重映射只是仿射变换，不会丢裁剪信息（原始 trim 偏移仍按附件数据保留）。
+ *
+ * `scale` 只作用于打包的碎图（按比例缩小图块占位）；复制页按原图 1:1 复制，
+ * 有复制页时会给一条提示。
  */
 function buildAtlas(
   textures: readonly string[],
-  images: ReadonlyArray<{ name: string; path: string; width: number; height: number }>,
+  images: ReadonlyArray<{ name: string; path: string; width: number; height: number; loose?: boolean }>,
   stem: string,
   maxSize: number,
   scale = 1
 ): PackedAtlas {
   const warnings: string[] = []
   const ratio = Number.isFinite(scale) && scale > 0 ? scale : 1
-  // 按出现顺序去重：多个骨架共用同一张图时只占一个图块
+  // 按出现顺序去重：多个骨架共用同一张图时只占一个页面 / 图块
   const used: string[] = []
   for (const name of textures) {
     if (name.length > 0 && !used.includes(name)) used.push(name)
   }
-  const items = used.map((name) => {
+
+  const copies: Array<{ source: string; path: string; width: number; height: number; ext: string }> = []
+  const items: Array<{ id: string; width: number; height: number }> = []
+  for (const name of used) {
     const image = images.find((entry) => entry.name === name)
+    // 已经是图集（显式标 false）、且拿得到源文件：整页照搬
+    if (image && image.loose === false && image.path) {
+      if (image.width <= 0 || image.height <= 0) {
+        warnings.push(`图集页「${name}」缺少尺寸信息，按 1×1 记录（原图仍然整页复制）`)
+      }
+      copies.push({
+        source: name,
+        path: image.path,
+        width: Math.max(1, image.width),
+        height: Math.max(1, image.height),
+        ext: extensionOf(image.path)
+      })
+      continue
+    }
     if (!image || image.width <= 0 || image.height <= 0) {
       warnings.push(`图片「${name}」缺少尺寸信息，导出时按 1×1 占位处理`)
-      return { id: name, width: 1, height: 1 }
+      items.push({ id: name, width: 1, height: 1 })
+      continue
     }
-    return {
+    items.push({
       id: name,
       width: Math.max(1, Math.round(image.width * ratio)),
       height: Math.max(1, Math.round(image.height * ratio))
-    }
+    })
+  }
+  if (copies.length > 0 && ratio !== 1) {
+    warnings.push(`${copies.length} 张已经是图集的页按原图复制，不参与「缩放」`)
+  }
+
+  const pageFiles: string[] = []
+  const pageSources: PageSource[] = []
+  const pages: RuntimeAtlasPage[] = []
+  const regions: RuntimeAtlasRegion[] = []
+  const passthroughOf = new Map<string, number>()
+  // 复制页排在前面：它们已经是完整的页，序号从 0 起
+  copies.forEach((entry, index) => {
+    const file = `${stem}_${index}${entry.ext}`
+    pageFiles.push(file)
+    pageSources.push({ kind: 'copy', path: entry.path, sourceName: entry.source })
+    passthroughOf.set(entry.source, index)
+    pages.push({ image: file, width: entry.width, height: entry.height })
+    regions.push({ name: entry.source, page: index, x: 0, y: 0, width: entry.width, height: entry.height })
   })
 
-  const packed = packMaxRects(items, { maxSize, initialSize: Math.min(512, maxSize), padding: 2, border: 2 })
-  for (const id of packed.failed) {
-    warnings.push(`图片「${id}」超过单页最大尺寸 ${maxSize}px，未被打包（导出后该附件会缺图）`)
-  }
-
   const placementOf = new Map<string, { page: number; placement: Placement }>()
-  const plans: PageEncodePlan[] = []
-  for (const page of packed.pages) {
-    plans.push({ width: page.width, height: page.height, blits: [] })
-  }
-
-  const pageFiles = packed.pages.map((page) => `${stem}_${page.index}.png`)
-  const pages: RuntimeAtlasPage[] = packed.pages.map((page, index) => ({
-    image: pageFiles[index],
-    width: page.width,
-    height: page.height
-  }))
-
-  const regions: RuntimeAtlasRegion[] = []
-  for (const placement of packed.placements) {
-    placementOf.set(placement.id, { page: placement.page, placement })
-    plans[placement.page].blits.push({
-      name: placement.id,
-      x: placement.x,
-      y: placement.y,
-      width: placement.width,
-      height: placement.height
-    })
-    regions.push({
-      name: placement.id,
-      page: placement.page,
-      x: placement.x,
-      y: placement.y,
-      width: placement.width,
-      height: placement.height
-    })
+  if (items.length > 0) {
+    const packed = packMaxRects(items, { maxSize, initialSize: Math.min(512, maxSize), padding: 2, border: 2 })
+    for (const id of packed.failed) {
+      warnings.push(`图片「${id}」超过单页最大尺寸 ${maxSize}px，未被打包（导出后该附件会缺图）`)
+    }
+    const offset = copies.length
+    for (const page of packed.pages) {
+      const file = `${stem}_${offset + page.index}.png`
+      pageFiles.push(file)
+      pageSources.push({ kind: 'packed', plan: { width: page.width, height: page.height, blits: [] } })
+      pages.push({ image: file, width: page.width, height: page.height })
+    }
+    for (const placement of packed.placements) {
+      placementOf.set(placement.id, { page: offset + placement.page, placement })
+      const source = pageSources[offset + placement.page]
+      if (source?.kind === 'packed') {
+        source.plan.blits.push({
+          name: placement.id,
+          x: placement.x,
+          y: placement.y,
+          width: placement.width,
+          height: placement.height
+        })
+      }
+      regions.push({
+        name: placement.id,
+        page: offset + placement.page,
+        x: placement.x,
+        y: placement.y,
+        width: placement.width,
+        height: placement.height
+      })
+    }
   }
 
   return {
     atlas: { format: 'hao2d-atlas', version: 1, pages, regions },
     pageFiles,
-    plans,
+    pageSources,
     placementOf,
+    passthroughOf,
     warnings
   }
 }
@@ -130,6 +192,12 @@ function remapAsset(asset: RuntimeAsset, packed: PackedAtlas): void {
         if (attachment.type === AttachmentType.BoundingBox) continue
         const source = attachment.textureName
         if (!source) continue
+        // 已经是图集的页：整页照搬，UV 不用动（本来就是按这一页归一化的），只换页名
+        const passthrough = packed.passthroughOf.get(source)
+        if (passthrough !== undefined) {
+          attachment.textureName = packed.pageFiles[passthrough] ?? ''
+          continue
+        }
         const target = packed.placementOf.get(source)
         if (!target) {
           attachment.textureName = newTextureNames[0] ?? ''
@@ -205,13 +273,17 @@ export interface ExportedSkeleton {
  * 弹窗用它实时算预览（改缩放 / 页尺寸立即重算），确认后再交给 `writeRuntimeExport`。
  */
 export interface RuntimeExportPlan {
-  /** 项目名（清洗过）：输出目录与图集名都用它 */
+  /** 项目名（清洗过）：输出目录、图集名与页名都用它 */
   stem: string
   atlasName: string
+  /** 页名（新），与 `pageSources` / `atlas.pages` 逐项对齐 */
   pageFiles: string[]
   atlas: RuntimeAtlasJson
-  /** 每页的绘制计划：png 编码与弹窗预览共用同一份 */
-  plans: PageEncodePlan[]
+  /**
+   * 每页怎么产出：碎图打包出来的页（要编码）或本来就是图集的页（复制源文件）。
+   * png 编码、写盘与弹窗预览共用同一份。
+   */
+  pageSources: PageSource[]
   warnings: string[]
   /** 逐个骨架的产物：每个骨架一份数据，图集是所有骨架共用的那一份 */
   skeletons: ExportedSkeleton[]
@@ -232,8 +304,14 @@ export function prepareRuntimeExport(options: RuntimeExportOptions): RuntimeExpo
   const selected = requested.length > 0 ? [...new Set(requested)] : [Math.min(store.activeSkeleton, list.length - 1)]
   const scope = options.atlasScope ?? 'all'
   const warnings: string[] = []
-  // 项目名（「新建项目」弹窗里填的）→ 图集名与输出目录；缺省退回当前骨架名
-  const stem = sanitize(stripExtension(store.projectName || store.document.armatureName) || 'project')
+  /*
+   * 项目名 → 输出目录 / 图集名 / 页名，**不跟骨架名走**。
+   * 兜底顺序：工程里记的项目名 → 工程文件名（老工程没有 projectName 字段）→ 当前骨架名（连工程都没存过）。
+   */
+  const stem = sanitize(
+    stripExtension(store.projectName || projectNameFromPath(store.projectPath ?? '') || store.document.armatureName) ||
+      'project'
+  )
 
   const skeletons: ExportedSkeleton[] = []
   const usedNames = new Set<string>()
@@ -273,7 +351,7 @@ export function prepareRuntimeExport(options: RuntimeExportOptions): RuntimeExpo
     atlasName: `${stem}_atlas.json`,
     pageFiles: packed.pageFiles,
     atlas: packed.atlas,
-    plans: packed.plans,
+    pageSources: packed.pageSources,
     warnings,
     skeletons
   }
@@ -300,14 +378,23 @@ export async function writeRuntimeExport(
     if (imageDir) await platform.registerAssetRoot(imageDir)
   }
   const bitmaps = new Map<string, ImageBitmap | null>()
-  const pngs = await encodeAtlasPages(plan.plans, async (name) => {
-    if (bitmaps.has(name)) return bitmaps.get(name) ?? null
-    const image = doc.images.find((entry) => entry.name === name)
-    // imageUrl：Electron 下是同源 blob:，fetch / createImageBitmap 都不会被 CSP 拦
-    const bitmap = image ? await loadImageBitmap(await platform.imageUrl(image.path)) : null
-    bitmaps.set(name, bitmap)
-    return bitmap
-  })
+  // 只有打包页需要编码；复制页（本来就是图集）在下面直接读源文件
+  const pngs = await encodeAtlasPages(
+    plan.pageSources.map((source) => (source.kind === 'packed' ? source.plan : null)),
+    async (name) => {
+      if (bitmaps.has(name)) return bitmaps.get(name) ?? null
+      const image = doc.images.find((entry) => entry.name === name)
+      // imageUrl：Electron 下是同源 blob:，fetch / createImageBitmap 都不会被 CSP 拦
+      const bitmap = image ? await loadImageBitmap(await platform.imageUrl(image.path)) : null
+      bitmaps.set(name, bitmap)
+      return bitmap
+    }
+  )
+
+  const pageBytes = await readPageBytes(plan, pngs)
+  if (pageBytes.failed.length > 0) {
+    warnings.push(`图集页 ${pageBytes.failed.join(' / ')} 读不出内容（源图缺失或无法读取）`)
+  }
 
   const files: Array<{ path: string; text?: string; bytes?: Uint8Array }> = [
     // 每个骨架一份数据（文件名取骨架名），图集是所有骨架共用的那一份
@@ -318,11 +405,8 @@ export async function writeRuntimeExport(
     { path: joinPath(outDir, plan.atlasName), text: serializeRuntimeAtlas(plan.atlas) }
   ]
   plan.pageFiles.forEach((file, index) => {
-    const bytes = pngs[index]
-    if (!bytes || bytes.length === 0) {
-      warnings.push(`图集页 ${file} 编码失败（可能是源图片无法读取）`)
-      return
-    }
+    const bytes = pageBytes.bytes[index]
+    if (!bytes || bytes.length === 0) return
     files.push({ path: joinPath(outDir, file), bytes })
   })
 
@@ -370,12 +454,14 @@ export async function exportHao2d(): Promise<ExportResult> {
  *
  * 目录结构与 Unity 侧约定一致（Hao2D 的 ScriptedImporter 只在 `.hao2d` 同目录找纹理与材质）：
  * ```
- * <stem>/<stem>.hao2d          + .meta     骨骼 / 动画二进制
+ * <stem>/<骨架名>.hao2d        + .meta     骨骼 / 动画二进制
  * <stem>/<stem>_0.png          + .meta     图集页（meta 里带 GUID，供材质引用）
  * <stem>/<stem>_0_Hao2D.mat    + .meta     材质：Hao2D/Sprite，_MainTex → 图集页
  * ```
+ * `<stem>` 是**项目名**：图集页名一律跟项目名走；已经是图集的页（导入资源带进来的）
+ * 按原图 1:1 复制（扩展名沿用源文件），只有碎图才会被重新打包成 png。
  *
- * 复用与「导出运行时」同一份打包计划（同样的缩放与 UV 重映射），
+ * 复用与「导出运行时」同一份打包计划（同样的页、缩放与 UV 重映射），
  * 所以两个弹窗预览里看到的是同一套页。
  */
 export async function writeHao2dExport(
@@ -397,13 +483,20 @@ export async function writeHao2dExport(
     if (imageDir) await platform.registerAssetRoot(imageDir)
   }
   const bitmaps = new Map<string, ImageBitmap | null>()
-  const pngs = await encodeAtlasPages(plan.plans, async (name) => {
-    if (bitmaps.has(name)) return bitmaps.get(name) ?? null
-    const image = doc.images.find((entry) => entry.name === name)
-    const bitmap = image ? await loadImageBitmap(await platform.imageUrl(image.path)) : null
-    bitmaps.set(name, bitmap)
-    return bitmap
-  })
+  const pngs = await encodeAtlasPages(
+    plan.pageSources.map((source) => (source.kind === 'packed' ? source.plan : null)),
+    async (name) => {
+      if (bitmaps.has(name)) return bitmaps.get(name) ?? null
+      const image = doc.images.find((entry) => entry.name === name)
+      const bitmap = image ? await loadImageBitmap(await platform.imageUrl(image.path)) : null
+      bitmaps.set(name, bitmap)
+      return bitmap
+    }
+  )
+  const pageBytes = await readPageBytes(plan, pngs)
+  if (pageBytes.failed.length > 0) {
+    warnings.push(`图集页 ${pageBytes.failed.join(' / ')} 读不出内容（源图缺失或无法读取），对应的材质也未生成`)
+  }
 
   const files: Array<{ path: string; text?: string; bytes?: Uint8Array }> = []
   const sheetCount = plan.pageFiles.length
@@ -411,11 +504,8 @@ export async function writeHao2dExport(
 
   for (let index = 0; index < plan.pageFiles.length; index++) {
     const pageFile = plan.pageFiles[index]
-    const bytes = pngs[index]
-    if (!bytes || bytes.length === 0) {
-      warnings.push(`图集页 ${pageFile} 编码失败（可能是源图片无法读取），对应的材质也未生成`)
-      continue
-    }
+    const bytes = pageBytes.bytes[index]
+    if (!bytes || bytes.length === 0) continue
     // 纹理 GUID：优先沿用同目录里已有的 .meta（Unity 里已挂的引用不会因为再导一次就失效）
     const textureGuid = await resolveGuid(platform, outDir, pageFile, plan.stem)
     files.push({ path: joinPath(outDir, pageFile), bytes })
@@ -454,6 +544,39 @@ export async function writeHao2dExport(
     warnings,
     files: files.map((file) => baseName(file.path))
   }
+}
+
+/**
+ * 取每一页的最终字节，与 `plan.pageFiles` 逐项对齐：
+ *
+ * - 打包页：用 `encodeAtlasPages` 编出来的 PNG；
+ * - 复制页（本来就是图集）：**直接读源文件的原始字节** —— 不做任何重编码，
+ *   美术给的图集页原样落盘（也省掉一次解码 + 编码）。
+ *
+ * 读不到的页只记名字，由调用方合并成一条告警（免得一张图报一次）。
+ */
+async function readPageBytes(
+  plan: RuntimeExportPlan,
+  encoded: readonly Uint8Array[]
+): Promise<{ bytes: Uint8Array[]; failed: string[] }> {
+  const platform = getPlatform()
+  const bytes: Uint8Array[] = []
+  const failed: string[] = []
+  for (let index = 0; index < plan.pageFiles.length; index++) {
+    const source = plan.pageSources[index]
+    if (!source) {
+      bytes.push(new Uint8Array())
+      continue
+    }
+    const data = source.kind === 'copy' ? await platform.readBinary(source.path) : encoded[index]
+    if (!data || data.length === 0) {
+      failed.push(plan.pageFiles[index] ?? `#${index}`)
+      bytes.push(new Uint8Array())
+      continue
+    }
+    bytes.push(data)
+  }
+  return { bytes, failed }
 }
 
 /**

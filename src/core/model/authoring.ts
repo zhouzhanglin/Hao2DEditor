@@ -151,7 +151,14 @@ export interface AuthoringImage {
   path: string
   width: number
   height: number
-  /** 是否为独立碎图（需要在导出时打包进图集） */
+  /**
+   * 是否为独立碎图。
+   *
+   * - `true`：散图（「导入图片」进来的），导出时打包进新图集；
+   * - `false`：已经是图集页（导入 Spine / DragonBones 带进来的），导出时整页复制、不重打包。
+   *
+   * 老工程文件没有这个字段 → 解析时按 `true` 处理（那时导出是一律重打包的）。
+   */
   loose: boolean
 }
 

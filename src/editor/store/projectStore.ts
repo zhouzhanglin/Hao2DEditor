@@ -176,12 +176,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 修好后标记为未保存，方便写回。
     const repaired = cloneDocument(document)
     const repairedCount = repairAnimationDurations(repaired) + repairDisplayNames(repaired)
+    const previous = get()
+    /*
+     * 项目名**不跟着骨架名走**。
+     *
+     * 导出目录、图集名与图集页名都取项目名，一旦导入资源时被骨架名覆盖，导出产物就会
+     * 变成「骨骼名_0.png」这种名字（重命名工程也救不回来，因为每次导入都会再覆盖一次）。
+     * 只有一上来就导入、工程还没起过名（默认名 + 从未保存）的会话才用骨架名兜底，
+     * 真正落地时 `finishImport` 还会优先采用被导入文件的名字。
+     */
+    const keepName = previous.projectPath !== null || previous.projectName !== DEFAULT_PROJECT_NAME
     set({
       document: repaired,
       skeletons: [repaired],
       activeSkeleton: 0,
-      // 导入资源进来的新项目：项目名先跟骨架名走（保存时会写进工程文件）
-      projectName: repaired.armatureName,
+      projectName: keepName ? previous.projectName : repaired.armatureName,
       projectPath: projectPath === undefined ? get().projectPath : projectPath,
       dirty: repairedCount > 0 || dirty,
       ...syncFlags(get())

@@ -18,13 +18,20 @@ export interface PageEncodePlan {
 /**
  * 用 OffscreenCanvas 把若干图片拼成图集页并编码为 PNG。
  * 放在渲染进程做：无需引入原生图像依赖，且浏览器 / Electron 行为一致。
+ *
+ * `plans` 与调用方的页清单**逐项对齐**：`null` 表示这一页不需要编码
+ * （本来就是图集，直接把源文件复制过去当页用），对应位置返回空字节。
  */
 export async function encodeAtlasPages(
-  plans: readonly PageEncodePlan[],
+  plans: readonly (PageEncodePlan | null)[],
   loadImage: (name: string) => Promise<ImageBitmap | null>
 ): Promise<Uint8Array[]> {
   const out: Uint8Array[] = []
   for (const plan of plans) {
+    if (!plan) {
+      out.push(new Uint8Array())
+      continue
+    }
     const canvas = createCanvas(plan.width, plan.height)
     if (!canvas) {
       out.push(new Uint8Array())

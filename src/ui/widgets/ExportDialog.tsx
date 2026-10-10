@@ -4,7 +4,9 @@ import { ChevronLeft, ChevronRight, FolderOpen, Loader2, Package, X } from 'luci
 import { getPlatform } from '@editor/platform'
 import { useProjectStore } from '@editor/store/projectStore'
 import { listFiles, prepareRuntimeExport, writeHao2dExport, writeRuntimeExport } from '@editor/services/exportService'
-import type { RuntimeExportPlan } from '@editor/services/exportService'
+import type { PageSource, RuntimeExportPlan } from '@editor/services/exportService'
+import type { PageEncodePlan } from '@editor/services/pngEncoder'
+import type { RuntimeAtlasPage } from '@core/codec/runtimeSkeJson'
 import { collectHao2dWarnings } from '@core/codec/hao2dWriter'
 import { loadImageElement } from '@render/imageLoader'
 
@@ -29,6 +31,25 @@ const SIZE_PRESETS = [1024, 2048, 4096]
 const MODE_TITLE: Record<ExportMode, string> = {
   runtime: '导出运行时数据',
   unity: '导出 Unity'
+}
+
+/**
+ * 预览用的一页绘制计划。
+ *
+ * 打包页就是它自己；**复制页**（本来就是图集、导出时原图整页照搬）没有图块清单，
+ * 这里合成一条「整页放这张原图」的图块 —— 预览因此和落盘结果一致（画的是同一张原图）。
+ */
+function previewPlanOf(
+  source: PageSource | undefined,
+  page: RuntimeAtlasPage | undefined
+): PageEncodePlan | null {
+  if (!source || !page) return null
+  if (source.kind === 'packed') return source.plan
+  return {
+    width: page.width,
+    height: page.height,
+    blits: [{ name: source.sourceName, x: 0, y: 0, width: page.width, height: page.height }]
+  }
 }
 
 /**
@@ -114,7 +135,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   useEffect(() => {
     const canvas = canvasRef.current
     const pageInfo = pages[current]
-    const pagePlan = plan.plans[current]
+    const pagePlan = previewPlanOf(plan.pageSources[current], pageInfo)
     if (!canvas || !pageInfo || !pagePlan) return
 
     let cancelled = false
@@ -199,9 +220,14 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     }
   }
 
-  const totalBlocks = plan.plans.reduce((sum, item) => sum + item.blits.length, 0)
+  const totalBlocks = plan.pageSources.reduce(
+    (sum, item) => sum + (item.kind === 'packed' ? item.plan.blits.length : 1),
+    0
+  )
+  const copyPages = plan.pageSources.filter((item) => item.kind === 'copy').length
   const pageInfo = pages[current]
-  const pagePlan = plan.plans[current]
+  const pageSource = plan.pageSources[current]
+  const pagePlan = previewPlanOf(pageSource, pageInfo)
 
   return createPortal(
     <div className="fixed inset-0 z-[900] flex items-center justify-center bg-black/55">
@@ -279,11 +305,14 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
         {/* 产物提示：会放进新建的子文件夹 */}
         <div className="shrink-0 border-b border-line/60 px-2.5 py-1.5">
           <span className="hao-label">
-            导出时会在所选目录内新建 <span className="text-accent">{plan.stem}/</span> 文件夹（目录与图集名都用项目名
+            导出时会在所选目录内新建 <span className="text-accent">{plan.stem}/</span> 文件夹（目录、图集名与图集页名都用项目名
             「<span className="text-accent">{projectName}</span>」），产物都放在里面：
             {mode === 'unity'
               ? `${plan.skeletons.length} 个骨架各自一个 .hao2d / 共用 ${pages.length} 张图集页与 ${pages.length} 个材质（Hao2D/Sprite）`
               : `${listFiles(plan.skeletons.map((entry) => entry.fileName))} / 共用 ${plan.atlasName} / ${pages.length} 张图集页`}
+            {copyPages > 0
+              ? `；其中 ${copyPages} 张本来就是图集（原图整页复制，不重打包、不重编码）`
+              : ''}
           </span>
         </div>
 
@@ -370,7 +399,9 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
             {pageInfo ? (
               <span className="text-3xs text-content-lo">
                 第 {current + 1} / {pages.length} 页 · {pageInfo.width}×{pageInfo.height} ·{' '}
-                {pagePlan?.blits.length ?? 0} 张图
+                {pageSource?.kind === 'copy'
+                  ? `原图整页复制（${pageSource.sourceName}）`
+                  : `${pagePlan?.blits.length ?? 0} 张碎图`}
               </span>
             ) : null}
             {pages.length > 1 ? (

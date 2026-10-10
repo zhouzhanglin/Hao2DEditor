@@ -25,6 +25,26 @@ import { CURRENT_SCHEMA_VERSION, createDefaultMeta, createEmptyDocument } from '
 /** 工程文件后缀（含点，落盘文件名形如 `hero.hao2d.proj`） */
 export const PROJECT_EXTENSION = 'hao2d.proj'
 
+/** 旧后缀也认（早期工程用过 `.hao2dproj`，手改过的也用 `.json`） */
+const LEGACY_PROJECT_EXTENSIONS = ['hao2dproj', 'json']
+
+/**
+ * 工程文件路径 → 项目名：`My.Game.hao2d.proj` → `My.Game`。
+ *
+ * 用途：老工程文件里没有 `projectName` 字段时拿它兜底 —— 导出目录、图集名与图集页名
+ * 都该跟**项目名**走，而不是跟骨架名（`hero.hao2d.proj` 里有个叫 `hero` 的骨架只是常事）。
+ */
+export function projectNameFromPath(path: string): string {
+  const base = path.split(/[\\/]/).pop() ?? path
+  const lower = base.toLowerCase()
+  for (const ext of [PROJECT_EXTENSION, ...LEGACY_PROJECT_EXTENSIONS]) {
+    const suffix = `.${ext.toLowerCase()}`
+    if (lower.endsWith(suffix)) return base.slice(0, base.length - suffix.length)
+  }
+  const dot = base.lastIndexOf('.')
+  return dot > 0 ? base.slice(0, dot) : base
+}
+
 export interface ParseDocumentResult {
   document: EditorDocument
   warnings: string[]
@@ -83,7 +103,10 @@ function skeletonPart(doc: EditorDocument): Record<string, unknown> {
 export interface ParseProjectResult {
   skeletons: EditorDocument[]
   activeSkeleton: number
-  /** 项目名（老工程没有这个字段 → 用当前骨架名兜底） */
+  /**
+   * 工程里记的项目名。老工程没有这个字段 → **空串**，由调用方按工程文件名兜底
+   *（见 `projectNameFromPath`）—— 导出目录 / 图集名 / 图集页名都跟项目名走，不跟骨架名。
+   */
   projectName: string
   warnings: string[]
 }
@@ -97,6 +120,8 @@ export function parseProject(text: string): ParseProjectResult {
  *
  * - 有 `skeletons` 数组（且非空）→ 逐个骨架规整，图片池取顶层 `images`；
  * - 否则按老格式处理（顶层就是一份骨架文档），等价于「只有一个骨架」。
+ *
+ * 项目名缺失（老工程）时给空串：调用方更清楚工程文件叫什么，由它兜底。
  */
 export function normalizeProject(raw: unknown): ParseProjectResult {
   if (!isRecord(raw)) {
@@ -104,7 +129,7 @@ export function normalizeProject(raw: unknown): ParseProjectResult {
     return {
       skeletons: [single.document],
       activeSkeleton: 0,
-      projectName: single.document.armatureName,
+      projectName: '',
       warnings: single.warnings
     }
   }
@@ -114,7 +139,7 @@ export function normalizeProject(raw: unknown): ParseProjectResult {
     return {
       skeletons: [single.document],
       activeSkeleton: 0,
-      projectName: str(raw.projectName, single.document.armatureName),
+      projectName: str(raw.projectName, ''),
       warnings: single.warnings
     }
   }
@@ -128,7 +153,7 @@ export function normalizeProject(raw: unknown): ParseProjectResult {
     return parsed.document
   })
   const active = Math.min(Math.max(0, Math.round(num(raw.activeSkeleton, 0))), skeletons.length - 1)
-  return { skeletons, activeSkeleton: active, projectName: str(raw.projectName, skeletons[active].armatureName), warnings }
+  return { skeletons, activeSkeleton: active, projectName: str(raw.projectName, ''), warnings }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -489,7 +514,13 @@ function normalizeImage(raw: Record<string, unknown>): AuthoringImage {
     path: str(raw.path),
     width: Math.round(num(raw.width)),
     height: Math.round(num(raw.height)),
-    loose: bool(raw.loose)
+    /*
+     * 只有**显式** `false` 才算「已经是图集」（导出时整页复制）。
+     *
+     * 老工程文件没有这个字段：那时导出是一律重新打包的，缺省按「碎图」走才不会
+     * 让散图一张一页地导出去；导入资源时写入的都是显式值，因此不受影响。
+     */
+    loose: raw.loose !== false
   }
 }
 

@@ -181,7 +181,14 @@ export interface ImageRef {
   path: string
   width: number
   height: number
-  /** 是否为独立碎图（导出时需要打包进图集） */
+  /**
+   * 是否为独立碎图。
+   *
+   * - `true`：散图，导出时**打包进新图集**（UV 会被重映射）；
+   * - `false`：已经是图集页（导入 Spine / DragonBones 带进来的那种），导出时**整页复制源文件**，
+   *   不重打包也不重编码，UV 原样保留；
+   * - 缺省：按 `true` 处理（老工程文件没有这个字段，当时导出是一律重打包的）。
+   */
   loose?: boolean
 }
 

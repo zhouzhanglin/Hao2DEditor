@@ -1,6 +1,6 @@
 import { getPlatform, baseName, dirName, joinPath, stripExtension } from '../platform'
 import type { Platform } from '../platform'
-import { parseProject, serializeProject, PROJECT_EXTENSION } from '@core/codec/projectJson'
+import { parseProject, projectNameFromPath, serializeProject, PROJECT_EXTENSION } from '@core/codec/projectJson'
 import { decompileAsset } from '@core/codec/decompile'
 import type { EditorDocument } from '@core/model/authoring'
 import { importSpine } from '@importers/spine'
@@ -11,7 +11,7 @@ import { detectSkeletonFormat, isDbTextureJson } from '@importers/detect'
 import { registerLooseImages } from '@importers/looseImages'
 import { ASSET_DIR, copyAssets, planAssetCopies, resolveImagePaths } from './projectAssets'
 import type { AtlasRegion, PageSizes } from '@importers/uv'
-import { useProjectStore } from '../store/projectStore'
+import { DEFAULT_PROJECT_NAME, useProjectStore } from '../store/projectStore'
 import { releaseDocumentAssets } from './assetCache'
 
 export interface IoResult {
@@ -172,8 +172,11 @@ export async function openProjectAt(path: string): Promise<IoResult> {
       false
     )
   useProjectStore.getState().setWarnings(parsed.warnings)
-  // 项目名随文件走（老工程没有这个字段时，normalizeProject 已用骨架名兜底）
-  useProjectStore.getState().setProjectInfo({ projectName: parsed.projectName })
+  // 项目名随文件走：老工程没有 projectName 字段 → 用**工程文件名**兜底
+  //（导出目录 / 图集名 / 图集页名都跟项目名走，别退化成骨架名）
+  useProjectStore.getState().setProjectInfo({
+    projectName: parsed.projectName || projectNameFromPath(path)
+  })
   await platform.recentAdd(path)
   const suffix = parsed.skeletons.length > 1 ? `（${parsed.skeletons.length} 个骨架）` : ''
   return { ok: true, message: `已打开 ${baseName(path)}${suffix}`, warnings: parsed.warnings }
@@ -265,7 +268,7 @@ export async function importSpineFlow(): Promise<IoResult> {
     pageImages,
     atlasText
   })
-  const document = finishImport(result.asset, pageImages, pageSizes)
+  const document = finishImport(result.asset, pageImages, pageSizes, jsonPath)
   const warnings = [...parsed.warnings, ...result.warnings]
   useProjectStore.getState().setWarnings(warnings)
   return {
@@ -334,7 +337,7 @@ export async function importDragonBonesFlow(): Promise<IoResult> {
     pageSizes,
     pageImages
   })
-  const document = finishImport(result.asset, pageImages, pageSizes)
+  const document = finishImport(result.asset, pageImages, pageSizes, jsonPath)
   warnings.push(...result.warnings)
   warnings.push(`合并 ${dbTextureNames(subTextures).length} 张图集页`)
   useProjectStore.getState().setWarnings(warnings)
@@ -346,6 +349,20 @@ export async function importDragonBonesFlow(): Promise<IoResult> {
 }
 
 /**
+ * 导入的资源名 → 项目名：`Rooster_Ani_ske.json` → `Rooster_Ani`（图集文件常见的 `_tex` 也去掉）。
+ *
+ * 只在**还没起过名**的会话里采用（默认名 + 从未保存）：导出的图集名 / 目录名 / 页名都跟项目名走，
+ * 直接拿编辑器默认的 `hao2dProject` 当名字太不具体；已有名字（新建项目填的、打开的工程）绝不动。
+ */
+function adoptProjectNameFromImport(sourcePath: string | undefined): void {
+  if (!sourcePath) return
+  const store = useProjectStore.getState()
+  if (store.projectPath !== null || store.projectName !== DEFAULT_PROJECT_NAME) return
+  const stem = stripExtension(baseName(sourcePath)).replace(/_(ske|tex)$/i, '')
+  if (stem.length > 0) store.setProjectInfo({ projectName: stem })
+}
+
+/**
  * Runtime → Authoring，并把图集页的真实路径写进图片清单。
  *
  * 导入（Spine / DragonBones、菜单与拖入两条路）都是**整份替换**文档：先把上个资源占着的
@@ -354,7 +371,8 @@ export async function importDragonBonesFlow(): Promise<IoResult> {
 function finishImport(
   asset: ReturnType<typeof importSpine>['asset'],
   pageImages: Record<string, string>,
-  pageSizes: PageSizes
+  pageSizes: PageSizes,
+  sourcePath?: string
 ): EditorDocument {
   releaseDocumentAssets()
   const document = decompileAsset(asset)
@@ -366,6 +384,8 @@ function finishImport(
     loose: false
   }))
   useProjectStore.getState().setDocument(document, null, true)
+  // 一上来就导入、工程还没名字：用被导入文件的名字当项目名（导出产物都跟它走）
+  adoptProjectNameFromImport(sourcePath)
   return document
 }
 
@@ -481,7 +501,7 @@ export async function importDroppedPaths(paths: readonly string[]): Promise<IoRe
           pageImages: resolved.pageImages,
           atlasText
         })
-        const document = finishImport(result.asset, resolved.pageImages, resolved.pageSizes)
+        const document = finishImport(result.asset, resolved.pageImages, resolved.pageSizes, jsons[0])
         return {
           ok: true,
           message: `已导入 Spine（拖入）：${document.bones.length} 骨骼 / ${document.animations.length} 动画`,

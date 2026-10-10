@@ -14,8 +14,10 @@ import {
   Maximize2,
   Plus,
   Route,
+  Search,
   Trash2,
-  Unlock
+  Unlock,
+  X
 } from 'lucide-react'
 import type { AuthoringAttachmentType } from '@core/model/authoring'
 import { useProjectStore } from '@editor/store/projectStore'
@@ -412,6 +414,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   const update = useProjectStore((s) => s.update)
   const selection = useSelectionStore()
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
+  /** 搜索框内容：空 = 不过滤；有值时只显示命中节点 + 其祖先（根骨骼始终保留），并临时全展开 */
+  const [query, setQuery] = useState('')
   /** 树列表容器：拖放兜底判定要用它量各行的位置 */
   const listRef = useRef<HTMLDivElement | null>(null)
 
@@ -469,6 +473,14 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
 
   const displaysOf = (slotName: string): EditorDocument['skins'][number]['slots'][number]['attachments'] =>
     activeSkin?.slots.find((item) => item.slot === slotName)?.attachments ?? []
+
+  /**
+   * 搜索筛选用的 display 键：插槽名 + 附件名（换行分隔，避免名字里带冒号时歧义）。
+   *
+   * 定义位置有讲究：**必须在下面的搜索 memo 之前** —— 它是 `const`，memo 在渲染早期就执行，
+   * 放到后面会撞上 TDZ（第一次命中就整块树抛错）。
+   */
+  const displayKey = (slotName: string, attachmentName: string): string => `${slotName}\n${attachmentName}`
 
   /**
    * 点击插槽下的 display：切到它；**再点当前正显示的那一个则隐藏** —— 插槽只有两种状态：
@@ -890,14 +902,64 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     return items
   }
 
+  /**
+   * 搜索筛选：保留「名字命中」的节点，以及它们的**祖先**（层级路径不能断）。
+   *
+   * **根骨骼始终保留**，哪怕自己没命中 —— 筛选后树顶仍有锚点，不会只剩几根孤立的子节点
+   * 让人看不出它们属于哪套骨架。搜索期间忽略折叠状态（强制展开），清空后原折叠状态照旧。
+   *
+   * 返回 null 表示当前没在搜索，渲染逻辑照常。
+   */
+  const filter = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return null
+    const hit = (text: string): boolean => text.toLowerCase().includes(q)
+    const bones = new Set<string>()
+    const slots = new Set<string>()
+    const displays = new Set<string>()
+    const constraints = new Set<string>()
+    /** 深度优先：返回「这棵子树里有没有命中」，命中的节点记进对应集合 */
+    const visit = (bone: AuthoringBone): boolean => {
+      let found = hit(bone.name)
+      for (const constraint of constraintsByBone.get(bone.name) ?? []) {
+        if (!hit(constraint.name)) continue
+        constraints.add(constraint.name)
+        found = true
+      }
+      for (const slot of slotsByBone.get(bone.name) ?? []) {
+        let slotHit = hit(slot.name)
+        for (const attachment of displaysOf(slot.name)) {
+          if (!hit(attachment.name)) continue
+          displays.add(displayKey(slot.name, attachment.name))
+          slotHit = true
+        }
+        if (slotHit) {
+          slots.add(slot.name)
+          found = true
+        }
+      }
+      for (const child of bonesByParent.get(bone.name) ?? []) if (visit(child)) found = true
+      if (found) bones.add(bone.name)
+      return found
+    }
+    for (const root of bonesByParent.get('') ?? []) {
+      visit(root)
+      bones.add(root.name)
+    }
+    return { bones, slots, displays, constraints }
+  }, [query, bonesByParent, slotsByBone, constraintsByBone, document])
+
   const rows: React.ReactNode[] = []
 
   const pushBone = (bone: AuthoringBone, depth: number): void => {
+    // 搜索时：整棵被筛掉的子树直接跳过
+    if (filter && !filter.bones.has(bone.name)) return
     const children = bonesByParent.get(bone.name) ?? []
     const slots = slotsByBone.get(bone.name) ?? []
     const constraints = constraintsByBone.get(bone.name) ?? []
     const hasChildren = children.length + slots.length + constraints.length > 0
-    const expanded = !collapsed.has(bone.name)
+    // 搜索期间强制展开：命中的节点多半藏在折叠的分支里；清空搜索后原折叠状态照旧
+    const expanded = filter ? true : !collapsed.has(bone.name)
 
     rows.push(
       <TreeRow
@@ -962,6 +1024,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     attachment: EditorDocument['skins'][number]['slots'][number]['attachments'][number],
     depth: number
   ): React.ReactNode => {
+    // 搜索时：没命中的 display 不渲染
+    if (filter && !filter.displays.has(displayKey(slot.name, attachment.name))) return null
     // 「显示中」标记与点击判定同一数据源：Animate 态按当前时间点的关键帧数据判断
     const showing = shownDisplayName(slot) === attachment.name
     return (
@@ -1015,11 +1079,13 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
 
   const pushedSlots = new Set<string>()
   const pushSlot = (slot: EditorDocument['slots'][number], depth: number): void => {
+    // 搜索时：没命中的插槽（及其 display）不渲染
+    if (filter && !filter.slots.has(slot.name)) return
     // 同名插槽只渲染一次：异常数据（重名）或热更新残留时也不至于把树撑重复
     if (pushedSlots.has(slot.name)) return
     pushedSlots.add(slot.name)
     const displays = displaysOf(slot.name)
-    const expanded = !collapsed.has(`slot:${slot.name}`)
+    const expanded = filter ? true : !collapsed.has(`slot:${slot.name}`)
     rows.push(
       <TreeRow
         key={`slot:${slot.name}`}
@@ -1076,7 +1142,9 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     for (const attachment of displays) rows.push(renderDisplay(slot, attachment, depth + 1))
   }
 
-  const renderConstraint = (constraint: AuthoringConstraint, depth: number): React.ReactNode => (
+  const renderConstraint = (constraint: AuthoringConstraint, depth: number): React.ReactNode =>
+    // 搜索时：没命中的约束不渲染
+    filter && !filter.constraints.has(constraint.name) ? null : (
     <TreeRow
       key={`constraint:${constraint.name}`}
       depth={depth}
@@ -1139,6 +1207,34 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           <Route size={14} />
         </button>
         <span className="ml-auto font-mono text-3xs text-content-lo">{rows.length}</span>
+      </div>
+      {/* 搜索：按名字筛选树（骨骼 / 插槽 / display / 约束），根骨骼始终保留 —— 见上面的 filter */}
+      <div className="relative shrink-0 border-b border-line/60 bg-ink-800/60 px-1 py-1">
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            // Esc 清空：与检查器里的输入框一致，打错了不用先全选再删
+            if (event.key === 'Escape') setQuery('')
+          }}
+          placeholder="搜索骨骼 / 插槽 / 约束…"
+          className="hao-field h-[22px] w-full pr-6 text-panel"
+        />
+        {query ? (
+          <button
+            type="button"
+            title="清空搜索"
+            onClick={() => setQuery('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-content-lo hover:text-content-hi"
+          >
+            <X size={12} />
+          </button>
+        ) : (
+          <Search
+            size={12}
+            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-content-lo"
+          />
+        )}
       </div>
       <div
         ref={listRef}

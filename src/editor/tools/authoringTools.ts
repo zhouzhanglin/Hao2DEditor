@@ -70,10 +70,20 @@ interface DragSession {
    * 走的写入路径与以前完全一致。
    */
   bones: MultiBoneStart[]
+  /**
+   * 旋转增量记账（单位：度，都是在父空间里量的指针角）。
+   *
+   * - `lastAngle`：上一帧指针绕**骨骼原点**的角度，用来取帧间增量；
+   * - `sweep`：本次拖拽累计转过的角度 —— 每帧只把「这一帧转了多少」累加上去。
+   *
+   * 旋转按「指针转了多少度」加减，而不是「指针指到哪就转到哪」：抓在旋转圈任意位置按下，
+   * 骨骼都不会先跳到指针方向。逐帧累计（而不是拿当前角减起始角）是因为 `atan2` 会在 ±180°
+   * 回绕：一次划过 60° 若直接相减，可能算成 −300°；逐帧增量配合回绕修正则连续转几圈都不受影响。
+   */
+  lastAngle: number
+  sweep: number
   /** 骨骼世界原点（旋转 / 缩放的轴心） */
   origin: Vec2
-  parentRotation: number
-  inheritRotation: boolean
   /** gizmo 拖拽：模式 + 抓到的部位（中心 / X 轴 / Y 轴），以及按下时的骨骼本地值 */
   gizmoMode: GizmoMode
   gizmoPart: GizmoPart
@@ -141,9 +151,10 @@ const IDLE: DragSession = {
   kind: 'none',
   bone: '',
   bones: [],
+  lastAngle: 0,
+  sweep: 0,
   origin: { x: 0, y: 0 },
-  parentRotation: 0,
-  inheritRotation: true,
+
   startDistance: 0,
   startScale: { x: 1, y: 1 },
   gizmoMode: 'move',
@@ -483,8 +494,6 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     origin,
     parentWorld,
     startPointerLocal: parentWorld ? mulPoint(invert(parentWorld), info.world) : { x: info.world.x, y: info.world.y },
-    parentRotation: parent >= 0 ? skeleton.worldRot[parent] : 0,
-    inheritRotation: bone.inheritRotation,
     startDistance: Math.max(1e-4, Math.hypot(info.world.x - origin.x, info.world.y - origin.y))
   }
   storeHandler.begin('移动骨骼')
@@ -532,6 +541,27 @@ export function pickDragRoots(
     }
     return true
   })
+}
+
+/**
+ * 把角度差收进 (-180, 180]。
+ *
+ * `atan2` 的返回值在 ±180° 处断开：指针从 170° 划到 −170°（实际是 +20°）直接相减会得到 −340°。
+ * 逐帧取增量时先过一遍这里，旋转就不会在跨越那条线时突然倒转一大圈。
+ */
+export function wrapDegrees(degrees: number): number {
+  return ((degrees % 360) + 540) % 360 - 180
+}
+
+/**
+ * 父空间是否镜像：行列式为负 → -1。
+ *
+ * 镜像的父骨骼（例如翻转过来的手）下，同样的**世界**转角要写成**反号**的本地转角才对得上；
+ * 多选时先把这次的实际世界转角还原出来，再按各自父坐标系的镜像方向写进每根骨骼。
+ */
+function mirroredSign(parentWorld: Float32Array | null): number {
+  if (!parentWorld) return 1
+  return parentWorld[0] * parentWorld[5] - parentWorld[4] * parentWorld[1] < 0 ? -1 : 1
 }
 
 /** 收集这次拖拽要一起改的骨骼：当前选中集合（锁定 / 找不到的剔除）+ 按下的这根 */
@@ -611,14 +641,20 @@ function beginGizmoDrag(
   const parentWorld = parent >= 0 ? skeleton.world.slice(parent * 16, parent * 16 + 16) : null
   const startPointerLocal = parentWorld ? mulPoint(invert(parentWorld), world) : { x: world.x, y: world.y }
   const bones = collectDragBones(host, boneName)
+  /*
+   * 旋转基准角 = 按下时指针相对**骨骼原点**的角度，在父空间里量（与骨骼本地旋转同一个空间）。
+   * 之后每帧只累计「这一帧转了多少」→ 抓着旋转圈任意位置按下，骨骼都不会先跳一下。
+   */
+  const startAngle =
+    Math.atan2(startPointerLocal.y - startLocal.pos.y, startPointerLocal.x - startLocal.pos.x) *
+    (180 / Math.PI)
   drag = {
     ...IDLE,
     kind: 'gizmo',
     bone: boneName,
     bones,
+    lastAngle: startAngle,
     origin,
-    parentRotation: parent >= 0 ? skeleton.worldRot[parent] : 0,
-    inheritRotation: bone.inheritRotation,
     gizmoMode: mode,
     gizmoPart: part,
     startLocal,
@@ -675,8 +711,6 @@ function beginShearBoxDrag(host: ToolHost, boneName: string, edge: ShearEdge, wo
     kind: 'shear-box',
     bone: boneName,
     origin: { x: box.corners[0].x, y: box.corners[0].y },
-    parentRotation: parent >= 0 ? skeleton.worldRot[parent] : 0,
-    inheritRotation: bone.inheritRotation,
     startLocal,
     parentWorld,
     localAxisX: { x: Math.cos(xAngle), y: Math.sin(xAngle) },
@@ -762,17 +796,25 @@ function dragGizmo(host: ToolHost, world: Vec2): void {
   }
 
   if (mode === 'rotate') {
-    const angle = Math.atan2(ry, rx) * (180 / Math.PI)
-    const local = drag.inheritRotation ? angle - drag.parentRotation : angle
     /*
-     * 多选：取相对**按下时**的角度增量，加到每根选中骨骼自己的起始旋转上。
-     * 角度是局部量，增量可以直接相加；「祖先也在集合里」的子孙已在 collectDragBones 里剔除，
-     * 所以不会出现「父骨骼转一次 + 自己再转一次」的双倍。
+     * 旋转按**指针绕骨骼原点的角度变化**加减，不是「指到哪就转到哪」：
+     * 每帧只累计这一帧转过的角度（`wrapDegrees` 修掉 atan2 的 ±180° 回绕），
+     * 骨骼在按下时的起始旋转上加这个累计值 —— 抓在旋转圈任意位置按下都不会先跳一下，
+     * 连续转好几圈也不会被打断，每一度都由鼠标实际划过的弧决定。
+     *
+     * 角度在**父空间**里量（与骨骼本地旋转同一个空间），镜像父骨骼下方向也自动一致：
+     * 多选时先把这次的实际世界转角还原出来，再按各自父坐标系的镜像方向写进去。
+     * 「祖先也在集合里」的子孙已在 collectDragBones 里剔除，不会出现转两次的双倍。
      */
-    const delta = local - drag.startLocal.rot
+    const angle =
+      Math.atan2(pointerLocal.y - drag.startLocal.pos.y, pointerLocal.x - drag.startLocal.pos.x) *
+      (180 / Math.PI)
+    drag.sweep += wrapDegrees(angle - drag.lastAngle)
+    drag.lastAngle = angle
+    const sweep = drag.sweep * mirroredSign(drag.parentWorld)
     store.updateSilent((draft) => {
       for (const item of drag.bones) {
-        writeBoneValue(draft, animation, host.time, item.name, 'rotate', item.rot + delta)
+        writeBoneValue(draft, animation, host.time, item.name, 'rotate', item.rot + sweep * mirroredSign(item.parentWorld))
       }
     })
   } else if (mode === 'move') {

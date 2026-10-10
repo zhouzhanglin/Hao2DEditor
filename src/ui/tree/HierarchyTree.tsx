@@ -116,7 +116,7 @@ interface TreeRowProps {
   focusTarget?: FocusTarget
   /** 骨骼行用 `data-bone` 标出名字：定位（滚过来 + 闪一下）靠它查这一行 */
   dataBone?: string
-  /** 非 0 时这行的名字闪一下（值本身只用来当 key，重播动画） */
+  /** 非 0 时整行闪一下（定位请求；父组件 900ms 后清 0，靠这个开关重启动画） */
   flashKey?: number
 }
 
@@ -182,6 +182,8 @@ function TreeRow({
         nodeHint === 'inside' ? 'bg-accent/20 text-content-hi' : '',
         nodeHint === 'above' ? 'shadow-[inset_0_2px_0_0_rgba(34,211,238,0.9)]' : '',
         nodeHint === 'below' ? 'shadow-[inset_0_-2px_0_0_rgba(34,211,238,0.9)]' : '',
+        // 定位高亮：整行闪一下橙色底（见 .hao-reveal-flash），动画结束后再接管回本行样式
+        flashKey ? 'hao-reveal-flash' : '',
         dragPayload ? 'cursor-grab active:cursor-grabbing' : ''
       ].join(' ')}
       title={title}
@@ -334,15 +336,8 @@ function TreeRow({
         ) : (
           <span className="flex h-[14px] w-[14px] shrink-0 items-center justify-center text-content-lo">{icon}</span>
         )}
-        {/*
-          key 跟着闪烁序号走：同一根骨骼被再次定位时字符串类名不变，靠重挂载才能重播动画
-        */}
-        <span
-          key={flashKey ?? 0}
-          className={['min-w-0 flex-1 truncate', flashKey ? 'hao-reveal-flash' : ''].join(' ')}
-        >
-          {label}
-        </span>
+        {/* 定位时整行一起闪（见行 className），文字白不白跟着行走，这里不再单独处理 */}
+        <span className="min-w-0 flex-1 truncate">{label}</span>
         {meta ? <span className="shrink-0 font-mono text-3xs text-content-lo">{meta}</span> : null}
         {trailing}
         {onDelete ? (
@@ -530,7 +525,12 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   const revealTarget = useRevealStore((s) => s.bone)
   const revealNonce = useRevealStore((s) => s.nonce)
   const handledReveal = useRef(0)
-  /** 正在闪烁的骨骼行 */
+  /**
+   * 正在闪烁的骨骼行（整行蓝底，见 `.hao-reveal-flash`）。
+   *
+   * 闪烁靠「加类 → 900ms 后清掉」这个开关重播动画，所以同一根骨骼在闪烁途中被再次
+   * 定位时不会从头发一遍 —— 那会儿它本来就还是蓝的，重新滚动到位已经足够。
+   */
   const [flash, setFlash] = useState<{ name: string; nonce: number } | null>(null)
 
   /**

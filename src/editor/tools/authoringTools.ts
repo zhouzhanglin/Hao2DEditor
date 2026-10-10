@@ -15,6 +15,9 @@ import type { GizmoMode } from '../store/toolStore'
 import { useProjectStore } from '../store/projectStore'
 import { useSelectionStore } from '../store/selectionStore'
 import { keyBoneChannel, keyDeform } from '../commands/animationCommands'
+// 「画骨骼时把鼠标下的插槽带过来」复用层级树拖放插槽的同一套命令（会换算附件位置，画面不跳）
+import { moveSlot, validateSlotMove } from '../commands/hierarchyCommands'
+import type { MoveResult } from '../commands/hierarchyCommands'
 import {
   autoWeights,
   findAttachment,
@@ -138,6 +141,11 @@ interface DragSession {
   createStart: Vec2
   createEnd: Vec2
   createParent: string
+  /**
+   * 新建骨骼时鼠标所在的插槽（拖到哪个插槽上就记哪个，视口里同时高亮它）。
+   * 松开后这个插槽会挂到新骨骼下面；没命中 / 命中锁定插槽时为空串。
+   */
+  createTargetSlot: string
   /** 附件操作器：宿主骨骼索引 + 按下时的 setup 值 + 被拖轴的局部 / 世界方向 */
   attBoneIndex: number
   attStart: { position: Vec2; rotation: number; scale: Vec2 }
@@ -183,6 +191,7 @@ const IDLE: DragSession = {
   createStart: { x: 0, y: 0 },
   createEnd: { x: 0, y: 0 },
   createParent: '',
+  createTargetSlot: '',
   attBoneIndex: -1,
   attStart: { position: { x: 0, y: 0 }, rotation: 0, scale: { x: 1, y: 1 } },
   attAxisLocal: { x: 1, y: 0 },
@@ -329,11 +338,12 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     scene.setViewState({ pendingBone: { x1: start.x, y1: start.y, x2: start.x, y2: start.y } })
     storeHandler.begin('新建骨骼')
     host.status(
-      endpoint
+      (endpoint
         ? `已吸附到「${parent}」的骨骼端点：拖动决定长度与方向，松开生成（一根接一根就是骨骼链）`
         : parent
           ? `从「${parent}」接着画：拖动决定长度与方向，松开生成（可以一根接一根拖成骨骼链）`
-          : '拖动决定长度与方向，松开生成骨骼（建在根层；从骨骼上起笔才会挂到它下面）'
+          : '拖动决定长度与方向，松开生成骨骼（建在根层；从骨骼上起笔才会挂到它下面）') +
+        '；拖到插槽上松手会把该插槽挂过来（锁定中的插槽除外）'
     )
     return true
   }
@@ -1202,8 +1212,16 @@ function moveActiveDrag(host: ToolHost, info: PointerInfo): void {
     // 收笔同样吸端点：拖到目标骨骼的根端 / 末端时精确对接（端点优先于轴线投影）
     const end = snapToBoneEndpoint(host, info.world)?.point ?? snapToBoneAxis(host, info.world)
     drag.createEnd = end
+    /*
+     * 鼠标下的插槽：用与**选择工具悬停**同一套拾取（`pickAttachmentAt` + `hoveredDisplay`），
+     * 一眼看出「松手后哪个插槽会挂到新骨骼下面」。锁定的插槽按点不中处理（不高亮、不带过来）。
+     */
+    const under = host.scene.pickAttachmentAt(info.world.x, info.world.y)
+    const target = under && !slotLocked(under.slot) ? under : null
+    drag.createTargetSlot = target ? target.slot : ''
     host.scene.setViewState({
-      pendingBone: { x1: drag.createStart.x, y1: drag.createStart.y, x2: end.x, y2: end.y }
+      pendingBone: { x1: drag.createStart.x, y1: drag.createStart.y, x2: end.x, y2: end.y },
+      hoveredDisplay: target
     })
     host.scene.markDirty()
     return
@@ -1261,9 +1279,16 @@ export function toolPointerUp(host: ToolHost): void {
   if (drag.kind === 'bone-create') {
     const session = drag
     drag = { ...IDLE }
-    host.scene.setViewState({ pendingBone: null })
+    // 预览与插槽高亮一起收掉；鼠标下的插槽（若没被锁）随后挂到新骨骼下
+    host.scene.setViewState({ pendingBone: null, hoveredDisplay: null })
     storeHandler.end()
-    createBoneFromDrag(host, session.createStart, session.createEnd, session.createParent)
+    createBoneFromDrag(
+      host,
+      session.createStart,
+      session.createEnd,
+      session.createParent,
+      session.createTargetSlot
+    )
     return
   }
 
@@ -1365,7 +1390,13 @@ function resolveCreateParent(host: ToolHost, world: Vec2): string {
  * 按拖拽的两点生成骨骼：起点转换成父骨骼局部坐标、长度取两点距离、
  * 角度取连线方向再扣掉父骨骼的世界旋转（对应 inheritRotation / inheritScale 的语义）。
  */
-function createBoneFromDrag(host: ToolHost, start: Vec2, end: Vec2, parent: string): void {
+function createBoneFromDrag(
+  host: ToolHost,
+  start: Vec2,
+  end: Vec2,
+  parent: string,
+  targetSlot = ''
+): void {
   const scene = host.scene
   const bundle = scene.runtime
   if (!bundle) return
@@ -1403,11 +1434,38 @@ function createBoneFromDrag(host: ToolHost, start: Vec2, end: Vec2, parent: stri
   })
   if (!created) return
 
+  // 先把新骨骼刷进场景：世界矩阵有了，下面换宿主才能按它换算附件位置
+  scene.setDocument(useProjectStore.getState().document, host.selection.skin)
+  scene.refresh()
+
+  /*
+   * 鼠标下的插槽跟过来：挂到新骨骼下 —— 走的是**层级树拖放插槽的同一套命令**
+   *（`moveSlot` + 世界矩阵），插槽里的附件位置会按「旧宿主 → 新宿主」换算一次，
+   * 画面上的位置不会因为换骨骼而跳一下。
+   */
+  let moved = ''
+  let note = ''
+  if (targetSlot) {
+    const check = validateSlotMove(useProjectStore.getState().document, targetSlot, created)
+    if (!check.ok) note = ` · ${check.message}`
+    else {
+      let result: MoveResult = check
+      useProjectStore.getState().update('插槽挂到新骨骼', (draft) => {
+        result = moveSlot(draft, targetSlot, created, null, {
+          worldMatrixOf: (name) => scene.worldMatrixOf(name)
+        })
+      })
+      if (result.ok) moved = targetSlot
+      else note = ` · ${result.message}`
+    }
+  }
+
   useSelectionStore.getState().selectBone(created)
   scene.setDocument(useProjectStore.getState().document, host.selection.skin)
   scene.refresh()
   host.status(
-    `已新建骨骼「${created}」${parent ? `，挂在「${parent}」下` : '（根骨骼）'} · 长度 ${length.toFixed(2)}`
+    `已新建骨骼「${created}」${parent ? `，挂在「${parent}」下` : '（根骨骼）'} · 长度 ${length.toFixed(2)}` +
+      (moved ? ` · 插槽「${moved}」已挂到它下面` : note)
   )
 }
 

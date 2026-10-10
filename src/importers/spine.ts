@@ -449,9 +449,24 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
     name: skin.name,
     slots: Object.entries(skin.attachments).map<SkinSlotData>(([slotName, attachments]) => ({
       slotName,
-      attachments: Object.entries(attachments).map(([name, attachment]) =>
-        // 附件名保持裸名（动画 / setup 都按它引用），只把皮肤名交给区域查找
-        convertAttachment({ ...attachment, name: attachment.name ?? name }, ctx, skin.name)
+      attachments: Object.entries(attachments).map(([key, attachment]) =>
+        /*
+         * 附件名取 **json 键**，与官方运行库一致（`SkeletonJson` 读皮肤时
+         * `skin.setAttachment(slot.index, entryName, ...)` 用的就是键）。
+         *
+         * 插槽的 setup 附件（`slots[].attachment`）与动画里的显示帧引用的都是键；早先这里
+         * 用 `name ?? 键`（键只在没有 name 字段时才生效），于是 `head 1` / `arm` 这类带 name
+         * 的附件跟引用 `Head` / `Arm` 对不上 —— 整根插槽解析不到 setup display，什么都不画
+         *（FootSoldier 的 13 根插槽里有 8 根是空的）。
+         *
+         * `name` 字段不能丢：官方用它推导区域路径（`path = map.path ?? name`），所以这里把它
+         * 并进 `path`，区域查找仍按「path → 皮肤名/键 → 键」的顺序（见 resolveRegion）。
+         */
+        convertAttachment(
+          { ...attachment, name: key, path: attachment.path ?? attachment.name },
+          ctx,
+          skin.name
+        )
       )
     }))
   }))

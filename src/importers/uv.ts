@@ -118,14 +118,17 @@ export function regionGeometry(
   displayWidthPx?: number,
   displayHeightPx?: number
 ): { width: number; height: number; offsetX: number; offsetY: number } {
-  // 90°/270°：图集中的占位宽高与区域原始宽高互换（对齐官方 packedWidth / packedHeight）
-  // —— 早先只匹配了 90°，270° 的区域尺寸/偏移会算错
-  const degrees = ((Math.round(region.rotate) % 360) + 360) % 360
-  const rotated = degrees === 90 || degrees === 270
-  const packedW = rotated ? region.height : region.width
-  const packedH = rotated ? region.width : region.height
-  const origW = region.origWidth > 0 ? region.origWidth : packedW
-  const origH = region.origHeight > 0 ? region.origHeight : packedH
+  /*
+   * 区域尺寸**不按图集旋转交换**：`bounds` 的宽高就是区域自身的宽高，`rotate` 只描述它在图集页里
+   * 怎么摆（由 UV 映射承担，见 mapRegionRelativeUvs）。这一点对齐官方运行库
+   * `RegionAttachment.computeUVs`：它用的也是 `region.width/height` 原值。
+   *
+   * 早先在这里按 90°/270° 交换了占位宽高，于是「裁剪居中补偿」对旋转区域多减了一份
+   * (w−h)/2 —— 表现是 rotate:90 的附件整体沿对角线平移（FootSoldier 的 eyes blink 67×22
+   * 偏了 0.225、mouth 28×21 偏了 0.035，正好都等于 (w−h)/2）。
+   */
+  const origW = region.origWidth > 0 ? region.origWidth : region.width
+  const origH = region.origHeight > 0 ? region.origHeight : region.height
 
   const kx = displayWidthPx && origW > 0 ? displayWidthPx / origW : 1
   const ky = displayHeightPx && origH > 0 ? displayHeightPx / origH : 1
@@ -133,8 +136,9 @@ export function regionGeometry(
   return {
     width: pxToUnit(origW * kx),
     height: pxToUnit(origH * ky),
-    offsetX: pxToUnit((region.offsetX + packedW * 0.5 - origW * 0.5) * kx),
-    offsetY: pxToUnit(-(region.offsetY + packedH * 0.5 - origH * 0.5) * ky)
+    // 未裁剪区域这里是 0（区域中心 = 附件位置）；裁剪时按 (bounds − orig)/2 补回中心
+    offsetX: pxToUnit((region.offsetX + region.width * 0.5 - origW * 0.5) * kx),
+    offsetY: pxToUnit(-(region.offsetY + region.height * 0.5 - origH * 0.5) * ky)
   }
 }
 

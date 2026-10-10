@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import DockLayout from './layout/DockLayout'
 import Splitter from './layout/Splitter'
 import MenuBar from './layout/MenuBar'
+import SkeletonBar from './layout/SkeletonBar'
 import StatusBar from './panels/StatusBar'
 import InspectorPanel from './panels/InspectorPanel'
 import AssetPanel from './panels/AssetPanel'
@@ -78,17 +79,18 @@ import { hasExternalFiles } from '@ui/widgets/dragDrop'
 import { setActiveScene, getActiveScene } from '@editor/activeScene'
 import type { EditorScene } from '@editor/scene'
 import {
+  createProjectAt,
   importDragonBonesFlow,
   importImagesFlow,
   importSpineFlow,
   lastProject,
-  newProject,
   openProject,
   openProjectAt,
   saveProject
 } from '@editor/services/projectIo'
 import ExportDialog from '@ui/widgets/ExportDialog'
 import type { ExportMode } from '@ui/widgets/ExportDialog'
+import NewProjectDialog from '@ui/widgets/NewProjectDialog'
 import { deleteSelectedTrack, keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
 import { PPU, deleteMeshVertex } from '@editor/commands/authoringCommands'
 
@@ -96,6 +98,7 @@ export default function App() {
   const mode = useModeStore((s) => s.mode)
   const setModeRaw = useModeStore((s) => s.setMode)
   const doc = useProjectStore((s) => s.document)
+  const projectName = useProjectStore((s) => s.projectName)
   const projectPath = useProjectStore((s) => s.projectPath)
   const dirty = useProjectStore((s) => s.dirty)
   const warnings = useProjectStore((s) => s.warnings)
@@ -192,6 +195,60 @@ export default function App() {
     viewResetForPath.current = projectPath
     resetSceneView()
   }, [projectPath, resetSceneView])
+
+  /**
+   * 骨架切换 / 新建 / 删除时的收尾。
+   *
+   * 选中项、待绑定状态、时间轴动画名、视口都指向**旧骨架**里的对象或名字，
+   * 不清掉会出现「选中的骨骼已经不存在」这类幽灵状态。
+   */
+  const resetForSkeletonChange = useCallback(() => {
+    useSelectionStore.getState().clear()
+    useToolStore.getState().setPendingWeightBone(null)
+    useTimelineStore.getState().setAnimation(null)
+    resetSceneView()
+  }, [resetSceneView])
+
+  const switchSkeleton = useCallback(
+    (index: number) => {
+      const store = useProjectStore.getState()
+      if (index === store.activeSkeleton) return
+      const name = store.skeletons[index]?.armatureName ?? String(index)
+      store.setActiveSkeleton(index)
+      resetForSkeletonChange()
+      flash(`已切换到骨架「${name}」`)
+    },
+    [flash, resetForSkeletonChange]
+  )
+
+  const addSkeleton = useCallback(() => {
+    useProjectStore.getState().addSkeleton()
+    resetForSkeletonChange()
+    flash(`已新建骨架「${useProjectStore.getState().document.armatureName}」：图片池与其它骨架共享`)
+  }, [flash, resetForSkeletonChange])
+
+  const renameSkeleton = useCallback(
+    (index: number, name: string) => {
+      useProjectStore.getState().renameSkeleton(index, name)
+      flash(`骨架已重命名为「${name}」`)
+    },
+    [flash]
+  )
+
+  const removeSkeleton = useCallback(
+    (index: number) => {
+      const store = useProjectStore.getState()
+      if (store.skeletons.length <= 1) {
+        flash('项目里至少保留一个骨架')
+        return
+      }
+      const name = store.skeletons[index]?.armatureName ?? ''
+      store.removeSkeleton(index)
+      resetForSkeletonChange()
+      flash(`已删除骨架「${name}」（图片池未动）`)
+    },
+    [flash, resetForSkeletonChange]
+  )
 
   /**
    * 切换 Pose / Animate 的**唯一入口**（Tab、菜单命令、视口左上角的 ModeSwitch 都走这里），
@@ -311,11 +368,23 @@ export default function App() {
     [flash]
   )
 
+  /** 「新建项目」弹窗：项目名与保存位置都要用户确认（项目名不能为空） */
+  const [newProjectOpen, setNewProjectOpen] = useState(false)
+
+  /** 弹窗确认：清空工程 → 记住项目名与保存位置 → 立刻写出工程文件 → 视口复位 */
+  const createProject = useCallback(
+    (name: string, dir: string) => {
+      setNewProjectOpen(false)
+      run(createProjectAt(name, dir)).then(resetSceneView)
+    },
+    [run, resetSceneView]
+  )
+
   const handleCommand = useCallback(
     (command: string) => {
       switch (command) {
         case 'project:new':
-          run(newProject()).then(resetSceneView)
+          setNewProjectOpen(true)
           return
         case 'project:open':
           run(openProject()).then(resetSceneView)
@@ -419,9 +488,9 @@ export default function App() {
   )
 
   useEffect(() => {
-    globalThis.document.title = `${doc.armatureName}${dirty ? ' *' : ''} — Hao2D Editor`
+    globalThis.document.title = `${projectName}${dirty ? ' *' : ''} — Hao2D Editor`
     return getPlatform().onMenuCommand(handleCommand)
-  }, [doc.armatureName, dirty, handleCommand])
+  }, [projectName, dirty, handleCommand])
 
   // 快捷键
   useEffect(() => {
@@ -550,12 +619,21 @@ export default function App() {
       <DockLayout
         menuBar={
           <MenuBar
-            documentName={doc.armatureName}
+            documentName={projectName}
             dirty={dirty}
             mode={mode}
             projectPath={projectPath}
             onCommand={handleCommand}
             onOpenRecent={(path) => run(openProjectAt(path))}
+          />
+        }
+        toolbar={
+          <SkeletonBar
+            onSwitch={switchSkeleton}
+            onAdd={addSkeleton}
+            onRename={renameSkeleton}
+            onRemove={removeSkeleton}
+            onStatus={flash}
           />
         }
         left={
@@ -673,6 +751,10 @@ export default function App() {
 
       {exportMode ? (
         <ExportDialog mode={exportMode} onClose={() => setExportMode(null)} onStatus={flash} />
+      ) : null}
+
+      {newProjectOpen ? (
+        <NewProjectDialog onClose={() => setNewProjectOpen(false)} onConfirm={createProject} />
       ) : null}
     </div>
   )

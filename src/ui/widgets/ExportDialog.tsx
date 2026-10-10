@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight, FolderOpen, Loader2, Package, X } from 'lucide-react'
 import { getPlatform } from '@editor/platform'
 import { useProjectStore } from '@editor/store/projectStore'
-import { prepareRuntimeExport, writeHao2dExport, writeRuntimeExport } from '@editor/services/exportService'
+import { listFiles, prepareRuntimeExport, writeHao2dExport, writeRuntimeExport } from '@editor/services/exportService'
 import type { RuntimeExportPlan } from '@editor/services/exportService'
 import { collectHao2dWarnings } from '@core/codec/hao2dWriter'
 import { loadImageElement } from '@render/imageLoader'
@@ -40,6 +40,9 @@ const MODE_TITLE: Record<ExportMode, string> = {
  */
 export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogProps) {
   const doc = useProjectStore((s) => s.document)
+  const skeletons = useProjectStore((s) => s.skeletons)
+  const activeSkeleton = useProjectStore((s) => s.activeSkeleton)
+  const projectName = useProjectStore((s) => s.projectName)
   const [dir, setDir] = useState(() => {
     if (typeof localStorage === 'undefined') return ''
     return localStorage.getItem(EXPORT_DIR_KEY) ?? ''
@@ -48,6 +51,14 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   const [maxSize, setMaxSize] = useState(2048)
   const [page, setPage] = useState(0)
   const [busy, setBusy] = useState(false)
+  /** 勾选要导出的骨架：默认全选（一个项目可以有多个骨架，每个骨架单独出一份资源） */
+  const [picked, setPicked] = useState<number[]>(() => skeletons.map((_, index) => index))
+  /** 图集范围：默认装**所有骨架**用到的图；也可以只装这次要导出的骨架用到的图 */
+  const [atlasScope, setAtlasScope] = useState<'all' | 'selected'>('all')
+  const selected = useMemo(
+    () => picked.filter((index) => index >= 0 && index < skeletons.length),
+    [picked, skeletons]
+  )
   const rootRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   /** 预览用的已加载图片（按源图名缓存，切页 / 调参数不用重新解码） */
@@ -55,8 +66,8 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
 
   // 编译 + 打包 + UV 重映射（纯计算，不写盘）：改缩放 / 页尺寸后立刻重算预览
   const plan = useMemo<RuntimeExportPlan>(
-    () => prepareRuntimeExport({ scale, maxSize }),
-    [scale, maxSize, doc]
+    () => prepareRuntimeExport({ scale, maxSize, skeletons: selected, atlasScope }),
+    [scale, maxSize, doc, skeletons, selected, atlasScope]
   )
   const pages = plan.atlas.pages
   const current = Math.min(page, Math.max(0, pages.length - 1))
@@ -66,9 +77,24 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
    * 只在这类导出里显示，运行时导出不受影响。
    */
   const warnings = useMemo(
-    () => (mode === 'unity' ? collectHao2dWarnings(plan.asset) : []),
+    () =>
+      mode === 'unity'
+        ? [...new Set(plan.skeletons.flatMap((entry) => collectHao2dWarnings(entry.asset)))]
+        : [],
     [mode, plan]
   )
+
+  /** 勾选 / 取消一个骨架（至少留一个：全不勾等于没东西可导） */
+  const toggleSkeleton = (index: number): void => {
+    setPicked((prev) => {
+      if (!prev.includes(index)) return [...prev, index].sort((a, b) => a - b)
+      if (prev.length <= 1) {
+        onStatus?.('至少要勾选一个骨架')
+        return prev
+      }
+      return prev.filter((item) => item !== index)
+    })
+  }
 
   /** Esc 关闭；弹窗内的按键不冒泡出去（否则会触发视口 / 工具的全局快捷键） */
   useEffect(() => {
@@ -209,18 +235,85 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
           </button>
         </div>
 
+        {/* 导出骨架：一个项目可以有多个骨架，这里勾选要导出的（默认全选） */}
+        <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-line/60 px-2.5 py-2">
+          <span className="hao-label w-[54px] shrink-0">导出骨架</span>
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+            {skeletons.map((skeleton, index) => (
+              <label
+                key={`${skeleton.armatureName}-${index}`}
+                className="flex cursor-pointer items-center gap-1 rounded-[4px] border border-line/60 px-1.5 py-[2px] text-3xs text-content-mid hover:bg-ink-700"
+                title={`${skeleton.armatureName}（${skeleton.bones.length} 骨骼 / ${skeleton.animations.length} 动画）`}
+              >
+                <input
+                  type="checkbox"
+                  className="h-[11px] w-[11px] accent-cyan-400"
+                  checked={picked.includes(index)}
+                  onChange={() => toggleSkeleton(index)}
+                />
+                <span className="max-w-[150px] truncate text-content-hi">{skeleton.armatureName}</span>
+              </label>
+            ))}
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              className="hao-btn h-[18px] px-1.5 text-3xs"
+              title="勾选全部骨架"
+              onClick={() => setPicked(skeletons.map((_, index) => index))}
+            >
+              全选
+            </button>
+            <button
+              type="button"
+              className="hao-btn h-[18px] px-1.5 text-3xs"
+              title="只勾选当前编辑的骨架"
+              disabled={picked.length === 1 && picked[0] === activeSkeleton}
+              onClick={() => setPicked([activeSkeleton])}
+            >
+              仅当前
+            </button>
+          </div>
+        </div>
+
         {/* 产物提示：会放进新建的子文件夹 */}
         <div className="shrink-0 border-b border-line/60 px-2.5 py-1.5">
           <span className="hao-label">
-            导出时会在所选目录内新建 <span className="text-accent">{plan.stem}/</span> 文件夹，产物都放在里面：
+            导出时会在所选目录内新建 <span className="text-accent">{plan.stem}/</span> 文件夹（目录与图集名都用项目名
+            「<span className="text-accent">{projectName}</span>」），产物都放在里面：
             {mode === 'unity'
-              ? `${plan.stem}.hao2d / ${pages.length} 张图集页 / ${pages.length} 个材质（Hao2D/Sprite，_MainTex 已指向图集）`
-              : `${plan.skeName} / ${plan.atlasName} / ${pages.length} 张图集页`}
+              ? `${plan.skeletons.length} 个骨架各自一个 .hao2d / 共用 ${pages.length} 张图集页与 ${pages.length} 个材质（Hao2D/Sprite）`
+              : `${listFiles(plan.skeletons.map((entry) => entry.fileName))} / 共用 ${plan.atlasName} / ${pages.length} 张图集页`}
           </span>
         </div>
 
         {/* 参数区 */}
         <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-2.5 py-2">
+          <div className="flex items-center gap-2">
+            <span className="hao-label shrink-0">图集范围</span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                title="图集里装上项目里所有骨架用到的图（默认）"
+                className={['hao-btn h-[18px] px-1.5 text-3xs', atlasScope === 'all' ? 'hao-btn-accent' : ''].join(' ')}
+                onClick={() => setAtlasScope('all')}
+              >
+                所有骨架用到的图
+              </button>
+              <button
+                type="button"
+                title="图集里只装这次要导出的骨架用到的图"
+                className={[
+                  'hao-btn h-[18px] px-1.5 text-3xs',
+                  atlasScope === 'selected' ? 'hao-btn-accent' : ''
+                ].join(' ')}
+                onClick={() => setAtlasScope('selected')}
+              >
+                只含选中骨架用到的图
+              </button>
+            </div>
+          </div>
+
           <div className="flex items-center gap-2">
             <span className="hao-label w-[54px] shrink-0">图集缩放</span>
             <input

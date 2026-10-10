@@ -1,8 +1,7 @@
 import { getPlatform, baseName, dirName, joinPath, stripExtension } from '../platform'
 import type { Platform } from '../platform'
-import { parseDocument, serializeDocument, PROJECT_EXTENSION } from '@core/codec/projectJson'
+import { parseProject, serializeProject, PROJECT_EXTENSION } from '@core/codec/projectJson'
 import { decompileAsset } from '@core/codec/decompile'
-import { createAuthoringBone, createEmptyDocument } from '@core/model/authoring'
 import type { EditorDocument } from '@core/model/authoring'
 import { importSpine } from '@importers/spine'
 import { importDragonBones } from '@importers/dragonBones'
@@ -72,19 +71,44 @@ async function resolvePageImages(
   return { pageSizes, pageImages }
 }
 
+/**
+ * 无弹窗的快捷新建（浏览器预览 / 测试用）：走 store 的 `reset()` ——
+ * 默认项目名 `hao2dProject` + 一根 root，与「新建项目」弹窗的结果完全一致。
+ */
 export function newProject(): IoResult {
-  const doc = createEmptyDocument()
-  // 新工程默认给一根根骨骼：插槽必须挂在骨骼上，有个 root 拖图 / 建插槽都能直接开工
-  doc.bones.push({ ...createAuthoringBone({ name: 'root', length: 0.4 }) })
-  useProjectStore.getState().setDocument(doc, null, false)
-  useProjectStore.getState().setWarnings([])
-  return { ok: true, message: '已新建工程（含根骨骼 root）' }
+  useProjectStore.getState().reset()
+  return { ok: true, message: '已新建项目（含根骨骼 root）' }
 }
 
 /**
  * 上次打开的工程：取最近列表第一条，并确认文件仍然存在。
  * 返回 null 表示没有历史记录、或文件已被移动 / 删除（此时保持空白工程）。
  */
+/** 文件名里不能出现的字符替换掉（项目名会直接当文件名用） */
+function safeFileName(name: string): string {
+  return name.replace(/[\\/:*?"<>|]/g, '_').trim()
+}
+
+/**
+ * 新建项目（「新建项目」弹窗确认后调用）：重置工程 → 记住项目名与保存位置 → **立刻写出**工程文件。
+ *
+ * 新项目的图片池是空的：图片留给后面的「导入图片 / 导入 Spine / 导入 DragonBones」。
+ */
+export async function createProjectAt(name: string, dir: string): Promise<IoResult> {
+  const platform = getPlatform()
+  const trimmed = name.trim()
+  if (trimmed.length === 0) return fail('项目名不能为空')
+  if (!dir) return fail('请先选择保存位置')
+  const path = joinPath(dir, `${safeFileName(trimmed)}.${PROJECT_EXTENSION}`)
+
+  const store = useProjectStore.getState()
+  store.reset()
+  store.setProjectInfo({ projectName: trimmed, projectPath: path })
+  const saved = await saveProject(false)
+  if (!saved.ok) return saved
+  return { ok: true, message: `已新建项目「${trimmed}」：${baseName(path)}`, warnings: saved.warnings }
+}
+
 export async function lastProject(): Promise<string | null> {
   const platform = getPlatform()
   const [latest] = await platform.recentList()
@@ -111,15 +135,16 @@ export async function openProjectAt(path: string): Promise<IoResult> {
   if (!text) return fail(`无法读取工程文件：${path}`)
 
   // 解析失败也要走 fail 分支：启动时自动打开上次工程，坏文件不能把启动流程带崩
-  let parsed: ReturnType<typeof parseDocument>
+  let parsed: ReturnType<typeof parseProject>
   try {
-    parsed = parseDocument(text)
+    parsed = parseProject(text)
   } catch (error) {
     return fail(`工程文件解析失败：${error instanceof Error ? error.message : String(error)}`)
   }
   // 工程自带的图片存的是相对路径（images/xxx）：按工程文件所在目录解析成绝对路径，
   // 之后预览 / 渲染 / 导出都按绝对路径读文件，不用再关心工程被移到哪里
-  parsed.document.images = resolveImagePaths(parsed.document.images, dirName(path))
+  // 图片池由全部骨架共享：解析一次，再把同一份指给每个骨架
+  const pool = resolveImagePaths(parsed.skeletons[parsed.activeSkeleton]?.images ?? [], dirName(path))
   // 资源面板的缩略图走 hao2d-file:// 协议，主进程只允许读**已登记资源根**以内的文件；
   // 打开工程只读了 JSON，从不登记图片目录 → 缩略图全部被 403 拒绝，变成破图
   //（视口不受影响：那边走 readBinary → blob:，不经过协议）。
@@ -128,15 +153,25 @@ export async function openProjectAt(path: string): Promise<IoResult> {
   const roots = new Set<string>()
   const projectDir = dirName(path)
   if (projectDir) roots.add(projectDir)
-  for (const image of parsed.document.images) {
+  for (const image of pool) {
     const dir = dirName(image.path)
     if (dir) roots.add(dir)
   }
   for (const dir of roots) await platform.registerAssetRoot(dir)
-  useProjectStore.getState().setDocument(parsed.document, path, false)
+  useProjectStore
+    .getState()
+    .setProject(
+      parsed.skeletons.map((skeleton) => ({ ...skeleton, images: pool })),
+      parsed.activeSkeleton,
+      path,
+      false
+    )
   useProjectStore.getState().setWarnings(parsed.warnings)
+  // 项目名随文件走（老工程没有这个字段时，normalizeProject 已用骨架名兜底）
+  useProjectStore.getState().setProjectInfo({ projectName: parsed.projectName })
   await platform.recentAdd(path)
-  return { ok: true, message: `已打开 ${baseName(path)}`, warnings: parsed.warnings }
+  const suffix = parsed.skeletons.length > 1 ? `（${parsed.skeletons.length} 个骨架）` : ''
+  return { ok: true, message: `已打开 ${baseName(path)}${suffix}`, warnings: parsed.warnings }
 }
 
 /** 最近打开的工程列表（含存在性提示由主进程负责） */
@@ -157,7 +192,7 @@ export async function saveProject(saveAs: boolean): Promise<IoResult> {
   let path = saveAs ? null : store.projectPath
   if (!path) {
     path = await platform.pickSavePath({
-      defaultPath: defaultFileName(store.document.armatureName),
+      defaultPath: defaultFileName(store.projectName || store.document.armatureName),
       filters: PROJECT_FILTER
     })
   }
@@ -172,7 +207,9 @@ export async function saveProject(saveAs: boolean): Promise<IoResult> {
   const plan = planAssetCopies(store.document.images, dirName(path))
   const copied = await copyAssets(plan.copies, platform, platform)
 
-  await platform.writeText(path, serializeDocument({ ...store.document, images: plan.images }))
+  // 一个项目可以有多个骨架：全部写进去；图片池只写顶层那一份（工程内相对路径）
+  const skeletons = store.skeletons.map((skeleton) => ({ ...skeleton, images: plan.images }))
+  await platform.writeText(path, serializeProject(skeletons, store.activeSkeleton, store.projectName))
   store.markSaved(path)
   await platform.recentAdd(path)
 

@@ -26,7 +26,7 @@ export interface MenuBarProps {
 }
 
 const QUICK_ACTIONS = [
-  { command: 'project:new', label: '新建', icon: FilePlus2, hint: '新建工程 (Ctrl+N)' },
+  { command: 'project:new', label: '新建项目', icon: FilePlus2, hint: '新建项目 (Ctrl+N)' },
   { command: 'project:open', label: '打开', icon: FolderOpen, hint: '打开工程 (Ctrl+O)' },
   { command: 'project:save', label: '保存', icon: Save, hint: '保存工程 (Ctrl+S)' },
   { command: 'project:importImages', label: '导入图片', icon: Import, hint: '导入或拖入碎图 (Ctrl+I)' }

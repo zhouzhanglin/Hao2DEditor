@@ -48,7 +48,7 @@ interface PackedAtlas {
  * 只是纹理分辨率降低。
  */
 function buildAtlas(
-  asset: RuntimeAsset,
+  textures: readonly string[],
   images: ReadonlyArray<{ name: string; path: string; width: number; height: number }>,
   stem: string,
   maxSize: number,
@@ -56,7 +56,11 @@ function buildAtlas(
 ): PackedAtlas {
   const warnings: string[] = []
   const ratio = Number.isFinite(scale) && scale > 0 ? scale : 1
-  const used = asset.textureNames.filter((name) => name.length > 0)
+  // 按出现顺序去重：多个骨架共用同一张图时只占一个图块
+  const used: string[] = []
+  for (const name of textures) {
+    if (name.length > 0 && !used.includes(name)) used.push(name)
+  }
   const items = used.map((name) => {
     const image = images.find((entry) => entry.name === name)
     if (!image || image.width <= 0 || image.height <= 0) {
@@ -174,6 +178,26 @@ export interface RuntimeExportOptions {
   scale: number
   /** 单页最大边长 */
   maxSize: number
+  /** 要导出的骨架下标（默认：只导当前骨架） */
+  skeletons?: readonly number[]
+  /**
+   * 图集范围：
+   * - `all`（默认）：含**项目里所有骨架**用到的图
+   * - `selected`：只含**本次要导出的骨架**用到的图
+   */
+  atlasScope?: 'all' | 'selected'
+}
+
+/** 一个骨架的导出产物（每个骨架一个 json / hao2d，图集共用） */
+export interface ExportedSkeleton {
+  /** 骨架原名（提示用） */
+  name: string
+  /** 清洗过的文件名主体 */
+  stem: string
+  /** 运行时导出写 `<stem>_ske.json`，Unity 导出写 `<stem>.hao2d` */
+  fileName: string
+  /** 已按新图集重映射 UV 的资产 */
+  asset: RuntimeAsset
 }
 
 /**
@@ -181,41 +205,77 @@ export interface RuntimeExportOptions {
  * 弹窗用它实时算预览（改缩放 / 页尺寸立即重算），确认后再交给 `writeRuntimeExport`。
  */
 export interface RuntimeExportPlan {
+  /** 项目名（清洗过）：输出目录与图集名都用它 */
   stem: string
-  skeName: string
   atlasName: string
   pageFiles: string[]
   atlas: RuntimeAtlasJson
   /** 每页的绘制计划：png 编码与弹窗预览共用同一份 */
   plans: PageEncodePlan[]
   warnings: string[]
-  /** 已重映射 UV 的资产（写盘时直接序列化） */
-  asset: RuntimeAsset
+  /** 逐个骨架的产物：每个骨架一份数据，图集是所有骨架共用的那一份 */
+  skeletons: ExportedSkeleton[]
 }
 
+/**
+ * 导出前的准备：**逐个骨架**编译 → 合并图集打包 → 逐个重映射 UV。**不写任何文件**。
+ *
+ * 图集只有一份（名称取项目名），里面装哪些图由 `atlasScope` 决定：
+ * 默认「所有骨架用到的图」，也可以只装这次要导出的那几个骨架用到的图。
+ */
 export function prepareRuntimeExport(options: RuntimeExportOptions): RuntimeExportPlan {
-  const doc = useProjectStore.getState().document
-  const stem = sanitize(stripExtension(doc.armatureName) || 'armature')
-  const compiled = compileDocument(doc)
-  const warnings = [...compiled.warnings]
+  const store = useProjectStore.getState()
+  const list = store.skeletons.length > 0 ? store.skeletons : [store.document]
+  const requested = (options.skeletons ?? [store.activeSkeleton]).filter(
+    (index) => index >= 0 && index < list.length
+  )
+  const selected = requested.length > 0 ? [...new Set(requested)] : [Math.min(store.activeSkeleton, list.length - 1)]
+  const scope = options.atlasScope ?? 'all'
+  const warnings: string[] = []
+  // 项目名（「新建项目」弹窗里填的）→ 图集名与输出目录；缺省退回当前骨架名
+  const stem = sanitize(stripExtension(store.projectName || store.document.armatureName) || 'project')
 
-  if (compiled.asset.textureNames.length === 0) {
-    warnings.push('当前工程没有使用任何图片，导出的图集将为空（角色会以纯色块渲染）')
+  const skeletons: ExportedSkeleton[] = []
+  const usedNames = new Set<string>()
+  for (const index of selected) {
+    const doc = list[index]
+    const compiled = compileDocument(doc)
+    // 多骨架时给告警带上骨架名，否则看不出说的是哪一套
+    for (const warning of compiled.warnings) {
+      warnings.push(selected.length > 1 ? `[${doc.armatureName}] ${warning}` : warning)
+    }
+    let name = sanitize(stripExtension(doc.armatureName) || `skeleton-${index + 1}`) || `skeleton-${index + 1}`
+    // 两个骨架可能重名：文件名不能互相覆盖
+    while (usedNames.has(name)) name = `${name}_2`
+    usedNames.add(name)
+    skeletons.push({ name: doc.armatureName, stem: name, fileName: `${name}_ske.json`, asset: compiled.asset })
   }
 
-  const packed = buildAtlas(compiled.asset, doc.images, stem, options.maxSize, options.scale)
+  // 图集里装哪些图：先放「要导出的骨架」用到的，再按范围决定要不要补上其它骨架用到的
+  const textures: string[] = []
+  for (const entry of skeletons) textures.push(...entry.asset.textureNames)
+  if (scope === 'all') {
+    for (let index = 0; index < list.length; index++) {
+      if (selected.includes(index)) continue
+      textures.push(...compileDocument(list[index]).asset.textureNames)
+    }
+  }
+  if (textures.every((name) => name.length === 0)) {
+    warnings.push('本次导出的骨架没有使用任何图片，导出的图集将为空（角色会以纯色块渲染）')
+  }
+
+  const packed = buildAtlas(textures, store.document.images, stem, options.maxSize, options.scale)
   warnings.push(...packed.warnings)
-  remapAsset(compiled.asset, packed)
+  for (const entry of skeletons) remapAsset(entry.asset, packed)
 
   return {
     stem,
-    skeName: `${stem}_ske.json`,
     atlasName: `${stem}_atlas.json`,
     pageFiles: packed.pageFiles,
     atlas: packed.atlas,
     plans: packed.plans,
     warnings,
-    asset: compiled.asset
+    skeletons
   }
 }
 
@@ -250,7 +310,11 @@ export async function writeRuntimeExport(
   })
 
   const files: Array<{ path: string; text?: string; bytes?: Uint8Array }> = [
-    { path: joinPath(outDir, plan.skeName), text: serializeRuntimeSke(plan.asset, { atlasFileName: plan.atlasName, ppu: RUNTIME_PPU }) },
+    // 每个骨架一份数据（文件名取骨架名），图集是所有骨架共用的那一份
+    ...plan.skeletons.map((entry) => ({
+      path: joinPath(outDir, entry.fileName),
+      text: serializeRuntimeSke(entry.asset, { atlasFileName: plan.atlasName, ppu: RUNTIME_PPU })
+    })),
     { path: joinPath(outDir, plan.atlasName), text: serializeRuntimeAtlas(plan.atlas) }
   ]
   plan.pageFiles.forEach((file, index) => {
@@ -263,12 +327,12 @@ export async function writeRuntimeExport(
   })
 
   await platform.writeBatch(files)
-  await platform.revealInFolder(joinPath(outDir, plan.skeName))
+  await platform.revealInFolder(joinPath(outDir, plan.skeletons[0]?.fileName ?? plan.atlasName))
   useProjectStore.getState().setWarnings(warnings)
 
   return {
     ok: true,
-    message: `已导出到 ${baseName(outDir)}/：${plan.skeName} / ${plan.atlasName} / ${plan.pageFiles.length} 张图集页`,
+    message: `已导出到 ${baseName(outDir)}/：${listFiles(plan.skeletons.map((entry) => entry.fileName))} / ${plan.atlasName} / ${plan.pageFiles.length} 张图集页`,
     warnings,
     files: files.map((file) => baseName(file.path))
   }
@@ -320,7 +384,11 @@ export async function writeHao2dExport(
 ): Promise<ExportResult> {
   const platform = getPlatform()
   const doc = useProjectStore.getState().document
-  const warnings = [...plan.warnings, ...collectHao2dWarnings(plan.asset)]
+  // 每个骨架各自可能有能力差异提示：合并后去重
+  const warnings = uniqueWarnings([
+    ...plan.warnings,
+    ...plan.skeletons.flatMap((entry) => collectHao2dWarnings(entry.asset))
+  ])
   const outDir = joinPath(dir, plan.stem)
 
   // png 编码要读源图：先登记它们的目录（与运行时导出同一条路径）
@@ -362,16 +430,21 @@ export async function writeHao2dExport(
     files.push({ path: joinPath(outDir, `${matFile}.meta`), text: materialMeta(matGuid) })
   }
 
-  const hao2dFile = `${plan.stem}.hao2d`
-  const hao2dGuid = await resolveGuid(platform, outDir, hao2dFile, plan.stem)
-  files.push({ path: joinPath(outDir, hao2dFile), bytes: writeHao2d(plan.asset) })
-  files.push({ path: joinPath(outDir, `${hao2dFile}.meta`), text: hao2dMeta(hao2dGuid) })
+  // 每个骨架一份 .hao2d（+ .meta），共享同一套图集页与材质
+  const hao2dFiles: string[] = []
+  for (const entry of plan.skeletons) {
+    const hao2dFile = `${entry.stem}.hao2d`
+    hao2dFiles.push(hao2dFile)
+    const hao2dGuid = await resolveGuid(platform, outDir, hao2dFile, entry.stem)
+    files.push({ path: joinPath(outDir, hao2dFile), bytes: writeHao2d(entry.asset) })
+    files.push({ path: joinPath(outDir, `${hao2dFile}.meta`), text: hao2dMeta(hao2dGuid) })
+  }
 
   await platform.writeBatch(files)
-  await platform.revealInFolder(joinPath(outDir, hao2dFile))
+  await platform.revealInFolder(joinPath(outDir, hao2dFiles[0] ?? `${plan.stem}.hao2d`))
   useProjectStore.getState().setWarnings(warnings)
 
-  const parts = [`${hao2dFile}`, `${sheetCount} 张图集页`, `${materialCount} 个材质（Hao2D/Sprite）`]
+  const parts = [listFiles(hao2dFiles), `${sheetCount} 张图集页`, `${materialCount} 个材质（Hao2D/Sprite）`]
   let message = `已导出到 ${baseName(outDir)}/：${parts.join(' / ')}`
   if (warnings.length > 0) message += `；${warnings.length} 条与 Unity 运行时的差异提示`
   if (warnings.length > 0) console.warn('[hao2d] Unity 导出告警：', warnings)
@@ -405,6 +478,24 @@ async function resolveGuid(
 }
 
 /** 文件名安全化（去掉路径分隔符与非法字符） */
+/** 文件清单的紧凑写法：不超过 3 个就全列出来，多了写「前 3 个 / 等 N 个」（导出面板也用） */
+export function listFiles(names: readonly string[]): string {
+  if (names.length <= 3) return names.join(' / ')
+  return `${names.slice(0, 3).join(' / ')} 等 ${names.length} 个`
+}
+
+/** 告警去重（多骨架会重复报同一类差异） */
+function uniqueWarnings(list: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const item of list) {
+    if (seen.has(item)) continue
+    seen.add(item)
+    out.push(item)
+  }
+  return out
+}
+
 function sanitize(name: string): string {
   return name.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'armature'
 }

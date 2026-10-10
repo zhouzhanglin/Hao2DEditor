@@ -1,13 +1,25 @@
 import type { EditorDocument } from '@core/model/authoring'
 
-export interface HistoryEntry {
-  label: string
+/**
+ * 撤销快照 = **整个项目**：全部骨架 + 当前骨架下标 + 图片池。
+ *
+ * 以前只存「当前文档」。一个项目可以有多个骨架之后，只存文档会让
+ * 「新建 / 删除 / 重命名骨架」无法撤销，也会在切换骨架之后把别的骨架的内容撤回来。
+ */
+export interface ProjectSnapshot {
   document: EditorDocument
+  skeletons: EditorDocument[]
+  activeSkeleton: number
 }
 
-function clone(doc: EditorDocument): EditorDocument {
-  if (typeof structuredClone === 'function') return structuredClone(doc)
-  return JSON.parse(JSON.stringify(doc)) as EditorDocument
+export interface HistoryEntry {
+  label: string
+  snapshot: ProjectSnapshot
+}
+
+function clone<T>(value: T): T {
+  if (typeof structuredClone === 'function') return structuredClone(value)
+  return JSON.parse(JSON.stringify(value)) as T
 }
 
 /**
@@ -40,23 +52,23 @@ export class History {
     return this.future.length > 0 ? this.future[this.future.length - 1].label : null
   }
 
-  /** 记一条编辑记录（传入**修改前**的文档） */
-  push(label: string, before: EditorDocument): void {
-    this.past.push({ label, document: clone(before) })
+  /** 记一条编辑记录（传入**修改前**的项目快照） */
+  push(label: string, before: ProjectSnapshot): void {
+    this.past.push({ label, snapshot: clone(before) })
     if (this.past.length > this.limit) this.past.shift()
     this.future.length = 0
   }
 
   /** 连续操作的起点（拖拽开始）；重复调用只保留第一次 */
-  begin(label: string, before: EditorDocument): void {
+  begin(label: string, before: ProjectSnapshot): void {
     if (this.pending) return
-    this.pending = { label, document: clone(before) }
+    this.pending = { label, snapshot: clone(before) }
   }
 
   /** 连续操作的终点（拖拽结束）；把整段操作合并成一条记录 */
   end(): void {
     if (!this.pending) return
-    this.push(this.pending.label, this.pending.document)
+    this.push(this.pending.label, this.pending.snapshot)
     this.pending = null
   }
 
@@ -64,18 +76,18 @@ export class History {
     this.pending = null
   }
 
-  undo(current: EditorDocument): EditorDocument | null {
+  undo(current: ProjectSnapshot): ProjectSnapshot | null {
     const entry = this.past.pop()
     if (!entry) return null
-    this.future.push({ label: entry.label, document: clone(current) })
-    return entry.document
+    this.future.push({ label: entry.label, snapshot: clone(current) })
+    return entry.snapshot
   }
 
-  redo(current: EditorDocument): EditorDocument | null {
+  redo(current: ProjectSnapshot): ProjectSnapshot | null {
     const entry = this.future.pop()
     if (!entry) return null
-    this.past.push({ label: entry.label, document: clone(current) })
-    return entry.document
+    this.past.push({ label: entry.label, snapshot: clone(current) })
+    return entry.snapshot
   }
 
   clear(): void {

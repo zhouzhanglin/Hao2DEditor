@@ -40,6 +40,97 @@ export function parseDocument(text: string): ParseDocumentResult {
   return normalizeDocument(raw)
 }
 
+/**
+ * 工程文件的**多骨架**写法。
+ *
+ * 文件结构（单骨架工程与老格式完全一样）：
+ * - 顶层仍是「当前骨架」的扁平字段 + 共享的 `images`（老版本编辑器读到的就是当前骨架）；
+ * - 多骨架时再补两个字段：`activeSkeleton`（下标）与 `skeletons`（**全部**骨架的骨架部分，
+ *   不含 `images` —— 图片池只有顶层那一份，由所有骨架共享）。
+ */
+export function serializeProject(
+  skeletons: readonly EditorDocument[],
+  activeSkeleton: number,
+  projectName?: string
+): string {
+  const list = skeletons.length > 0 ? skeletons : [createEmptyDocument()]
+  const index = Math.min(Math.max(0, Math.round(activeSkeleton)), list.length - 1)
+  const payload: Record<string, unknown> = { ...list[index] }
+  // 项目名是**项目级**的（与骨架名无关）：导出的图集名与输出目录用它
+  if (projectName && projectName.length > 0) payload.projectName = projectName
+  if (list.length > 1) {
+    payload.activeSkeleton = index
+    payload.skeletons = list.map((doc) => skeletonPart(doc))
+  }
+  return `${JSON.stringify(payload, null, 2)}\n`
+}
+
+/** 骨架部分的字段（共享的图片池与版本号留在工程顶层） */
+function skeletonPart(doc: EditorDocument): Record<string, unknown> {
+  return {
+    armatureName: doc.armatureName,
+    frameRate: doc.frameRate,
+    runtimeIK: doc.runtimeIK,
+    bones: doc.bones,
+    slots: doc.slots,
+    skins: doc.skins,
+    constraints: doc.constraints,
+    animations: doc.animations,
+    editorMeta: doc.editorMeta
+  }
+}
+
+export interface ParseProjectResult {
+  skeletons: EditorDocument[]
+  activeSkeleton: number
+  /** 项目名（老工程没有这个字段 → 用当前骨架名兜底） */
+  projectName: string
+  warnings: string[]
+}
+
+export function parseProject(text: string): ParseProjectResult {
+  return normalizeProject(JSON.parse(text) as unknown)
+}
+
+/**
+ * 把任意 JSON 规整成「多骨架工程」。
+ *
+ * - 有 `skeletons` 数组（且非空）→ 逐个骨架规整，图片池取顶层 `images`；
+ * - 否则按老格式处理（顶层就是一份骨架文档），等价于「只有一个骨架」。
+ */
+export function normalizeProject(raw: unknown): ParseProjectResult {
+  if (!isRecord(raw)) {
+    const single = normalizeDocument(raw)
+    return {
+      skeletons: [single.document],
+      activeSkeleton: 0,
+      projectName: single.document.armatureName,
+      warnings: single.warnings
+    }
+  }
+  const parts = Array.isArray(raw.skeletons) ? raw.skeletons.filter(isRecord) : []
+  if (parts.length === 0) {
+    const single = normalizeDocument(raw)
+    return {
+      skeletons: [single.document],
+      activeSkeleton: 0,
+      projectName: str(raw.projectName, single.document.armatureName),
+      warnings: single.warnings
+    }
+  }
+
+  const pool = arr(raw.images).map((item) => normalizeImage(isRecord(item) ? item : {}))
+  const warnings: string[] = []
+  const skeletons = parts.map((part) => {
+    // 复用单骨架规整：图片池在工程顶层共享，逐骨架带上同一份
+    const parsed = normalizeDocument({ ...part, schemaVersion: raw.schemaVersion, images: pool })
+    for (const warning of parsed.warnings) warnings.push(warning)
+    return parsed.document
+  })
+  const active = Math.min(Math.max(0, Math.round(num(raw.activeSkeleton, 0))), skeletons.length - 1)
+  return { skeletons, activeSkeleton: active, projectName: str(raw.projectName, skeletons[active].armatureName), warnings }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

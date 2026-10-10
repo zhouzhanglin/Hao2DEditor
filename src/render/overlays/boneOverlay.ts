@@ -418,6 +418,13 @@ function drawPendingBone(
   strokes.circle(x2, y2, w * 5).stroke({ width: w * 2, color: COLOR_PENDING, alpha: 0.95 })
 }
 
+/**
+ * 约束手柄连线（红色）：
+ * - IK：**顺着骨骼链**走（根骨原点 → 各关节 → 末端尖端），再从尖端拉到目标点
+ * - 变换 / 路径：多根骨骼共同受某个目标影响，保持「每根 → 目标」的扇形连线
+ *
+ * 目标骨骼缺失、约束停用、以及不参与求解的 physics 都不画。
+ */
 function drawConstraintLinks(
   g: Graphics,
   skeleton: Skeleton,
@@ -426,16 +433,42 @@ function drawConstraintLinks(
 ): void {
   for (const constraint of constraints) {
     if (!constraint.enabled || constraint.type === 'physics') continue
-    if (constraint.targetBoneIndex < 0) continue
+    if (constraint.targetBoneIndex < 0 || constraint.targetBoneIndex >= skeleton.boneCount) continue
     const targetX = skeleton.boneWorldX(constraint.targetBoneIndex)
     const targetY = skeleton.boneWorldY(constraint.targetBoneIndex)
 
-    for (const bone of constraint.boneIndices) {
-      if (bone < 0 || bone >= skeleton.boneCount) continue
-      const x = skeleton.boneWorldX(bone)
-      const y = skeleton.boneWorldY(bone)
-      g.moveTo(x, y).lineTo(targetX, targetY)
-      g.stroke({ width: w * 1.2, color: COLOR_CONSTRAINT, alpha: 0.7 })
+    if (constraint.type === 'ik') {
+      /*
+       * 中间几段与骨骼本体重合（一眼看出「这几根归这条 IK 管」、链的顺序是根 → 末端），
+       * 最后一段「尖端 → 目标」才是 IK 真正要消除的差距。
+       *
+       * 早先是「链上每根骨骼的原点都连到目标点」：两骨 IK 会画成一个三角扇形，
+       * 既不像骨骼，也看不出链的顺序（目标离链尾远时尤其别扭）。
+       */
+      let last = -1
+      for (const bone of constraint.boneIndices) {
+        if (bone < 0 || bone >= skeleton.boneCount) continue
+        const x = skeleton.boneWorldX(bone)
+        const y = skeleton.boneWorldY(bone)
+        if (last < 0) g.moveTo(x, y)
+        else g.lineTo(x, y)
+        last = bone
+      }
+      if (last >= 0) {
+        // 末端 = 原点沿骨骼 x 轴走一个 length（矩阵首列含缩放，与拾取 / 求解同一算法）
+        const o = last * 16
+        const length = skeleton.asset.bones[last].length
+        const tipX = skeleton.world[o] * length + skeleton.world[o + 12]
+        const tipY = skeleton.world[o + 1] * length + skeleton.world[o + 13]
+        g.lineTo(tipX, tipY).lineTo(targetX, targetY)
+        g.stroke({ width: w * 1.2, color: COLOR_CONSTRAINT, alpha: 0.7 })
+      }
+    } else {
+      for (const bone of constraint.boneIndices) {
+        if (bone < 0 || bone >= skeleton.boneCount) continue
+        g.moveTo(skeleton.boneWorldX(bone), skeleton.boneWorldY(bone)).lineTo(targetX, targetY)
+        g.stroke({ width: w * 1.2, color: COLOR_CONSTRAINT, alpha: 0.7 })
+      }
     }
 
     /*

@@ -20,7 +20,19 @@ import type {
 import type { IkConstraint } from '../model/constraints'
 
 export const HAO2D_MAGIC = 0x44324f48
-export const HAO2D_VERSION = 5
+/**
+ * 数据版本。
+ *
+ * - **5**：初始版本；
+ * - **6**：附件段补 `contentOffset`（内容中心相对原图中心的位移，**附件自身坐标轴**）。
+ *   被裁剪的图（DragonBones 的 trim / Spine 的 offset）必须靠它才能落在正确位置：偏移不能加进
+ *   `position` —— 那是骨骼坐标系，会被骨骼旋转带偏。未裁剪时为 0，与 v5 数据等价（读端兼容 v5）。
+ *
+ * ⚠️ 附件段**只写 C# 参考库 `Hao2DCodec` 认识的字段**。编辑器内部还有 `frameSize`
+ * （未裁剪原图尺寸，只用于检查器显示与选中框），它**不进二进制**：写进去会让 Unity 读端
+ * 从附件段开始整体错位（EndOfStreamException）。展示用的 frameSize 请放工程 JSON。
+ */
+export const HAO2D_VERSION = 6
 
 export interface Hao2dInspectResult {
   magic: number
@@ -30,7 +42,7 @@ export interface Hao2dInspectResult {
 }
 
 /**
- * 序列化为 `.hao2d`（Version = 5）。
+ * 序列化为 `.hao2d`（Version = 6；读端兼容 5）。
  * 字段顺序、类型宽度、字符串编码与参考库 `Hao2DCodec.Write` 逐字节一致。
  *
  * 结构：MAGIC(u32) | VERSION(u16) | armatureName | frameRate | bones | slots | skins |
@@ -118,6 +130,15 @@ function writeAttachment(writer: ByteWriter, a: AttachmentData): void {
   writer.writeFloat32(a.scale.y)
   writer.writeFloat32(a.size.x)
   writer.writeFloat32(a.size.y)
+  /*
+   * v6 新增：contentOffset —— 内容中心相对原图中心的位移，写在**附件自身坐标轴**里，
+   * 渲染四边形时按它做局部偏移（`meshBuilder.emitRegion`）。不能并进 position：
+   * position 在骨骼坐标系，会被骨骼旋转带着转。
+   *
+   * 只写这一个（C# Hao2DCodec 的 v6 就是这个字段）；编辑器内部的 frameSize 不落盘。
+   */
+  writer.writeFloat32(a.contentOffset.x)
+  writer.writeFloat32(a.contentOffset.y)
   writer.writeFloat32(a.color.r)
   writer.writeFloat32(a.color.g)
   writer.writeFloat32(a.color.b)

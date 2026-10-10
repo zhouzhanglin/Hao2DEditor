@@ -109,6 +109,10 @@ export function serializeRuntimeSke(
           position: [attachment.position.x, attachment.position.y],
           scale: [attachment.scale.x, attachment.scale.y],
           size: [attachment.size.x, attachment.size.y],
+          // 裁剪信息：frameSize = 未裁剪原图尺寸（编辑器画框用）；contentOffset = 内容中心相对
+          // 原图中心的位移，**附件自身坐标轴**（渲染四边形时局部叠加，别并进 position）
+          frameSize: [attachment.frameSize.x, attachment.frameSize.y],
+          contentOffset: [attachment.contentOffset.x, attachment.contentOffset.y],
           color: [attachment.color.r, attachment.color.g, attachment.color.b, attachment.color.a],
           uvs: Array.from(attachment.uvs),
           vertices: Array.from(attachment.vertices)

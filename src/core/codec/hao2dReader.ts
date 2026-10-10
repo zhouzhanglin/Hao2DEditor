@@ -28,7 +28,7 @@ export interface Hao2dReadResult {
   warnings: string[]
 }
 
-/** 解析 `.hao2d`（Version 必须等于 5）。magic / version 不匹配时抛出可读错误。 */
+/** 解析 `.hao2d`（支持 Version 5 / 6）。magic / version 不匹配时抛出可读错误。 */
 export function readHao2d(bytes: Uint8Array): Hao2dReadResult {
   const reader = new ByteReader(bytes)
   const magic = reader.readUint32()
@@ -36,15 +36,16 @@ export function readHao2d(bytes: Uint8Array): Hao2dReadResult {
     throw new Error(`Hao2D: 文件头不匹配（0x${magic.toString(16)}），不是 .hao2d 资源`)
   }
   const version = reader.readUint16()
-  if (version !== HAO2D_VERSION) {
-    throw new Error(`Hao2D: 不支持的数据版本 ${version}（需要 ${HAO2D_VERSION}），请重新导出`)
+  // v5 的附件段没有 contentOffset，按 0 读 —— 等价于「没被裁剪过」
+  if (version !== 5 && version !== HAO2D_VERSION) {
+    throw new Error(`Hao2D: 不支持的数据版本 ${version}（支持 5 / ${HAO2D_VERSION}），请重新导出`)
   }
 
   const armatureName = reader.readString()
   const frameRate = reader.readFloat32()
   const bones = readBones(reader)
   const slots = readSlots(reader)
-  const skins = readSkins(reader)
+  const skins = readSkins(reader, version)
   const constraints = readIks(reader)
   const animations = readAnimations(reader)
   const bindposes = readBindposes(reader)
@@ -118,7 +119,7 @@ function readSlots(reader: ByteReader): SlotData[] {
   return slots
 }
 
-function readSkins(reader: ByteReader): SkinData[] {
+function readSkins(reader: ByteReader, version: number): SkinData[] {
   const count = reader.readInt32()
   const skins: SkinData[] = []
   for (let i = 0; i < count; i++) {
@@ -129,7 +130,7 @@ function readSkins(reader: ByteReader): SkinData[] {
       const slotName = reader.readString()
       const attachmentCount = reader.readInt32()
       const attachments: AttachmentData[] = []
-      for (let k = 0; k < attachmentCount; k++) attachments.push(readAttachment(reader))
+      for (let k = 0; k < attachmentCount; k++) attachments.push(readAttachment(reader, version))
       slots.push({ slotName, attachments })
     }
     skins.push({ name, slots })
@@ -137,13 +138,21 @@ function readSkins(reader: ByteReader): SkinData[] {
   return skins
 }
 
-function readAttachment(reader: ByteReader): AttachmentData {
+function readAttachment(reader: ByteReader, version: number): AttachmentData {
   const name = reader.readString()
   const type = reader.readInt32() as AttachmentType
   const position = { x: reader.readFloat32(), y: reader.readFloat32() }
   const rotation = reader.readFloat32()
   const scale = { x: reader.readFloat32(), y: reader.readFloat32() }
   const size = { x: reader.readFloat32(), y: reader.readFloat32() }
+  /*
+   * v6 起附件段带裁剪信息：只有 contentOffset（与 C# Hao2DCodec 一致）。
+   * v5 没有这个字段，按 0 读 —— 等价于「没被裁剪过」。
+   * frameSize（未裁剪原图尺寸）不落盘，仅编辑器内部使用，读回时为 0。
+   */
+  const frameSize = { x: 0, y: 0 }
+  const contentOffset =
+    version >= 6 ? { x: reader.readFloat32(), y: reader.readFloat32() } : { x: 0, y: 0 }
   const color = {
     r: reader.readFloat32(),
     g: reader.readFloat32(),
@@ -181,6 +190,8 @@ function readAttachment(reader: ByteReader): AttachmentData {
     rotation,
     scale,
     size,
+    frameSize,
+    contentOffset,
     color,
     textureName,
     uvs,

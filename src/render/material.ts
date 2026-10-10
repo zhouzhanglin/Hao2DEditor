@@ -60,6 +60,14 @@ export class TextureStore {
   private readonly textures = new Map<string, Texture>()
   private readonly loading = new Set<string>()
   private readonly listeners = new Set<() => void>()
+  /**
+   * 「这个名字的贴图被清过几次」。
+   *
+   * 解码是异步的：清掉某张图（换项目、图集页换了源路径）之后，**之前那次**解码可能迟到落地。
+   * 靠它把迟到的结果丢掉 —— 否则上一份图集页会重新占住这个名字，而新资源的同名图集页又会因为
+   * `textures.has(name)` 被跳过，画面里贴的依旧是旧图。
+   */
+  private readonly revisions = new Map<string, number>()
 
   get(name: string): Texture {
     return this.textures.get(name) ?? Texture.WHITE
@@ -90,11 +98,14 @@ export class TextureStore {
    */
   async load(name: string, url: string): Promise<Texture> {
     if (this.textures.has(name) || this.loading.has(name) || !url) return this.get(name)
+    const revision = this.revision(name)
     this.loading.add(name)
     const texture = await loadTextureFromUrl(url).catch((error: unknown) => {
       console.error(`[hao2d] 纹理加载失败：${name}`, error)
       return null
     })
+    // 期间被清过：这次加载作废。`loading` 标记也不动 —— 新的那次加载已经接管这个名字了
+    if (this.revision(name) !== revision) return this.get(name)
     this.loading.delete(name)
     if (texture) this.set(name, texture)
     return this.get(name)
@@ -107,6 +118,7 @@ export class TextureStore {
    * 只按名字判断「已加载」会继续用上一份贴图 —— 表现就是新导入的零件张冠李戴。
    */
   delete(name: string): void {
+    this.invalidate(name)
     const texture = this.textures.get(name)
     if (!texture) return
     this.textures.delete(name)
@@ -115,9 +127,21 @@ export class TextureStore {
   }
 
   clear(): void {
+    // 正在加载的也要作废：它们的 URL 都属于「上一份资源」
+    for (const name of [...this.textures.keys(), ...this.loading]) this.invalidate(name)
     for (const texture of this.textures.values()) texture.destroy(true)
     this.textures.clear()
     this.notify()
+  }
+
+  /** 作废这个名字上「正在进行 / 已排队的加载」，并允许立刻重新加载 */
+  private invalidate(name: string): void {
+    this.revisions.set(name, this.revision(name) + 1)
+    this.loading.delete(name)
+  }
+
+  private revision(name: string): number {
+    return this.revisions.get(name) ?? 0
   }
 
   private notify(): void {

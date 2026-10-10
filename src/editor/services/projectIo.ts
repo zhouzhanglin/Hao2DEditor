@@ -12,6 +12,7 @@ import { registerLooseImages } from '@importers/looseImages'
 import { ASSET_DIR, copyAssets, planAssetCopies, resolveImagePaths } from './projectAssets'
 import type { AtlasRegion, PageSizes } from '@importers/uv'
 import { useProjectStore } from '../store/projectStore'
+import { releaseDocumentAssets } from './assetCache'
 
 export interface IoResult {
   ok: boolean
@@ -76,6 +77,8 @@ async function resolvePageImages(
  * 默认项目名 `hao2dProject` + 一根 root，与「新建项目」弹窗的结果完全一致。
  */
 export function newProject(): IoResult {
+  // 先丢掉上个项目的图片 / 图集内存，再换文档（顺序原因见 releaseDocumentAssets）
+  releaseDocumentAssets()
   useProjectStore.getState().reset()
   return { ok: true, message: '已新建项目（含根骨骼 root）' }
 }
@@ -101,6 +104,8 @@ export async function createProjectAt(name: string, dir: string): Promise<IoResu
   if (!dir) return fail('请先选择保存位置')
   const path = joinPath(dir, `${safeFileName(trimmed)}.${PROJECT_EXTENSION}`)
 
+  // 新项目的图片池是空的：先把上个项目占着的图片 / 图集内存放掉，再换文档
+  releaseDocumentAssets()
   const store = useProjectStore.getState()
   store.reset()
   store.setProjectInfo({ projectName: trimmed, projectPath: path })
@@ -340,12 +345,18 @@ export async function importDragonBonesFlow(): Promise<IoResult> {
   }
 }
 
-/** Runtime → Authoring，并把图集页的真实路径写进图片清单 */
+/**
+ * Runtime → Authoring，并把图集页的真实路径写进图片清单。
+ *
+ * 导入（Spine / DragonBones、菜单与拖入两条路）都是**整份替换**文档：先把上个资源占着的
+ * 图片 / 图集内存放掉，再换 —— 否则旧图集页会一直留着，且同名图集页还会被继续复用。
+ */
 function finishImport(
   asset: ReturnType<typeof importSpine>['asset'],
   pageImages: Record<string, string>,
   pageSizes: PageSizes
 ): EditorDocument {
+  releaseDocumentAssets()
   const document = decompileAsset(asset)
   document.images = document.images.map((image) => ({
     ...image,

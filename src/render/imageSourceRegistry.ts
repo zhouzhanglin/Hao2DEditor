@@ -42,4 +42,17 @@ export class ImageSourceRegistry {
   clear(): void {
     this.loaded.clear()
   }
+
+  /** 记账条数（状态检查 / 测试用） */
+  get size(): number {
+    return this.loaded.size
+  }
 }
+
+/**
+ * 编辑器全局的记账单例：只有记账，不占任何 GPU / DOM 资源。
+ *
+ * 它得是模块级单例（而不是挂在视口组件里）：换工程时由 `releaseDocumentAssets()` 统一清空，
+ * 不依赖视口是否挂载 —— 视口没挂载时组件里的那份就没人清了。
+ */
+export const imageSources = new ImageSourceRegistry()

@@ -39,6 +39,13 @@ export interface Platform {
    * 但它与页面跨源，上传 WebGL 时会被判定成「被污染的图片」，实际渲染成白块。
    */
   imageUrl(path: string): Promise<string>
+  /**
+   * 释放所有已缓存的图片 URL。
+   *
+   * `blob:` 必须 revoke，否则背后的图片字节一直被 URL 引用、回收不掉 —— 每导入一个工程就会
+   * 多留一份图集页在内存里。新建项目 / 导入别的资源（整份换文档）时调用。
+   */
+  releaseImageCache(): void
   /** 从系统拖入的 File 取绝对路径；浏览器模式返回内存路径 */
   pathForDroppedFile(file: File): Promise<string>
   onMenuCommand(cb: (command: string) => void): () => void
@@ -134,6 +141,11 @@ class ElectronPlatform implements Platform {
     const url = URL.createObjectURL(blob)
     this.imageUrls.set(path, url)
     return url
+  }
+
+  releaseImageCache(): void {
+    for (const url of this.imageUrls.values()) URL.revokeObjectURL(url)
+    this.imageUrls.clear()
   }
 
   async pathForDroppedFile(file: File): Promise<string> {
@@ -279,6 +291,12 @@ class MemoryPlatform implements Platform {
   /** 浏览器模式的内存文件本来就是 blob:，与展示用的 URL 是同一份 */
   async imageUrl(path: string): Promise<string> {
     return this.fileUrl(path)
+  }
+
+  /** 只放 URL 缓存：文件字节留在内存文件系统里（`files`），下次要图会按需重新造 URL */
+  releaseImageCache(): void {
+    for (const url of this.blobs.values()) URL.revokeObjectURL(url)
+    this.blobs.clear()
   }
 
   async pathForDroppedFile(file: File): Promise<string> {

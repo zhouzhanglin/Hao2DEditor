@@ -21,6 +21,11 @@ export class ImageAlphaCache {
   private entries = new Map<string, ImageAlphaEntry>()
   private failed = new Set<string>()
   private pending = new Set<string>()
+  /**
+   * 同 `TextureStore.revisions`：清掉某张图之后，**之前那次**解码可能迟到落地 ——
+   * 靠它把结果丢掉，否则上一份图的像素会被塞回来（占着内存，拾取也按旧像素判断）。
+   */
+  private readonly revisions = new Map<string, number>()
 
   /** 是否已就绪（测试与调试用） */
   has(name: string): boolean {
@@ -64,10 +69,10 @@ export class ImageAlphaCache {
     if (!name || !url) return
     if (this.entries.has(name) || this.failed.has(name) || this.pending.has(name)) return
     this.pending.add(name)
-    void this.decode(name, url)
+    void this.decode(name, url, this.revision(name))
   }
 
-  private async decode(name: string, url: string): Promise<void> {
+  private async decode(name: string, url: string, revision: number): Promise<void> {
     try {
       const image = await loadImageElement(url)
       const width = image.naturalWidth
@@ -82,12 +87,15 @@ export class ImageAlphaCache {
       const pixels = context.getImageData(0, 0, width, height).data
       const alpha = new Uint8Array(width * height)
       for (let i = 0; i < alpha.length; i++) alpha[i] = pixels[i * 4 + 3]
+      // 期间被清过（换项目 / 换了源路径）：这次结果作废，别把上一份图的像素塞回来
+      if (this.revision(name) !== revision) return
       this.entries.set(name, { width, height, alpha })
     } catch {
       // 解码失败（图片损坏 / 权限）：标记一次，之后不再重试，拾取退化为几何命中
-      this.failed.add(name)
+      if (this.revision(name) === revision) this.failed.add(name)
     } finally {
-      this.pending.delete(name)
+      // 作废的这次不许动 pending：新的那次解码已经接管这个名字了
+      if (this.revision(name) === revision) this.pending.delete(name)
     }
   }
 
@@ -98,14 +106,26 @@ export class ImageAlphaCache {
    * 不释放会继续按旧像素做拾取判断（点不中 / 点错零件）。
    */
   delete(name: string): void {
+    this.invalidate(name)
     this.entries.delete(name)
     this.failed.delete(name)
     this.pending.delete(name)
   }
 
   clear(): void {
+    // 正在解码的也要作废：它们的 URL 都属于「上一份资源」
+    for (const name of [...this.entries.keys(), ...this.pending]) this.invalidate(name)
     this.entries.clear()
     this.failed.clear()
     this.pending.clear()
+  }
+
+  /** 作废这个名字上「正在进行的解码」，并允许立刻重新解码 */
+  private invalidate(name: string): void {
+    this.revisions.set(name, this.revision(name) + 1)
+  }
+
+  private revision(name: string): number {
+    return this.revisions.get(name) ?? 0
   }
 }

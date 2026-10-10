@@ -3,7 +3,7 @@ import { Bone } from 'lucide-react'
 import { EditorScene } from '@editor/scene'
 import { TextureStore } from '@render/material'
 import { ImageAlphaCache } from '@render/imageAlpha'
-import { ImageSourceRegistry } from '@render/imageSourceRegistry'
+import { imageSources } from '@render/imageSourceRegistry'
 import { getPlatform } from '@editor/platform'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
@@ -892,11 +892,11 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
   )
 }
 
-/**
- * 图集页来源记账（名字 → 源路径）。模块级单例：它只是记账，真正占资源的是贴图 / 像素缓存。
- * 视图卸载与下一次挂载都会清 / 重建，见 `imageSources.clear()`。
+/*
+ * 图集页来源记账见 `@render/imageSourceRegistry` 的模块级单例 `imageSources`：
+ * 视图卸载时会清掉（下面 effect 的清理函数），新建项目 / 导入资源时由
+ * `releaseDocumentAssets()` 清掉 —— 视口没挂载时也得能清，所以不放这儿。
  */
-const imageSources = new ImageSourceRegistry()
 
 async function loadTextures(
   store: TextureStore | null,

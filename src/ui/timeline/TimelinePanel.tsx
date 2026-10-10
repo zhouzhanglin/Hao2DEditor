@@ -514,13 +514,37 @@ function selectionTargets(selection: ReturnType<typeof useSelectionStore.getStat
   return []
 }
 
-/** 点击轨道 → 在场景里同步选中对应对象 */
+/**
+ * 点击轨道 → 在场景里同步选中对应对象。
+ *
+ * **顺序要紧**：`selection.selectBone / selectSlot` 会把动画面板里选中的通道清掉
+ *（点了对象就换关注点，旧通道作废 —— 见 `selectionStore.clearTrackFocus`），
+ * 所以通道必须**最后**写；写在前头会被紧接着的选对象清掉，点了轨道行反而看不到高亮。
+ */
 function selectTrack(
   track: TimelineTrack,
   selection: ReturnType<typeof useSelectionStore.getState>,
   status: (text: string) => void,
   setTrack: (track: { kind: string; target: string; attachment: string; channel: string } | null) => void
 ): void {
+  const suffix = track.isGroup || !track.channel ? '' : `（按 K 只给「${track.label}」打帧）`
+
+  if (track.kind === 'bone') {
+    selection.selectBone(track.target)
+    status(`选中骨骼「${track.target}」${suffix}`)
+  } else if (track.kind === 'slot') {
+    selection.selectSlot(track.target)
+    status(`选中插槽「${track.target}」${suffix}`)
+  } else if (track.kind === 'deform') {
+    selection.selectAttachment(track.target, track.attachment)
+    status(`选中附件「${track.target} / ${track.attachment}」${suffix}`)
+  } else if (track.kind === 'constraint') {
+    selection.selectConstraint(track.target)
+    status(`选中约束「${track.target}」${suffix}`)
+  } else {
+    status('事件轨道：在检查器里编辑事件参数')
+  }
+
   // 记住点中的子轨道：按 K 打关键帧时只打它（分组行只作折叠标题，不参与）
   setTrack(
     track.isGroup
@@ -532,29 +556,6 @@ function selectTrack(
           channel: track.channel ?? ''
         }
   )
-  const suffix = track.isGroup || !track.channel ? '' : `（按 K 只给「${track.label}」打帧）`
-
-  if (track.kind === 'bone') {
-    selection.selectBone(track.target)
-    status(`选中骨骼「${track.target}」${suffix}`)
-    return
-  }
-  if (track.kind === 'slot') {
-    selection.selectSlot(track.target)
-    status(`选中插槽「${track.target}」${suffix}`)
-    return
-  }
-  if (track.kind === 'deform') {
-    selection.selectAttachment(track.target, track.attachment)
-    status(`选中附件「${track.target} / ${track.attachment}」${suffix}`)
-    return
-  }
-  if (track.kind === 'constraint') {
-    selection.selectConstraint(track.target)
-    status(`选中约束「${track.target}」${suffix}`)
-    return
-  }
-  status('事件轨道：在检查器里编辑事件参数')
 }
 
 export type { KeySelector }

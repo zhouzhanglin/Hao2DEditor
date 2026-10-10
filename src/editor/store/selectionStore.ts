@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useTimelineStore } from './timelineStore'
 
 export type SelectionKind = 'none' | 'bone' | 'slot' | 'attachment' | 'constraint'
 
@@ -47,6 +48,21 @@ const EMPTY: Selection = {
   vertex: -1
 }
 
+/**
+ * 点了骨骼 / 插槽（层级树、视口、插槽层级面板…）就把动画面板里选中的**通道**清掉。
+ *
+ * 通道属于上一个对象：留着不但 dope sheet 继续高亮那一行，按 K 也不再「打这个对象的全部通道」，
+ * 而是只打那条已经跟当前选择无关的子轨道。
+ *
+ * 动画面板自己点轨道行**不受影响** —— `TimelinePanel.selectTrack` 先选对象、最后才写通道
+ *（顺序反了会被这里清掉，那里有对应注释）。没选中通道时直接返回，重复调用（如拖拽中反复选中同一根骨骼）
+ * 不会多写一次 store。
+ */
+function clearTrackFocus(): void {
+  const timeline = useTimelineStore.getState()
+  if (timeline.selectedTrack) timeline.setSelectedTrack(null)
+}
+
 export const useSelectionStore = create<SelectionState>((set, get) => ({
   ...EMPTY,
 
@@ -65,7 +81,8 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
       return next
     }),
 
-  selectBone: (name) =>
+  selectBone: (name) => {
+    clearTrackFocus()
     set((state) => {
       // 同一根骨骼保持原有顶点选择（拖拽中途会重复选中），换对象则连单选顶点一起作废
       const keep = state.bone === name
@@ -76,9 +93,13 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
         vertices: keep ? state.vertices : [],
         vertex: keep ? state.vertex : -1
       }
-    }),
+    })
+  },
 
-  selectSlot: (name) => set((state) => ({ ...state, kind: 'slot', slot: name, vertices: [], vertex: -1 })),
+  selectSlot: (name) => {
+    clearTrackFocus()
+    set((state) => ({ ...state, kind: 'slot', slot: name, vertices: [], vertex: -1 }))
+  },
 
   selectAttachment: (slot, attachment) =>
     set((state) => ({ ...state, kind: 'attachment', slot, attachment, vertices: [], vertex: -1 })),

@@ -17,8 +17,9 @@ export interface ActionResult {
 
 /** 把当前选中对象映射为可打关键帧的目标 */
 export function selectionTargets(selection: Selection): Array<{ kind: KeyKind; target: string; attachment: string }> {
-  if (selection.kind === 'bone' && selection.bone) {
-    return [{ kind: 'bone', target: selection.bone, attachment: '' }]
+  // 多选：整批骨骼都算目标（按 K 一次给所有选中骨骼打帧）
+  if (selection.kind === 'bone' && selection.bones.length > 0) {
+    return selection.bones.map((name) => ({ kind: 'bone' as KeyKind, target: name, attachment: '' }))
   }
   if (selection.kind === 'slot' && selection.slot) {
     return [{ kind: 'slot', target: selection.slot, attachment: '' }]

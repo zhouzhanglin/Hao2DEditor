@@ -63,7 +63,10 @@ export interface SceneViewState {
    * 连其它附件一起隐藏，为的是不被十几层网格互相遮挡）。
    */
   focusMeshSlot: string
+  /** 主选中骨骼（操作器轴心、拾取、检查器都看它） */
   selectedBone: string
+  /** 选中的骨骼集合（多选）：叠加层把这批骨骼全部画成选中样式 */
+  selectedBones: string[]
   hoveredBone: string
   /**
    * 权重刷工具是否激活：**权重着色（顶点饼图）只在它激活时画**。
@@ -176,6 +179,7 @@ export class EditorScene {
     isolateMeshSlot: '',
     isolateMeshAttachment: '',
     selectedBone: '',
+    selectedBones: [],
     hoveredBone: '',
     weightTool: false,
     selectedVertices: [],
@@ -320,11 +324,16 @@ export class EditorScene {
 
   setViewState(patch: Partial<SceneViewState>): void {
     const previousSelected = this.viewState.selectedBone
+    const previousSelectedBones = this.viewState.selectedBones.join(',')
     const previousTime = this.viewState.time
     const wasPlaying = this.viewState.playing
     this.viewState = { ...this.viewState, ...patch }
+    // 选中集合是数组，每次渲染都是新引用：按内容比，免得无变化也重画一帧
+    const selectedBonesChanged =
+      patch.selectedBones !== undefined && patch.selectedBones.join(',') !== previousSelectedBones
     if (
       patch.selectedBone !== undefined ||
+      selectedBonesChanged ||
       patch.hoveredBone !== undefined ||
       patch.weightBones !== undefined
     ) {
@@ -1060,6 +1069,15 @@ export class EditorScene {
     const showConstraints = state.overlay.constraints && bundle !== null
     const showBoneLayer = showSkeleton || showConstraints
     const selectedIndex = bundle ? (bundle.boneIndex[state.selectedBone] ?? -1) : -1
+    // 多选高亮：名字 → 索引（已删除的骨骼自动略过），主选中一定在里面
+    const selectedBoneIndices = new Set<number>()
+    if (bundle) {
+      for (const name of state.selectedBones) {
+        const index = bundle.boneIndex[name] ?? -1
+        if (index >= 0) selectedBoneIndices.add(index)
+      }
+      if (selectedIndex >= 0) selectedBoneIndices.add(selectedIndex)
+    }
     /*
      * 选中网格绑定的骨骼：名字 → 索引（已被删除的骨骼自动略过），并按它在「权重骨骼列表」
      * 里的**位置**取配色（见 weightPalette）。
@@ -1077,7 +1095,7 @@ export class EditorScene {
     if (showBoneLayer && bundle) {
       drawBoneOverlay(this.boneStroke, this.boneFill, bundle.skeleton, bundle.asset.constraints, {
         unitsPerPixel: unitPerPixel,
-        selectedBone: selectedIndex,
+        selectedBones: selectedBoneIndices,
         hoveredBone: bundle.boneIndex[state.hoveredBone] ?? -1,
         weightBoneColors,
         showBones: showSkeleton,

@@ -73,6 +73,8 @@ interface TreeRowProps {
   depth: number
   label: string
   active: boolean
+  /** 多选里的**次要**选中行（选中集合中非主选中的那几根）：高亮淡一档，一眼认出主选中 */
+  secondary?: boolean
   icon: React.ReactNode
   /** 图标可点击：行内快捷操作（display 行 = 切换显示 / 隐藏）。不传则图标只是装饰 */
   onIconClick?: (event: React.MouseEvent<HTMLButtonElement>) => void
@@ -86,7 +88,8 @@ interface TreeRowProps {
   expandable?: boolean
   expanded?: boolean
   onToggle?: () => void
-  onSelect: () => void
+  /** 行点击；**带事件**是为了识别 Shift / Cmd 多选（骨骼行用），写 `() => …` 也兼容 */
+  onSelect: (event: React.MouseEvent) => void
   onDelete?: () => void
   onContextMenu?: (event: React.MouseEvent) => void
   /** 接收资源面板拖来的图片（可多选成组；插槽行用它追加 display） */
@@ -134,7 +137,8 @@ function TreeRow({
   dataSlot,
   dragPayload,
   onDropNode,
-  focusTarget
+  focusTarget,
+  secondary
 }: TreeRowProps) {
   const [dropActive, setDropActive] = useState(false)
   /** 树内拖动时的高亮：放进行内 or 贴在上/下沿 */
@@ -153,7 +157,11 @@ function TreeRow({
       className={[
         // macOS 列表行：24px 行高；选中是「左右留白的圆角色块」（Finder 的选中不是通栏色块）
         'group relative mx-1 flex h-[22px] items-center gap-1 rounded-[5px] px-1 text-panel transition-colors duration-panel cursor-pointer',
-        active ? 'bg-accent-deep text-white' : 'text-content-hi hover:bg-white/[0.07]',
+        active
+          ? secondary
+            ? 'bg-accent-deep/60 text-white'
+            : 'bg-accent-deep text-white'
+          : 'text-content-hi hover:bg-white/[0.07]',
         dropActive ? 'ring-1 ring-inset ring-accent/70 bg-accent/10 text-content-hi' : '',
         nodeHint === 'inside' ? 'bg-accent/20 text-content-hi' : '',
         nodeHint === 'above' ? 'shadow-[inset_0_2px_0_0_rgba(34,211,238,0.9)]' : '',
@@ -868,13 +876,19 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         onDropNode={(payload, position) => handleNodeDrop(payload, { kind: 'bone', name: bone.name }, position)}
         depth={depth}
         label={bone.name}
-        active={selection.kind === 'bone' && selection.bone === bone.name}
+        active={selection.kind === 'bone' && selection.bones.includes(bone.name)}
+        secondary={selection.kind === 'bone' && selection.bone !== bone.name}
         icon={<Bone size={11} style={{ color: bone.color }} />}
         meta={bone.length > 0 ? `${(bone.length * 100).toFixed(0)}px` : undefined}
         expandable={hasChildren}
         expanded={expanded}
         onToggle={() => toggle(bone.name)}
-        onSelect={() => selection.selectBone(bone.name)}
+        // Shift / Cmd / Ctrl 点击 = 加选 / 减选（多选后可一起旋转 / 移动 / 缩放）
+        onSelect={(event) =>
+          event.shiftKey || event.metaKey || event.ctrlKey
+            ? selection.toggleBone(bone.name)
+            : selection.selectBone(bone.name)
+        }
         // 拖到骨骼行 = 在这根骨骼下新建一个插槽
         onDropImage={(imageNames) => addSlotFromImage(bone.name, imageNames)}
         onContextMenu={(event) => openMenu(event, { kind: 'bone', name: bone.name, bone: bone.parent })}

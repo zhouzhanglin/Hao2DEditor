@@ -46,9 +46,30 @@ export interface ToolHost {
 
 type DragKind = 'bone-translate' | 'bone-create' | 'gizmo' | 'shear-box' | 'vertex' | 'paint' | 'attachment' | 'none'
 
+/** 多骨骼拖拽：每根骨骼各自按下时的本地值（增量都按自己的起始值重算，避免累积误差） */
+interface MultiBoneStart {
+  name: string
+  /** 按下时的本地旋转（度） */
+  rot: number
+  /** 按下时的本地位置（父骨骼局部空间） */
+  pos: Vec2
+  /** 按下时的本地缩放 */
+  scale: Vec2
+  /** 父骨骼世界矩阵（按下时）：把世界位移换算到这一根的父空间要用它；根骨骼为 null */
+  parentWorld: Float32Array | null
+}
+
 interface DragSession {
   kind: DragKind
   bone: string
+  /**
+   * 这次拖拽要一起改的骨骼（旋转 / 移动 / 缩放同时作用于它们）。
+   *
+   * 内容 = 当前选中集合去掉「祖先也在集合里」的子孙（见 `pickDragRoots`）：父骨骼动了，
+   * 子骨骼本来就会跟着动，再写一遍子骨骼的本地值等于动双倍。单根选中时就是它自己，
+   * 走的写入路径与以前完全一致。
+   */
+  bones: MultiBoneStart[]
   /** 骨骼世界原点（旋转 / 缩放的轴心） */
   origin: Vec2
   parentRotation: number
@@ -119,6 +140,7 @@ interface DragSession {
 const IDLE: DragSession = {
   kind: 'none',
   bone: '',
+  bones: [],
   origin: { x: 0, y: 0 },
   parentRotation: 0,
   inheritRotation: true,
@@ -435,7 +457,9 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
 
   const selection = useSelectionStore.getState()
 
-  selection.selectBone(bone.name)
+  // 点在**已选中**的骨骼上就保留整个多选（拖动 = 带着其它选中骨骼一起动）；
+  // 点别的骨骼才改成单选它 —— 与层级树里点行的规则一致
+  if (!selection.bones.includes(bone.name)) selection.selectBone(bone.name)
 
   const offset = hit.boneIndex * 16
   const origin: Vec2 = { x: scene.runtime.skeleton.world[offset + 12], y: scene.runtime.skeleton.world[offset + 13] }
@@ -449,12 +473,17 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     }
     return beginGizmoDrag(host, hit.boneIndex, bone.name, 'center', info.world)
   }
+  const skeleton = scene.runtime.skeleton
+  const parentWorld = parent >= 0 ? skeleton.world.slice(parent * 16, parent * 16 + 16) : null
   drag = {
     ...IDLE,
     kind: 'bone-translate',
     bone: bone.name,
+    bones: collectDragBones(host, bone.name),
     origin,
-    parentRotation: parent >= 0 ? scene.runtime.skeleton.worldRot[parent] : 0,
+    parentWorld,
+    startPointerLocal: parentWorld ? mulPoint(invert(parentWorld), info.world) : { x: info.world.x, y: info.world.y },
+    parentRotation: parent >= 0 ? skeleton.worldRot[parent] : 0,
     inheritRotation: bone.inheritRotation,
     startDistance: Math.max(1e-4, Math.hypot(info.world.x - origin.x, info.world.y - origin.y))
   }
@@ -479,6 +508,66 @@ function axisFactor(current: number, start: number): number {
 function boneLocked(name: string): boolean {
   const bone = useProjectStore.getState().document.bones.find((item) => item.name === name)
   return bone?.locked === true
+}
+
+/**
+ * 从选中集合里挑出**真正要写本地值的骨骼**：祖先也在集合里的那些要剔除。
+ *
+ * 父骨骼旋转 / 平移时子骨骼本来就会跟着动，再给子骨骼写一遍它自己的本地值 = 动双倍。
+ * 剔除之后剩下的互不为祖先，一起改就是一次刚体式的整体变换。
+ */
+export function pickDragRoots(
+  names: readonly string[],
+  parentOf: (name: string) => string | undefined
+): string[] {
+  return names.filter((name) => {
+    const seen = new Set<string>([name])
+    let parent = parentOf(name)
+    while (parent) {
+      if (names.includes(parent)) return false
+      // 脏数据（父子成环）时直接停下，别让这里转不出来
+      if (seen.has(parent)) break
+      seen.add(parent)
+      parent = parentOf(parent)
+    }
+    return true
+  })
+}
+
+/** 收集这次拖拽要一起改的骨骼：当前选中集合（锁定 / 找不到的剔除）+ 按下的这根 */
+function collectDragBones(host: ToolHost, boneName: string): MultiBoneStart[] {
+  const bundle = host.scene.runtime
+  if (!bundle) return []
+  const skeleton = bundle.skeleton
+  const asset = bundle.asset
+  const indexOf = (name: string): number => bundle.boneIndex[name] ?? -1
+  const parentOf = (name: string): string | undefined => {
+    const index = indexOf(name)
+    if (index < 0) return undefined
+    const parentIndex = asset.bones[index].parentIndex
+    return parentIndex >= 0 ? asset.bones[parentIndex].name : undefined
+  }
+  // 直接读 store：视口按下时可能刚把点击的骨骼选上，host 里的 selection 是按下那一刻的快照
+  const current = useSelectionStore.getState()
+  const selected = current.kind === 'bone' ? current.bones : []
+  // 按下的那根一定参与（视口里点骨骼体会先把它选上，但保险起见再兜一次）
+  const names = selected.includes(boneName) ? selected : [...selected, boneName]
+
+  const out: MultiBoneStart[] = []
+  for (const name of pickDragRoots(names, parentOf)) {
+    const index = indexOf(name)
+    if (index < 0 || boneLocked(name)) continue
+    const parentIndex = asset.bones[index].parentIndex
+    out.push({
+      name,
+      rot: skeleton.localRot[index],
+      pos: { x: skeleton.localPos[index * 2], y: skeleton.localPos[index * 2 + 1] },
+      scale: { x: skeleton.localScale[index * 2], y: skeleton.localScale[index * 2 + 1] },
+      parentWorld:
+        parentIndex >= 0 ? skeleton.world.slice(parentIndex * 16, parentIndex * 16 + 16) : null
+    })
+  }
+  return out
 }
 
 /**
@@ -521,10 +610,12 @@ function beginGizmoDrag(
   /** 指针在父骨骼局部空间的按下位置（平移用；根骨骼没有父矩阵，就是世界坐标） */
   const parentWorld = parent >= 0 ? skeleton.world.slice(parent * 16, parent * 16 + 16) : null
   const startPointerLocal = parentWorld ? mulPoint(invert(parentWorld), world) : { x: world.x, y: world.y }
+  const bones = collectDragBones(host, boneName)
   drag = {
     ...IDLE,
     kind: 'gizmo',
     bone: boneName,
+    bones,
     origin,
     parentRotation: parent >= 0 ? skeleton.worldRot[parent] : 0,
     inheritRotation: bone.inheritRotation,
@@ -546,7 +637,8 @@ function beginGizmoDrag(
   storeHandler.begin(label)
   const suffix = host.mode === 'animate' ? '（写入关键帧）' : '（修改 setup）'
   const partLabel = part === 'center' ? '整体' : `${part.toUpperCase()} 轴`
-  host.status(`${label}骨骼「${boneName}」${suffix} · ${partLabel}`)
+  const together = bones.length > 1 ? `（同时作用于 ${bones.length} 根选中骨骼）` : ''
+  host.status(`${label}骨骼「${boneName}」${suffix} · ${partLabel}${together}`)
   return true
 }
 
@@ -672,8 +764,16 @@ function dragGizmo(host: ToolHost, world: Vec2): void {
   if (mode === 'rotate') {
     const angle = Math.atan2(ry, rx) * (180 / Math.PI)
     const local = drag.inheritRotation ? angle - drag.parentRotation : angle
+    /*
+     * 多选：取相对**按下时**的角度增量，加到每根选中骨骼自己的起始旋转上。
+     * 角度是局部量，增量可以直接相加；「祖先也在集合里」的子孙已在 collectDragBones 里剔除，
+     * 所以不会出现「父骨骼转一次 + 自己再转一次」的双倍。
+     */
+    const delta = local - drag.startLocal.rot
     store.updateSilent((draft) => {
-      writeBoneValue(draft, animation, host.time, drag.bone, 'rotate', local)
+      for (const item of drag.bones) {
+        writeBoneValue(draft, animation, host.time, item.name, 'rotate', item.rot + delta)
+      }
     })
   } else if (mode === 'move') {
     // 位移存在**父骨骼局部空间**里，位移量相对按下点算（否则骨骼会先跳到指针底下）
@@ -686,23 +786,42 @@ function dragGizmo(host: ToolHost, world: Vec2): void {
       const along = moved.x * axis.x + moved.y * axis.y
       next = { x: start.x + axis.x * along, y: start.y + axis.y * along }
     }
+    // 多选：`moved` 是按下那根骨骼**父空间**里的位移，先换成世界位移，再各自换算进自己的父空间
+    const worldDelta = drag.parentWorld
+      ? mulVector(drag.parentWorld, { x: next.x - start.x, y: next.y - start.y })
+      : { x: next.x - start.x, y: next.y - start.y }
     store.updateSilent((draft) => {
-      writeBoneValue(draft, animation, host.time, drag.bone, 'translate', next)
+      for (const item of drag.bones) {
+        // 根骨骼没有父矩阵 → 父空间就是世界空间（与 beginGizmoDrag 的约定一致）
+        const delta = item.parentWorld
+          ? mulVector(invert(item.parentWorld), worldDelta)
+          : worldDelta
+        writeBoneValue(draft, animation, host.time, item.name, 'translate', {
+          x: item.pos.x + delta.x,
+          y: item.pos.y + delta.y
+        })
+      }
     })
   } else {
     // 缩放（斜切不走小坐标轴，由包围盒拖拽 dragShearBox 处理）
-    const next = { x: drag.startLocal.scale.x, y: drag.startLocal.scale.y }
+    // 各轴**因子**对所有选中骨骼是同一个，乘到每根自己按下时的缩放上（缩放是局部量）
+    let factorX = 1
+    let factorY = 1
     if (part === 'x') {
-      next.x = drag.startLocal.scale.x * axisFactor(rx * drag.axisDir.x + ry * drag.axisDir.y, drag.startProject)
+      factorX = axisFactor(rx * drag.axisDir.x + ry * drag.axisDir.y, drag.startProject)
     } else if (part === 'y') {
-      next.y = drag.startLocal.scale.y * axisFactor(rx * drag.axisPerp.x + ry * drag.axisPerp.y, drag.startProject)
+      factorY = axisFactor(rx * drag.axisPerp.x + ry * drag.axisPerp.y, drag.startProject)
     } else {
-      const factor = axisFactor(Math.hypot(rx, ry), drag.startDistance)
-      next.x = drag.startLocal.scale.x * factor
-      next.y = drag.startLocal.scale.y * factor
+      factorX = axisFactor(Math.hypot(rx, ry), drag.startDistance)
+      factorY = factorX
     }
     store.updateSilent((draft) => {
-      writeBoneValue(draft, animation, host.time, drag.bone, 'scale', next)
+      for (const item of drag.bones) {
+        writeBoneValue(draft, animation, host.time, item.name, 'scale', {
+          x: item.scale.x * factorX,
+          y: item.scale.y * factorY
+        })
+      }
     })
   }
 
@@ -1105,8 +1224,24 @@ function moveActiveDrag(host: ToolHost, info: PointerInfo): void {
   const local = bone.parentIndex >= 0
     ? mulPoint(invert(skeleton.world.slice(parentOffset, parentOffset + 16)), info.world)
     : info.world
+  /*
+   * 多选：按下那根照旧「原点吸到指针」（拖原点圈的原有手感），其余骨骼按**同一世界位移**
+   * 各自换算进自己的父空间 —— 这样它们跟着走，不会被指针位置拽得乱跳。
+   */
+  const pointerDelta = { x: local.x - drag.startPointerLocal.x, y: local.y - drag.startPointerLocal.y }
+  const worldDelta = drag.parentWorld ? mulVector(drag.parentWorld, pointerDelta) : pointerDelta
   store.updateSilent((draft) => {
-    writeBoneValue(draft, animation, host.time, drag.bone, 'translate', local)
+    for (const item of drag.bones) {
+      if (item.name === drag.bone) {
+        writeBoneValue(draft, animation, host.time, item.name, 'translate', local)
+        continue
+      }
+      const delta = item.parentWorld ? mulVector(invert(item.parentWorld), worldDelta) : worldDelta
+      writeBoneValue(draft, animation, host.time, item.name, 'translate', {
+        x: item.pos.x + delta.x,
+        y: item.pos.y + delta.y
+      })
+    }
   })
 
   scene.setDocument(store.document, host.selection.skin)

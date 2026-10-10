@@ -590,7 +590,9 @@ export default function App() {
 
   const selectionText =
     selection.kind === 'bone'
-      ? `骨骼「${selection.bone}」`
+      ? selection.bones.length > 1
+        ? `${selection.bones.length} 根骨骼（主选中「${selection.bone}」）`
+        : `骨骼「${selection.bone}」`
       : selection.kind === 'slot'
         ? `插槽「${selection.slot}」`
         : selection.kind === 'attachment'

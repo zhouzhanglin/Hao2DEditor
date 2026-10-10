@@ -8,7 +8,8 @@ import { circlePolygon } from './shapes'
 export interface BoneOverlayOptions {
   /** 1 世界单位对应的屏幕像素的倒数（= 1 / zoom），用于保持描边视觉宽度恒定 */
   unitsPerPixel: number
-  selectedBone: number
+  /** 选中的骨骼（索引集合）：多选时这几根**全部**按选中样式画 */
+  selectedBones: ReadonlySet<number>
   hoveredBone: number
   /** 是否绘制骨骼本体（关掉「骨骼」开关但「约束」仍开着时传 false：只留约束手柄，不画骨架） */
   showBones: boolean
@@ -298,7 +299,7 @@ export function drawBoneOverlay(
     const x = skeleton.world[o + 12]
     const y = skeleton.world[o + 13]
     const length = skeleton.asset.bones[i].length
-    const isSelected = i === options.selectedBone
+    const isSelected = options.selectedBones.has(i)
     const isHovered = i === options.hoveredBone
     const isRoot = skeleton.asset.bones[i].parentIndex < 0
     /*

@@ -238,6 +238,8 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         // Pose 工具要拖骨骼改绑定姿态（蒙皮随之变形），所以和选择工具一样给操作器
         showGizmo: tools.tool === 'select' || tools.tool === 'pose',
         selectedBone: selection.kind === 'bone' ? selection.bone : '',
+        // 多选：整批高亮（操作器仍只画在主选中那根上）
+        selectedBones: selection.kind === 'bone' ? selection.bones : [],
         // 权重着色（饼图）跟着工具走：顶部「权重」开关已移除
         weightTool: tools.tool === 'weight',
         weightBones,
@@ -509,8 +511,15 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
           return
         }
       }
-      selection.selectBone(name)
-      onStatus(`选中骨骼「${name}」（骨骼体=旋转 / 原点圈=移动 / 末端方块=缩放）`)
+      // Shift / Cmd / Ctrl 点击 = 加选 / 减选；点**已选中**的骨骼保留整批（接着拖 = 一起动）
+      if (event.shiftKey || event.metaKey || event.ctrlKey) selection.toggleBone(name)
+      else if (!selection.bones.includes(name)) selection.selectBone(name)
+      const after = useSelectionStore.getState()
+      onStatus(
+        after.bones.length > 1
+          ? `选中 ${after.bones.length} 根骨骼（主选中「${after.bone}」）`
+          : `选中骨骼「${name}」（骨骼体=旋转 / 原点圈=移动 / 末端方块=缩放）`
+      )
     } else {
       selection.clear()
       onStatus('已取消选择')

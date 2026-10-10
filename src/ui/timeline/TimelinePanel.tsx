@@ -459,7 +459,15 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
           timeline.setPlaying(false)
           timeline.setTime(value)
         }}
-        onSelectTarget={(track) => selectTrack(track, selection, onStatus, timeline.setSelectedTrack)}
+        onSelectTarget={(track) => {
+          // null = 轨道列表里右键，取消通道选择。当前选择直接读 store：
+          // 面板刻意不订阅这些「按点击变化」的字段（见上面的高频通道说明），已经没选就不写。
+          if (!track) {
+            if (useTimelineStore.getState().selectedTrack) timeline.setSelectedTrack(null)
+            return
+          }
+          selectTrack(track, selection, onStatus, timeline.setSelectedTrack)
+        }}
         onSetTimes={(entries) => {
           // 绝对时间由 dope sheet 基于拖拽起点算出，这里只做写入（拖拽会话内 selector 时间保持同步）
           const name = animation?.name ?? null

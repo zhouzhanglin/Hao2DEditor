@@ -22,7 +22,8 @@ export interface DopeSheetProps {
   onSelectKeys: (keys: KeySelector[]) => void
   onSetTimes: (entries: Array<{ selector: KeySelector; time: number }>) => void
   onScrub: (time: number) => void
-  onSelectTarget: (track: TimelineTrack) => void
+  /** 选中某个通道；传 `null` = 取消通道选择（轨道列表里右键） */
+  onSelectTarget: (track: TimelineTrack | null) => void
   onBeginDrag: () => void
   onEndDrag: () => void
   /** 状态栏提示（右键「显示」通道切换 display 时反馈） */
@@ -596,6 +597,17 @@ export default function DopeSheet(props: DopeSheetProps) {
     }
   }
 
+  /**
+   * 关键帧区右键：取消关键帧的选择。
+   *
+   * 只在**确实选着**的时候写 store（否则每次右键都触发一次全面板重渲染）；
+   * 顺手拦掉浏览器菜单 —— 这块区域里它没有用处。
+   */
+  const cancelKeySelection = (event: React.MouseEvent): void => {
+    event.preventDefault()
+    if (selectedKeys.length > 0) props.onSelectKeys([])
+  }
+
   return (
     <div ref={hostRef} className="flex min-h-0 flex-1 flex-col">
       {/* 表头：轨道信息 + 帧 / 时间刻度尺 */}
@@ -726,6 +738,11 @@ export default function DopeSheet(props: DopeSheetProps) {
                         : `${track.group} · ${track.label} · 点击选中该通道（按 K 只给它打帧，Delete 删除整条通道）`
                 }
                 onClick={() => props.onSelectTarget(track)}
+                onContextMenu={(event) => {
+                  // 右键轨道行：取消通道的选择（父级会先判断是否选着，再决定要不要写 store）
+                  event.preventDefault()
+                  props.onSelectTarget(null)
+                }}
               >
                 {/* 选中通道的左侧色条：与 hover 区分开，一眼能看出「按 K 会打到哪条通道」 */}
                 {trackActive ? (
@@ -765,7 +782,11 @@ export default function DopeSheet(props: DopeSheetProps) {
           </div>
 
           {/* 关键帧区（缩放后超出窗口的关键帧会被裁掉，靠平移查看） */}
-          <div ref={areaRef} className="relative min-w-0 flex-1 overflow-hidden">
+          <div
+            ref={areaRef}
+            className="relative min-w-0 flex-1 overflow-hidden"
+            onContextMenu={cancelKeySelection}
+          >
             <div
               className="pointer-events-none absolute top-0 z-10 h-full border-r border-dashed border-warn/60"
               style={{ left: `${endPercent}%`, opacity: endPercent < 0 || endPercent > 100 ? 0 : 1 }}

@@ -8,8 +8,6 @@ import { useTimelineStore } from '@editor/store/timelineStore'
 import { useShallow } from 'zustand/react/shallow'
 import { drawOrderFrameAt, keyDrawOrder } from '@editor/commands/animationCommands'
 import { applySlotOrder } from '@editor/commands/hierarchyCommands'
-import { keyframeTargetsNow } from '@editor/timeline/actions'
-import type { KeyframeTarget } from '@editor/timeline/model'
 import ContextMenu from '@ui/widgets/ContextMenu'
 import type { ContextMenuItem } from '@ui/widgets/ContextMenu'
 
@@ -31,7 +29,7 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
   const [dropIndex, setDropIndex] = useState<number | null>(null)
   /** 行元素（按插槽名索引）：插入位置靠它们的中心线算 */
   const rowRefs = useRef(new Map<string, HTMLDivElement | null>())
-  /** 行右键菜单（Animate 态：给这条插槽打关键帧） */
+  /** 行右键菜单（Animate 态：写层级帧） */
   const [rowMenu, setRowMenu] = useState<{ x: number; y: number; slot: string } | null>(null)
 
   const animate = mode === 'animate' && timeline.currentAnimation !== null
@@ -245,12 +243,12 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
               ].join(' ')}
               onClick={() => selection.selectSlot(name)}
               onContextMenu={(event) => {
-                // Animate 态：右键插槽 = 给它打关键帧（显示 / 颜色 / 可见性）
+                // Animate 态：右键插槽 = 写当前时间的层级（绘制顺序）帧
                 if (!animate) return
                 event.preventDefault()
                 setRowMenu({ x: event.clientX, y: event.clientY, slot: name })
               }}
-              title={`${slot.name}（挂载于「${slot.bone}」）：拖动调整绘制顺序${animate ? '，Animate 态自动打关键帧，右键可打显示 / 颜色 / 可见性帧' : ''}`}
+              title={`${slot.name}（挂载于「${slot.bone}」）：拖动调整绘制顺序${animate ? '，Animate 态自动打关键帧，右键可写层级帧' : ''}`}
             >
               {/* 落点指示线：绝对定位，不占布局（占位会推挤行、让落点来回跳） */}
               {dropIndex === index ? (
@@ -287,11 +285,13 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
         <ContextMenu
           x={rowMenu.x}
           y={rowMenu.y}
-          title={`插槽「${rowMenu.slot}」· 打关键帧${
+          title={`插槽「${rowMenu.slot}」· 层级帧${
             // 置灰项的 hover 提示看不到，把原因写在标题里
-            document.animations.length === 0 ? '（工程里还没有动画：先在时间轴点「+ 动画」）' : ''
+            animation ? '' : '（当前没有可打帧的动画：先在时间轴点「+ 动画」）'
           }`}
-          items={slotKeyframeItems(rowMenu.slot, onStatus, document.animations.length > 0)}
+          items={slotOrderKeyframeItem(rowMenu.slot, timeline.time, Boolean(animation), () =>
+            commitOrder(layers)
+          )}
           onClose={() => setRowMenu(null)}
         />
       ) : null}
@@ -299,33 +299,31 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
   )
 }
 
-/** 插槽的「打关键帧」菜单项：显示 / 颜色 / 可见性，以及一次打全部通道 */
-function slotKeyframeItems(
+/**
+ * 这个面板只负责**绘制顺序（层级）**，所以右键只留一项「层级关键帧」：
+ * 把当前图层顺序写成当前时间的绘制顺序帧 —— 与拖动 / 点箭头走的是同一条写入路径。
+ *
+ * 显示 / 颜色 / 可见性这些**通道**帧归层级树（那边才是按对象 / 通道打帧的入口），
+ * 堆在这里只会让人以为「层级面板也能改颜色」。
+ */
+function slotOrderKeyframeItem(
   slot: string,
-  onStatus: ((text: string) => void) | undefined,
-  hasAnimation: boolean
+  time: number,
+  canKey: boolean,
+  onKey: () => void
 ): ContextMenuItem[] {
-  const item = (key: string, label: string, hint: string, targets: KeyframeTarget[]): ContextMenuItem => ({
-    key,
-    label,
-    // 没有动画时置灰并说明原因（点了只会闪一行状态栏，容易被当成「没反应」）
-    hint: hasAnimation ? hint : '工程里还没有动画：先在时间轴点「+ 动画」',
-    icon: <KeyRound size={12} />,
-    disabled: !hasAnimation,
-    onSelect: () => {
-      const result = keyframeTargetsNow(targets, hint)
-      onStatus?.(result.message)
-    }
-  })
-  const channel = (name: string): KeyframeTarget[] => [
-    { kind: 'slot', target: slot, attachment: '', channel: name }
-  ]
   return [
-    item('k-display', '显示关键帧', `${slot} · 显示`, channel('display')),
-    item('k-color', '颜色关键帧', `${slot} · 颜色`, channel('color')),
-    item('k-visible', '可见性关键帧', `${slot} · 可见性`, channel('visible')),
-    { key: 'sep-k', label: '', separator: true },
-    item('k-all', '全部通道关键帧', slot, [...channel('display'), ...channel('color'), ...channel('visible')])
+    {
+      key: 'k-order',
+      label: '层级关键帧',
+      // 没有动画时置灰并说明原因（点了只会闪一行状态栏，容易被当成「没反应」）
+      hint: canKey
+        ? `${slot} 所在层级 · 把当前绘制顺序写入 ${time.toFixed(2)}s`
+        : '工程里还没有动画：先在时间轴点「+ 动画」',
+      icon: <KeyRound size={12} />,
+      disabled: !canKey,
+      onSelect: onKey
+    }
   ]
 }
 

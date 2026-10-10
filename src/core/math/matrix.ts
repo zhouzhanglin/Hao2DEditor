@@ -1,4 +1,4 @@
-import { DEG2RAD, RAD2DEG, normalizeAngle } from './utils'
+import { DEG2RAD, RAD2DEG, wrapAngle } from './utils'
 
 export interface Vec2 {
   x: number
@@ -240,7 +240,7 @@ export function decomposeTrs(m: Float32Array): TrsParts {
     scaleX,
     scaleY: mirrored ? -scaleY : scaleY,
     shearX: 0,
-    shearY: normalizeAngle(thetaY - thetaX - 90)
+    shearY: wrapAngle(thetaY - thetaX - 90)
   }
 }
 

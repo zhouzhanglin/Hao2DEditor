@@ -1,4 +1,6 @@
-import type { EditorDocument } from '@core/model/authoring'
+import type { AuthoringAttachment, AuthoringBone, EditorDocument } from '@core/model/authoring'
+import { MAT4_LENGTH, decomposeTrs, invert, mul, trs } from '@core/math/matrix'
+import { DEG2RAD } from '@core/math/utils'
 import { findSkinSlot } from './authoringCommands'
 
 /**
@@ -28,6 +30,62 @@ export interface MoveResult {
 
 type Bones = EditorDocument['bones']
 type Slots = EditorDocument['slots']
+
+/**
+ * 「换父级 / 换宿主时保持世界变换」用的世界矩阵查询。
+ *
+ * 传了它就按**拖动前**的世界矩阵反推出新的局部值，对象在画面上不动；
+ * 不传 = 老行为（只改父子关系，局部值原样保留）。
+ * 返回 `null` 表示这根骨骼当前查不到（比如场景还没就绪）—— 那一步就不换算，宁可不换算也不乱改。
+ */
+export interface MoveOptions {
+  worldMatrixOf?: (boneName: string) => Float32Array | null
+}
+
+/** 骨骼的局部矩阵：含斜切（X 轴角 = rotation + shearX，Y 轴角 = rotation + 90 + shearY），与 decomposeTrs 互逆 */
+function boneLocalMatrix(bone: AuthoringBone): Float32Array {
+  const m = new Float32Array(MAT4_LENGTH)
+  const rx = (bone.rotation + bone.localShear.x) * DEG2RAD
+  const ry = (bone.rotation + 90 + bone.localShear.y) * DEG2RAD
+  m[0] = Math.cos(rx) * bone.localScale.x
+  m[1] = Math.sin(rx) * bone.localScale.x
+  m[4] = Math.cos(ry) * bone.localScale.y
+  m[5] = Math.sin(ry) * bone.localScale.y
+  m[10] = 1
+  m[12] = bone.localPosition.x
+  m[13] = bone.localPosition.y
+  m[15] = 1
+  return m
+}
+
+/** 把矩阵写回骨骼的局部 TRS（含斜切；镜像统一归到 scaleY 取负，见 decomposeTrs） */
+function applyLocalMatrix(bone: AuthoringBone, m: Float32Array): void {
+  const parts = decomposeTrs(m)
+  bone.localPosition = { x: parts.x, y: parts.y }
+  bone.rotation = parts.rotation
+  bone.localScale = { x: parts.scaleX, y: parts.scaleY }
+  bone.localShear = { x: parts.shearX, y: parts.shearY }
+}
+
+/** 附件局部矩阵：附件只有 position / rotation / scale，没有斜切 */
+function attachmentLocalMatrix(att: AuthoringAttachment): Float32Array {
+  return trs(att.position.x, att.position.y, att.rotation, att.scale.x, att.scale.y)
+}
+
+/**
+ * 换宿主骨骼后，把附件局部值重算成「相对新宿主骨骼」的等价变换（世界矩阵逐元素不变）。
+ *
+ * 附件只有 position / rotation / scale（**没有斜切字段**），而两根骨骼之间可能是
+ * 「非均匀缩放 + 斜切」—— 那种相对变换无法用这三个量精确表达，只能取最接近的分解
+ * （画面会有一点点形变）。骨骼之间是刚体 + **均匀**缩放时（拖槽位的常见做法）则是精确的。
+ */
+function rebindAttachment(att: AuthoringAttachment, oldBoneWorld: Float32Array, newBoneWorld: Float32Array): void {
+  const world = mul(oldBoneWorld, attachmentLocalMatrix(att))
+  const parts = decomposeTrs(mul(invert(newBoneWorld), world))
+  att.position = { x: parts.x, y: parts.y }
+  att.rotation = parts.rotation
+  att.scale = { x: parts.scaleX, y: parts.scaleY }
+}
 
 /** name 是否落在 ancestor 的子树里（用来挡住「把骨骼拖进自己的后代」这种成环操作） */
 export function isDescendantOf(bones: readonly Bones[number][], name: string, ancestor: string): boolean {
@@ -62,17 +120,35 @@ export function moveBone(
   doc: EditorDocument,
   name: string,
   targetBone: string,
-  zone: DropZone
+  zone: DropZone,
+  options?: MoveOptions
 ): MoveResult {
   const check = validateBoneMove(doc, name, targetBone)
   if (!check.ok) return check
   const bone = doc.bones.find((item) => item.name === name)
   if (!bone) return check
 
+  // 新父级：inside = 目标骨骼本身；above / below = 与目标同级（挂到目标的父级）
+  const target = targetBone ? doc.bones.find((item) => item.name === targetBone) : null
+  const parent = zone === 'inside' ? targetBone : targetBone ? (target?.parent ?? '') : ''
+
+  /*
+   * 保持世界变换：用**拖动前**的世界矩阵（父链还是旧的那条）反推出新的局部 TRS。
+   * 必须在改 parent 之前取矩阵 —— 改完再算就成「用新父级算旧世界」了。
+   * 关闭继承（inheritRotation / inheritScale）的骨骼不做逆推：它的局部值本来就不跟随父级，
+   * 强行换算反而会改变语义。
+   */
+  if (options?.worldMatrixOf) {
+    const world = options.worldMatrixOf(name)
+    const parentWorld = parent ? options.worldMatrixOf(parent) : null
+    if (world && bone.inheritRotation && bone.inheritScale && (parent === '' || parentWorld)) {
+      applyLocalMatrix(bone, parent && parentWorld ? mul(invert(parentWorld), world) : world)
+    }
+  }
+
   if (zone === 'inside' || !targetBone) {
     bone.parent = targetBone
   } else {
-    const target = doc.bones.find((item) => item.name === targetBone)
     if (!target) return { ok: false, message: `找不到骨骼「${targetBone}」` }
     bone.parent = target.parent
     const from = doc.bones.indexOf(bone)
@@ -104,12 +180,29 @@ export function moveSlot(
   doc: EditorDocument,
   name: string,
   targetBone: string,
-  anchor: MoveAnchor | null
+  anchor: MoveAnchor | null,
+  options?: MoveOptions
 ): MoveResult {
   const check = validateSlotMove(doc, name, targetBone)
   if (!check.ok) return check
   const slot = doc.slots.find((item) => item.name === name)
   if (!slot) return check
+
+  /*
+   * 换宿主骨骼：插槽本身没有局部变换，动的是它里面的附件 ——
+   * 每张皮肤上挂在这个插槽下的附件都要按「旧宿主 → 新宿主」换算一次，画面上才会待在原地。
+   */
+  if (slot.bone !== targetBone && options?.worldMatrixOf) {
+    const oldWorld = options.worldMatrixOf(slot.bone)
+    const newWorld = options.worldMatrixOf(targetBone)
+    if (oldWorld && newWorld) {
+      for (const skin of doc.skins) {
+        const skinSlot = findSkinSlot(skin, name)
+        if (!skinSlot) continue
+        for (const att of skinSlot.attachments) rebindAttachment(att, oldWorld, newWorld)
+      }
+    }
+  }
 
   slot.bone = targetBone
   const ordered = [...doc.slots].sort((left, right) => left.zOrder - right.zOrder).filter((item) => item.name !== name)
@@ -171,7 +264,8 @@ export function moveDisplay(
   name: string,
   toSlot: string,
   anchor: MoveAnchor | null,
-  skinName: string
+  skinName: string,
+  options?: MoveOptions
 ): MoveResult {
   const check = validateDisplayMove(doc, fromSlot, name, toSlot, skinName)
   if (!check.ok) return check
@@ -186,6 +280,16 @@ export function moveDisplay(
   if (at < 0) return check
 
   const [moved] = source.attachments.splice(at, 1)
+
+  // 换到别的插槽 = 换宿主骨骼：按旧宿主的世界矩阵把这个附件换算到新宿主空间（保持世界变换）。
+  // 同一插槽内只是排序（宿主没变）时不做任何换算。
+  if (moved && fromSlot !== toSlot && options?.worldMatrixOf) {
+    const fromBone = doc.slots.find((item) => item.name === fromSlot)?.bone ?? ''
+    const toBone = doc.slots.find((item) => item.name === toSlot)?.bone ?? ''
+    const oldWorld = fromBone ? options.worldMatrixOf(fromBone) : null
+    const newWorld = toBone ? options.worldMatrixOf(toBone) : null
+    if (oldWorld && newWorld && fromBone !== toBone) rebindAttachment(moved, oldWorld, newWorld)
+  }
   let index = target.attachments.length
   if (anchor) {
     const found = target.attachments.findIndex((item) => item.name === anchor.name)

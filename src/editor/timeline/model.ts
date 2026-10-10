@@ -593,7 +593,8 @@ export function keyframeTargets(
 
 /** 约束通道的中文名（右键菜单 / 时间轴共用） */
 export const CONSTRAINT_CHANNEL_LABEL: Record<string, string> = {
-  mix: '混合',
+  // 只有 IK 有这条通道（见 CONSTRAINT_CHANNELS）：与检查器的「权重」滑杆同名，别叫回「混合」
+  mix: '权重',
   mixRotate: '旋转混合',
   mixX: 'X 位移混合',
   mixY: 'Y 位移混合',

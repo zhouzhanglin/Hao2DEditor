@@ -26,6 +26,7 @@ import {
 import { runAutoWeightsForBones } from '@editor/tools/authoringTools'
 import { buildGridMesh, buildOutlineMesh } from '@editor/commands/meshActions'
 import type { RenameKind } from '@editor/commands/authoringCommands'
+import type { EditorDocument } from '@core/model/authoring'
 import { weightPaletteColor } from '@core/weightPalette'
 import {
   CheckboxField,
@@ -34,6 +35,7 @@ import {
   FieldGroup,
   NumberField,
   SelectField,
+  SliderField,
   TextField,
   ToggleField,
   Vector2Field
@@ -961,6 +963,21 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
     })
   }
 
+  /**
+   * IK 混合（「权重」滑杆）的写入口。
+   *
+   * 拖动期间是高频写入，必须走不记历史的 `updateSilent` —— 撤销事务由滑杆自己按下时开、
+   * 松开时收尾，整段拖动只留一条记录；键盘微调 / 数字框提交走普通 `update`。
+   */
+  const editIkMix = (value: number, silent: boolean): void => {
+    const mutate = (draft: EditorDocument): void => {
+      const t = draft.constraints.find((c) => c.name === constraint.name)
+      if (t && t.type === 'ik') t.mix = value
+    }
+    if (silent) useProjectStore.getState().updateSilent(mutate)
+    else update('修改IK权重', mutate)
+  }
+
   /** 链内换位：越靠前越接近链根，越靠后越接近链尾 */
   const moveChainBone = (from: number, to: number) => (): void => {
     editChain('调整受约束骨骼顺序', (bones) => {
@@ -1032,7 +1049,11 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
           ) : null}
           <span className="text-3xs text-content-lo">
             受约束骨骼链（
-            {constraint.type === 'ik' ? '链根 → 链尾，IK 按这个顺序驱动，至少要有链根与链尾两根骨骼' : '按顺序排布'}
+            {/*
+              求解器对任何非空链都生效：单骨 = 让链尾指向目标（CCD），两骨走解析解，
+              更长的链走 CCD 迭代。原来写「至少要两根」与实现不符（单骨也能求解）。
+            */}
+            {constraint.type === 'ik' ? '链根 → 链尾，IK 按这个顺序驱动（单骨 = 让链尾指向目标，两骨及以上逐节弯曲）' : '按顺序排布'}
             ）
             {constraint.type === 'physics' ? ' · 物理约束仅保留数据，不参与求解' : ''}
           </span>
@@ -1107,13 +1128,14 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
 
       {constraint.type === 'ik' ? (
         <FieldGroup title="IK 参数">
-          <NumberField
-            label="混合"
+          <SliderField
+            label="权重"
             value={constraint.mix}
             step={0.05}
             min={0}
             max={1}
-            onChange={(value) => update('修改IK混合', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'ik') t.mix = value })}
+            transaction="修改IK权重"
+            onChange={editIkMix}
           />
           <SelectField
             label="弯曲"

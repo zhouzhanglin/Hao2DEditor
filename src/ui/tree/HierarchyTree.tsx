@@ -74,6 +74,13 @@ interface MenuTarget {
 interface TreeRowProps {
   depth: number
   label: string
+  /**
+   * 整行悬浮描述（原生 title，多行用 `\n` 分隔）。
+   *
+   * 只挂在行容器上：行内按钮自带 title（眼睛 / 锁 / 图标 / 删除），悬浮到按钮上时
+   * 浏览器显示的是按钮自己的那句，不会被行描述盖掉。
+   */
+  title?: string
   active: boolean
   /** 多选里的**次要**选中行（选中集合中非主选中的那几根）：高亮淡一档，一眼认出主选中 */
   secondary?: boolean
@@ -125,6 +132,7 @@ function dropPositionOf(event: React.DragEvent<HTMLDivElement>): TreeDropPositio
 function TreeRow({
   depth,
   label,
+  title,
   active,
   icon,
   onIconClick,
@@ -176,6 +184,7 @@ function TreeRow({
         nodeHint === 'below' ? 'shadow-[inset_0_-2px_0_0_rgba(34,211,238,0.9)]' : '',
         dragPayload ? 'cursor-grab active:cursor-grabbing' : ''
       ].join(' ')}
+      title={title}
       data-slot={dataSlot}
       data-bone={dataBone}
       onClick={onSelect}
@@ -417,6 +426,89 @@ function isMeshType(type: AuthoringAttachmentType): boolean {
   return type === 'mesh' || type === 'linkedmesh'
 }
 
+/** display 行的类型名（与行内图标同一口径：贴图 / 网格） */
+const ATTACHMENT_KIND: Record<AuthoringAttachmentType, string> = {
+  region: '贴图',
+  mesh: '网格',
+  linkedmesh: '网格（链接）',
+  boundingbox: '包围盒'
+}
+
+type TreeSlot = EditorDocument['slots'][number]
+type TreeDisplay = EditorDocument['skins'][number]['slots'][number]['attachments'][number]
+
+/*
+ * 行的悬浮描述（原生 title）。
+ *
+ * 都是纯函数、字符串在组件外拼好：文案只取决于文档数据，跟渲染状态无关；
+ * 多行的写法与树容器那句说明一致 —— 一行一个信息点，扫一眼就能读完。
+ */
+function boneRowTitle(bone: AuthoringBone, counts: { bones: number; slots: number; constraints: number }): string {
+  const attached: string[] = []
+  if (counts.bones > 0) attached.push(`${counts.bones} 根子骨骼`)
+  if (counts.slots > 0) attached.push(`${counts.slots} 个插槽`)
+  if (counts.constraints > 0) attached.push(`${counts.constraints} 个约束`)
+  const lines = [
+    `骨骼「${bone.name}」`,
+    `父级：${bone.parent || '（根骨骼）'}`,
+    `挂载：${attached.length > 0 ? attached.join(' · ') : '（空）'}`,
+    // 与行尾 meta 同一口径（length 是 100 倍刻度，树里一直按 px 显示）；
+    // rotation 存的是**局部**值，有父级时写明基准，免得跟视口里看到的世界角度对不上
+    `长度 ${(bone.length * 100).toFixed(0)}px · ${
+      bone.parent ? `相对父级旋转 ${bone.rotation.toFixed(1)}°` : `旋转 ${bone.rotation.toFixed(1)}°`
+    }`
+  ]
+  if (bone.locked) lines.push('已锁定：视口里点不中它（层级树里照常可操作）')
+  return lines.join('\n')
+}
+
+function slotRowTitle(slot: TreeSlot, displayCount: number, showing: string): string {
+  const lines = [
+    `插槽「${slot.name}」`,
+    `挂载于：${slot.bone || '根层'}`,
+    `绘制层序 ${slot.zOrder}（越小越先绘制）· display ${displayCount} 个`
+  ]
+  if (!slot.visible) lines.push('已隐藏：视口与导出都不绘制它（点行首眼睛恢复）')
+  else if (showing) lines.push(`当前显示：${showing}`)
+  else if (displayCount > 0) lines.push('当前一个 display 都不显示（点 display 行的小图标显示它）')
+  if (slot.locked) lines.push('已锁定：视口里点不中它（层级树里照常可操作）')
+  return lines.join('\n')
+}
+
+function displayRowTitle(slot: TreeSlot, display: TreeDisplay, showing: boolean): string {
+  const lines = [`display「${display.name}」 · ${ATTACHMENT_KIND[display.type]}`, `宿主插槽：${slot.name}`]
+  if (display.image) lines.push(`图片：${display.image}`)
+  lines.push(
+    showing
+      ? '显示中：点前面的小图标可隐藏它（该插槽将不显示任何 display）'
+      : '未显示：点前面的小图标切换到它（点文字只选中，不改显示）'
+  )
+  return lines.join('\n')
+}
+
+function constraintRowTitle(constraint: AuthoringConstraint): string {
+  const lines = [
+    `${CONSTRAINT_KIND[constraint.type]}约束「${constraint.name}」`,
+    `骨骼链：${constraint.bones.length > 0 ? constraint.bones.join(' → ') : '（没有骨骼）'}`
+  ]
+  if (constraint.target) lines.push(`目标：${constraint.target}`)
+  if (constraint.type === 'ik') {
+    lines.push(`权重 ${constraint.mix.toFixed(2)} · 弯曲方向 ${constraint.bendSign > 0 ? '+1' : '-1'}`)
+  }
+  if (constraint.type === 'transform') {
+    // inherit 没有中文名（工程文件里也是这几个英文枚举），原样显示成「字段：取值」
+    lines.push(
+      `继承模式：${constraint.inherit}${constraint.relative ? ' · 相对叠加' : ''}${constraint.local ? ' · 取局部变换' : ''}`
+    )
+  }
+  if (constraint.type === 'path') {
+    lines.push(`位置 ${constraint.position.toFixed(2)} · 间距 ${constraint.spacing.toFixed(2)}`)
+  }
+  if (constraint.type === 'physics') lines.push('仅保留数据：不参与求解，导出直通')
+  if (!constraint.enabled) lines.push('已停用（enabled = false）')
+  return lines.join('\n')
+}
+
 /**
  * 层级树：骨骼、插槽、约束（含 IK）合并为**一棵树**，用图标区分类型。
  *
@@ -566,11 +658,20 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     selection.selectAttachment(slotName, attachmentName)
   }
 
-  /** 插槽 / display 都是绑定数据：Animate 态拒绝修改，避免污染动画基线 */
+  /** 骨骼 / 插槽 / display / 约束都是绑定数据：Animate 态拒绝增删与改层级，避免污染动画基线 */
   const canEditBinding = (): boolean => {
     if (useModeStore.getState().mode === 'pose') return true
-    onStatus?.('切到 Pose 状态才能改插槽的 display：插槽 / 附件属于绑定数据')
+    // 这句话服务于所有入口：拖行改层级、拖图片建插槽 / 加 display、工具栏新建、行尾删除
+    onStatus?.('切到 Pose 状态才能改绑定数据（骨骼 / 插槽 / display / 约束）')
     return false
+  }
+
+  /**
+   * 绑定数据的增删统一包一层：Animate 态点下去得到与拖拽相同的那句提示，
+   * 而不是静默写 setup —— 写进去的那一笔会成为动画基线，事后很难解释。
+   */
+  const poseOnly = (action: () => void): (() => void) => () => {
+    if (canEditBinding()) action()
   }
 
   /** 资源面板拖进来的图片：作为新的 display 追加到该插槽，并立即切换显示 */
@@ -857,7 +958,12 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     }
   }
 
-  /** 「删除」菜单项：骨骼 / 插槽 / 约束共用一份（约束行的整条菜单就是它，见下面两处） */
+  /**
+   * 「删除」菜单项：骨骼 / 插槽 / 约束共用一份（约束行的整条菜单就是它，见下面两处）。
+   *
+   * 删除改的同样是绑定数据，所以 Animate 态一律拒绝；但菜单在 Animate 态仍留着它 ——
+   * 直接隐藏会让人以为「删不掉」，点了给一句「切回 Pose」反而更清楚。
+   */
   const deleteItem = (target: MenuTarget): ContextMenuItem => ({
     key: 'delete',
     label: `删除「${target.name}」`,
@@ -865,7 +971,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     disabled: target.kind === 'bone' && document.bones.length <= 1,
     hint: target.kind === 'bone' && document.bones.length <= 1 ? '至少保留一根骨骼' : undefined,
     icon: <Trash2 size={12} />,
-    onSelect: () => {
+    onSelect: poseOnly(() => {
       if (target.kind === 'slot') {
         update('删除插槽', (draft) => {
           deleteSlot(draft, target.name)
@@ -881,7 +987,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         for (const child of draft.bones) if (child.parent === target.name) child.parent = ''
         draft.slots = draft.slots.filter((s) => s.bone !== target.name)
       })
-    }
+    })
   })
 
   /**
@@ -1083,6 +1189,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         onDropNode={(payload, position) => handleNodeDrop(payload, { kind: 'bone', name: bone.name }, position)}
         depth={depth}
         label={bone.name}
+        title={boneRowTitle(bone, { bones: children.length, slots: slots.length, constraints: constraints.length })}
         active={selection.kind === 'bone' && selection.bones.includes(bone.name)}
         secondary={selection.kind === 'bone' && selection.bone !== bone.name}
         icon={<Bone size={11} style={{ color: bone.color }} />}
@@ -1111,12 +1218,13 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         }}
         onDelete={
           document.bones.length > 1
-            ? () =>
+            ? poseOnly(() =>
                 update('删除骨骼', (draft) => {
                   draft.bones = draft.bones.filter((b) => b.name !== bone.name)
                   for (const child of draft.bones) if (child.parent === bone.name) child.parent = ''
                   draft.slots = draft.slots.filter((s) => s.bone !== bone.name)
                 })
+              )
             : undefined
         }
       />
@@ -1152,6 +1260,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         }
         depth={depth}
         label={attachment.name}
+        title={displayRowTitle(slot, attachment, showing)}
         active={
           selection.kind === 'attachment' &&
           selection.slot === slot.name &&
@@ -1185,9 +1294,9 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             attachment: attachment.name
           })
         }}
-        onDelete={() =>
+        onDelete={poseOnly(() =>
           update('删除 display', (draft) => deleteAttachment(draft, slot.name, attachment.name))
-        }
+        )}
       />
     )
   }
@@ -1201,6 +1310,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     pushedSlots.add(slot.name)
     const displays = displaysOf(slot.name)
     const expanded = filter ? true : !collapsed.has(`slot:${slot.name}`)
+    // 行尾 meta 与悬浮描述共用同一次采样（Animate 态按关键帧、Pose 态看 setup）
+    const showing = shownDisplayName(slot)
     rows.push(
       <TreeRow
         key={`slot:${slot.name}`}
@@ -1208,6 +1319,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         onDropNode={(payload, position) => handleNodeDrop(payload, { kind: 'slot', name: slot.name }, position)}
         depth={depth}
         label={slot.name}
+        title={slotRowTitle(slot, displays.length, showing)}
         active={selection.kind === 'slot' && selection.slot === slot.name}
         icon={
           <span
@@ -1217,7 +1329,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         }
         // 行尾显示当前显示的 display 名，不用展开也知道显示的是哪一个。
         // Animate 态按关键帧采样（与 display 行的「显示中」标记同一数据源），不能直接看 setup
-        meta={shownDisplayName(slot) || (displays.length > 0 ? `${displays.length} 个 display` : undefined)}
+        meta={showing || (displays.length > 0 ? `${displays.length} 个 display` : undefined)}
         expandable={displays.length > 0}
         expanded={expanded}
         dataSlot={slot.name}
@@ -1245,11 +1357,11 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
               if (target) target.locked = !target.locked
             })
         }}
-        onDelete={() =>
+        onDelete={poseOnly(() =>
           update('删除插槽', (draft) => {
             deleteSlot(draft, slot.name)
           })
-        }
+        )}
       />
     )
 
@@ -1264,6 +1376,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       key={`constraint:${constraint.name}`}
       depth={depth}
       label={constraint.name}
+      title={constraintRowTitle(constraint)}
       active={selection.kind === 'constraint' && selection.constraint === constraint.name}
       // 约束没有拖动负载，双击聚焦的目标只能显式给（骨骼 / 插槽 / display 都由负载推导）
       focusTarget={{ kind: 'constraint', name: constraint.name }}
@@ -1273,7 +1386,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       onContextMenu={(event) =>
         openMenu(event, { kind: 'constraint', name: constraint.name, bone: constraint.bones[0] ?? '' })
       }
-      onDelete={() => removeConstraint(update, constraint.name)}
+      onDelete={poseOnly(() => removeConstraint(update, constraint.name))}
     />
   )
 
@@ -1289,11 +1402,11 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-[24px] shrink-0 items-center gap-1 border-b border-line/60 bg-ink-800/80 px-1">
-        <button type="button" title="新建骨骼（挂在当前选中骨骼下）" className="hao-btn h-[18px] px-1.5 text-3xs" onClick={() => addBone()}>
+        <button type="button" title="新建骨骼（挂在当前选中骨骼下；未选中时建在根层）" className="hao-btn h-[18px] px-1.5 text-3xs" onClick={poseOnly(() => addBone())}>
           <Bone size={11} />
           <span>骨骼</span>
         </button>
-        <button type="button" title="新建插槽（挂到当前选中骨骼）" className="hao-btn h-[18px] px-1.5 text-3xs" onClick={() => addSlot()}>
+        <button type="button" title="新建插槽（挂到当前选中骨骼；未选中时挂到第一根骨骼）" className="hao-btn h-[18px] px-1.5 text-3xs" onClick={poseOnly(() => addSlot())}>
           <Plus size={11} />
           <span>插槽</span>
         </button>
@@ -1301,7 +1414,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           type="button"
           title="新建 IK 约束"
           className="hao-btn h-[18px] px-1.5 text-3xs"
-          onClick={() => addConstraint('ik')}
+          onClick={poseOnly(() => addConstraint('ik'))}
         >
           <IkConstraintIcon size={14} />
         </button>
@@ -1309,7 +1422,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           type="button"
           title="新建变换约束"
           className="hao-btn h-[18px] px-1.5 text-3xs"
-          onClick={() => addConstraint('transform')}
+          onClick={poseOnly(() => addConstraint('transform'))}
         >
           <Maximize2 size={14} />
         </button>
@@ -1317,7 +1430,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           type="button"
           title="新建路径约束"
           className="hao-btn h-[18px] px-1.5 text-3xs"
-          onClick={() => addConstraint('path')}
+          onClick={poseOnly(() => addConstraint('path'))}
         >
           <Route size={14} />
         </button>
@@ -1355,9 +1468,11 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         ref={listRef}
         className="min-h-0 flex-1 overflow-auto hao-scroll pb-1"
         title={
-          '右键可添加骨骼 / 插槽 / 约束\n' +
-          '拖动行来调整层级：骨骼 → 骨骼下（或空白处成为根骨骼）、插槽 → 骨骼下、display → 插槽下\n' +
-          '拖动行的上/下沿可以排序；把资源面板的图片拖到插槽行 = 给该插槽加一个 display'
+          '右键骨骼行 / 空白处：添加骨骼、插槽、约束（约束挂在驱动骨骼下）\n' +
+          '拖动行调整层级：骨骼 → 骨骼下（拖到空白处成为根骨骼）、插槽 → 骨骼下（拖到空白处挂到第一根骨骼）、display → 插槽下\n' +
+          '拖到行的上 / 下沿 = 排到那一行的前 / 后（骨骼会一起换到它所在的父级下）\n' +
+          '资源面板的图片：拖到插槽行（含它下面的 display 行）= 给该插槽加一个 display；拖到骨骼行 = 在该骨骼下新建插槽\n' +
+          '改绑定数据（拖动行 / 拖图片 / 新建 / 删除）只在 Pose 态可用'
         }
         onContextMenu={(event) => openMenu(event, { kind: 'root', name: '', bone: '' })}
         onDragOver={(event) => {

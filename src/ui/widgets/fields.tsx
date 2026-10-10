@@ -194,6 +194,101 @@ export function format(value: number, precision = 3): string {
   return String(rounded)
 }
 
+export interface SliderFieldProps {
+  label: string
+  /**
+   * 写值。`silent = true` 是**拖动中**的高频写入，要走不记历史的 `updateSilent`
+   * （事务由控件按下 / 松开时开关，整段拖动只留一条撤销记录）；
+   * `silent = false` 是键盘微调 / 数字框提交这类一次性写入，按普通可撤销编辑写。
+   */
+  onChange: (value: number, silent: boolean) => void
+  min?: number
+  max?: number
+  step?: number
+  precision?: number
+  disabled?: boolean
+  /** 拖动事务的撤销记录名（一次拖动 = 一条记录） */
+  transaction?: string
+  /** 悬停提示 */
+  hint?: string
+  /** 右侧数字读数（可直接输入精确值）；不要读数就传 false */
+  showValue?: boolean
+}
+
+/**
+ * 滑杆 + 数字读数（0..1 的混合 / 权重这类参数）。
+ *
+ * 拖动是高频写入：按下时开事务、松开时收尾，中途走调用方的 `silent` 分支 ——
+ * 直接一路 `update` 的话每移动一像素就是一条撤销记录，撤销得按几十下才退回去。
+ * 键盘方向键与数字框提交不属于拖动，按普通可撤销编辑写入。
+ */
+export function SliderField({
+  label,
+  value,
+  onChange,
+  min = 0,
+  max = 1,
+  step = 0.05,
+  precision = 3,
+  disabled,
+  transaction = '调整数值',
+  hint,
+  showValue = true
+}: SliderFieldProps) {
+  /** 是否处在拖动中：只有拖动期间才把写入降级成 silent（键盘调值没有按下 / 松开的配对） */
+  const dragging = useRef(false)
+  const digits = digitsForStep(step)
+  const clamp = (next: number): number => Math.min(max, Math.max(min, next))
+  /** range 的原生步进会带出 0.30000000000000004 这类浮点噪声，按步长取整 */
+  const quantize = (next: number): number => clamp(Number(next.toFixed(digits)))
+
+  const beginDrag = (): void => {
+    if (disabled) return
+    dragging.current = true
+    useProjectStore.getState().beginTransaction(transaction)
+  }
+
+  const finishDrag = (): void => {
+    if (!dragging.current) return
+    dragging.current = false
+    useProjectStore.getState().endTransaction()
+  }
+
+  return (
+    <label className="flex items-center gap-1.5" title={hint}>
+      <span className="hao-label w-[52px] shrink-0">{label}</span>
+      <input
+        type="range"
+        className="h-[14px] min-w-0 flex-1 cursor-pointer accent-accent disabled:cursor-not-allowed disabled:opacity-40"
+        min={min}
+        max={max}
+        step={step}
+        value={clamp(value)}
+        disabled={disabled}
+        onPointerDown={beginDrag}
+        onPointerUp={finishDrag}
+        onPointerCancel={finishDrag}
+        onChange={(event) => onChange(quantize(Number(event.target.value)), dragging.current)}
+      />
+      {showValue ? (
+        <CommitTextField
+          className="hao-field h-[20px] w-[46px] shrink-0 text-right font-mono text-3xs"
+          value={format(value, precision)}
+          disabled={disabled}
+          inputMode="decimal"
+          scrub
+          title="失焦 / 回车生效；中键左右拖动可调"
+          sanitize={(raw) => {
+            const next = Number(raw)
+            return Number.isFinite(next) ? format(quantize(next), precision) : null
+          }}
+          onCommit={(next) => onChange(quantize(Number(next)), false)}
+        />
+      ) : null}
+    </label>
+  )
+}
+
 export interface Vector2FieldProps {
   label: string
   value: { x: number; y: number }

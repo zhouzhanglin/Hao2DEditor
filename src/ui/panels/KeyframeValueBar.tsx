@@ -26,7 +26,7 @@ const CHANNEL_LABEL: Record<string, string> = {
   visible: '可见性',
   order: '绘制顺序',
   offsets: 'FFD 偏移',
-  mix: '混合权重',
+  mix: '权重',
   position: '位置',
   spacing: '间距'
 }

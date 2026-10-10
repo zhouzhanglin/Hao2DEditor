@@ -158,7 +158,12 @@ export function moveBone(
   }
   return {
     ok: true,
-    message: targetBone ? `骨骼「${name}」已移到「${targetBone}」${zone === 'inside' ? '下' : '旁'}` : `骨骼「${name}」已变成根骨骼`
+    // 贴上下沿是「与目标同级」：父级会跟着换成目标的父级，只说「已移到旁边」会被当成只动了顺序
+    message: targetBone
+      ? zone === 'inside'
+        ? `骨骼「${name}」已移到「${targetBone}」下`
+        : `骨骼「${name}」已移到「${targetBone}」旁（与它同父级）`
+      : `骨骼「${name}」已变成根骨骼`
   }
 }
 

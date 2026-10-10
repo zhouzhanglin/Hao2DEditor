@@ -248,7 +248,7 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
                 event.preventDefault()
                 setRowMenu({ x: event.clientX, y: event.clientY, slot: name })
               }}
-              title={`${slot.name}（挂载于「${slot.bone}」）：拖动调整绘制顺序${animate ? '，Animate 态自动打关键帧，右键可写层级帧' : ''}`}
+              title={`${slot.name}（挂载于「${hostName(slot)}」）：拖动调整绘制顺序${animate ? '，Animate 态自动打关键帧，右键可写层级帧' : ''}`}
             >
               {/* 落点指示线：绝对定位，不占布局（占位会推挤行、让落点来回跳） */}
               {dropIndex === index ? (
@@ -267,7 +267,7 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
                 {slot.visible ? <Eye size={11} /> : <EyeOff size={11} />}
               </button>
               <span className="min-w-0 flex-1 truncate">{slot.name}</span>
-              <span className="shrink-0 font-mono text-3xs text-content-lo/80">{slot.bone}</span>
+              <span className="shrink-0 font-mono text-3xs text-content-lo/80">{hostName(slot)}</span>
               <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex">
                 {arrowButton(name, 'up')}
                 {arrowButton(name, 'down')}
@@ -325,6 +325,11 @@ function slotOrderKeyframeItem(
       onSelect: onKey
     }
   ]
+}
+
+/** 宿主骨骼的显示名：为空（工程里一根骨骼都没有时建的插槽）要说成「根层」，别渲染成「」 */
+function hostName(slot: { bone: string }): string {
+  return slot.bone || '根层'
 }
 
 function rowByName(doc: { slots: Array<{ name: string; bone: string; visible: boolean }> }, name: string) {

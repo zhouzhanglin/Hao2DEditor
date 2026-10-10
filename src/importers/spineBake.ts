@@ -8,6 +8,8 @@ import {
   TextureAtlas
 } from '@esotericsoftware/spine-core'
 import { PPU } from './uv'
+import { normalizeLegacyAnimations } from './spineLegacyCurves'
+import type { SpineCurveKeyframe, SpineJson } from './spineTypes'
 
 /**
  * 用**官方 Spine 运行库**（`@esotericsoftware/spine-core`）把动画烘焙成关键帧轨道。
@@ -151,14 +153,32 @@ export function simplifyVec2(keys: BakedVec2Key[], eps: number): BakedVec2Key[] 
   return keep.length < keys.length ? keep : keys
 }
 
-/** 简化（单值） */
-export function simplifyScalar(keys: BakedScalarKey[], eps: number): BakedScalarKey[] {
+/**
+ * 旋转通道合并键时的**最大取值跨度**（度）。
+ *
+ * 运行期角度采样走 `sampleAngle → lerpAngle`（**沿最短弧**）：相邻两键的取值跨度一旦超过 180°，
+ * 「正转 313°」会被解释成「反转 -47°」。而烘焙做的正是把官方逐帧姿态压成稀疏键 ——
+ * 所以压出来的每一段都必须留在这个上限内，否则播放会整段拐错方向。
+ *
+ * 实测 Dragon 的 flying：COG 第 10–19 帧正转 313.87°，压缩后成为一对相邻键（跨度 282.5°），
+ * 播放时该段被当成反转，第 19 帧读出 -53.5°（正确值 306.5°）。
+ */
+export const MAX_ANGLE_SPAN = 180
+
+/**
+ * 简化（单值）：中间点都落在「锚点 → 终点」直线上（误差 ≤ eps）就丢掉。
+ *
+ * `maxSpan` 额外限制**合并后的取值跨度**：角度传 `MAX_ANGLE_SPAN`（见上），
+ * 其余场合保持默认（数值通道没有回绕问题）。
+ */
+export function simplifyScalar(keys: BakedScalarKey[], eps: number, maxSpan = Infinity): BakedScalarKey[] {
   if (keys.length <= 2) return keys
   const keep: BakedScalarKey[] = [keys[0]]
   let anchor = 0
   for (let i = 1; i < keys.length; i++) {
-    let straight = true
-    for (let j = anchor; j < i; j++) {
+    // 跨度超上限就不合并：中间点确实还在同一条直线上，但播放时会被当成反向旋转
+    let straight = Math.abs(keys[i].value - keys[anchor].value) <= maxSpan
+    for (let j = anchor; j < i && straight; j++) {
       if (keys[j].stepped) {
         straight = false
         break
@@ -185,7 +205,9 @@ export function simplifyScalar(keys: BakedScalarKey[], eps: number): BakedScalar
       i = anchor
     }
   }
-  keep.push(keys[keys.length - 1])
+  // 尾巴补最后一键；已经作为 pivot 推过就不要再推（同刻双键在时间轴上会出现空悬键）
+  const last = keys[keys.length - 1]
+  if (keep[keep.length - 1] !== last) keep.push(last)
   return keep.length < keys.length ? keep : keys
 }
 
@@ -296,17 +318,122 @@ function compactConstantScalar(
 /**
  * 烘焙所有动画；失败（版本不兼容 / 图集缺 region / 数据异常）返回 null，
  * 调用方据此回退到内置解析。
+ *
+ * 老格式（3.x）的 `translate` 轨道带缓动时官方运行库会算出 NaN（见 spineLegacyCurves），
+ * 所以失败后会把那些曲线段拆成线性子键**再试一次** —— 拆完就不再走那条坏路径，
+ * 于是老资源也能用官方运行库烘焙，与 Unity 侧一致。
  */
+/** 读一帧 rotate 的取值（4.2+ 写 `value`，老文件写 `angle`） */
+function rotateKeyValue(key: SpineCurveKeyframe): number {
+  const raw = typeof key.value === 'number' ? key.value : key.angle
+  return typeof raw === 'number' ? raw : 0
+}
+
+/** 回写时用原来的字段名（老文件是 `angle` 就仍写 `angle`） */
+function rotateKeyField(key: SpineCurveKeyframe): 'value' | 'angle' {
+  return typeof key.value === 'number' ? 'value' : 'angle'
+}
+
+/**
+ * 把 rotate 通道的取值**连续化**：每一键换成与前一键同方向、跨度落在 (-180°, 180°] 内的等价角。
+ *
+ * 官方运行库对 rotate 是**按取值直接线性插值**的（`RotateTimeline.getRelativeValue → getCurveValue`，
+ * 里面没有任何环绕处理），而运行期角度采样走最短弧（`sampleAngle → lerpAngle`）。
+ *
+ * 老导出会把角度写成 0..360 的**正数**：Dragon `flying` 的 COG 关键帧是
+ * `0° → 23.93° → 337.8° → 0°`，本意是「抬到 23.93° 再轻轻回摆 -22.2°」（337.8 ≡ -22.2），
+ * 照字面值交给官方库就会在中间**跨过 180° 把角色翻倒立**（实测第 15 帧 180.91°，画面整个倒过来）。
+ *
+ * 所以烘焙前先按最短弧连续化：`337.8 → -22.2`，两端 0° 不动，逐帧采样出来就是那条回摆曲线。
+ * 旋转差 360° 是同一个姿态，这一步只改数值表示，不改任何一帧看起来的样子。
+ *
+ * 只复制要改的这一层（animations → bones → rotate 键），骨架 / 皮肤等大对象仍按引用共享；
+ * 没改动时原样返回入参对象。
+ */
+export function wrapRotateKeys(json: unknown): unknown {
+  const animations = (json as SpineJson | undefined)?.animations
+  if (!animations || typeof animations !== 'object') return json
+  const animationsOut = { ...(animations as Record<string, unknown>) }
+  let changed = false
+
+  for (const [animationName, animation] of Object.entries(animationsOut)) {
+    const bones = (animation as { bones?: Record<string, unknown> } | undefined)?.bones
+    if (!bones || typeof bones !== 'object') continue
+    let bonesOut: Record<string, unknown> | null = null
+
+    for (const [boneName, track] of Object.entries(bones)) {
+      const keys = (track as { rotate?: SpineCurveKeyframe[] } | undefined)?.rotate
+      if (!Array.isArray(keys) || keys.length < 2) continue
+      let previous = rotateKeyValue(keys[0])
+      let keysOut: SpineCurveKeyframe[] | null = null
+
+      for (let i = 1; i < keys.length; i++) {
+        const key = keys[i]
+        const value = rotateKeyValue(key)
+        // 取最近的那个等价角：差值一步就落进 (-180, 180]
+        const wrapped = value - 360 * Math.round((value - previous) / 360)
+        if (Math.abs(wrapped - value) > 1e-9) {
+          if (!keysOut) keysOut = keys.slice()
+          keysOut[i] = rotateKeyField(key) === 'value' ? { ...key, value: wrapped } : { ...key, angle: wrapped }
+          changed = true
+        }
+        previous = wrapped
+      }
+
+      if (keysOut) {
+        if (!bonesOut) bonesOut = { ...bones }
+        bonesOut[boneName] = { ...(track as object), rotate: keysOut }
+      }
+    }
+
+    if (bonesOut) animationsOut[animationName] = { ...(animation as object), bones: bonesOut }
+  }
+
+  return changed ? { ...(json as object), animations: animationsOut } : json
+}
+
 export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | null {
+  const fps = input.fps && input.fps > 0 ? input.fps : 30
+  /*
+   * rotate 取值先连续化再交给官方库：官方按取值线性插值，直接读 337.8 会在中途把角色翻过来。
+   * 必须在**拆缓动之前**做 —— 拆出来的子键是按原始端点算的（337.8 → 0 的长弧），
+   * 事后再连续化就会顺着这些子键一路减 360°，末尾多转一整圈。
+   */
+  const wrapped = wrapRotateKeys(input.json)
+  const first = bakeOnce(input, wrapped, fps, true)
+  if (first) return first
+
+  const fixed = normalizeLegacyAnimations(wrapped as SpineJson, fps)
+  if (fixed.segments === 0 && fixed.renamed === 0) return null
+  const retry = bakeOnce(input, fixed.json, fps, false)
+  if (retry) {
+    console.info(
+      `[spine] 老格式动画已规整（拆缓动 ${fixed.segments} 段 / 改名 ${fixed.renamed} 帧），改用官方运行库烘焙`
+    )
+    return retry
+  }
+  return null
+}
+
+/**
+ * 单次烘焙尝试。
+ *
+ * `quiet` = 这次失败是**预期内**的（外层还要拿拆过曲线的数据重试），不要把 NaN / 异常打出来。
+ */
+function bakeOnce(
+  input: SpineBakeInput,
+  json: unknown,
+  fps: number,
+  quiet: boolean
+): BakedAnimation[] | null {
   try {
     const atlas = new TextureAtlas(input.atlasText)
     const skeletonJson = new SkeletonJson(new AtlasAttachmentLoader(atlas))
     // 让官方运行库直接输出我们的世界单位：骨骼位置 ÷ PPU（角度 / 缩放 / 剪切不受影响）
     skeletonJson.scale = 1 / PPU
-    const data = skeletonJson.readSkeletonData(input.json)
+    const data = skeletonJson.readSkeletonData(json)
     const skeleton = new Skeleton(data)
     const state = new AnimationState(new AnimationStateData(data))
-    const fps = input.fps && input.fps > 0 ? input.fps : 30
 
     const boneIndexOf = new Map<string, number>()
     input.boneNames.forEach((name, i) => boneIndexOf.set(name, i))
@@ -336,6 +463,8 @@ export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | n
       const frames = Math.max(1, Math.round(duration * fps))
       const boneTracks = new Map<number, BakedBoneTrack>()
       const slotTracks = new Map<number, BakedSlotTrack>()
+      /** NaN 只报一次（它在逐帧循环里，报多了刷屏） */
+      let nanReported = false
 
       skeleton.setupPose()
       state.clearTracks()
@@ -368,6 +497,15 @@ export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | n
             !Number.isFinite(pose.shearX) ||
             !Number.isFinite(pose.shearY)
           ) {
+            // 只报一次：这是逐帧逐骨骼的循环，报在这里能直接看出是哪根骨骼 / 哪条轨道
+            if (!quiet && !nanReported) {
+              nanReported = true
+              console.warn(
+                `[spine] 官方运行库采样出 NaN（动画「${animation.name}」第 ${f} 帧，骨骼「${bone.data.name}」，` +
+                  `pose=${pose.x},${pose.y},${pose.rotation}）：多为 3.3 及更早的老格式与 4.x 运行库不兼容，` +
+                  `本次导入的动画将回退到内置解析`
+              )
+            }
             return null
           }
           let track = boneTracks.get(index)
@@ -404,7 +542,7 @@ export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | n
         markSteppedVec2(track.shear, 60)
         track.translate = simplifyVec2(track.translate, 1e-4)
         track.scale = simplifyVec2(track.scale, 1e-4)
-        track.rotate = simplifyScalar(track.rotate, 0.05)
+        track.rotate = simplifyScalar(track.rotate, 0.05, MAX_ANGLE_SPAN)
         track.shear = simplifyVec2(track.shear, 0.05)
 
         const setup = setupById.get(track.bone)
@@ -452,7 +590,13 @@ export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | n
       })
     }
     return out
-  } catch {
+  } catch (error) {
+    /*
+     * 静默回退很容易让人以为是「我们算错了」——其实多半是官方运行库读不了这个文件
+     *（版本差异：3.3 的键名、图集缺 region、附件类型不认识…）。把原因打出来，
+     * 排查「导入后动画和官方库不一致」时第一眼就能看到。
+     */
+    if (!quiet) console.warn('[spine] 官方运行库烘焙抛错，已回退内置解析：', error)
     return null
   }
 }

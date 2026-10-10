@@ -398,7 +398,7 @@ function expandDrawOrder(
  * - ≥ 4.2：是 **(时间, 值) 空间的绝对坐标**，必须按「本帧 → 下一帧」的区间归一化。
  *   贝塞尔对仿射变换不变，所以归一化后的形状与官方完全等价。
  *
- * 数值启发式（四个分量是否都落在 [0,1]）**会误判**：scale 通道的值本来就在 1 附近，
+ * 数值启发式（四个分量是否都落在宽松的过冲窗口内）**仍会误判**：scale 通道的值本来就在 1 附近，
  * 绝对控制点很容易整组落进 [0,1]（正例见 spineboy-pro 的 `idle-turn/front-fist.scale`）。
  * 所以只在版本缺失（`null`）时才回退到它。
  *
@@ -429,8 +429,14 @@ function curveOfChannel(
   const dt = time2 - time1
   if (Math.abs(dt) < 1e-9) return { easing: Easing.Linear, curve: null }
 
-  const in01 = (value: number): boolean => value >= -1e-6 && value <= 1 + 1e-6
-  const looksNormalized = in01(c1t) && in01(c1v) && in01(c2t) && in01(c2v)
+  /*
+   * 「像不像归一化控制点」：`cx` 是两帧之间的时间百分比，`cy` 是两帧取值差的百分比 —— 官方允许
+   * **过冲 / 回弹**（3.3 的 Dragon 实测 1.06 / 1.33 / 1.43）。这里必须给过冲留余量，
+   * 别用 [0,1] 硬卡：卡死后这些曲线会被误判成绝对坐标，缓动被压成「几乎不动 → 末尾突跳」。
+   * 出现 10 / 20 这类通道单位的值时才判定为绝对坐标。
+   */
+  const inRange = (value: number): boolean => value >= -1 && value <= 2
+  const looksNormalized = inRange(c1t) && inRange(c1v) && inRange(c2t) && inRange(c2v)
   // 版本明确时以版本为准；歧义（版本缺失）时才看数值
   const treatAsNormalized = absolute === true ? false : absolute === false ? true : looksNormalized
   if (treatAsNormalized && looksNormalized) {

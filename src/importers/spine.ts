@@ -544,7 +544,8 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
     : null
   const bakedApplied = baked ? applyBakedAnimations(animations, baked, slots, attIndexBySlot) : false
   if (input.atlasText && !baked) {
-    warnings.push('官方运行库烘焙失败，动画改用内置解析（缓动 / IK 可能与官方有差异）')
+    // 原因见控制台（官方运行库读不了 / 采样出 NaN）；多为 3.3 及更早的老格式
+    warnings.push('官方运行库烘焙失败，动画改用内置解析（老版本格式常见：3.3 及更早；缓动 / IK 可能与官方有差异）')
   }
 
   const images: ImageRef[] = textureNames.map((name) => ({

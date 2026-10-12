@@ -1,4 +1,4 @@
-import { Brush, Crosshair, Grid3x3, Layers } from 'lucide-react'
+import { Brush, Crosshair, Grid3x3, Layers, Trash2 } from 'lucide-react'
 import { BlendMode } from '@core/model/types'
 import { curvePercent } from '@core/anim/interpolation'
 import { useProjectStore } from '@editor/store/projectStore'
@@ -26,7 +26,7 @@ import {
 import { runAutoWeightsForBones } from '@editor/tools/authoringTools'
 import { buildGridMesh, buildOutlineMesh } from '@editor/commands/meshActions'
 import type { RenameKind } from '@editor/commands/authoringCommands'
-import type { EditorDocument } from '@core/model/authoring'
+import type { AuthoringConstraint, EditorDocument } from '@core/model/authoring'
 import { weightPaletteColor } from '@core/weightPalette'
 import {
   CheckboxField,
@@ -99,6 +99,347 @@ function sampleNumberKeys(
   return a.value + (b.value - a.value) * t
 }
 
+/**
+ * 寄宿在某根骨骼上的约束：IK = 目标骨，变换 / 路径 = 第一根被驱动骨。
+ * 与层级树行尾徽标同一口径（见 HierarchyTree 的 constraintHost）；物理约束不寄宿，仍在「约束」页。
+ */
+function hostedConstraints(document: EditorDocument, boneName: string): AuthoringConstraint[] {
+  return document.constraints.filter((constraint) => {
+    if (constraint.type === 'physics') return false
+    return (constraint.type === 'ik' ? constraint.target : constraint.bones[0] ?? '') === boneName
+  })
+}
+
+/** 删除约束并清掉动画里的约束轨道（与层级树右键删除同一段逻辑） */
+function removeConstraint(
+  update: (label: string, mutate: (draft: EditorDocument) => void) => void,
+  name: string
+): void {
+  update('删除约束', (draft) => {
+    draft.constraints = draft.constraints.filter((c) => c.name !== name)
+    for (const animation of draft.animations) {
+      animation.constraints = animation.constraints.filter((t) => t.constraint !== name)
+    }
+  })
+}
+
+/**
+ * 单条约束的编辑器 —— 两个入口共用同一份字段，避免「改了这边忘了那边」：
+ * - 检查器的「约束」页（selection.kind === 'constraint'，从时间轴轨道 / 根层孤儿行进入）
+ * - 宿主骨骼面板的内嵌分组（合并显示后 IK / 变换 / 路径约束寄在宿主行上）
+ *
+ * `embedded` = 内嵌形态：省去名称与顺序（那是「约束对象」的元信息，由专用页维护），
+ * 标题带上约束名、标题栏右侧给删除按钮 —— 树里已经没有约束行，这是合并显示后的删除入口。
+ * `nameField` / `orderField` 由专用页传入（重命名要联动选中态，闭包留在主组件里）。
+ */
+function ConstraintEditor({
+  document,
+  constraint,
+  update,
+  revealBone,
+  nameField,
+  orderField,
+  embedded = false,
+  onDelete
+}: {
+  document: EditorDocument
+  constraint: AuthoringConstraint
+  update: (label: string, mutate: (draft: EditorDocument) => void) => void
+  revealBone: (name: string) => void
+  nameField?: React.ReactNode
+  orderField?: React.ReactNode
+  embedded?: boolean
+  onDelete?: () => void
+}) {
+  /** 受约束骨骼链（IK 按「链根 → 链尾」顺序驱动，顺序直接影响求解结果） */
+  const chainBones = constraint.bones
+  const chainCandidates = document.bones.filter((bone) => !chainBones.includes(bone.name))
+  const targetBoneExists = constraint.target !== '' && document.bones.some((bone) => bone.name === constraint.target)
+
+  /** 「目标」的写入口：下拉选择与「从层级树拖骨骼进来」共用（拖进来的骨骼一定存在） */
+  const setTargetBone = (name: string): void => {
+    if (name === constraint.target) return
+    update('修改约束目标', (draft) => {
+      const item = draft.constraints.find((c) => c.name === constraint.name)
+      if (item) item.target = name
+    })
+  }
+
+  /** 「定位到目标骨骼」：层级树滚到它并闪一下（目标常挂在脚 / 手这些离得远的部位） */
+  const locateTargetBone = (): void => {
+    if (targetBoneExists) revealBone(constraint.target)
+  }
+
+  const editChain = (label: string, mutate: (bones: string[]) => void): void => {
+    update(label, (draft) => {
+      const item = draft.constraints.find((c) => c.name === constraint.name)
+      if (item) mutate(item.bones)
+    })
+  }
+
+  /**
+   * IK 混合（「权重」滑杆）的写入口。
+   *
+   * 拖动期间是高频写入，必须走不记历史的 `updateSilent` —— 撤销事务由滑杆自己按下时开、
+   * 松开时收尾，整段拖动只留一条记录；键盘微调 / 数字框提交走普通 `update`。
+   */
+  const editIkMix = (value: number, silent: boolean): void => {
+    const mutate = (draft: EditorDocument): void => {
+      const t = draft.constraints.find((c) => c.name === constraint.name)
+      if (t && t.type === 'ik') t.mix = value
+    }
+    if (silent) useProjectStore.getState().updateSilent(mutate)
+    else update('修改IK权重', mutate)
+  }
+
+  /** 链内换位：越靠前越接近链根，越靠后越接近链尾 */
+  const moveChainBone = (from: number, to: number) => (): void => {
+    editChain('调整受约束骨骼顺序', (bones) => {
+      if (from < 0 || from >= bones.length || to < 0 || to >= bones.length) return
+      const [moved] = bones.splice(from, 1)
+      bones.splice(to, 0, moved)
+    })
+  }
+
+  return (
+    <>
+      <FieldGroup
+        title={
+          embedded
+            ? `${CONSTRAINT_LABEL[constraint.type]}约束 · ${constraint.name}`
+            : `${CONSTRAINT_LABEL[constraint.type]}约束`
+        }
+        actions={
+          embedded && onDelete ? (
+            <button
+              type="button"
+              title="删除这条约束（连同它在时间轴上的关键帧轨道）"
+              className="flex h-[16px] w-[16px] items-center justify-center rounded text-danger/80 hover:bg-danger/15"
+              onClick={onDelete}
+            >
+              <Trash2 size={11} />
+            </button>
+          ) : undefined
+        }
+      >
+        {nameField}
+        {orderField}
+        <ToggleField
+          label="启用"
+          value={constraint.enabled}
+          onChange={(value) => update('启停约束', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t) t.enabled = value })}
+        />
+        {/*
+          内嵌的 IK 不显示「目标」：目标就是宿主骨骼本身（「目标骨即 IK 节点」）。
+          要把 IK 挪到别的骨上，走「约束」页（时间轴轨道点进去）或删了重配
+        */}
+        {(!embedded || constraint.type !== 'ik') ? (
+          <SelectField
+            label="目标"
+            value={constraint.target}
+            options={[{ value: '', label: '（无）' }, ...document.bones.map((b) => ({ value: b.name, label: b.name }))]}
+            onChange={setTargetBone}
+            onDropBone={setTargetBone}
+            trailing={
+              <button
+                type="button"
+                disabled={!targetBoneExists}
+                title={
+                  targetBoneExists
+                    ? `在层级树里定位「${constraint.target}」`
+                    : '还没有可定位的目标骨骼'
+                }
+                className="flex h-[22px] w-[22px] shrink-0 cursor-pointer items-center justify-center rounded-[5px] text-content-lo transition-colors duration-panel hover:bg-white/[0.14] hover:text-content-hi disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-content-lo"
+                onClick={locateTargetBone}
+              >
+                <Crosshair size={13} />
+              </button>
+            }
+          />
+        ) : null}
+        {/*
+          IK 静默失效的两个坑：「没选目标」和「链是空的」——求解器直接返回，
+          视口里看不出任何异常。这里就地提醒，比等编译告警直观
+        */}
+        {constraint.type === 'ik' && !targetBoneExists ? (
+          <span className="text-3xs text-warn">
+            {constraint.target ? `目标骨骼「${constraint.target}」不存在，IK 不会生效` : '没有目标骨骼，IK 不会生效'}
+          </span>
+        ) : null}
+        {constraint.type === 'ik' && chainBones.length === 0 ? (
+          <span className="text-3xs text-warn">受约束骨骼链是空的，IK 不会生效</span>
+        ) : null}
+        <div className="flex flex-col gap-1">
+          <span className="text-3xs text-content-lo">
+            受约束骨骼链（
+            {/*
+              求解器对任何非空链都生效：单骨 = 让链尾指向目标（CCD），两骨走解析解，
+              更长的链走 CCD 迭代。原来写「至少要两根」与实现不符（单骨也能求解）。
+            */}
+            {constraint.type === 'ik' ? '链根 → 链尾，IK 按这个顺序驱动（单骨 = 让链尾指向目标，两骨及以上逐节弯曲）' : '按顺序排布'}
+            ）
+            {constraint.type === 'physics' ? ' · 物理约束仅保留数据，不参与求解' : ''}
+          </span>
+          {chainBones.length === 0 ? <span className="text-3xs text-content-lo">（未设置）</span> : null}
+          {chainBones.map((name, index) => (
+            <div key={`${index}:${name}`} className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-ink-700/60">
+              <span className="w-[10px] shrink-0 text-right font-mono text-3xs text-content-lo">{index + 1}</span>
+              <span className="min-w-0 flex-1 truncate text-3xs" title={name}>
+                {name}
+              </span>
+              {/* 链里的每根骨骼同样能定位：长链里要挨个确认链根 / 链尾时很好用 */}
+              <button
+                type="button"
+                className="shrink-0 text-content-lo hover:text-content-hi"
+                title={`在层级树里定位「${name}」`}
+                onClick={() => revealBone(name)}
+              >
+                <Crosshair size={11} />
+              </button>
+              <button
+                type="button"
+                className="shrink-0 text-3xs text-content-lo hover:text-content-hi disabled:opacity-30 disabled:hover:text-content-lo"
+                disabled={index === 0}
+                title="上移（越靠前越接近链根）"
+                onClick={moveChainBone(index, index - 1)}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                className="shrink-0 text-3xs text-content-lo hover:text-content-hi disabled:opacity-30 disabled:hover:text-content-lo"
+                disabled={index === chainBones.length - 1}
+                title="下移（越靠后越接近链尾）"
+                onClick={moveChainBone(index, index + 1)}
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                className="shrink-0 text-3xs text-content-lo hover:text-danger"
+                title="从受约束骨骼链里移除（约束本身不受影响）"
+                onClick={() => editChain('移除受约束骨骼', (bones) => {
+                  const at = bones.indexOf(name)
+                  if (at >= 0) bones.splice(at, 1)
+                })}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          <SelectField
+            label="添加骨骼"
+            value=""
+            disabled={chainCandidates.length === 0}
+            options={[
+              { value: '', label: chainCandidates.length > 0 ? '（选择骨骼加到链尾）' : '（没有可添加的骨骼）' },
+              ...chainCandidates.map((bone) => ({ value: bone.name, label: bone.name }))
+            ]}
+            onChange={(value) => {
+              if (!value) return
+              editChain('添加受约束骨骼', (bones) => bones.push(value))
+            }}
+            // 从层级树直接拖骨骼过来 = 加到链尾，省得在下拉里翻
+            onDropBone={(name) => {
+              if (chainBones.includes(name)) return
+              editChain('添加受约束骨骼', (bones) => bones.push(name))
+            }}
+          />
+          <span className="text-3xs text-content-lo">「目标」和「添加骨骼」都能从层级树拖骨骼进来</span>
+        </div>
+      </FieldGroup>
+
+      {constraint.type === 'ik' ? (
+        <FieldGroup title="IK 参数">
+          <SliderField
+            label="权重"
+            value={constraint.mix}
+            step={0.05}
+            min={0}
+            max={1}
+            transaction="修改IK权重"
+            onChange={editIkMix}
+          />
+          <SelectField
+            label="弯曲"
+            value={String(constraint.bendSign)}
+            options={[{ value: '1', label: '正向 (+1)' }, { value: '-1', label: '反向 (-1)' }]}
+            onChange={(value) => update('修改IK弯曲方向', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'ik') t.bendSign = Number(value) })}
+          />
+          <ToggleField
+            label="用骨长"
+            value={constraint.useBoneLength}
+            onChange={(value) => update('修改IK长度取法', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'ik') t.useBoneLength = value })}
+          />
+        </FieldGroup>
+      ) : null}
+
+      {constraint.type === 'transform' ? (
+        <FieldGroup title="变换混合">
+          {(
+            [
+              ['mixRotate', '旋转'],
+              ['mixX', 'X 位移'],
+              ['mixY', 'Y 位移'],
+              ['mixScaleX', 'X 缩放'],
+              ['mixScaleY', 'Y 缩放'],
+              ['mixShearY', '斜切']
+            ] as const
+          ).map(([key, label]) => (
+            <NumberField
+              key={key}
+              label={label}
+              value={constraint[key]}
+              step={0.05}
+              min={0}
+              max={1}
+              onChange={(value) =>
+                update('修改变换约束', (draft) => {
+                  const t = draft.constraints.find((c) => c.name === constraint.name)
+                  if (t && t.type === 'transform') t[key] = value
+                })
+              }
+            />
+          ))}
+        </FieldGroup>
+      ) : null}
+
+      {constraint.type === 'path' ? (
+        <FieldGroup title="路径参数">
+          <NumberField
+            label="位置"
+            value={constraint.position}
+            step={0.02}
+            onChange={(value) => update('修改路径位置', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'path') t.position = value })}
+          />
+          <NumberField
+            label="间距"
+            value={constraint.spacing}
+            step={0.02}
+            onChange={(value) => update('修改路径间距', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'path') t.spacing = value })}
+          />
+          <NumberField
+            label="旋转混合"
+            value={constraint.rotateMix}
+            step={0.05}
+            min={0}
+            max={1}
+            onChange={(value) => update('修改路径旋转混合', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'path') t.rotateMix = value })}
+          />
+          <NumberField
+            label="位移混合"
+            value={constraint.translateMix}
+            step={0.05}
+            min={0}
+            max={1}
+            onChange={(value) => update('修改路径位移混合', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'path') t.translateMix = value })}
+          />
+        </FieldGroup>
+      ) : null}
+    </>
+  )
+}
+
 /** 属性：骨骼 / 插槽 / 附件 / 约束四类选中对象的属性编辑（网格 / FFD 的设置也在附件这栏的最下面） */
 export default function InspectorPanel({ onStatus = () => undefined }: InspectorPanelProps) {
   const document = useProjectStore((s) => s.document)
@@ -113,6 +454,19 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   const animating = mode === 'animate' && !!currentAnimation
   /** 「定位」：让层级树滚到某根骨骼并闪一下（只提示位置，不改选中 —— 见 locateBone） */
   const revealBone = useRevealStore((s) => s.revealBone)
+
+  /**
+   * 删除寄宿在骨骼面板里的约束：Animate 态拒绝（改的是绑定数据，与层级树同一套保护）。
+   * 树里已没有 IK / 变换 / 路径约束行，这个按钮是它们的删除入口。
+   */
+  const deleteHostedConstraint = (name: string): void => {
+    if (mode !== 'pose') {
+      onStatus('切到 Pose 状态才能改绑定数据（骨骼 / 插槽 / display / 约束）')
+      return
+    }
+    removeConstraint(update, name)
+    onStatus(`已删除约束「${name}」`)
+  }
 
   /**
    * 重命名当前选中对象（骨骼 / 插槽 / 附件 / 约束）。
@@ -401,6 +755,22 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             }
           />
         </FieldGroup>
+
+        {/*
+          合并显示的约束寄宿在宿主骨骼行上（行尾徽标同口径）：IK = 目标骨，「目标骨就是 IK 节点」；
+          变换 / 路径 = 第一根被驱动骨。参数就地在这里编辑，物理约束仍走「约束」页
+        */}
+        {hostedConstraints(document, bone.name).map((hosted) => (
+          <ConstraintEditor
+            key={hosted.name}
+            document={document}
+            constraint={hosted}
+            update={update}
+            revealBone={revealBone}
+            embedded
+            onDelete={() => deleteHostedConstraint(hosted.name)}
+          />
+        ))}
         {toolSections}
       </div>
     )
@@ -932,287 +1302,39 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   const constraint = document.constraints.find((c) => c.name === selection.constraint)
   if (!constraint) return <PanelEmpty title="约束不存在" description="该约束可能已被删除，请重新选择。" />
 
-  /**
-   * 受约束骨骼链（IK 按「链根 → 链尾」顺序驱动，顺序直接影响求解结果）。
-   *
-   * 链必须可编辑：新建约束时只带得上「右键那一根」骨骼，两骨 IK（腿 / 手臂）
-   * 要在这里把链尾补进来 —— 缺了它，IK 永远只有一根骨，等于配不出来。
-   */
-  const chainBones = constraint.bones
-  const chainCandidates = document.bones.filter((bone) => !chainBones.includes(bone.name))
-  const targetBoneExists = constraint.target !== '' && document.bones.some((bone) => bone.name === constraint.target)
-
-  /** 「目标」的写入口：下拉选择与「从层级树拖骨骼进来」共用（拖进来的骨骼一定存在） */
-  const setTargetBone = (name: string): void => {
-    if (name === constraint.target) return
-    update('修改约束目标', (draft) => {
-      const item = draft.constraints.find((c) => c.name === constraint.name)
-      if (item) item.target = name
-    })
-  }
-
-  /** 「定位到目标骨骼」：层级树滚到它并闪一下（目标常挂在脚 / 手这些离得远的部位） */
-  const locateTargetBone = (): void => {
-    if (targetBoneExists) revealBone(constraint.target)
-  }
-
-  const editChain = (label: string, mutate: (bones: string[]) => void): void => {
-    update(label, (draft) => {
-      const item = draft.constraints.find((c) => c.name === constraint.name)
-      if (item) mutate(item.bones)
-    })
-  }
-
-  /**
-   * IK 混合（「权重」滑杆）的写入口。
-   *
-   * 拖动期间是高频写入，必须走不记历史的 `updateSilent` —— 撤销事务由滑杆自己按下时开、
-   * 松开时收尾，整段拖动只留一条记录；键盘微调 / 数字框提交走普通 `update`。
-   */
-  const editIkMix = (value: number, silent: boolean): void => {
-    const mutate = (draft: EditorDocument): void => {
-      const t = draft.constraints.find((c) => c.name === constraint.name)
-      if (t && t.type === 'ik') t.mix = value
-    }
-    if (silent) useProjectStore.getState().updateSilent(mutate)
-    else update('修改IK权重', mutate)
-  }
-
-  /** 链内换位：越靠前越接近链根，越靠后越接近链尾 */
-  const moveChainBone = (from: number, to: number) => (): void => {
-    editChain('调整受约束骨骼顺序', (bones) => {
-      if (from < 0 || from >= bones.length || to < 0 || to >= bones.length) return
-      const [moved] = bones.splice(from, 1)
-      bones.splice(to, 0, moved)
-    })
-  }
-
   return (
     <div className="flex flex-col">
-      <FieldGroup title={`${CONSTRAINT_LABEL[constraint.type]}约束`}>
-        <TextField
-          label="名称"
-          value={constraint.name}
-          commitOnBlur
-          onChange={(next) =>
-            rename('constraint', constraint.name, next, {
-              label: '约束',
-              reselect: () => selection.selectConstraint(next.trim())
-            })
-          }
-        />
-        <NumberField
-          label="顺序"
-          value={constraint.order}
-          precision={0}
-          onChange={(value) => update('修改约束顺序', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t) t.order = value })}
-        />
-        <ToggleField
-          label="启用"
-          value={constraint.enabled}
-          onChange={(value) => update('启停约束', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t) t.enabled = value })}
-        />
-        <SelectField
-          label="目标"
-          value={constraint.target}
-          options={[{ value: '', label: '（无）' }, ...document.bones.map((b) => ({ value: b.name, label: b.name }))]}
-          onChange={setTargetBone}
-          onDropBone={setTargetBone}
-          trailing={
-            <button
-              type="button"
-              disabled={!targetBoneExists}
-              title={
-                targetBoneExists
-                  ? `在层级树里定位「${constraint.target}」`
-                  : '还没有可定位的目标骨骼'
-              }
-              className="flex h-[22px] w-[22px] shrink-0 cursor-pointer items-center justify-center rounded-[5px] text-content-lo transition-colors duration-panel hover:bg-white/[0.14] hover:text-content-hi disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-content-lo"
-              onClick={locateTargetBone}
-            >
-              <Crosshair size={13} />
-            </button>
-          }
-        />
-        <div className="flex flex-col gap-1">
-          {/*
-            IK 静默失效的两个坑：「没选目标」和「链是空的」——求解器直接返回，
-            视口里看不出任何异常。这里就地提醒，比等编译告警直观
-          */}
-          {constraint.type === 'ik' && !targetBoneExists ? (
-            <span className="text-3xs text-warn">
-              {constraint.target ? `目标骨骼「${constraint.target}」不存在，IK 不会生效` : '没有目标骨骼，IK 不会生效'}
-            </span>
-          ) : null}
-          {constraint.type === 'ik' && chainBones.length === 0 ? (
-            <span className="text-3xs text-warn">受约束骨骼链是空的，IK 不会生效</span>
-          ) : null}
-          <span className="text-3xs text-content-lo">
-            受约束骨骼链（
-            {/*
-              求解器对任何非空链都生效：单骨 = 让链尾指向目标（CCD），两骨走解析解，
-              更长的链走 CCD 迭代。原来写「至少要两根」与实现不符（单骨也能求解）。
-            */}
-            {constraint.type === 'ik' ? '链根 → 链尾，IK 按这个顺序驱动（单骨 = 让链尾指向目标，两骨及以上逐节弯曲）' : '按顺序排布'}
-            ）
-            {constraint.type === 'physics' ? ' · 物理约束仅保留数据，不参与求解' : ''}
-          </span>
-          {chainBones.length === 0 ? <span className="text-3xs text-content-lo">（未设置）</span> : null}
-          {chainBones.map((name, index) => (
-            <div key={`${index}:${name}`} className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-ink-700/60">
-              <span className="w-[10px] shrink-0 text-right font-mono text-3xs text-content-lo">{index + 1}</span>
-              <span className="min-w-0 flex-1 truncate text-3xs" title={name}>
-                {name}
-              </span>
-              {/* 链里的每根骨骼同样能定位：长链里要挨个确认链根 / 链尾时很好用 */}
-              <button
-                type="button"
-                className="shrink-0 text-content-lo hover:text-content-hi"
-                title={`在层级树里定位「${name}」`}
-                onClick={() => revealBone(name)}
-              >
-                <Crosshair size={11} />
-              </button>
-              <button
-                type="button"
-                className="shrink-0 text-3xs text-content-lo hover:text-content-hi disabled:opacity-30 disabled:hover:text-content-lo"
-                disabled={index === 0}
-                title="上移（越靠前越接近链根）"
-                onClick={moveChainBone(index, index - 1)}
-              >
-                ↑
-              </button>
-              <button
-                type="button"
-                className="shrink-0 text-3xs text-content-lo hover:text-content-hi disabled:opacity-30 disabled:hover:text-content-lo"
-                disabled={index === chainBones.length - 1}
-                title="下移（越靠后越接近链尾）"
-                onClick={moveChainBone(index, index + 1)}
-              >
-                ↓
-              </button>
-              <button
-                type="button"
-                className="shrink-0 text-3xs text-content-lo hover:text-danger"
-                title="从受约束骨骼链里移除（约束本身不受影响）"
-                onClick={() => editChain('移除受约束骨骼', (bones) => {
-                  const at = bones.indexOf(name)
-                  if (at >= 0) bones.splice(at, 1)
-                })}
-              >
-                ×
-              </button>
-            </div>
-          ))}
-          <SelectField
-            label="添加骨骼"
-            value=""
-            disabled={chainCandidates.length === 0}
-            options={[
-              { value: '', label: chainCandidates.length > 0 ? '（选择骨骼加到链尾）' : '（没有可添加的骨骼）' },
-              ...chainCandidates.map((bone) => ({ value: bone.name, label: bone.name }))
-            ]}
-            onChange={(value) => {
-              if (!value) return
-              editChain('添加受约束骨骼', (bones) => bones.push(value))
-            }}
-            // 从层级树直接拖骨骼过来 = 加到链尾，省得在下拉里翻
-            onDropBone={(name) => {
-              if (chainBones.includes(name)) return
-              editChain('添加受约束骨骼', (bones) => bones.push(name))
-            }}
+      {/*
+        专用「约束」页：从时间轴轨道 / 根层孤儿行进入（物理约束、目标或驱动骨缺失的约束）。
+        字段与宿主面板的内嵌分组同源（见 ConstraintEditor），这里补上名称与顺序两项目录信息
+      */}
+      <ConstraintEditor
+        document={document}
+        constraint={constraint}
+        update={update}
+        revealBone={revealBone}
+        nameField={
+          <TextField
+            label="名称"
+            value={constraint.name}
+            commitOnBlur
+            onChange={(next) =>
+              rename('constraint', constraint.name, next, {
+                label: '约束',
+                reselect: () => selection.selectConstraint(next.trim())
+              })
+            }
           />
-          <span className="text-3xs text-content-lo">「目标」和「添加骨骼」都能从层级树拖骨骼进来</span>
-        </div>
-      </FieldGroup>
-
-      {constraint.type === 'ik' ? (
-        <FieldGroup title="IK 参数">
-          <SliderField
-            label="权重"
-            value={constraint.mix}
-            step={0.05}
-            min={0}
-            max={1}
-            transaction="修改IK权重"
-            onChange={editIkMix}
-          />
-          <SelectField
-            label="弯曲"
-            value={String(constraint.bendSign)}
-            options={[{ value: '1', label: '正向 (+1)' }, { value: '-1', label: '反向 (-1)' }]}
-            onChange={(value) => update('修改IK弯曲方向', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'ik') t.bendSign = Number(value) })}
-          />
-          <ToggleField
-            label="用骨长"
-            value={constraint.useBoneLength}
-            onChange={(value) => update('修改IK长度取法', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'ik') t.useBoneLength = value })}
-          />
-        </FieldGroup>
-      ) : null}
-
-      {constraint.type === 'transform' ? (
-        <FieldGroup title="变换混合">
-          {(
-            [
-              ['mixRotate', '旋转'],
-              ['mixX', 'X 位移'],
-              ['mixY', 'Y 位移'],
-              ['mixScaleX', 'X 缩放'],
-              ['mixScaleY', 'Y 缩放'],
-              ['mixShearY', '斜切']
-            ] as const
-          ).map(([key, label]) => (
-            <NumberField
-              key={key}
-              label={label}
-              value={constraint[key]}
-              step={0.05}
-              min={0}
-              max={1}
-              onChange={(value) =>
-                update('修改变换约束', (draft) => {
-                  const t = draft.constraints.find((c) => c.name === constraint.name)
-                  if (t && t.type === 'transform') t[key] = value
-                })
-              }
-            />
-          ))}
-        </FieldGroup>
-      ) : null}
-
-      {constraint.type === 'path' ? (
-        <FieldGroup title="路径参数">
+        }
+        orderField={
           <NumberField
-            label="位置"
-            value={constraint.position}
-            step={0.02}
-            onChange={(value) => update('修改路径位置', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'path') t.position = value })}
+            label="顺序"
+            value={constraint.order}
+            precision={0}
+            onChange={(value) => update('修改约束顺序', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t) t.order = value })}
           />
-          <NumberField
-            label="间距"
-            value={constraint.spacing}
-            step={0.02}
-            onChange={(value) => update('修改路径间距', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'path') t.spacing = value })}
-          />
-          <NumberField
-            label="旋转混合"
-            value={constraint.rotateMix}
-            step={0.05}
-            min={0}
-            max={1}
-            onChange={(value) => update('修改路径旋转混合', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'path') t.rotateMix = value })}
-          />
-          <NumberField
-            label="位移混合"
-            value={constraint.translateMix}
-            step={0.05}
-            min={0}
-            max={1}
-            onChange={(value) => update('修改路径位移混合', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'path') t.translateMix = value })}
-          />
-        </FieldGroup>
-      ) : null}
+        }
+      />
       {toolSections}
     </div>
   )

@@ -363,6 +363,14 @@ function worldMatrixOfBone(boneName: string): Float32Array | null {
   return getActiveScene()?.worldMatrixOf(boneName) ?? null
 }
 
+/** 骨骼末端的世界坐标（原点沿骨骼 x 轴前进 length）：新建 IK 节点骨要摆在链尾末端 */
+function boneTipWorld(boneName: string, length: number): { x: number; y: number } | null {
+  const matrix = worldMatrixOfBone(boneName)
+  if (!matrix || matrix.length < 14) return null
+  // mat4 列主序：第 0 列是骨骼 x 轴方向，平移在 [12] / [13]
+  return { x: matrix[0] * length + matrix[12], y: matrix[1] * length + matrix[13] }
+}
+
 /**
  * IK 约束图标：**准星**（靶环 + 四向凸点 + 内环 + 中心横杆），与视口叠加层里画的约束手柄同形
  *（`boneOverlay.drawConstraintLinks`）—— 一眼能对上「树里这条约束」和「视口里那个手柄」。
@@ -411,6 +419,19 @@ const CONSTRAINT_KIND: Record<AuthoringConstraint['type'], string> = {
   physics: '物理'
 }
 
+/**
+ * 约束的「宿主」骨骼：合并显示后，IK / 变换 / 路径约束不再单独占一行，而是寄在
+ * 宿主行的徽标 + 属性面板的内嵌分组里；物理约束与宿主缺失的约束仍单独成行。
+ *
+ * - IK：宿主 = 目标骨 —— 「目标骨就是 IK 节点」（DragonBones 的 bone.ik 心智）
+ * - 变换 / 路径：宿主 = 第一根被驱动骨（约束跟着被驱动的骨骼走；目标骨常被多条约束共享，
+ *   挂目标上会让一根骨的面板里堆出一摞约束）
+ */
+function constraintHost(constraint: AuthoringConstraint): string {
+  if (constraint.type === 'ik') return constraint.target
+  return constraint.bones[0] ?? ''
+}
+
 export interface HierarchyTreeProps {
   /** 状态栏提示（Animate 态拒绝改绑定数据时说明原因） */
   onStatus?: (text: string) => void
@@ -438,7 +459,11 @@ type TreeDisplay = EditorDocument['skins'][number]['slots'][number]['attachments
  * 都是纯函数、字符串在组件外拼好：文案只取决于文档数据，跟渲染状态无关；
  * 多行的写法与树容器那句说明一致 —— 一行一个信息点，扫一眼就能读完。
  */
-function boneRowTitle(bone: AuthoringBone, counts: { bones: number; slots: number; constraints: number }): string {
+function boneRowTitle(
+  bone: AuthoringBone,
+  counts: { bones: number; slots: number; constraints: number },
+  hosted: readonly AuthoringConstraint[] = []
+): string {
   const attached: string[] = []
   if (counts.bones > 0) attached.push(`${counts.bones} 根子骨骼`)
   if (counts.slots > 0) attached.push(`${counts.slots} 个插槽`)
@@ -453,6 +478,13 @@ function boneRowTitle(bone: AuthoringBone, counts: { bones: number; slots: numbe
       bone.parent ? `相对父级旋转 ${bone.rotation.toFixed(1)}°` : `旋转 ${bone.rotation.toFixed(1)}°`
     }`
   ]
+  // 寄宿的约束（IK = 目标骨，变换 / 路径 = 第一根被驱动骨）：树里不再单独成行，靠徽标 + 这里说明
+  for (const constraint of hosted) {
+    lines.push(
+      `${CONSTRAINT_KIND[constraint.type]}约束「${constraint.name}」寄宿在本骨骼 · ` +
+        `骨链 ${constraint.bones.length > 0 ? constraint.bones.join(' → ') : '（未设置）'} · 参数在属性面板`
+    )
+  }
   if (bone.locked) lines.push('已锁定：视口里点不中它（层级树里照常可操作）')
   return lines.join('\n')
 }
@@ -510,7 +542,8 @@ function constraintRowTitle(constraint: AuthoringConstraint): string {
  * 组织结构：
  * - 根骨骼挂在顶层，子骨骼递归缩进（还原真实父子层级）
  * - 插槽作为其宿主骨骼的子节点（缩进一级），展开后列出它的 display
- * - 约束作为驱动骨骼（`bones[0]`）的子节点，图标按 IK / 变换 / 路径区分
+ * - IK / 变换 / 路径约束**不单独成行**：寄宿在宿主骨骼行上（行尾徽标，见 `constraintHost`），
+ *   参数在该骨骼的属性面板里编辑；物理约束与宿主缺失的约束仍作为独立行挂在 `bones[0]` 下
  */
 export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   const document = useProjectStore((s) => s.document)
@@ -870,38 +903,70 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   }
 
   /**
-   * 「添加 IK 约束」菜单项的副标题：把**这一次**会配出的受约束骨链显示出来。
-   * 多选父→子连续的骨骼时链会一次配好，只选一根时顺带提示链尾可以在检查器里补。
+   * 「添加 IK 约束」菜单项的副标题：**新建一根 IK 节点骨**当目标（挂根层、摆在链尾末端，
+   * spineboy 的 front-ankle-ik 就是这么长的），而不是征用现有骨骼 —— 目标骨要能独立拖动 /
+   * 打帧，拿链上的骨骼当目标会让 IK 拉着自己跑。链取当前多选（父→子连续），没多选就驱动右键那根。
    */
-  const ikChainHint = (host: string): string => {
-    if (!host) return '未指定驱动骨骼'
-    const chain = selection.bones.includes(host) ? chainFromSelection(document, selection.bones, host) : [host]
-    return chain.length > 1
-      ? `受约束骨链：${chain.join(' → ')}`
-      : `驱动骨骼：「${host}」（多选父→子连续的骨骼可一次配好整条链）`
+  const ikCreateHint = (host: string): string => {
+    const chain =
+      selection.bones.length >= 2
+        ? chainFromSelection(document, selection.bones, host)
+        : host
+          ? [host]
+          : []
+    if (chain.length === 0) return '未指定驱动骨骼：先选中骨骼再点'
+    return `新建 IK 节点骨驱动：${chain.join(' → ')}（节点骨挂根层，可拖动 / 可打帧）`
   }
 
   const addConstraint = (kind: AuthoringConstraint['type'], bone = selectedBone()): void => {
-    update('新建约束', (draft) => {
-      const driver = bone || draft.bones[0]?.name || ''
-      const name = uniqueName(draft.constraints.map((c) => c.name), kind)
-      /*
-       * IK 真正有用的是「链根 → 链尾」两根以上的骨链，只带右键那一根等于配不出腿 / 手臂。
-       * 多选父→子连续的骨骼时一次把整条链配好；只选一根就退回单骨，
-       * 链尾之后可以在检查器的「受约束骨骼链」里补。
-       */
-      const bones =
-        kind === 'ik' && driver && selection.bones.includes(driver)
-          ? chainFromSelection(draft, selection.bones, driver)
-          : driver
-            ? [driver]
+    /*
+     * IK 的链在进 draft 前先定好：取当前多选（父→子连续，右键骨会被 openMenu 追加进组，
+     * 右键链尾的子骨骼正好把链延长）；没多选就驱动右键的那一根 —— 单骨 IK 立刻可用
+     * （链尾指向目标），两骨以上的链走解析解。
+     */
+    const chain =
+      kind !== 'ik'
+        ? []
+        : selection.bones.length >= 2
+          ? chainFromSelection(document, selection.bones, bone || document.bones[0]?.name || '')
+          : bone
+            ? [bone]
             : []
-      const base = { name, order: draft.constraints.length, enabled: true, bones, target: '' }
-      if (kind === 'ik') draft.constraints.push({ ...createIkConstraint(), ...base, type: 'ik' })
-      else if (kind === 'transform') {
-        draft.constraints.push({ ...createTransformConstraint(), ...base, type: 'transform' })
-      } else draft.constraints.push({ ...createPathConstraint(), ...base, type: 'path' })
+    const tail = chain[chain.length - 1] ?? ''
+    // 节点骨摆在链尾**末端**（原点 + 骨长沿骨骼方向）；场景没就绪时退回原点，之后手动拖
+    const tailBone = document.bones.find((item) => item.name === tail)
+    const tip = tail ? boneTipWorld(tail, tailBone?.length ?? 0) : null
+    // 名字在进 draft 前定好：创建完要选中新节点（名字与约束名是两个命名空间，互不冲突）
+    const nodeName = uniqueName(document.bones.map((item) => item.name), tail ? `${tail}_ik` : 'ik')
+    update('新建约束', (draft) => {
+      const name = uniqueName(draft.constraints.map((c) => c.name), kind)
+      const base = { name, order: draft.constraints.length, enabled: true, bones: [] as string[], target: '' }
+      if (kind === 'ik') {
+        // IK 节点骨：挂根层、零长度（就是个把手）、约束红 —— 与视口里 IK 手柄同色
+        draft.bones.push(
+          createAuthoringBone({
+            name: nodeName,
+            parent: '',
+            localPosition: tip ?? { x: 0, y: 0 },
+            length: 0,
+            color: '#e4572e'
+          })
+        )
+        draft.constraints.push({ ...createIkConstraint(), ...base, type: 'ik', target: nodeName, bones: chain })
+      } else {
+        // 变换 / 路径的宿主是第一根被驱动骨：点中的骨骼进骨链，目标（来源骨 / 路径骨）在面板里选
+        const host = bone || draft.bones[0]?.name || ''
+        const bones = host ? [host] : []
+        if (kind === 'transform') {
+          draft.constraints.push({ ...createTransformConstraint(), ...base, type: 'transform', bones })
+        } else draft.constraints.push({ ...createPathConstraint(), ...base, type: 'path', bones })
+      }
     })
+    if (kind === 'ik') {
+      // 选中新节点：属性面板立刻显示它（行首 IK 图标 + 内嵌 IK 分组），直接接着补参数
+      selection.selectBone(nodeName)
+      return
+    }
     if (bone) setCollapsed((prev) => (prev.has(bone) ? new Set([...prev].filter((n) => n !== bone)) : prev))
   }
 
@@ -921,13 +986,18 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     // Animate 态根层没有关键帧操作：不开空菜单（比弹一个空框更清楚）
     if (useModeStore.getState().mode === 'animate' && target.kind === 'root') return
     if (target.kind === 'bone') {
-      if (selection.bones.length > 1 && selection.bones.includes(target.name)) {
+      if (selection.bones.length > 1) {
         /*
-         * 已多选时保持整组选中：右键就是「对选中的这组骨骼做什么」，
-         * 新建 IK 正是拿这组骨骼当受约束骨链用（见 addConstraint）。
-         * 只把右键那一根挪到组末 —— 组末是主选中（检查器显示它）。
+         * 已多选时保持整组选中：右键就是「对选中的这组骨骼做什么」。
+         * 新建 IK 拿这组骨骼当受约束骨链 —— 右键那一根不在组里时**追加**进组：
+         * 右键链尾的子骨骼正好把链延长（父→子连续就能配成链）；配不成链时
+         * addConstraint 会退回只驱动右键那一根。
          */
-        selection.selectBones([...selection.bones.filter((name) => name !== target.name), target.name])
+        selection.selectBones(
+          selection.bones.includes(target.name)
+            ? [...selection.bones.filter((name) => name !== target.name), target.name]
+            : [...selection.bones, target.name]
+        )
       } else {
         selection.selectBone(target.name)
       }
@@ -991,9 +1061,37 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   })
 
   /**
+   * 约束的关键帧菜单项（Animate 态）。独立约束行（物理 / 宿主缺失）的整条菜单与
+   * 骨骼行里「寄宿约束」的追加段共用：`withDelete` 为真时末尾带分隔线 + 删除。
+   */
+  const constraintKeyframeItems = (name: string, withDelete: boolean): ContextMenuItem[] => {
+    const constraint = document.constraints.find((item) => item.name === name)
+    const channels = constraint ? CONSTRAINT_CHANNELS[constraint.type] ?? [] : []
+    const deleteEntry = deleteItem({ kind: 'constraint', name, bone: constraint?.bones[0] ?? '' })
+    if (channels.length === 0) return withDelete ? [deleteEntry] : []
+    const labelOf = (channel: string): string => CONSTRAINT_CHANNEL_LABEL[channel] ?? channel
+    const keyAll: KeyframeTarget[] = [{ kind: 'constraint', target: name, attachment: '' }]
+    const keyOne = (channel: string): KeyframeTarget[] => [
+      { kind: 'constraint', target: name, attachment: '', channel }
+    ]
+    const items: ContextMenuItem[] =
+      channels.length === 1
+        ? [keyframeItem('k-constraint-0', `${labelOf(channels[0])}关键帧`, `${name} · ${labelOf(channels[0])}`, keyAll)]
+        : [
+            keyframeItem('k-constraint-all', '全部参数关键帧', `${name} · 全部参数`, keyAll),
+            { key: 'sep-kc', label: '', separator: true },
+            ...channels.map((channel) =>
+              keyframeItem(`k-constraint-${channel}`, `${labelOf(channel)}关键帧`, `${name} · ${labelOf(channel)}`, keyOne(channel))
+            )
+          ]
+    if (withDelete) items.push({ key: 'sep-kc2', label: '', separator: true }, deleteEntry)
+    return items
+  }
+
+  /**
    * Animate 态的菜单：只给「打关键帧」。
    * 加骨骼 / 插槽 / 约束、删除这些改的是 setup（绑定）数据，动画状态里动它们会污染动画基线。
-   * 约束行同样给打关键帧（IK 的混合是可做动画的），删除放在最后（见下面的分支）。
+   * 骨骼行顺带给寄宿约束（IK 权重等）的打帧入口 —— 合并显示后约束不再有独立行；删除放最后。
    */
   const keyframeMenuItems = (target: MenuTarget): ContextMenuItem[] => {
     if (target.kind === 'bone') {
@@ -1001,7 +1099,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       const channel = (name: string): KeyframeTarget[] => [
         { kind: 'bone', target: bone, attachment: '', channel: name }
       ]
-      return [
+      const items: ContextMenuItem[] = [
         keyframeItem('k-translate', '位置关键帧', `${bone} · 位置`, channel('translate')),
         keyframeItem('k-rotate', '旋转关键帧', `${bone} · 旋转`, channel('rotate')),
         keyframeItem('k-scale', '缩放关键帧', `${bone} · 缩放`, channel('scale')),
@@ -1014,6 +1112,17 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           ...channel('shear')
         ])
       ]
+      // 寄宿在本骨骼上的约束（IK 权重等）就地给打帧入口 —— 合并显示后约束不再有独立行
+      const hosted = document.constraints.filter(
+        (constraint) => constraint.type !== 'physics' && constraintHost(constraint) === bone
+      )
+      for (const constraint of hosted) {
+        const constraintItems = constraintKeyframeItems(constraint.name, false)
+        if (constraintItems.length > 0) {
+          items.push({ key: `sep-hc-${constraint.name}`, label: '', separator: true }, ...constraintItems)
+        }
+      }
+      return items
     }
     if (target.kind === 'slot') {
       const slot = target.name
@@ -1034,32 +1143,13 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     }
     if (target.kind === 'constraint') {
       /*
-       * 约束：Animate 态给「打关键帧」，参数之外的操作（添加骨骼 / 插槽）对约束行没有意义。
+       * 约束行（现在只剩物理 / 宿主缺失的约束）：Animate 态给「打关键帧」，
+       * 参数之外的操作（添加骨骼 / 插槽）对约束行没有意义。
        * IK 的混合（mix）本来就是可做动画的（时间轴有它的轨道、`.hao2d` 也导出 iks 段），
        * 这里不给入口的话权重动画就只能手改工程文件。物理约束没有可做动画的参数（只保留数据、
        * 不参与求解），菜单仍只留「删除」。
        */
-      const name = target.name
-      const constraint = document.constraints.find((item) => item.name === name)
-      const channels = constraint ? CONSTRAINT_CHANNELS[constraint.type] ?? [] : []
-      if (channels.length === 0) return [deleteItem(target)]
-      const labelOf = (channel: string): string => CONSTRAINT_CHANNEL_LABEL[channel] ?? channel
-      const keyAll: KeyframeTarget[] = [{ kind: 'constraint', target: name, attachment: '' }]
-      const keyOne = (channel: string): KeyframeTarget[] => [
-        { kind: 'constraint', target: name, attachment: '', channel }
-      ]
-      const items: ContextMenuItem[] =
-        channels.length === 1
-          ? [keyframeItem('k-constraint-0', `${labelOf(channels[0])}关键帧`, `${name} · ${labelOf(channels[0])}`, keyAll)]
-          : [
-              keyframeItem('k-constraint-all', '全部参数关键帧', `${name} · 全部参数`, keyAll),
-              { key: 'sep-kc', label: '', separator: true },
-              ...channels.map((channel) =>
-                keyframeItem(`k-constraint-${channel}`, `${labelOf(channel)}关键帧`, `${name} · ${labelOf(channel)}`, keyOne(channel))
-              )
-            ]
-      items.push({ key: 'sep-kc2', label: '', separator: true }, deleteItem(target))
-      return items
+      return constraintKeyframeItems(target.name, true)
     }
     return []
   }
@@ -1093,8 +1183,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             {
               key: 'ik',
               label: '添加 IK 约束',
-              // 多选父→子连续的骨骼时，链会一次配好；只选一根就提示怎么配出两骨 IK
-              hint: ikChainHint(host),
+              // 新建一根 IK 节点骨当目标；多选链根→链尾后再点，链会一次配好
+              hint: ikCreateHint(host),
               icon: <IkConstraintIcon size={12} />,
               onSelect: () => addConstraint('ik', host)
             },
@@ -1145,6 +1235,11 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         constraints.add(constraint.name)
         found = true
       }
+      // 宿主命中：IK / 变换 / 路径约束不再单独成行，约束名搜到时要点亮寄它那行（目标骨 / 驱动骨）
+      for (const constraint of document.constraints) {
+        if (constraint.type === 'physics') continue
+        if (constraintHost(constraint) === bone.name && hit(constraint.name)) found = true
+      }
       for (const slot of slotsByBone.get(bone.name) ?? []) {
         let slotHit = hit(slot.name)
         for (const attachment of displaysOf(slot.name)) {
@@ -1175,8 +1270,14 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     if (filter && !filter.bones.has(bone.name)) return
     const children = bonesByParent.get(bone.name) ?? []
     const slots = slotsByBone.get(bone.name) ?? []
-    const constraints = constraintsByBone.get(bone.name) ?? []
-    const hasChildren = children.length + slots.length + constraints.length > 0
+    // 只有物理约束（与宿主缺失的约束，见根层兜底）还单独成行；其余寄宿在本行的徽标 + 属性面板里
+    const constraintRows = (constraintsByBone.get(bone.name) ?? []).filter(
+      (constraint) => constraint.type === 'physics'
+    )
+    const hosted = document.constraints.filter(
+      (constraint) => constraint.type !== 'physics' && constraintHost(constraint) === bone.name
+    )
+    const hasChildren = children.length + slots.length + constraintRows.length > 0
     // 搜索期间强制展开：命中的节点多半藏在折叠的分支里；清空搜索后原折叠状态照旧
     const expanded = filter ? true : !collapsed.has(bone.name)
 
@@ -1189,10 +1290,20 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         onDropNode={(payload, position) => handleNodeDrop(payload, { kind: 'bone', name: bone.name }, position)}
         depth={depth}
         label={bone.name}
-        title={boneRowTitle(bone, { bones: children.length, slots: slots.length, constraints: constraints.length })}
+        title={boneRowTitle(bone, { bones: children.length, slots: slots.length, constraints: constraintRows.length }, hosted)}
+        // 宿主骨骼的行首图标直接用约束图标（不再画骨骼图标）：一眼认出「这行是个 IK / 变换 / 路径节点」；
+        // 寄宿多条约束时取第一条，其余在悬浮描述与属性面板里
+        icon={
+          hosted.length > 0 ? (
+            <span title={hosted.map((c) => `${CONSTRAINT_KIND[c.type]}约束「${c.name}」`).join('\n')}>
+              {CONSTRAINT_ICON[hosted[0].type]}
+            </span>
+          ) : (
+            <Bone size={11} style={{ color: bone.color }} />
+          )
+        }
         active={selection.kind === 'bone' && selection.bones.includes(bone.name)}
         secondary={selection.kind === 'bone' && selection.bone !== bone.name}
-        icon={<Bone size={11} style={{ color: bone.color }} />}
         meta={bone.length > 0 ? `${(bone.length * 100).toFixed(0)}px` : undefined}
         expandable={hasChildren}
         expanded={expanded}
@@ -1233,7 +1344,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     if (!expanded) return
     for (const child of children) pushBone(child, depth + 1)
     for (const slot of slots) pushSlot(slot, depth + 1)
-    for (const constraint of constraints) rows.push(renderConstraint(constraint, depth + 1))
+    for (const constraint of constraintRows) rows.push(renderConstraint(constraint, depth + 1))
   }
 
   /**
@@ -1392,11 +1503,14 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
 
   for (const bone of bonesByParent.get('') ?? []) pushBone(bone, 0)
 
-  // 兜底：骨骼不存在时（异常数据）把插槽 / 约束挂到根层，避免对象彻底消失
+  // 兜底：宿主不存在（目标 / 驱动骨骼被删或还没设）的约束挂到根层，避免对象彻底消失。
+  // 有宿主的 IK / 变换 / 路径约束寄在宿主行上（徽标），这里只收留无处安放的
   const boneNames = new Set(document.bones.map((b) => b.name))
   for (const slot of document.slots) if (!boneNames.has(slot.bone)) pushSlot(slot, 0)
   for (const constraint of document.constraints) {
-    if (!constraint.bones[0] || !boneNames.has(constraint.bones[0])) rows.push(renderConstraint(constraint, 0))
+    const host = constraintHost(constraint)
+    if (host && boneNames.has(host)) continue
+    rows.push(renderConstraint(constraint, 0))
   }
 
   return (
@@ -1412,7 +1526,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         </button>
         <button
           type="button"
-          title="新建 IK 约束"
+          title="新建 IK 约束（自动新建一根 IK 节点骨挂在根层、摆在链尾末端；先多选链根 → 链尾再点，可一次配好骨链）"
           className="hao-btn h-[18px] px-1.5 text-3xs"
           onClick={poseOnly(() => addConstraint('ik'))}
         >
@@ -1468,7 +1582,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         ref={listRef}
         className="min-h-0 flex-1 overflow-auto hao-scroll pb-1"
         title={
-          '右键骨骼行 / 空白处：添加骨骼、插槽、约束（约束挂在驱动骨骼下）\n' +
+          '右键骨骼行 / 空白处：添加骨骼、插槽、约束（IK 寄宿在目标骨、变换 / 路径寄宿在第一根驱动骨，参数在属性面板；物理约束单独成行）\n' +
           '拖动行调整层级：骨骼 → 骨骼下（拖到空白处成为根骨骼）、插槽 → 骨骼下（拖到空白处挂到第一根骨骼）、display → 插槽下\n' +
           '拖到行的上 / 下沿 = 排到那一行的前 / 后（骨骼会一起换到它所在的父级下）\n' +
           '资源面板的图片：拖到插槽行（含它下面的 display 行）= 给该插槽加一个 display；拖到骨骼行 = 在该骨骼下新建插槽\n' +

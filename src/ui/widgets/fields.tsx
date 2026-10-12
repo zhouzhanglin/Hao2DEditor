@@ -705,11 +705,22 @@ export function TextField({
   )
 }
 
-/** 检查器分组卡片 */
-export function FieldGroup({ title, children }: { title: string; children: React.ReactNode }) {
+/** 检查器分组卡片；`actions` 渲染在标题右侧（内嵌约束分组的删除按钮用） */
+export function FieldGroup({
+  title,
+  actions,
+  children
+}: {
+  title: string
+  actions?: React.ReactNode
+  children: React.ReactNode
+}) {
   return (
     <section className="border-b border-line/70 px-2 py-2">
-      <h3 className="hao-panel-title mb-1.5">{title}</h3>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <h3 className="hao-panel-title">{title}</h3>
+        {actions ? <div className="flex shrink-0 items-center gap-1">{actions}</div> : null}
+      </div>
       <div className="flex flex-col gap-1.5">{children}</div>
     </section>
   )

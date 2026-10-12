@@ -311,6 +311,8 @@ export default function DopeSheet(props: DopeSheetProps) {
   }, [lastKeyed, axis])
 
   const activeTrack = useTimelineStore((state) => state.selectedTrack)
+  // 仅拖框选择才显示缩放框，逐点点击不显示
+  const selectionByBox = useTimelineStore((state) => state.selectionByBox)
   const isTrackActive = (track: TimelineTrack): boolean =>
     !track.isGroup &&
     activeTrack !== null &&
@@ -507,6 +509,8 @@ export default function DopeSheet(props: DopeSheetProps) {
         // 选择器随之后移：下一次 move 才能定位到已移动的帧，同时保持选中高亮
         scale.selectors = scale.selectors.map((selector, index) => ({ ...selector, time: times[index] }))
         propsRef.current.onSelectKeys(scale.selectors)
+        // onSelectKeys 会默认关掉缩放框，缩放手柄拖拽期间要重新打开
+        useTimelineStore.getState().setSelectionByBox(true)
         return
       }
 
@@ -594,7 +598,8 @@ export default function DopeSheet(props: DopeSheetProps) {
    * 范围由「最早 / 最晚时间」×「最上 / 最下轨道行」决定。
    */
   const selectionBox = useMemo(() => {
-    if (selectedKeys.length === 0) return null
+    // 只给拖框（橡皮筋）选择显示缩放框；逐点点击选中不显示
+    if (!selectionByBox || selectedKeys.length === 0) return null
     const times = selectedKeys.map((k) => k.time)
     const minTime = Math.min(...times)
     const maxTime = Math.max(...times)
@@ -620,7 +625,7 @@ export default function DopeSheet(props: DopeSheetProps) {
       minTime,
       maxTime
     }
-  }, [selectedKeys, visibleTracks, markersByTrack, start, span])
+  }, [selectionByBox, selectedKeys, visibleTracks, markersByTrack, start, span])
 
   /**
    * 框选：把矩形覆盖到的关键帧全部选中。
@@ -646,6 +651,8 @@ export default function DopeSheet(props: DopeSheetProps) {
       }
     }
     propsRef.current.onSelectKeys(picked)
+    // 拖框选择才显示缩放手柄：onSelectKeys 会默认关掉，这里重新打开（注意顺序）
+    useTimelineStore.getState().setSelectionByBox(true)
     setBand({
       left: left - rect.left,
       top: top - rect.top,
@@ -683,6 +690,8 @@ export default function DopeSheet(props: DopeSheetProps) {
       : selectedNow
         ? live
         : marker.selectors
+    // 逐点点击（含 Shift/Ctrl 多选）不是拖框，不显示缩放框
+    useTimelineStore.getState().setSelectionByBox(false)
     props.onSelectKeys(next)
     if (next.length === 0) return
     props.onBeginDrag()

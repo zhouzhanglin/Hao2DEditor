@@ -20,6 +20,12 @@ export interface TimelineState {
   /** 选中的关键帧（含轨道定位信息，可直接用于增删改） */
   selectedKeys: KeySelector[]
   /**
+   * 这些选中关键帧是否由「拖框（橡皮筋）选择」产生。
+   * 仅拖框选择才显示可选框与左右缩放手柄；逐点点击 / 框选整段（Ctrl+A）等方式不显示，
+   * 避免随手一点就冒出缩放手柄。
+   */
+  selectionByBox: boolean
+  /**
    * 时间轴上点中的轨道（分组行不算）。打关键帧时优先用它：
    * 选中插槽的「显示」行按 K 就只打显示帧，而不是把该插槽的通道全打一遍。
    */
@@ -43,6 +49,7 @@ export interface TimelineState {
   setSnapToFrame: (snap: boolean) => void
   setZoom: (zoom: number) => void
   setSelectedKeys: (keys: KeySelector[]) => void
+  setSelectionByBox: (byBox: boolean) => void
   setSelectedTrack: (track: TimelineState['selectedTrack']) => void
 }
 
@@ -66,6 +73,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   snapToFrame: true,
   zoom: TIMELINE_ZOOM_DEFAULT,
   selectedKeys: [],
+  selectionByBox: false,
   selectedTrack: null,
   lastKeyed: null,
 
@@ -93,7 +101,10 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   toggleOnionSkin: () => set({ onionSkin: !get().onionSkin }),
   setSnapToFrame: (snapToFrame) => set({ snapToFrame }),
   setZoom: (zoom) => set({ zoom: Math.max(TIMELINE_ZOOM_MIN, Math.min(TIMELINE_ZOOM_MAX, zoom)) }),
-  setSelectedKeys: (key) => set({ selectedKeys: key }),
+  // 任何「非拖框」方式改选中（命令 / 逐点点击 / 粘贴等）都默认关掉缩放框，
+  // 只有拖框选择（applyBand）与拖框后的缩放（startScale 拖手柄）显式把它置回 true。
+  setSelectedKeys: (key) => set({ selectedKeys: key, selectionByBox: false }),
+  setSelectionByBox: (byBox) => set({ selectionByBox: byBox }),
   setSelectedTrack: (track) => set({ selectedTrack: track })
 }))
 

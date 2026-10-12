@@ -49,7 +49,14 @@ export default function ViewportOverlays(props: ViewportOverlaysProps) {
           {label}
         </button>
       ))}
-      <span className="px-1.5 font-mono text-3xs text-content-lo">{zoom.toFixed(0)}%</span>
+      {/*
+        缩放读数按 4 位数 + % 预留宽度并右对齐：位数增减时面板不再左右晃动。
+        固定宽度放在**内层纯文字**的 span 上 —— 外层还背着 px 内边距，
+        border-box 会把内边距算进 min-width，导致预留空间不足（80%→110% 仍会晃）
+      */}
+      <span className="px-1.5 font-mono text-3xs text-content-lo">
+        <span className="inline-block min-w-[5ch] text-right">{zoom.toFixed(0)}%</span>
+      </span>
       <button
         type="button"
         title="适配视野 (F)"

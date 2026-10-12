@@ -209,18 +209,6 @@ function ConstraintEditor({
             ? `${CONSTRAINT_LABEL[constraint.type]}约束 · ${constraint.name}`
             : `${CONSTRAINT_LABEL[constraint.type]}约束`
         }
-        actions={
-          embedded && onDelete ? (
-            <button
-              type="button"
-              title="删除这条约束（连同它在时间轴上的关键帧轨道）"
-              className="flex h-[16px] w-[16px] items-center justify-center rounded text-danger/80 hover:bg-danger/15"
-              onClick={onDelete}
-            >
-              <Trash2 size={11} />
-            </button>
-          ) : undefined
-        }
       >
         {nameField}
         {orderField}
@@ -435,6 +423,24 @@ function ConstraintEditor({
             onChange={(value) => update('修改路径位移混合', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'path') t.translateMix = value })}
           />
         </FieldGroup>
+      ) : null}
+
+      {/*
+        内嵌分组的移除入口：树里已没有 IK / 变换 / 路径约束行，得有个明确的「拆除」按钮 ——
+        移除后宿主骨骼还原为普通骨骼（行首图标自动变回骨骼），该约束在时间轴上的轨道一并清掉
+      */}
+      {embedded && onDelete ? (
+        <div className="px-2 py-2">
+          <button
+            type="button"
+            title="移除这条约束：本骨骼还原为普通骨骼；它在时间轴上的关键帧轨道一并删除"
+            className="hao-btn flex h-[22px] w-full items-center justify-center gap-1 border-danger/40 text-danger/90 hover:border-danger hover:bg-danger/10"
+            onClick={onDelete}
+          >
+            <Trash2 size={11} />
+            <span>移除{CONSTRAINT_LABEL[constraint.type]}约束</span>
+          </button>
+        </div>
       ) : null}
     </>
   )

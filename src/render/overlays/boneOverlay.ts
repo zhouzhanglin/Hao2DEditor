@@ -1,7 +1,7 @@
 import { Graphics } from 'pixi.js'
 import type { Skeleton } from '@core/model/skeleton'
 import type { Constraint } from '@core/model/constraints'
-import { BONE_ORIGIN_RADIUS, attachmentGizmoFrame, gizmoGeometry } from '@render/picking'
+import { BONE_ORIGIN_RADIUS, attachmentGizmoFrame, gizmoGeometry, unshearedWorldRot } from '@render/picking'
 import type { GizmoGeometry } from '@render/picking'
 import { circlePolygon } from './shapes'
 
@@ -317,8 +317,15 @@ export function drawBoneOverlay(
     const isWeight = weightColor !== undefined
     const color = weightColor ?? COLOR_BONE
 
-    const dx = skeleton.world[o] * length
-    const dy = skeleton.world[o + 1] * length
+    /*
+     * 骨骼方向按**不含剪切的旋转角**画（长度乘世界缩放）：剪切只作用于蒙皮 / 附件，
+     * 骨骼本体不跟着歪。否则斜切工具下骨骼会随 shearX 摆动，与旋转的观感完全混淆 ——
+     * 「斜切」的反馈要看剪切包围盒与附件的形变，动骨骼本体的只能是旋转工具。
+     */
+    const worldScale = Math.hypot(skeleton.world[o], skeleton.world[o + 1])
+    const boneAngle = (unshearedWorldRot(skeleton, i) * Math.PI) / 180
+    const dx = Math.cos(boneAngle) * length * worldScale
+    const dy = Math.sin(boneAngle) * length * worldScale
     const norm = Math.hypot(dx, dy)
 
     if (length >= 1e-4 && norm >= 1e-6) {
@@ -458,11 +465,16 @@ function drawConstraintLinks(
         last = bone
       }
       if (last >= 0) {
-        // 末端 = 原点沿骨骼 x 轴走一个 length（矩阵首列含缩放，与拾取 / 求解同一算法）
+        /*
+         * 末端 = 原点沿骨骼 x 轴走一个 length —— 方向按**不含剪切的旋转角**算
+         *（与骨骼本体绘制 / 拾取同一口径）：剪切不该让骨骼末端偏离画出来的骨骼
+         */
         const o = last * 16
         const length = skeleton.asset.bones[last].length
-        const tipX = skeleton.world[o] * length + skeleton.world[o + 12]
-        const tipY = skeleton.world[o + 1] * length + skeleton.world[o + 13]
+        const scale = Math.hypot(skeleton.world[o], skeleton.world[o + 1])
+        const angle = (unshearedWorldRot(skeleton, last) * Math.PI) / 180
+        const tipX = skeleton.world[o + 12] + Math.cos(angle) * length * scale
+        const tipY = skeleton.world[o + 13] + Math.sin(angle) * length * scale
         g.lineTo(tipX, tipY).lineTo(targetX, targetY)
         g.stroke({ width: w * 1.2, color: COLOR_CONSTRAINT, alpha: 0.7 })
       }

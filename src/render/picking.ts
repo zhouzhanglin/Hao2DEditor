@@ -256,6 +256,29 @@ export interface VertexHit {
 }
 
 /**
+ * 骨骼「不含剪切」的世界旋转角（度）。
+ *
+ * 剪切（shearX / shearY）只作用于蒙皮 / 附件：骨骼本体的绘制与拾取都按这个角走 ——
+ * 否则斜切工具下骨骼会随 shearX 摆动，与「旋转」的观感完全混淆（斜切的反馈应看
+ * 剪切包围盒与附件的形变，动骨骼本体的只能是旋转工具）。
+ *
+ * 累加规则与 FK 的 `setWorldRotation` 一致：本层 `inheritRotation` 为假时，
+ * 父层的角度不带入（那一层的局部角就是它的世界角）。
+ */
+export function unshearedWorldRot(skeleton: Skeleton, index: number): number {
+  let angle = 0
+  let i = index
+  while (i >= 0) {
+    angle += skeleton.localRot[i]
+    const bone = skeleton.asset.bones[i]
+    const parent = bone?.parentIndex ?? -1
+    if (parent < 0 || !bone.inheritRotation) break
+    i = parent
+  }
+  return angle
+}
+
+/**
  * 最近骨骼拾取：把鼠标位置换算到骨骼线段上的最短距离，命中阈值内取最近的一根。
  *
  * 距离几乎打平时（骨骼重叠、鼠标正好压在两条线上）取**索引更大的那根** ——
@@ -269,8 +292,15 @@ export function pickBone(skeleton: Skeleton, x: number, y: number, tolerance: nu
     const bx = skeleton.world[o + 12]
     const by = skeleton.world[o + 13]
     const length = skeleton.asset.bones[i].length
-    const tx = skeleton.world[o] * Math.max(length, 0.0001) + bx
-    const ty = skeleton.world[o + 1] * Math.max(length, 0.0001) + by
+    /*
+     * 骨骼线段按**不含剪切的旋转角**算（与 boneOverlay 绘制同一口径，所见即可点）：
+     * 剪切只作用于蒙皮 / 附件，骨骼本体的形状与命中区都不跟着歪
+     */
+    const scale = Math.hypot(skeleton.world[o], skeleton.world[o + 1])
+    const angle = (unshearedWorldRot(skeleton, i) * Math.PI) / 180
+    const tip = Math.max(length, 0.0001) * scale
+    const tx = bx + Math.cos(angle) * tip
+    const ty = by + Math.sin(angle) * tip
 
     let distance = distanceToSegment(x, y, bx, by, tx, ty)
     // 关节本身更容易被点到

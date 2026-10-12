@@ -427,6 +427,9 @@ export default function App() {
         case 'project:exportHao2d':
           setExportMode('unity')
           return
+        case 'project:exportSpine':
+          setExportMode('spine')
+          return
         case 'edit:undo':
           useProjectStore.getState().undo()
           flash('已撤销')

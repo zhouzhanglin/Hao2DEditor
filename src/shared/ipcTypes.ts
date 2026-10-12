@@ -90,6 +90,7 @@ export type MenuCommand =
   | 'project:importImages'
   | 'project:exportRuntime'
   | 'project:exportHao2d'
+  | 'project:exportSpine'
   | 'edit:undo'
   | 'edit:redo'
   | 'edit:delete'

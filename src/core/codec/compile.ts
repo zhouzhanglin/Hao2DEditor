@@ -215,6 +215,7 @@ function convertAttachment(att: AuthoringAttachment, ctx: AttachmentContext): Re
     contentOffset: { ...(att.contentOffset ?? { x: 0, y: 0 }) },
     color: hexToRgba(att.color),
     textureName: att.image,
+    regionName: att.regionName,
     uvs,
     vertices,
     triangles: [...att.triangles],

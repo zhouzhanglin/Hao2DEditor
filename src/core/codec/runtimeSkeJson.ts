@@ -25,6 +25,14 @@ export interface RuntimeAtlasRegion {
   y: number
   width: number
   height: number
+  /** 旋转（度，0/90/180/270）。Spine 的 `rotate: true` 即 90 */
+  rotate?: number
+  /** 未裁剪原始尺寸 */
+  origWidth?: number
+  origHeight?: number
+  /** 裁剪偏移 */
+  offsetX?: number
+  offsetY?: number
 }
 
 export interface RuntimeAtlasJson {

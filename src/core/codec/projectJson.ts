@@ -294,6 +294,8 @@ function normalizeAttachment(raw: Record<string, unknown>): AuthoringAttachment 
     name: str(raw.name, 'attachment'),
     type: type === 'mesh' || type === 'linkedmesh' || type === 'boundingbox' ? type : 'region',
     image: str(raw.image),
+    // 导出 Spine 用：附件在图集里的区域名（= sprite 名）。老工程没有此字段 → undefined
+    regionName: str(raw.regionName) || undefined,
     position: vec2(raw.position),
     rotation: num(raw.rotation),
     scale: vec2(raw.scale, 1, 1),
@@ -509,6 +511,21 @@ function normalizeAnimation(raw: Record<string, unknown>): AuthoringAnimData {
 }
 
 function normalizeImage(raw: Record<string, unknown>): AuthoringImage {
+  const regionRaw = Array.isArray(raw.regions) ? raw.regions : []
+  const regions = (regionRaw.filter(isRecord) as Record<string, unknown>[])
+    .map((r) => ({
+      name: str(r.name),
+      x: num(r.x),
+      y: num(r.y),
+      width: num(r.width),
+      height: num(r.height),
+      rotate: num(r.rotate),
+      origWidth: num(r.origWidth),
+      origHeight: num(r.origHeight),
+      offsetX: num(r.offsetX),
+      offsetY: num(r.offsetY)
+    }))
+    .filter((r) => r.name.length > 0)
   return {
     name: str(raw.name),
     path: str(raw.path),
@@ -520,7 +537,8 @@ function normalizeImage(raw: Record<string, unknown>): AuthoringImage {
      * 老工程文件没有这个字段：那时导出是一律重新打包的，缺省按「碎图」走才不会
      * 让散图一张一页地导出去；导入资源时写入的都是显式值，因此不受影响。
      */
-    loose: raw.loose !== false
+    loose: raw.loose !== false,
+    regions: regions.length > 0 ? regions : undefined
   }
 }
 

@@ -165,7 +165,7 @@ export interface SpineAnimationJson {
 }
 
 export interface SpineJson {
-  skeleton?: { spine?: string; fps?: number; hash?: string; images?: string }
+  skeleton?: { spine?: string; fps?: number; hash?: string; images?: string; x?: number; y?: number; width?: number; height?: number }
   bones?: SpineBoneJson[]
   slots?: SpineSlotJson[]
   /**

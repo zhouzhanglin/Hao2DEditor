@@ -4,14 +4,15 @@ import { ChevronLeft, ChevronRight, FolderOpen, Loader2, Package, X } from 'luci
 import { getPlatform } from '@editor/platform'
 import { useProjectStore } from '@editor/store/projectStore'
 import { listFiles, prepareRuntimeExport, writeHao2dExport, writeRuntimeExport } from '@editor/services/exportService'
+import { writeSpineExport } from '@editor/services/spineExport'
 import type { PageSource, RuntimeExportPlan } from '@editor/services/exportService'
 import type { PageEncodePlan } from '@editor/services/pngEncoder'
 import type { RuntimeAtlasPage } from '@core/codec/runtimeSkeJson'
 import { collectHao2dWarnings } from '@core/codec/hao2dWriter'
 import { loadImageElement } from '@render/imageLoader'
 
-/** 两套导出目标：自定义运行时数据 / 给 Unity 的 .hao2d（共用打包与预览） */
-export type ExportMode = 'runtime' | 'unity'
+/** 三套导出目标：自定义运行时数据 / 给 Unity 的 .hao2d / Spine 4.3 骨骼数据 */
+export type ExportMode = 'runtime' | 'unity' | 'spine'
 
 export interface ExportDialogProps {
   /** 导出目标：自定义运行时数据 / 给 Unity 的 .hao2d（含图集与材质） */
@@ -27,10 +28,11 @@ const MAX_PREVIEW_HEIGHT = 320
 const SCALE_PRESETS = [0.25, 0.5, 0.75, 1]
 const SIZE_PRESETS = [1024, 2048, 4096]
 
-/** 两种导出模式的标题 */
+/** 三种导出模式的标题 */
 const MODE_TITLE: Record<ExportMode, string> = {
   runtime: '导出运行时数据',
-  unity: '导出 Unity'
+  unity: '导出 Unity',
+  spine: '导出 Spine'
 }
 
 /**
@@ -85,10 +87,16 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   /** 预览用的已加载图片（按源图名缓存，切页 / 调参数不用重新解码） */
   const loadedRef = useRef(new Map<string, HTMLImageElement>())
 
-  // 编译 + 打包 + UV 重映射（纯计算，不写盘）：改缩放 / 页尺寸后立刻重算预览
+  // 编译 + 打包 + UV 重映射（纯计算，不写盘）：改缩放 / 页尺寸后立刻重算预览。
+  // Spine 要求图集与附件尺寸 1:1（scale 固定 1），且按单骨架（当前骨架）导出。
+  // 单文档工程里 store.skeletons 为空、activeSkeleton 为 -1，此时取索引 0（即 document 本身）。
+  const spineSkeleton = skeletons.length > 0 ? Math.max(0, activeSkeleton) : 0
   const plan = useMemo<RuntimeExportPlan>(
-    () => prepareRuntimeExport({ scale, maxSize, skeletons: selected, atlasScope }),
-    [scale, maxSize, doc, skeletons, selected, atlasScope]
+    () =>
+      mode === 'spine'
+        ? prepareRuntimeExport({ scale: 1, maxSize, skeletons: [spineSkeleton], atlasScope })
+        : prepareRuntimeExport({ scale, maxSize, skeletons: selected, atlasScope }),
+    [mode, scale, maxSize, doc, skeletons, selected, spineSkeleton, atlasScope]
   )
   const pages = plan.atlas.pages
   const current = Math.min(page, Math.max(0, pages.length - 1))
@@ -210,9 +218,11 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     setBusy(true)
     try {
       const result =
-        mode === 'unity'
-          ? await writeHao2dExport(dir, plan)
-          : await writeRuntimeExport(dir, plan)
+        mode === 'spine'
+          ? await writeSpineExport(dir, plan)
+          : mode === 'unity'
+            ? await writeHao2dExport(dir, plan)
+            : await writeRuntimeExport(dir, plan)
       onStatus?.(result.message)
       onClose()
     } finally {
@@ -343,34 +353,36 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="hao-label w-[54px] shrink-0">图集缩放</span>
-            <input
-              type="range"
-              min={0.1}
-              max={1}
-              step={0.05}
-              value={scale}
-              className="h-[14px] w-[150px] cursor-pointer accent-cyan-400"
-              onChange={(event) => setScale(Number(event.target.value))}
-            />
-            <span className="w-[38px] shrink-0 text-panel text-content-hi">{Math.round(scale * 100)}%</span>
-            <div className="flex items-center gap-1">
-              {SCALE_PRESETS.map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  className={[
-                    'hao-btn h-[18px] px-1.5 text-3xs',
-                    Math.abs(scale - preset) < 1e-6 ? 'hao-btn-accent' : ''
-                  ].join(' ')}
-                  onClick={() => setScale(preset)}
-                >
-                  {Math.round(preset * 100)}%
-                </button>
-              ))}
+          {mode !== 'spine' && (
+            <div className="flex items-center gap-2">
+              <span className="hao-label w-[54px] shrink-0">图集缩放</span>
+              <input
+                type="range"
+                min={0.1}
+                max={1}
+                step={0.05}
+                value={scale}
+                className="h-[14px] w-[150px] cursor-pointer accent-cyan-400"
+                onChange={(event) => setScale(Number(event.target.value))}
+              />
+              <span className="w-[38px] shrink-0 text-panel text-content-hi">{Math.round(scale * 100)}%</span>
+              <div className="flex items-center gap-1">
+                {SCALE_PRESETS.map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    className={[
+                      'hao-btn h-[18px] px-1.5 text-3xs',
+                      Math.abs(scale - preset) < 1e-6 ? 'hao-btn-accent' : ''
+                    ].join(' ')}
+                    onClick={() => setScale(preset)}
+                  >
+                    {Math.round(preset * 100)}%
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex items-center gap-2">
             <span className="hao-label shrink-0">单页最大</span>

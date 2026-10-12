@@ -9,6 +9,7 @@ import { packMaxRects } from '@core/atlas/packer'
 import { remapPageUvs } from '@core/atlas/remap'
 import type { Placement } from '@core/atlas/remap'
 import { AttachmentType } from '@core/model/types'
+import type { ImageAtlasRegion } from '@core/model/types'
 import type { RuntimeAsset } from '@core/model/asset'
 import { encodeAtlasPages, loadImageBitmap } from './pngEncoder'
 import type { PageEncodePlan } from './pngEncoder'
@@ -76,7 +77,14 @@ function extensionOf(path: string): string {
  */
 function buildAtlas(
   textures: readonly string[],
-  images: ReadonlyArray<{ name: string; path: string; width: number; height: number; loose?: boolean }>,
+  images: ReadonlyArray<{
+    name: string
+    path: string
+    width: number
+    height: number
+    loose?: boolean
+    regions?: ImageAtlasRegion[]
+  }>,
   stem: string,
   maxSize: number,
   scale = 1
@@ -134,6 +142,28 @@ function buildAtlas(
     pageSources.push({ kind: 'copy', path: entry.path, sourceName: entry.source })
     passthroughOf.set(entry.source, index)
     pages.push({ image: file, width: entry.width, height: entry.height })
+    // 本来就是图集的页：把导入时保留下来的各个子区域照原样写进图集，
+    // 而不是把整页当一块（那样图集里的 sprite 全部丢失，重新导入后每个附件都指向整页）。
+    const original = images.find((image) => image.name === entry.source)?.regions
+    if (original && original.length > 0) {
+      for (const region of original) {
+        regions.push({
+          name: region.name,
+          page: index,
+          x: region.x,
+          y: region.y,
+          width: region.width,
+          height: region.height,
+          rotate: region.rotate,
+          origWidth: region.origWidth,
+          origHeight: region.origHeight,
+          offsetX: region.offsetX,
+          offsetY: region.offsetY
+        })
+      }
+    }
+    // 兼容旧工程 / 未能匹配到子图的附件：仍保留一个以页名命名的整页区域作为兜底，
+    // 避免 Unity 端报 "Missing Regions: <页名>"。有正确 regionName 的附件不会命中它。
     regions.push({ name: entry.source, page: index, x: 0, y: 0, width: entry.width, height: entry.height })
   })
 
@@ -196,11 +226,15 @@ function remapAsset(asset: RuntimeAsset, packed: PackedAtlas): void {
         const passthrough = packed.passthroughOf.get(source)
         if (passthrough !== undefined) {
           attachment.textureName = packed.pageFiles[passthrough] ?? ''
+          // regionName 在导入时已记为原始 sprite 区域名（如 "goblin/head"），保持不动，
+          // 导出的 .atlas 里每个区域名才能和附件 path 对得上。仅在缺失时退回整页名。
+          if (!attachment.regionName) attachment.regionName = source
           continue
         }
         const target = packed.placementOf.get(source)
         if (!target) {
           attachment.textureName = newTextureNames[0] ?? ''
+          attachment.regionName = source
           continue
         }
         const page = packed.atlas.pages[target.page]
@@ -209,6 +243,7 @@ function remapAsset(asset: RuntimeAsset, packed: PackedAtlas): void {
           height: page.height
         })
         attachment.textureName = page.image
+        attachment.regionName = source
       }
     }
   }
@@ -220,7 +255,10 @@ function remapAsset(asset: RuntimeAsset, packed: PackedAtlas): void {
         if (attachment.type !== AttachmentType.LinkedMesh) continue
         const parentSlot = skin.slots.find((slot) => slot.slotName === skinSlot.slotName)
         const parent = parentSlot?.attachments.find((a) => a.name === attachment.linkedMeshAttachment)
-        if (parent) attachment.textureName = parent.textureName
+        if (parent) {
+          attachment.textureName = parent.textureName
+          attachment.regionName = parent.regionName
+        }
       }
     }
   }
@@ -555,7 +593,7 @@ export async function writeHao2dExport(
  *
  * 读不到的页只记名字，由调用方合并成一条告警（免得一张图报一次）。
  */
-async function readPageBytes(
+export async function readPageBytes(
   plan: RuntimeExportPlan,
   encoded: readonly Uint8Array[]
 ): Promise<{ bytes: Uint8Array[]; failed: string[] }> {

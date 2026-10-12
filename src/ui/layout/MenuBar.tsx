@@ -48,6 +48,12 @@ const EXPORT_ACTIONS = [
     label: '导出 Unity',
     icon: Package,
     hint: '导出给 Unity 的 .hao2d + 图集 png + 材质 (Ctrl+Shift+E)'
+  },
+  {
+    command: 'project:exportSpine',
+    label: '导出 Spine',
+    icon: Package,
+    hint: '导出 Spine 4.3 骨骼数据：{名称}.json + {名称}.atlas + 图集 png (Ctrl+Alt+E)'
   }
 ]
 

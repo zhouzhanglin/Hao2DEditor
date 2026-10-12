@@ -1,5 +1,5 @@
 import type { Vec2 } from '../math/matrix'
-import type { RGBA } from './types'
+import type { RGBA, ImageAtlasRegion } from './types'
 import { BlendMode } from './types'
 import type { IkConstraint, PathConstraint, PhysicsConstraint, TransformConstraint } from './constraints'
 import type {
@@ -69,6 +69,8 @@ export interface AuthoringAttachment {
   type: AuthoringAttachmentType
   /** 图集页 / 图片名 */
   image: string
+  /** 导出 Spine 用：附件在图集里的区域名（= sprite 名，可能带皮肤前缀） */
+  regionName?: string
   position: Vec2
   /** 度 */
   rotation: number
@@ -160,6 +162,11 @@ export interface AuthoringImage {
    * 老工程文件没有这个字段 → 解析时按 `true` 处理（那时导出是一律重打包的）。
    */
   loose: boolean
+  /**
+   * 本来就是图集的页（`loose === false`）导入时保留下来的**各个子区域**。
+   * 导出时按这些区域写图集，而不是把整页当一块。散图（loose 为真）没有它。
+   */
+  regions?: ImageAtlasRegion[]
 }
 
 // ---------------- 动画（名字引用） ----------------

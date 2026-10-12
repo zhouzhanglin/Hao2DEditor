@@ -310,6 +310,7 @@ function convertDisplay(
       ...base,
       type: AttachmentType.Mesh,
       textureName: subTexture?.textureName ?? '',
+      regionName: subTexture?.name,
       size: { x: pxToUnit(display.width ?? 0), y: pxToUnit(display.height ?? 0) },
       uvs,
       vertices,
@@ -357,6 +358,7 @@ function convertDisplay(
     ...base,
     type: AttachmentType.Region,
     textureName: subTexture?.textureName ?? '',
+    regionName: subTexture?.name,
     // position = 显示变换（= 原图中心）；裁剪块的位置交给 contentOffset（见上）
     position: { x: base.position.x, y: base.position.y },
     /*
@@ -595,12 +597,39 @@ export function importDragonBones(input: DragonBonesImportInput): DragonBonesImp
     })
   )
 
-  const images: ImageRef[] = textureNames.map((name) => ({
-    name,
-    path: input.pageImages?.[name] ?? name,
-    width: input.pageSizes[name]?.width ?? 0,
-    height: input.pageSizes[name]?.height ?? 0
-  }))
+  // 按页分组所有 SubTexture，导出时把图集页里每个 sprite 子区域照原样写进 .atlas，
+  // 而不是整页当一块（否则重新导入 Spine 后每个附件都指向整页区域）。
+  const subByPage = new Map<string, DbSubTexture[]>()
+  for (const sub of input.subTextures) {
+    const list = subByPage.get(sub.textureName) ?? []
+    list.push(sub)
+    subByPage.set(sub.textureName, list)
+  }
+  const images: ImageRef[] = textureNames.map((name) => {
+    const subs = subByPage.get(name)
+    return {
+      name,
+      path: input.pageImages?.[name] ?? name,
+      width: input.pageSizes[name]?.width ?? 0,
+      height: input.pageSizes[name]?.height ?? 0,
+      loose: subs ? false : undefined,
+      regions: subs
+        ? subs.map((s) => ({
+            name: s.name,
+            x: s.x,
+            y: s.y,
+            width: s.width,
+            height: s.height,
+            rotate: 0,
+            // DB 的显示尺寸已在附件里按打包尺寸取好，图集区域按打包尺寸记录即可（offset 置 0）
+            origWidth: s.width,
+            origHeight: s.height,
+            offsetX: 0,
+            offsetY: 0
+          }))
+        : undefined
+    }
+  })
 
   const asset = createRuntimeAsset({
     dataType: AnimType.DragonBone,

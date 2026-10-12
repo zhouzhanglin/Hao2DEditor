@@ -144,6 +144,12 @@ export interface AttachmentData {
   color: RGBA
   /** 对应图集中的纹理名（= 图集页 png 名） */
   textureName: string
+  /**
+   * 导出 Spine 用：附件在图集里的**区域名**（= 原始图片名，passthrough 页即页名）。
+   * 运行期渲染不依赖它（region 附件的 UV 由运行期按页重算、mesh 用页相对 UV），
+   * 只在写出 Spine 骨架时作为附件的 `path` 指向图集区域。
+   */
+  regionName?: string
 
   /** 顶点 UV，归一化到 0..1（v 已翻转，左下原点） */
   uvs: Float32Array
@@ -181,6 +187,24 @@ export interface SkinData {
   slots: SkinSlotData[]
 }
 
+/** 图集页里单个区域的几何（导入 Spine / DragonBones 图集时随页带进来，导出时用来还原图集里的各个 sprite）。 */
+export interface ImageAtlasRegion {
+  /** 区域名（= 图集 .atlas 里的 region 名，可能带皮肤前缀，如 `goblin/head`） */
+  name: string
+  x: number
+  y: number
+  width: number
+  height: number
+  /** 旋转角度（度，0/90/180/270）。Spine 的 `rotate: true` 即 90 */
+  rotate?: number
+  /** 未裁剪原始尺寸 */
+  origWidth?: number
+  origHeight?: number
+  /** 裁剪偏移（图片坐标轴，向右 / 向下为正） */
+  offsetX?: number
+  offsetY?: number
+}
+
 /** 图集页 / 图片引用（编辑器扩展字段，参考库用 Texture2D 表达）。 */
 export interface ImageRef {
   /** = AttachmentData.textureName */
@@ -198,6 +222,12 @@ export interface ImageRef {
    * - 缺省：按 `true` 处理（老工程文件没有这个字段，当时导出是一律重打包的）。
    */
   loose?: boolean
+  /**
+   * 本来就是图集的页（`loose === false`）导入时保留下来的**各个子区域**。
+   * 导出时按这些区域写图集，而不是把整页当一块 —— 否则图集里的 sprite 全部丢失，
+   * 重新导入后每个附件都指向整页区域。散图（loose 为真）没有它。
+   */
+  regions?: ImageAtlasRegion[]
 }
 
 export function createBoneData(partial?: Partial<BoneData>): BoneData {

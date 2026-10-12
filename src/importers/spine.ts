@@ -309,6 +309,7 @@ function convertAttachment(
       ...base,
       type: AttachmentType.LinkedMesh,
       textureName: region ? region.page : '',
+      regionName: region ? region.name : undefined,
       size: { x: pxToUnit(attachment.width ?? 0), y: pxToUnit(attachment.height ?? 0) },
       linkedMeshSkin: (attachment as { skin?: string }).skin ?? '',
       linkedMeshAttachment: (attachment as { parent?: string }).parent ?? ''
@@ -337,6 +338,7 @@ function convertAttachment(
     return createAttachmentData({
       ...base,
       type: AttachmentType.Mesh,
+      regionName: region ? region.name : undefined,
       // 顶点自带完整位置（相对骨骼）：附件 TRS 必须保持单位阵，否则会被叠加两次
       position: { x: 0, y: 0 },
       rotation: 0,
@@ -374,6 +376,7 @@ function convertAttachment(
     ...base,
     type: AttachmentType.Region,
     textureName: region ? region.page : '',
+    regionName: region ? region.name : undefined,
     // position = 附件声明的显示位置（= 原图中心）；裁剪块的位置交给 contentOffset（附件局部坐标）
     position: { x: base.position.x, y: base.position.y },
     size: geometry
@@ -567,12 +570,37 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
     warnings.push('官方运行库烘焙失败，动画改用内置解析（老版本格式常见：3.3 及更早；缓动 / IK 可能与官方有差异）')
   }
 
-  const images: ImageRef[] = textureNames.map((name) => ({
-    name,
-    path: input.pageImages?.[name] ?? name,
-    width: input.pageSizes[name]?.width ?? 0,
-    height: input.pageSizes[name]?.height ?? 0
-  }))
+  const regionsByPage = new Map<string, AtlasRegion[]>()
+  for (const region of input.regions ?? []) {
+    const list = regionsByPage.get(region.page) ?? []
+    list.push(region)
+    regionsByPage.set(region.page, list)
+  }
+  const images: ImageRef[] = textureNames.map((name) => {
+    const pageRegions = regionsByPage.get(name)
+    return {
+      name,
+      path: input.pageImages?.[name] ?? name,
+      width: input.pageSizes[name]?.width ?? 0,
+      height: input.pageSizes[name]?.height ?? 0,
+      // 带进来的图集页：整页复制、不重打包；并保留页里每个 sprite 的子区域，导出时还原
+      loose: pageRegions ? false : undefined,
+      regions: pageRegions
+        ? pageRegions.map((r) => ({
+            name: r.name,
+            x: r.x,
+            y: r.y,
+            width: r.width,
+            height: r.height,
+            rotate: r.rotate,
+            origWidth: r.origWidth,
+            origHeight: r.origHeight,
+            offsetX: r.offsetX,
+            offsetY: r.offsetY
+          }))
+        : undefined
+    }
+  })
 
   const asset = createRuntimeAsset({
     dataType: AnimType.Spine,

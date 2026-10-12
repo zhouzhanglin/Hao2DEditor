@@ -94,6 +94,7 @@ function decompileAttachment(
     name: attachment.name,
     type: attachmentTypeOf(attachment.type),
     image: attachment.textureName,
+    regionName: attachment.regionName,
     position: { ...attachment.position },
     rotation: attachment.rotation,
     scale: { ...attachment.scale },
@@ -228,7 +229,8 @@ export function decompileAsset(asset: RuntimeAsset, activeSkin = ''): EditorDocu
       path: image.path,
       width: image.width,
       height: image.height,
-      loose: false
+      loose: image.loose ?? false,
+      regions: image.regions
     })),
     editorMeta: { ...createDefaultMeta(), activeSkin }
   }

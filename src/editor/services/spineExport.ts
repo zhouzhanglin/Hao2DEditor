@@ -20,7 +20,8 @@ import type { ExportResult } from './exportService'
 /** Spine 4.3 数据格式版本号（与示例资源对齐） */
 const SPINE_VERSION = '4.3.74-beta'
 
-function sanitize(name: string): string {
+/** 文件名清洗：把非法字符换成下划线 */
+export function sanitize(name: string): string {
   return name.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'armature'
 }
 
@@ -894,7 +895,7 @@ function regionTrimOf(att: AttachmentData, region: RuntimeAtlasJson['regions'][n
  *    只在真裁剪时才写 —— 不写时运行库取 originalWidth = bounds 宽，正好等价于「没裁」；
  *  - 旋转写 4.2 的度数（`rotate: 90`），不再写 3.x 的 `rotate: true`；
  *  - 不再写 `index`（4.2 起运行库默认 0）与全局 `scale`（4.2 里 `scale` 是**页**字段，
- *    我们的页都是 1:1，省略即为 1）；`format` / `repeat` / `pma` 同样省略，取运行库默认值。 */
+ *    我们的页都是 1:1，省略即为 1）；`format` / `repeat` / `pma` 同样省略，取运行库默认值（直通 Alpha）。 */
 export function serializeSpineAtlas(atlas: RuntimeAtlasJson): string {
   const byPage = new Map<number, RuntimeAtlasJson['regions']>()
   for (const region of atlas.regions) {
@@ -925,11 +926,21 @@ export function serializeSpineAtlas(atlas: RuntimeAtlasJson): string {
   return `${lines.join('\n')}\n`
 }
 
+/** Spine 导出的可选项 */
+export interface SpineExportOptions {
+  /** 图集文件名后缀 `.txt`：写 `<骨架名>.atlas.txt`（Spine 编辑器默认导出的形态，spine-unity 认） */
+  atlasTxt?: boolean
+}
+
 /**
- * 把准备好的产物写成 Spine 数据：`<骨架名>.json` + `<骨架名>.atlas` + `<骨架名>_<序号>.<扩展名>` 图集页。
+ * 把准备好的产物写成 Spine 数据：`<骨架名>.json` + `<骨架名>.atlas[.txt]` + `<骨架名>_<序号>.<扩展名>` 图集页。
  * 复用运行期图集的打包结果（只重命名页文件，使 Spine 加载器按 `<json 同名>.atlas` 找到配套资源）。
  */
-export async function writeSpineExport(dir: string, plan: RuntimeExportPlan): Promise<ExportResult> {
+export async function writeSpineExport(
+  dir: string,
+  plan: RuntimeExportPlan,
+  options: SpineExportOptions = {}
+): Promise<ExportResult> {
   const platform = getPlatform()
   const skeleton = plan.skeletons[0]
   if (!skeleton) return { ok: false, message: '没有可导出的骨架', warnings: [], files: [] }
@@ -973,13 +984,13 @@ export async function writeSpineExport(dir: string, plan: RuntimeExportPlan): Pr
   const atlasText = serializeSpineAtlas(atlas)
 
   // 编码图集页（与运行期导出同一套）
+  const loadSource = async (name: string): Promise<ImageBitmap | null> => {
+    const image = doc.images.find((entry) => entry.name === name)
+    return image ? await loadImageBitmap(await platform.imageUrl(image.path)) : null
+  }
   const pngs = await encodeAtlasPages(
     plan.pageSources.map((source) => (source.kind === 'packed' ? source.plan : null)),
-    async (name) => {
-      const image = doc.images.find((entry) => entry.name === name)
-      const bitmap = image ? await loadImageBitmap(await platform.imageUrl(image.path)) : null
-      return bitmap
-    }
+    loadSource
   )
   const pageBytes = await readPageBytes(plan, pngs)
   if (pageBytes.failed.length > 0) {
@@ -989,9 +1000,10 @@ export async function writeSpineExport(dir: string, plan: RuntimeExportPlan): Pr
   // 查表用**未改名的**区域（UV 换算要的是那块矩形本身），页名用改名后的，附件 path 由 names 改写
   const lookup: SpineRegionLookup = { ...buildRegionLookup({ ...plan.atlas, pages: atlasPages }), names }
   const skeletonJson = buildSpineJson(skeleton.asset, lookup)
+  const atlasFile = `${base}.atlas${options.atlasTxt ? '.txt' : ''}`
   const files: Array<{ path: string; text?: string; bytes?: Uint8Array }> = [
     { path: joinPath(outDir, `${base}.json`), text: `${JSON.stringify(skeletonJson, null, 2)}\n` },
-    { path: joinPath(outDir, `${base}.atlas`), text: atlasText }
+    { path: joinPath(outDir, atlasFile), text: atlasText }
   ]
   newPageFiles.forEach((file, index) => {
     const bytes = pageBytes.bytes[index]
@@ -1005,7 +1017,7 @@ export async function writeSpineExport(dir: string, plan: RuntimeExportPlan): Pr
 
   return {
     ok: true,
-    message: `已导出到 ${base}/：${base}.json / ${base}.atlas / ${newPageFiles.length} 张图集页`,
+    message: `已导出到 ${base}/：${base}.json / ${atlasFile} / ${newPageFiles.length} 张图集页`,
     warnings,
     files: files.map((file) => baseName(file.path))
   }

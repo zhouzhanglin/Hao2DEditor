@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight, FolderOpen, Loader2, Package, X } from 'lucide-react'
-import { getPlatform } from '@editor/platform'
+import { getPlatform, stripExtension } from '@editor/platform'
 import { useProjectStore } from '@editor/store/projectStore'
 import { listFiles, prepareRuntimeExport, writeHao2dExport, writeRuntimeExport } from '@editor/services/exportService'
-import { writeSpineExport } from '@editor/services/spineExport'
+import { writeSpineExport, sanitize } from '@editor/services/spineExport'
 import type { PageSource, RuntimeExportPlan } from '@editor/services/exportService'
 import type { PageEncodePlan } from '@editor/services/pngEncoder'
 import type { RuntimeAtlasPage } from '@core/codec/runtimeSkeJson'
@@ -74,6 +74,8 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   const [maxSize, setMaxSize] = useState(2048)
   const [page, setPage] = useState(0)
   const [busy, setBusy] = useState(false)
+  /** Spine 导出：图集文件名后缀 `.txt`（`xxx.atlas.txt`），默认不勾 */
+  const [atlasTxt, setAtlasTxt] = useState(false)
   /** 勾选要导出的骨架：默认全选（一个项目可以有多个骨架，每个骨架单独出一份资源） */
   const [picked, setPicked] = useState<number[]>(() => skeletons.map((_, index) => index))
   /** 图集范围：默认装**所有骨架**用到的图；也可以只装这次要导出的骨架用到的图 */
@@ -100,6 +102,12 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   )
   const pages = plan.atlas.pages
   const current = Math.min(page, Math.max(0, pages.length - 1))
+  /** Spine 导出用的文件主体：与 writeSpineExport 里算的一致，描述文本要对得上 */
+  const spineBase = useMemo(() => {
+    const skeleton = plan.skeletons[0]
+    if (!skeleton) return 'skeleton'
+    return sanitize(stripExtension(skeleton.name) || skeleton.armatureName || 'skeleton')
+  }, [plan])
 
   /**
    * .hao2d 的能力差异提示（变换 / 路径约束在 Unity 侧写不进去等）。
@@ -219,7 +227,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     try {
       const result =
         mode === 'spine'
-          ? await writeSpineExport(dir, plan)
+          ? await writeSpineExport(dir, plan, { atlasTxt })
           : mode === 'unity'
             ? await writeHao2dExport(dir, plan)
             : await writeRuntimeExport(dir, plan)
@@ -314,16 +322,30 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
 
         {/* 产物提示：会放进新建的子文件夹 */}
         <div className="shrink-0 border-b border-line/60 px-2.5 py-1.5">
-          <span className="hao-label">
-            导出时会在所选目录内新建 <span className="text-accent">{plan.stem}/</span> 文件夹（目录、图集名与图集页名都用项目名
-            「<span className="text-accent">{projectName}</span>」），产物都放在里面：
-            {mode === 'unity'
-              ? `${plan.skeletons.length} 个骨架各自一个 .hao2d / 共用 ${pages.length} 张图集页与 ${pages.length} 个材质（Hao2D/Sprite）`
-              : `${listFiles(plan.skeletons.map((entry) => entry.fileName))} / 共用 ${plan.atlasName} / ${pages.length} 张图集页`}
-            {copyPages > 0
-              ? `；其中 ${copyPages} 张本来就是图集（原图整页复制，不重打包、不重编码）`
-              : ''}
-          </span>
+          {mode === 'spine' ? (
+            <span className="hao-label">
+              导出时会在所选目录内新建 <span className="text-accent">{spineBase}/</span> 文件夹（目录、图集名与图集页名都用骨架名
+              「<span className="text-accent">{plan.skeletons[0]?.name ?? spineBase}</span>」），产物都放在里面：
+              {spineBase}.json / {spineBase}.atlas{atlasTxt ? '.txt' : ''} / {pages.length} 张图集页
+              {copyPages > 0
+                ? `；其中 ${copyPages} 张本来就是图集（原图整页复制，逐字节照搬）`
+                : ''}
+            </span>
+          ) : mode === 'unity' ? (
+            <span className="hao-label">
+              导出时会在所选目录内新建 <span className="text-accent">{plan.stem}/</span> 文件夹（目录、图集页名与材质名都用项目名
+              「<span className="text-accent">{projectName}</span>」；每个 .hao2d 用各自骨架名），产物都放在里面：
+              {plan.skeletons.length} 个骨架各自一个 .hao2d / 共用 {pages.length} 张图集页与 {pages.length} 个材质（Hao2D/Sprite）
+              {copyPages > 0 ? `；其中 ${copyPages} 张本来就是图集（原图整页复制，不重打包、不重编码）` : ''}
+            </span>
+          ) : (
+            <span className="hao-label">
+              导出时会在所选目录内新建 <span className="text-accent">{plan.stem}/</span> 文件夹（目录、图集名与图集页名都用项目名
+              「<span className="text-accent">{projectName}</span>」），产物都放在里面：
+              {listFiles(plan.skeletons.map((entry) => entry.fileName))} / 共用 {plan.atlasName} / {pages.length} 张图集页
+              {copyPages > 0 ? `；其中 ${copyPages} 张本来就是图集（原图整页复制，不重打包、不重编码）` : ''}
+            </span>
+          )}
         </div>
 
         {/* 参数区 */}
@@ -401,6 +423,21 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
                 </button>
               ))}
             </div>
+            {/* Spine 图集文本后缀：勾上写 `xxx.atlas.txt`（Spine 编辑器默认导出的形态） */}
+            {mode === 'spine' && (
+              <label
+                className="ml-1 flex cursor-pointer items-center gap-1 rounded-[4px] border border-line/60 px-1.5 py-[2px] text-3xs text-content-mid hover:bg-ink-700"
+                title="在 atlas 文件名后追加 .txt，写成 xxx.atlas.txt（Spine 编辑器默认导出的形态，spine-unity 也认）"
+              >
+                <input
+                  type="checkbox"
+                  className="h-[11px] w-[11px] accent-cyan-400"
+                  checked={atlasTxt}
+                  onChange={(event) => setAtlasTxt(event.target.checked)}
+                />
+                <span className="text-content-hi">atlas名追加.txt</span>
+              </label>
+            )}
           </div>
         </div>
 

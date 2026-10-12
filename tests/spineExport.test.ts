@@ -380,6 +380,7 @@ describe('.atlas 文本对齐 4.2+ 语法', () => {
     const skins = json.skins as SpineSkinJson[]
     expect(skins[0].attachments?.head?.head?.path).toBe('head')
   })
+
 })
 
 describe('DB 附件上的裁剪回填进 .atlas', () => {

@@ -8,6 +8,7 @@ import type { IkConstraint } from '@core/model/constraints'
 import { Easing, emptyBoneAnim, emptyDeformAnim, emptySlotAnim } from '@core/model/animation'
 import type { AnimData, BoneAnim, DeformAnim, DrawOrderKeyframe, EventKeyframe, IkAnim, SlotAnim } from '@core/model/animation'
 import { PPU, pxToUnit } from './uv'
+import { triangulateFromHull } from '@core/mesh/triangulate'
 import { indexDbSubTextures } from './dragonBonesAtlas'
 import type { DbSubTexture } from './dragonBonesAtlas'
 import type {
@@ -306,6 +307,23 @@ function convertDisplay(
       weights = weighted
     }
 
+    const hull = Math.max(0, Math.min(display.hull ?? vertexCount, vertexCount))
+    let triangles = display.triangles ?? []
+    // 损坏/非三角形索引数组也按缺失处理
+    if (triangles.length % 3 !== 0) triangles = []
+    // DragonBones 经常只给 hull+edges 不给 triangles，我们自己耳切兜底；
+    // 否则 Spine/Unity 只能用 hull 做凸包填充，丢失凹形（羊的四肢/身体变方块）。
+    if (triangles.length === 0 && hull >= 3) {
+      triangles = triangulateFromHull(vertices, hull, display.edges ?? [])
+    }
+    const edges: number[] = []
+    if (display.edges && display.edges.length > 0) {
+      edges.push(...display.edges)
+    } else if (hull >= 3) {
+      // edges 缺失时按 hull 顺序生成闭合外环，保证导出和编辑器的边界显示一致
+      for (let i = 0; i < hull; i++) edges.push(i, (i + 1) % hull)
+    }
+
     return createAttachmentData({
       ...base,
       type: AttachmentType.Mesh,
@@ -314,9 +332,9 @@ function convertDisplay(
       size: { x: pxToUnit(display.width ?? 0), y: pxToUnit(display.height ?? 0) },
       uvs,
       vertices,
-      triangles: display.triangles ?? [],
-      edges: display.edges ?? [],
-      hull: display.hull ?? 0,
+      triangles,
+      edges,
+      hull,
       weights,
       ffdInBoneSpace: false
     })

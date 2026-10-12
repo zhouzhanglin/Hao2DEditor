@@ -10,7 +10,10 @@ import { AttachmentType, BlendMode } from '@core/model/types'
 import { Easing } from '@core/model/animation'
 import type { AnimData, BoneAnim, SlotAnim, DeformAnim, ConstraintAnim, DrawOrderKeyframe } from '@core/model/animation'
 import { sortConstraints } from '@core/model/constraints'
+import { triangulateFromHull } from '@core/mesh/triangulate'
 import type { SpineJson, SpineSlotJson, SpineSkinJson, SpineAttachmentJson, SpineAnimationJson, SpineCurveKeyframe, SpineTransformConstraintJson, SpinePathConstraintJson } from '@importers/spineTypes'
+import { pageUvsToRegionRelative } from '@importers/uv'
+import type { AtlasRegion, PageSizes } from '@importers/uv'
 import type { RuntimeAtlasJson } from '@core/codec/runtimeSkeJson'
 import type { ExportResult } from './exportService'
 
@@ -137,7 +140,40 @@ function buildSlots(asset: RuntimeAsset): SpineSlotJson[] {
   })
 }
 
-function spineAttachment(att: AttachmentData): SpineAttachmentJson {
+/** 图集区域表：附件按区域名取回自己那块贴图在页里的矩形（导出 uv 换算用） */
+export interface SpineRegionLookup {
+  regions: Map<string, AtlasRegion>
+  pageSizes: PageSizes
+}
+
+/** 把运行期图集（页 + 区域）转成导出侧查表用的区域表 */
+export function buildRegionLookup(atlas: RuntimeAtlasJson): SpineRegionLookup {
+  return {
+    regions: new Map(
+      atlas.regions.map((region) => [
+        region.name,
+        {
+          name: region.name,
+          page: atlas.pages[region.page]?.image ?? '',
+          x: region.x,
+          y: region.y,
+          width: region.width,
+          height: region.height,
+          rotate: region.rotate ?? 0,
+          origWidth: region.origWidth ?? region.width,
+          origHeight: region.origHeight ?? region.height,
+          offsetX: region.offsetX ?? 0,
+          offsetY: region.offsetY ?? 0
+        }
+      ])
+    ),
+    pageSizes: Object.fromEntries(
+      atlas.pages.map((page) => [page.image, { width: page.width, height: page.height }])
+    )
+  }
+}
+
+function spineAttachment(att: AttachmentData, lookup?: SpineRegionLookup): SpineAttachmentJson {
   const path = att.regionName ?? att.textureName
   const base: SpineAttachmentJson = {
     name: att.name,
@@ -170,8 +206,21 @@ function spineAttachment(att: AttachmentData): SpineAttachmentJson {
   }
   // Mesh
   base.type = 'mesh'
-  base.uvs = Array.from(att.uvs)
-  base.triangles = [...att.triangles]
+  // Spine 的 mesh uvs 是**区域相对**坐标（v=0 指向区域顶边，官方 MeshAttachment.ComputeUVs 会
+  // 再乘上区域尺寸），编辑器运行期存的是整页归一化 UV，这里必须换回去，否则 Unity 端取图整体错位。
+  const region = lookup && path ? lookup.regions.get(path) : undefined
+  base.uvs =
+    region && lookup
+      ? Array.from(pageUvsToRegionRelative(att.uvs, region, lookup.pageSizes))
+      : Array.from(att.uvs)
+  let triangles = [...att.triangles]
+  if (triangles.length % 3 !== 0) triangles = []
+  // 老工程或导入阶段没生成 triangles 的网格，导出前用 hull 耳切兜底，
+  // 否则 Unity/Spine 只有 hull 会退化成凸包填充。
+  if (triangles.length === 0 && att.hull >= 3 && att.vertices.length >= 6) {
+    triangles = triangulateFromHull(att.vertices, att.hull, att.edges)
+  }
+  base.triangles = triangles
   base.hull = att.hull
   if (att.edges && att.edges.length > 0) base.edges = [...att.edges]
   // 包围盒尺寸（像素）
@@ -217,13 +266,13 @@ function meshWeightedVertices(att: AttachmentData): number[] {
   return out
 }
 
-function buildSkins(asset: RuntimeAsset): SpineSkinJson[] {
+function buildSkins(asset: RuntimeAsset, lookup?: SpineRegionLookup): SpineSkinJson[] {
   return asset.skins.map((skin) => {
     const attachments: Record<string, Record<string, SpineAttachmentJson>> = {}
     for (const slot of skin.slots) {
       const slotEntries: Record<string, SpineAttachmentJson> = {}
       for (const att of slot.attachments) {
-        slotEntries[att.name] = spineAttachment(att)
+        slotEntries[att.name] = spineAttachment(att, lookup)
       }
       attachments[slot.slotName] = slotEntries
     }
@@ -250,7 +299,10 @@ function buildConstraints(asset: RuntimeAsset): SpineJson['constraints'] {
         bones: boneNames(asset, (c as { boneIndices: number[] }).boneIndices),
         target: asset.bones[(c as { targetBoneIndex: number }).targetBoneIndex]?.name ?? '',
         mix: (c as { mix: number }).mix,
-        bendPositive: (c as { bendSign: number }).bendSign > 0,
+        // 与 importer/spine.ts 的读入映射互逆：Spine 的 bendPositive(true) → bendSign=-1
+        // （其膝弯在 (根→目标) 的负叉积一侧），反之 bendSign=-1 必须写回 true。
+        // 这里若写成 bendSign > 0，四条腿的膝盖会全部朝反方向弯。
+        bendPositive: (c as { bendSign: number }).bendSign < 0,
         softness: (c as { softness: number }).softness,
         compress: (c as { compress: boolean }).compress,
         stretch: (c as { stretch: boolean }).stretch
@@ -399,22 +451,114 @@ function skinOfAttachment(asset: RuntimeAsset, slotName: string, attachmentName:
   return asset.skins[0]?.name || 'default'
 }
 
-function buildDeforms(asset: RuntimeAsset, animation: AnimData): SpineAnimationJson['deform'] {
-  const deform: Record<string, Record<string, Record<string, SpineCurveKeyframe[]>>> = {}
-  for (const track of animation.deforms) {
-    const slotName = asset.slots.find((s) => s.name === track.slot)?.name ?? track.slot
-    const skinName = skinOfAttachment(asset, slotName, track.attachment)
-    const frames: SpineCurveKeyframe[] = track.frames.map((f) => ({
-      time: f.time,
-      offset: f.vertexOffset,
-      vertices: f.offsets.map((o) => o * RUNTIME_PPU)
-    }))
-    if (frames.length === 0) continue
-    deform[skinName] = deform[skinName] ?? {}
-    deform[skinName][slotName] = deform[skinName][slotName] ?? {}
-    deform[skinName][slotName][track.attachment] = frames
+function findAttachment(asset: RuntimeAsset, slotName: string, attachmentName: string): AttachmentData | undefined {
+  for (const skin of asset.skins) {
+    const slot = skin.slots.find((s) => s.slotName === slotName)
+    const att = slot?.attachments.find((a) => a.name === attachmentName)
+    if (att) return att
   }
-  return deform
+  return undefined
+}
+
+/**
+ * FFD 轨道指向哪个附件：轨道名（DB 导入存的是显示名 / 参考库存的是附件名）优先，
+ * 其次插槽的 setup 附件，再兜底到该插槽的第一个网格附件。
+ * DB 的 FFD 是**按插槽**记录的（数据里没有附件名），只按名字硬查会整条轨道丢掉。
+ */
+function deformAttachmentName(asset: RuntimeAsset, slotName: string, track: DeformAnim, setupAttachment: string): string {
+  if (track.attachmentName && findAttachment(asset, slotName, track.attachmentName)) return track.attachmentName
+  if (setupAttachment && findAttachment(asset, slotName, setupAttachment)) return setupAttachment
+  for (const skin of asset.skins) {
+    const slot = skin.slots.find((s) => s.slotName === slotName)
+    const att = slot?.attachments.find((a) => a.type === AttachmentType.Mesh)
+    if (att) return att.name
+  }
+  return ''
+}
+
+/**
+ * 一帧 FFD 偏移 → Spine 的 `deform.vertices`。
+ *
+ * 两个必须对齐的地方：
+ * - Spine 的数组按**影响**展开（每根影响的骨内 (x,y) 各一份，加权网格逐骨骼复制），
+ *   编辑器运行期按**顶点**存一份（见 meshBuilder 的 accumulateWeighted）；
+ * - 偏移在**显示空间**时，要按该影响的 bindpose 方向换算到骨内空间，
+ *   与运行期 `!ffdInBoneSpace` 分支完全一致（`ffdInBoneSpace` 由 compile 归一化，正常恒为 false）。
+ *
+ * 数组长度严格等于附件顶点数 ×2（加权网格 = 影响数 ×2）：短了参考库按 0 补齐没问题，
+ * 长了 `Array.Copy` 直接越界抛异常。
+ */
+function deformFrameVertices(asset: RuntimeAsset, att: AttachmentData, frame: DeformAnim['frames'][number]): number[] {
+  const count = Math.floor(att.vertices.length / 2)
+  const weighted = count > 0 && att.weights.length === count
+  const base = Math.max(0, frame.vertexOffset)
+  const out: number[] = []
+  const bindposes = asset.bindposes
+  for (let i = 0; i < count; i++) {
+    const at = (base + i) * 2
+    const dx = frame.offsets[at] ?? 0
+    const dy = frame.offsets[at + 1] ?? 0
+    if (!weighted) {
+      out.push(dx * RUNTIME_PPU, dy * RUNTIME_PPU)
+      continue
+    }
+    const w = att.weights[i]
+    const influences: Array<[number, number]> = [
+      [w.b0, w.w0],
+      [w.b1, w.w1],
+      [w.b2, w.w2],
+      [w.b3, w.w3]
+    ]
+    for (const [bone, weight] of influences) {
+      if (weight <= 0) continue // 与 meshWeightedVertices 的过滤一致，否则下标会错位
+      if (att.ffdInBoneSpace) {
+        out.push(dx * RUNTIME_PPU, dy * RUNTIME_PPU)
+        continue
+      }
+      const o = bone * 16
+      if (o + 5 >= bindposes.length) {
+        out.push(dx * RUNTIME_PPU, dy * RUNTIME_PPU)
+        continue
+      }
+      out.push(
+        (bindposes[o] * dx + bindposes[o + 4] * dy) * RUNTIME_PPU,
+        (bindposes[o + 1] * dx + bindposes[o + 5] * dy) * RUNTIME_PPU
+      )
+    }
+  }
+  return out
+}
+
+/**
+ * FFD → 附件级 `deform` 轨道。
+ *
+ * 4.2 起 deform 必须挂在 `attachments.<skin>.<slot>.<attachment>.deform` 下：
+ * 顶层的 `deform`（4.0~4.1 写法）官方 4.3 运行库整段不读，导出物会静默丢掉 FFD。
+ */
+function buildDeforms(asset: RuntimeAsset, animation: AnimData): SpineAnimationJson['attachments'] {
+  const attachments: NonNullable<SpineAnimationJson['attachments']> = {}
+  for (const track of animation.deforms) {
+    if (track.frames.length === 0) continue
+    const slot = asset.slots[track.slotIndex]
+    if (!slot) continue
+    const attachmentName = deformAttachmentName(asset, slot.name, track, slot.setupAttachment)
+    if (!attachmentName) continue
+    const att = findAttachment(asset, slot.name, attachmentName)
+    if (!att) continue
+    const skinName = skinOfAttachment(asset, slot.name, attachmentName)
+    const frames: SpineCurveKeyframe[] = track.frames.map((f, i) => {
+      const next = track.frames[i + 1]
+      const key: SpineCurveKeyframe = { time: f.time, vertices: deformFrameVertices(asset, att, f) }
+      // 参考库读 deform 曲线时按「值域 0..1」换算（SkeletonJson: ReadCurve(..., 0, 1, 1)）
+      const curve = spineCurve(f.easing, f.curve, f.time, next ? next.time : f.time, 0, 1)
+      if (curve !== undefined) key.curve = curve
+      return key
+    })
+    attachments[skinName] = attachments[skinName] ?? {}
+    attachments[skinName][slot.name] = attachments[skinName][slot.name] ?? {}
+    attachments[skinName][slot.name][attachmentName] = { deform: frames }
+  }
+  return attachments
 }
 
 function buildDrawOrder(asset: RuntimeAsset, animation: AnimData): SpineCurveKeyframe[] {
@@ -494,8 +638,8 @@ function buildAnimations(asset: RuntimeAsset): SpineJson['animations'] {
     }
     const { ik, transform, path } = buildConstraintTimelines(asset, animation)
     const anim: SpineAnimationJson = { bones, slots }
-    const deform = buildDeforms(asset, animation)
-    if (Object.keys(deform).length > 0) anim.deform = deform
+    const attachments = buildDeforms(asset, animation)
+    if (Object.keys(attachments).length > 0) anim.attachments = attachments
     const drawOrder = buildDrawOrder(asset, animation)
     if (drawOrder.length > 0) anim.drawOrder = drawOrder
     if (animation.events.length > 0) {
@@ -552,7 +696,7 @@ function computeBounds(asset: RuntimeAsset): { x: number; y: number; width: numb
 
 // ---------------- 顶层组装 ----------------
 
-export function buildSpineJson(asset: RuntimeAsset): SpineJson {
+export function buildSpineJson(asset: RuntimeAsset, lookup?: SpineRegionLookup): SpineJson {
   const bounds = computeBounds(asset)
   const skeleton = {
     spine: SPINE_VERSION,
@@ -564,7 +708,7 @@ export function buildSpineJson(asset: RuntimeAsset): SpineJson {
     bones: buildBones(asset),
     slots: buildSlots(asset),
     constraints: buildConstraints(asset),
-    skins: buildSkins(asset),
+    skins: buildSkins(asset, lookup),
     animations: buildAnimations(asset)
   }
   // Spine 运行期（spine-csharp SkeletonJson.cs:124）直接按 `skeletonMap["hash"]` 取值，
@@ -665,7 +809,7 @@ export async function writeSpineExport(dir: string, plan: RuntimeExportPlan): Pr
     warnings.push(`图集页 ${pageBytes.failed.join(' / ')} 读不出内容（源图缺失或无法读取）`)
   }
 
-  const skeletonJson = buildSpineJson(skeleton.asset)
+  const skeletonJson = buildSpineJson(skeleton.asset, buildRegionLookup(atlas))
   const files: Array<{ path: string; text?: string; bytes?: Uint8Array }> = [
     { path: joinPath(outDir, `${base}.json`), text: `${JSON.stringify(skeletonJson, null, 2)}\n` },
     { path: joinPath(outDir, `${base}.atlas`), text: atlasText }

@@ -99,6 +99,57 @@ export function triangulatePolygon(points: readonly Vec2[]): number[] {
 }
 
 /**
+ * 用 hull 顶点（前 n 个）和边界边 `edges`（成对下标）给缺失 `triangles` 的网格做三角化。
+ * DragonBones 很多 mesh 不直接给出 triangles，只给 hull + edges，需要我们自己耳切。
+ * 返回的三角形下标直接对应原始 vertices 数组（内部顶点的下标不会被引用）。
+ */
+export function triangulateFromHull(vertices: Float32Array, hull: number, edges: readonly number[]): number[] {
+  const n = Math.max(0, Math.min(hull, Math.floor(vertices.length / 2)))
+  if (n < 3) return []
+
+  const points: Vec2[] = []
+  for (let i = 0; i < n; i++) {
+    points.push({ x: vertices[i * 2], y: vertices[i * 2 + 1] })
+  }
+
+  // 从 edges 串成闭合外轮廓；没有可用 edges 时默认按 vertices 顺序
+  let order: number[]
+  if (edges.length >= 4) {
+    const adj = new Map<number, number[]>()
+    for (let i = 0; i + 1 < edges.length; i += 2) {
+      const a = edges[i]
+      const b = edges[i + 1]
+      if (a >= n || b >= n) continue
+      if (!adj.has(a)) adj.set(a, [])
+      if (!adj.has(b)) adj.set(b, [])
+      adj.get(a)!.push(b)
+      adj.get(b)!.push(a)
+    }
+    const start = edges[0]
+    let prev = -1
+    let current = start
+    order = []
+    while (true) {
+      order.push(current)
+      const neighbors = adj.get(current) ?? []
+      const next = neighbors.find((v) => v !== prev) ?? -1
+      if (next < 0 || next === start) break
+      if (order.length > n + 1) break // 防御：避免死循环
+      prev = current
+      current = next
+    }
+  }
+  if (!order || order.length < 3) {
+    order = Array.from({ length: n }, (_, i) => i)
+  }
+
+  if (order.length < 3) return []
+  const orderedPoints = order.map((i) => points[i])
+  const tris = triangulatePolygon(orderedPoints)
+  return tris.map((ti) => order[ti])
+}
+
+/**
  * 多边形顶点 → UV：按包围盒线性映射到 0..1（v 翻转）。
  * 适用于「自由建网格」时用户框出的任意多边形，取图集页上的对应区域。
  */

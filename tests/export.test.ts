@@ -9,6 +9,9 @@ import { createSampleDocument } from '@core/sample'
 import { prepareRuntimeExport } from '@editor/services/exportService'
 import type { RuntimeExportPlan } from '@editor/services/exportService'
 import { useProjectStore } from '@editor/store/projectStore'
+import { buildRegionLookup, buildSpineJson } from '@editor/services/spineExport'
+import { importSpine } from '@importers/spine'
+import type { AtlasRegion } from '@importers/uv'
 import { createAuthoringAttachment } from '@core/model/authoring'
 import type { EditorDocument } from '@core/model/authoring'
 import { MeshBuilder } from '@core/skin/meshBuilder'
@@ -391,6 +394,69 @@ describe('已经是图集的资源：导出时不再重打包', () => {
     expect(sheet?.textureName).toBe('mix_0.png')
     expect(Array.from(sheet?.uvs ?? [])).toEqual([0.25, 0.25, 0.5, 0.25, 0.5, 0.5, 0.25, 0.5])
     expect(packedSprite?.textureName).toBe('mix_1.png')
+  })
+
+  it('Spine 导出的 mesh uvs 是区域相对坐标：按官方语义读回后与原整页 UV 完全一致', () => {
+    const doc = atlasDocument()
+    // 这一页里有一块子区域（导入 Spine / DragonBones 时会保留），网格就挂在这块上
+    doc.images[0].regions = [{ name: 'head', x: 64, y: 32, width: 128, height: 96 }]
+    const slot = doc.skins[0].slots[0]
+    slot.attachments.push(
+      createAuthoringAttachment({
+        name: 'sheet_mesh',
+        type: 'mesh',
+        image: 'sheet.png',
+        regionName: 'head',
+        size: { x: 128, y: 96 },
+        vertices: [
+          { x: 0, y: 0, weights: [] },
+          { x: 128, y: 0, weights: [] },
+          { x: 128, y: 96, weights: [] },
+          { x: 0, y: 96, weights: [] }
+        ],
+        triangles: [0, 1, 2, 0, 2, 3],
+        // head 区域四角在整页 512×256 上的归一化坐标（v 左下原点）
+        uvs: [0.125, 0.5, 0.375, 0.5, 0.375, 0.875, 0.125, 0.875]
+      })
+    )
+
+    const store = useProjectStore.getState()
+    store.setDocument(doc, null, false)
+    store.setProjectInfo({ projectName: '我的项目' })
+
+    const plan = prepareRuntimeExport({ scale: 1, maxSize: 2048 })
+    const asset = plan.skeletons[0].asset
+    const lookup = buildRegionLookup(plan.atlas)
+    const json = buildSpineJson(asset, lookup)
+
+    // Spine 侧的读法：页 UV = 区域原点 + 区域相对 UV × 区域尺寸（v 原点在页顶边，见官方
+    // MeshAttachment.ComputeUVs）—— 用导入端（等价实现）读回来应当得到导出前的整页 UV。
+    const atlasRegions: AtlasRegion[] = plan.atlas.regions.map((region) => ({
+      name: region.name,
+      page: plan.atlas.pages[region.page]?.image ?? '',
+      x: region.x,
+      y: region.y,
+      width: region.width,
+      height: region.height,
+      rotate: region.rotate ?? 0,
+      origWidth: region.origWidth ?? region.width,
+      origHeight: region.origHeight ?? region.height,
+      offsetX: region.offsetX ?? 0,
+      offsetY: region.offsetY ?? 0
+    }))
+    const pageSizes = Object.fromEntries(
+      plan.atlas.pages.map((page) => [page.image, { width: page.width, height: page.height }])
+    )
+    const back = importSpine({ json, regions: atlasRegions, pageSizes }).asset
+    const meshUvs = (target: typeof asset, name: string): number[] =>
+      Array.from(
+        target.skins.flatMap((skin) => skin.slots.flatMap((s) => s.attachments)).find((a) => a.name === name)?.uvs ?? []
+      )
+    const originalUvs = meshUvs(asset, 'sheet_mesh')
+
+    // 原 UV 是「整页归一化」（v 左下原点），导出成 Spine 的后必须能按官方语义原样读回
+    expect(originalUvs).toEqual([0.125, 0.5, 0.375, 0.5, 0.375, 0.875, 0.125, 0.875])
+    expect(meshUvs(back, 'sheet_mesh')).toEqual(originalUvs)
   })
 
   it('老工程文件没有 loose 字段：按碎图处理，照旧重打包', () => {

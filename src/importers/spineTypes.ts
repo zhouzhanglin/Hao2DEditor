@@ -152,11 +152,22 @@ export interface SpineSlotTimelineJson {
   twoColor?: SpineCurveKeyframe[]
 }
 
+/** 附件级轨道组：`deform` 之外还有 `sequence`、`twoColor` 等 */
+export interface SpineAttachmentTimelineJson {
+  deform?: SpineCurveKeyframe[]
+  [key: string]: unknown
+}
+
 export interface SpineAnimationJson {
   bones?: Record<string, SpineBoneTimelineJson>
   slots?: Record<string, SpineSlotTimelineJson>
-  /** 3.x：slot → attachment → 帧；4.x：skin → slot → attachment → 帧 */
+  /** 3.x：slot → attachment → 帧；4.0~4.1：skin → slot → attachment → 帧 */
   deform?: Record<string, Record<string, SpineCurveKeyframe[]>>
+  /**
+   * 4.2 起（参考库 4.3 只认这里）：skin → slot → attachment → `{ deform: 帧 }`。
+   * 写回这个层级才有效 —— 顶层 `deform` 会被官方运行库整段忽略。
+   */
+  attachments?: Record<string, Record<string, Record<string, SpineAttachmentTimelineJson>>>
   drawOrder?: SpineCurveKeyframe[]
   events?: SpineCurveKeyframe[]
   ik?: Record<string, SpineCurveKeyframe[]>

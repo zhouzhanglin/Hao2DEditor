@@ -91,6 +91,55 @@ export function mapRegionRelativeUvs(
   return out
 }
 
+/**
+ * `mapRegionRelativeUvs` 的**逆运算**：把「图集页归一化 UV」（v 左下原点）还原成「区域相对 UV」
+ * （v=0 指向区域顶边）。
+ *
+ * Spine / DragonBones 的 mesh `uvs` 都是区域相对坐标，而编辑器运行期一律存整页 UV，
+ * 所以往 Spine 写 `.json` 时必须反算 —— 否则 Unity 里每个网格附件都会按整页坐标去乘区域尺寸，
+ * 取到错位的贴图块（表现是「贴图整体偏移 / 串图」）。
+ * 旋转分支是上面四个正向公式的代数逆解，两者必须成对修改。
+ */
+export function pageUvsToRegionRelative(
+  uvs: ArrayLike<number>,
+  region: AtlasRegion,
+  pageSizes: PageSizes
+): Float32Array {
+  const page = pageSizes[region.page] ?? { width: 1, height: 1 }
+  const tw = Math.max(1, page.width)
+  const th = Math.max(1, page.height)
+  const x = region.x
+  const y = region.y
+  const w = Math.max(1e-6, region.width)
+  const h = Math.max(1e-6, region.height)
+  const rotate = ((Math.round(region.rotate) % 360) + 360) % 360
+  const out = new Float32Array(uvs.length)
+  for (let i = 0; i + 1 < uvs.length; i += 2) {
+    // 整页 UV（v 左下原点）→ 页内像素（左上原点）
+    const px = uvs[i] * tw
+    const py = (1 - uvs[i + 1]) * th
+    let u: number
+    let v: number
+    if (rotate === 90) {
+      // 正向：px = x + v*h，py = y + (1-u)*w
+      v = (px - x) / h
+      u = 1 - (py - y) / w
+    } else if (rotate === 180) {
+      u = 1 - (px - x) / w
+      v = 1 - (py - y) / h
+    } else if (rotate === 270) {
+      v = 1 - (px - x) / h
+      u = (py - y) / w
+    } else {
+      u = (px - x) / w
+      v = (py - y) / h
+    }
+    out[i] = u
+    out[i + 1] = v
+  }
+  return out
+}
+
 /** Region 附件的四角「内容相对 UV」：左下 → 右下 → 右上 → 左上（与 Region 顶点顺序一致） */
 const REGION_CORNER_UVS = Float32Array.from([0, 1, 1, 1, 1, 0, 0, 0])
 

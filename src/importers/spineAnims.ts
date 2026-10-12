@@ -296,7 +296,11 @@ function floatKey(
   }
 }
 
-/** deform 层级判定：第一层键能在插槽表找到 → 3.x 插槽层；否则是 4.x 皮肤层（只取第一个皮肤） */
+/**
+ * deform 层级判定：第一层键能在插槽表找到 → 3.x 插槽层；否则是 4.x 皮肤层（只取第一个皮肤）。
+ * 4.2 起官方把 deform 挪进了 `attachments.<skin>.<slot>.<attachment>.deform`，
+ * 由 `collectAttachmentDeforms` 单独处理。
+ */
 function collectDeforms(
   animation: SpineAnimationJson,
   ctx: SpineAnimContext,
@@ -304,6 +308,7 @@ function collectDeforms(
   onTime: (time: number) => void
 ): void {
   const deform = animation.deform
+  collectAttachmentDeforms(animation, ctx, out, onTime)
   if (!deform) return
 
   const keys = Object.keys(deform)
@@ -314,48 +319,81 @@ function collectDeforms(
   ) as unknown as Record<string, Record<string, Array<Record<string, unknown>>>>
 
   for (const [slotName, attachments] of Object.entries(layer)) {
-    const slotIndex = ctx.slotIndex.get(slotName)
-    if (slotIndex === undefined) continue
     for (const [attachmentName, frames] of Object.entries(attachments)) {
       if (!Array.isArray(frames)) continue
-      const track = emptyDeformAnim(slotIndex, attachmentName)
-      const base = ctx.deformBase.get(`${slotName}\u0000${attachmentName}`)
-      // 数组长度对齐到附件绑定顶点数（参考库用 `deformLength = 附件顶点数 × 2`）
-      let need = base ? base.vertices.length : 0
-      for (const frame of frames) {
-        const offset = numberOr(frame.offset, 0)
-        const vertices = Array.isArray(frame.vertices) ? (frame.vertices as number[]) : []
-        need = Math.max(need, Math.round(offset) + vertices.length)
-        onTime(numberOr(frame.time, 0))
-      }
-      for (const frame of frames) {
-        const offset = Math.max(0, Math.round(numberOr(frame.offset, 0)))
-        const vertices = Array.isArray(frame.vertices) ? (frame.vertices as number[]) : []
-        const offsets = new Array<number>(need).fill(0)
-        for (let i = 0; i < vertices.length; i++) {
-          const at = offset + i
-          // Spine 的 deform 帧 `vertices` **本身就是「相对绑定顶点的偏移」**：
-          // 官方 SkeletonJson 读取时是 `deform[i] = 该偏移[i] + 绑定顶点[i]`（非加权网格）
-          // 才凑出绝对坐标。我们运行期同样是「绑定顶点 + 偏移」（见 meshBuilder），
-          // 所以这里**原样使用**。
-          //
-          // 早先误以为 json 存的是绝对坐标、又减了一次绑定顶点 → 偏移变成
-          // 「偏移 − 绑定坐标」，FFD 彻底错乱（表现：deform 作用的部件变形诡异，
-          // 看起来像缩放/斜切出问题 —— 如 spineunitygirl 的手指与脚）。
-          offsets[at] = pxToUnit(vertices[i])
-        }
-        const key: DeformKeyframe = {
-          time: numberOr(frame.time, 0),
-          offsets,
-          vertexOffset: 0,
-          easing: Easing.Linear,
-          curve: null
-        }
-        track.frames.push(key)
-      }
-      if (track.frames.length > 0) out.push(track)
+      pushDeformTrack(slotName, attachmentName, frames as Array<Record<string, unknown>>, ctx, out, onTime)
     }
   }
+}
+
+/** 4.2+：`attachments.<skin>.<slot>.<attachment>.deform`（官方 4.3 运行库唯一认的位置） */
+function collectAttachmentDeforms(
+  animation: SpineAnimationJson,
+  ctx: SpineAnimContext,
+  out: DeformAnim[],
+  onTime: (time: number) => void
+): void {
+  const skins = animation.attachments
+  if (!skins) return
+  for (const slots of Object.values(skins)) {
+    if (!slots || typeof slots !== 'object') continue
+    for (const [slotName, attachments] of Object.entries(slots)) {
+      if (!attachments || typeof attachments !== 'object') continue
+      for (const [attachmentName, timeline] of Object.entries(attachments)) {
+        const frames = (timeline as { deform?: unknown } | null)?.deform
+        if (!Array.isArray(frames)) continue
+        pushDeformTrack(slotName, attachmentName, frames as Array<Record<string, unknown>>, ctx, out, onTime)
+      }
+    }
+  }
+}
+
+function pushDeformTrack(
+  slotName: string,
+  attachmentName: string,
+  frames: Array<Record<string, unknown>>,
+  ctx: SpineAnimContext,
+  out: DeformAnim[],
+  onTime: (time: number) => void
+): void {
+  const slotIndex = ctx.slotIndex.get(slotName)
+  if (slotIndex === undefined) return
+  const track = emptyDeformAnim(slotIndex, attachmentName)
+  const base = ctx.deformBase.get(`${slotName}\u0000${attachmentName}`)
+  // 数组长度对齐到附件绑定顶点数（参考库用 `deformLength = 附件顶点数 × 2`）
+  let need = base ? base.vertices.length : 0
+  for (const frame of frames) {
+    const offset = numberOr(frame.offset, 0)
+    const vertices = Array.isArray(frame.vertices) ? (frame.vertices as number[]) : []
+    need = Math.max(need, Math.round(offset) + vertices.length)
+    onTime(numberOr(frame.time, 0))
+  }
+  for (const frame of frames) {
+    const offset = Math.max(0, Math.round(numberOr(frame.offset, 0)))
+    const vertices = Array.isArray(frame.vertices) ? (frame.vertices as number[]) : []
+    const offsets = new Array<number>(need).fill(0)
+    for (let i = 0; i < vertices.length; i++) {
+      const at = offset + i
+      // Spine 的 deform 帧 `vertices` **本身就是「相对绑定顶点的偏移」**：
+      // 官方 SkeletonJson 读取时是 `deform[i] = 该偏移[i] + 绑定顶点[i]`（非加权网格）
+      // 才凑出绝对坐标。我们运行期同样是「绑定顶点 + 偏移」（见 meshBuilder），
+      // 所以这里**原样使用**。
+      //
+      // 早先误以为 json 存的是绝对坐标、又减了一次绑定顶点 → 偏移变成
+      // 「偏移 − 绑定坐标」，FFD 彻底错乱（表现：deform 作用的部件变形诡异，
+      // 看起来像缩放/斜切出问题 —— 如 spineunitygirl 的手指与脚）。
+      offsets[at] = pxToUnit(vertices[i])
+    }
+    const key: DeformKeyframe = {
+      time: numberOr(frame.time, 0),
+      offsets,
+      vertexOffset: 0,
+      easing: Easing.Linear,
+      curve: null
+    }
+    track.frames.push(key)
+  }
+  if (track.frames.length > 0) out.push(track)
 }
 
 type SpineCurveKeyframeMap = Record<string, Array<Record<string, unknown>>>

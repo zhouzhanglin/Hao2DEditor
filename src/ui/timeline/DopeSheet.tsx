@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, Flag, Lock, ZoomIn } from 'lucide-react'
+import { ChevronDown, ChevronRight, Filter, Flag, Lock, Minus, Plus, ZoomIn } from 'lucide-react'
 import { TIMELINE_ZOOM_MAX, TIMELINE_ZOOM_MIN } from '@editor/store/timelineStore'
 import type { KeySelector, TimelineTrack } from '@editor/timeline/model'
 import { useProjectStore } from '@editor/store/projectStore'
+import { useSelectionStore } from '@editor/store/selectionStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { playheadTime, usePlayheadStore } from '@editor/store/playheadStore'
 
@@ -50,7 +51,6 @@ const RULER_HEIGHT = 30
 /** 相邻主刻度之间的最小像素间距，用于挑选刻度步长 */
 const MIN_TICK_GAP = 58
 const FRAME_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 240, 600]
-const ZOOM_SENSITIVITY = 0.0016
 /**
  * 时间轴左侧留白（占帧区域宽度的比例）。
  * 时间 0 不是贴着左边缘，第 0 帧的关键帧菱形就不会被裁掉；
@@ -140,6 +140,21 @@ export default function DopeSheet(props: DopeSheetProps) {
   mapRef.current = { start, span }
   const propsRef = useRef(props)
   propsRef.current = props
+
+  /** 缩放（底部工具栏的滑块 / ±按钮）：以可见窗口中心为锚点，缩放后画面不跳走 */
+  const zoomAround = (next: number): void => {
+    const clamped = Math.max(TIMELINE_ZOOM_MIN, Math.min(TIMELINE_ZOOM_MAX, next))
+    const current = viewRef.current
+    const currentSpan = current.zoom > 0 ? axis / current.zoom : axis
+    const from = Math.min(Math.max(0, current.start), Math.max(0, axis - currentSpan))
+    const center = from + currentSpan / 2
+    const nextSpan = axis / clamped
+    applyView({
+      zoom: clamped,
+      start: Math.max(0, Math.min(Math.max(0, axis - nextSpan), center - nextSpan / 2))
+    })
+    props.onZoom(clamped)
+  }
 
   // 刻度尺宽度必须与轨道区完全一致（轨道区右侧有滚动条，因此以它的真实宽度为准）
   useEffect(() => {
@@ -283,6 +298,21 @@ export default function DopeSheet(props: DopeSheetProps) {
     (activeTrack.attachment ?? '') === (track.attachment ?? '') &&
     activeTrack.channel === (track.channel ?? '')
 
+  /**
+   * 智能过滤的匹配对象：选中骨骼 → 骨骼轨，选中插槽 / 附件 → 该插槽的轨，
+   * 选中约束 → 该约束的轨；什么都没选中时按钮置灰（没有可过滤的目标）
+   */
+  const selection = useSelectionStore()
+  const filterTarget =
+    selection.kind === 'bone'
+      ? selection.bone
+      : selection.kind === 'slot' || selection.kind === 'attachment'
+        ? selection.slot
+        : selection.kind === 'constraint'
+          ? selection.constraint
+          : ''
+  const [smartFilter, setSmartFilter] = useState(false)
+
   /** 折叠的骨骼分组（只影响显示，不动数据） */
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
   const toggleCollapse = (id: string): void =>
@@ -293,11 +323,15 @@ export default function DopeSheet(props: DopeSheetProps) {
       return next
     })
 
-  /** 实际渲染的轨道：折叠的分组行下面的子轨道会被过滤掉 */
-  const visibleTracks = useMemo(
-    () => tracks.filter((track) => !track.parentId || !collapsed.has(track.parentId)),
-    [tracks, collapsed]
-  )
+  /**
+   * 实际渲染的轨道：先过「智能过滤」（只留选中对象的轨道，分组行与子轨共用同一个
+   * `target`，按 target 匹配即可整组保留；事件 / 绘制顺序这类全局轨 target 为空，
+   * 过滤时一并隐藏 —— 它们不属于任何对象），再滤掉折叠分组下面的子轨道
+   */
+  const visibleTracks = useMemo(() => {
+    const scoped = smartFilter && filterTarget ? tracks.filter((track) => track.target === filterTarget) : tracks
+    return scoped.filter((track) => !track.parentId || !collapsed.has(track.parentId))
+  }, [tracks, collapsed, smartFilter, filterTarget])
 
   /** 同一轨道同一时间点的多通道关键帧合并成一个标记 */
   const markersByTrack = useMemo(
@@ -347,50 +381,30 @@ export default function DopeSheet(props: DopeSheetProps) {
   const snapScrub = (value: number): number => snap(Math.min(propsRef.current.length, value))
 
   /**
-   * 帧区域滚轮 = 缩放时间轴长度（以光标处的时间为锚点）。
-   * - Shift + 滚轮 / 横向滚动：平移可见窗口
-   * - Alt + 滚轮：让出给原生纵向滚动（轨道多时用它翻轨道）
-   * - 左侧「轨道 / 对象」列：保持原生纵向滚动
-   * 注：滚轮事件的 button 在 Chromium 里恒为 0，无法区分「中键滚轮」，
-   * 因此按「指针是否落在帧区域」来决定缩放，这也符合时间轴类工具的通行交互。
+   * 帧区域滚轮 = **上下翻轨道**（交给原生滚动；缩放入口已收拢到底部工具栏）。
+   * - Shift + 滚轮 / 触控板横扫：横向平移可见窗口
+   * - 左侧「轨道 / 对象」列：同样是原生纵向滚动
    */
   useEffect(() => {
     const host = hostRef.current
     if (!host) return
     const onWheel = (event: WheelEvent): void => {
-      if (event.altKey) return
       const rect = areaRef.current?.getBoundingClientRect()
       if (!rect || rect.width <= 0) return
       if (event.clientX < rect.left - 1) return
+      const horizontal = Math.abs(event.deltaX) > Math.abs(event.deltaY)
+      // 垂直滚轮不拦截：让滚动容器自然上下翻轨道
+      if (!horizontal && !event.shiftKey) return
       event.preventDefault()
 
       const current = propsRef.current
       const { start: rawStart, zoom: currentZoom } = viewRef.current
       const currentSpan = currentZoom > 0 ? current.axis / currentZoom : current.axis
       const from = Math.min(Math.max(0, rawStart), Math.max(0, current.axis - currentSpan))
-
-      const horizontal = Math.abs(event.deltaX) > Math.abs(event.deltaY)
-      if (event.shiftKey || horizontal) {
-        const pixels = event.deltaX !== 0 ? event.deltaX : event.deltaY
-        applyView({
-          start: Math.max(0, Math.min(current.axis - currentSpan, from + (pixels / rect.width) * currentSpan))
-        })
-        return
-      }
-
-      const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
-      const anchorTime = from + ratio * currentSpan
-      const next = Math.max(
-        TIMELINE_ZOOM_MIN,
-        Math.min(TIMELINE_ZOOM_MAX, currentZoom * Math.exp(-event.deltaY * ZOOM_SENSITIVITY))
-      )
-      const nextSpan = current.axis / next
-      // 保持光标处的时间不动
+      const pixels = event.deltaX !== 0 ? event.deltaX : event.deltaY
       applyView({
-        zoom: next,
-        start: Math.max(0, Math.min(current.axis - nextSpan, anchorTime - ratio * nextSpan))
+        start: Math.max(0, Math.min(current.axis - currentSpan, from + (pixels / rect.width) * currentSpan))
       })
-      current.onZoom(next)
     }
     host.addEventListener('wheel', onWheel, { passive: false })
     return () => host.removeEventListener('wheel', onWheel)
@@ -644,7 +658,7 @@ export default function DopeSheet(props: DopeSheetProps) {
             scrubRef.current = true
             props.onScrub(snapScrub(timeAtClientX(event.clientX)))
           }}
-          title="关键帧区：左键拖动框选关键帧（Shift / Ctrl 点击加选或减选），选中后可整段左右拖动；单击空白定位播放头；滚轮缩放时间轴长度（Shift+滚轮横向平移，Alt+滚轮纵向翻轨道）"
+          title="关键帧区：左键拖动框选关键帧（Shift / Ctrl 点击加选或减选），选中后可整段左右拖动；单击空白定位播放头；滚轮上下翻轨道，Shift+滚轮横向平移；缩放用底部工具栏"
         >
           {minorStep > 0
             ? majorFrames.flatMap((frame) =>
@@ -884,6 +898,91 @@ export default function DopeSheet(props: DopeSheetProps) {
         </div>
       </div>
 
+      {/*
+        底部工具栏：智能过滤 / 横向平移滑块 / 缩放组。
+        滚轮不再缩放时间轴（只上下翻轨道），缩放与快速平移的入口统一收拢到这里
+      */}
+      <div className="flex h-[26px] shrink-0 items-center gap-2 border-t border-line/60 bg-ink-800/80 px-1.5">
+        <button
+          type="button"
+          disabled={!filterTarget}
+          title={
+            filterTarget
+              ? '智能过滤：只显示当前选中对象的轨道（再点一次恢复全部）'
+              : '智能过滤：先在层级树 / 视口 / 时间轴里选中一个对象'
+          }
+          onClick={() => setSmartFilter((value) => !value)}
+          className={[
+            'flex h-[18px] shrink-0 items-center gap-1 rounded-[4px] px-1.5 text-3xs transition-colors duration-panel',
+            smartFilter && filterTarget
+              ? 'bg-accent-deep text-white'
+              : 'text-content-mid hover:bg-ink-600 hover:text-content-hi',
+            !filterTarget ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'
+          ].join(' ')}
+        >
+          <Filter size={11} />
+          <span>智能过滤</span>
+        </button>
+        {smartFilter && filterTarget ? (
+          <span className="shrink-0 text-3xs text-accent" title="再点一次「智能过滤」恢复全部轨道">
+            「{filterTarget}」
+          </span>
+        ) : null}
+
+        {/* 横向平移：拖动滑块快速左右滑动时间轴（与中键拖拽 / Shift+滚轮等效） */}
+        <input
+          type="range"
+          className="h-[4px] min-w-0 flex-1 cursor-pointer appearance-none rounded bg-ink-600 accent-accent disabled:cursor-not-allowed disabled:opacity-40"
+          min={0}
+          max={1000}
+          step={1}
+          disabled={maxStart <= 0}
+          value={Math.round((maxStart > 0 ? start / maxStart : 0) * 1000)}
+          onChange={(event) => applyView({ start: (Number(event.target.value) / 1000) * maxStart })}
+          title="左右滑动时间轴（拖到最右 = 时间轴末尾）"
+        />
+
+        {/* 缩放组：以可见窗口中心为锚点 */}
+        <button
+          type="button"
+          title="缩小时间轴（看得更全）"
+          className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded text-content-mid hover:bg-ink-600 hover:text-content-hi"
+          onClick={() => zoomAround(zoom / 1.25)}
+        >
+          <Minus size={12} />
+        </button>
+        <input
+          type="range"
+          className="h-[4px] w-28 shrink-0 cursor-pointer appearance-none rounded bg-ink-600 accent-accent"
+          min={Math.round(TIMELINE_ZOOM_MIN * 100)}
+          max={Math.round(TIMELINE_ZOOM_MAX * 100)}
+          step={1}
+          value={Math.round(zoom * 100)}
+          onChange={(event) => zoomAround(Number(event.target.value) / 100)}
+          title="时间轴缩放"
+        />
+        <button
+          type="button"
+          title="放大时间轴（逐帧精修）"
+          className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded text-content-mid hover:bg-ink-600 hover:text-content-hi"
+          onClick={() => zoomAround(zoom * 1.25)}
+        >
+          <Plus size={12} />
+        </button>
+        {zoomed ? (
+          <button
+            type="button"
+            title="恢复「完整适配」"
+            className="shrink-0 rounded bg-accent-deep px-1 text-3xs text-white hover:bg-accent"
+            onClick={() => {
+              applyView({ start: 0, zoom: 1 })
+              props.onZoom(1)
+            }}
+          >
+            1×
+          </button>
+        ) : null}
+      </div>
     </div>
   )
 }

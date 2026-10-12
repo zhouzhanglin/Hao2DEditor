@@ -39,6 +39,8 @@ const COLOR_ROOT = 0xbf5af2
 const COLOR_SELECTED = 0x000000
 /** 约束（连线 + 准星手柄）的红：与层级树里 IK 图标的颜色一致（HierarchyTree 的 IkConstraintIcon） */
 const COLOR_CONSTRAINT = 0xe4572e
+/** 目标骨被选中时准星提亮成白色：骨骼层关掉时这是「选中了它」的唯一视口反馈 */
+const COLOR_CONSTRAINT_SELECTED = 0xffffff
 const COLOR_LINK = 0x8e8e93
 
 /** 小坐标轴：X 轴红、Y 轴绿、中心蓝（macOS 系统色） */
@@ -384,7 +386,7 @@ export function drawBoneOverlay(
     }
   }
 
-  if (options.showConstraints) drawConstraintLinks(g, skeleton, constraints, w)
+  if (options.showConstraints) drawConstraintLinks(g, skeleton, constraints, w, options.selectedBones)
   drawPendingBone(strokes, fills, options.pendingBone, w)
 }
 
@@ -429,7 +431,8 @@ function drawConstraintLinks(
   g: Graphics,
   skeleton: Skeleton,
   constraints: readonly Constraint[],
-  w: number
+  w: number,
+  selectedBones: ReadonlySet<number>
 ): void {
   for (const constraint of constraints) {
     if (!constraint.enabled || constraint.type === 'physics') continue
@@ -476,7 +479,11 @@ function drawConstraintLinks(
      * 与层级树里的 IK 图标同形（HierarchyTree 的 IkConstraintIcon），
      * 「树里这条约束」和「视口里这个手柄」一眼能对上。
      * 原来只是一横一竖的十字，混在骨骼手柄里区分度太低。
+     *
+     * 目标骨被选中时准星提亮成白色：骨骼层关掉时骨骼高亮看不见，
+     * 白准星就是「选中了它」的唯一视口反馈
      */
+    const markerColor = selectedBones.has(constraint.targetBoneIndex) ? COLOR_CONSTRAINT_SELECTED : COLOR_CONSTRAINT
     const ring = w * 8
     const nubIn = ring + w * 0.7
     const nubOut = ring + w * 4.2
@@ -486,9 +493,9 @@ function drawConstraintLinks(
     g.moveTo(targetX - nubOut, targetY).lineTo(targetX - nubIn, targetY)
     g.moveTo(targetX + nubIn, targetY).lineTo(targetX + nubOut, targetY)
     g.moveTo(targetX, targetY).lineTo(targetX + ring * 0.82, targetY)
-    g.stroke({ width: w * 2.4, color: COLOR_CONSTRAINT, alpha: 0.95, cap: 'round', join: 'round' })
+    g.stroke({ width: w * 2.4, color: markerColor, alpha: 0.95, cap: 'round', join: 'round' })
     // 内环：细一圈、淡一点
     g.poly(circlePolygon(targetX, targetY, ring * 0.58))
-    g.stroke({ width: w * 1.1, color: COLOR_CONSTRAINT, alpha: 0.45 })
+    g.stroke({ width: w * 1.1, color: markerColor, alpha: 0.45 })
   }
 }

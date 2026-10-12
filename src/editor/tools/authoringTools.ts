@@ -434,6 +434,13 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   // 骨骼拾取先算出来：附件与骨骼重叠时**骨骼优先**（否则压在骨骼上的图片会把点击全吃掉，
   // 想选骨骼只能绕开图片，很难点）
   const hit = scene.pickBoneHandleAt(info.world.x, info.world.y)
+  /*
+   * 约束准星兜底（骨骼层关掉时 pickBoneHandleAt 恒空）：命中按「点中目标骨骼的原点圈」
+   * 处理 —— 选中它并直接进入移动拖拽，与拖骨骼原点同一交互。必须排在附件拾取**前面**：
+   * IK 节点（脚 / 手的 IK 把手）几乎都压在角色图片上，不抢先的话点准星选中的永远是图片
+   */
+  const constraintHit = hit ? -1 : scene.constraintTargetIndexAt(info.world.x, info.world.y)
+  const effectiveHit = hit ?? (constraintHit >= 0 ? { boneIndex: constraintHit, zone: 'origin' as const, distance: 0 } : null)
 
   // 附件操作器 / 点选附件：选中附件后，小坐标轴画在附件上（中心橙色区分骨骼）
   if (tools.tool === 'select') {
@@ -446,8 +453,8 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
         return true
       }
     }
-    // 骨骼命中时不抢选附件，交给下面的骨骼分支处理
-    const att = hit ? null : scene.pickAttachmentAt(info.world.x, info.world.y)
+    // 骨骼 / 约束准星命中时不抢选附件，交给下面的骨骼分支处理
+    const att = effectiveHit ? null : scene.pickAttachmentAt(info.world.x, info.world.y)
     // 锁定的插槽在视口里不响应点选（占位拦下并说明原因，别让人以为「点坏了」）
     if (att && slotLocked(att.slot)) {
       host.status(`插槽「${att.slot}」已锁定：在层级树里解锁后才能选中`)
@@ -471,8 +478,8 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   // 选择 / 骨骼 / 插槽 / 约束：点中骨骼即开始拖拽
   // 手柄分区：原点圈 = 移动、末端方块 = 缩放、骨骼体 = 旋转；
   // Shift 仍可强制移动、Alt 强制缩放（与旧习惯兼容）。
-  if (!hit) return false
-  const bone = scene.runtime.asset.bones[hit.boneIndex]
+  if (!effectiveHit) return false
+  const bone = scene.runtime.asset.bones[effectiveHit.boneIndex]
   if (!bone) return false
   // 锁定状态存在编辑期模型上（Runtime 模型没有该字段）
   const authoringBone = useProjectStore.getState().document.bones.find((item) => item.name === bone.name)
@@ -487,17 +494,18 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   // 点别的骨骼才改成单选它 —— 与层级树里点行的规则一致
   if (!selection.bones.includes(bone.name)) selection.selectBone(bone.name)
 
-  const offset = hit.boneIndex * 16
+  const offset = effectiveHit.boneIndex * 16
   const origin: Vec2 = { x: scene.runtime.skeleton.world[offset + 12], y: scene.runtime.skeleton.world[offset + 13] }
   const parent = bone.parentIndex
   // 骨骼**本体**上也直接响应当前变换模式（中心 = 整体：自由移动 / 旋转 / 等比缩放），
   // 不用非得精准抓到小坐标轴的细手柄；斜切则提示去拖包围盒的边。
-  if (hit.zone !== 'origin') {
+  // 约束准星命中时 zone 是 origin（见上面的兜底）→ 走下面的移动拖拽
+  if (effectiveHit.zone !== 'origin') {
     if (tools.gizmo === 'shear') {
       host.status(`斜切骨骼「${bone.name}」：拖动斜切包围盒的边（上下边横向拖 / 左右边纵向拖）`)
       return true
     }
-    return beginGizmoDrag(host, hit.boneIndex, bone.name, 'center', info.world)
+    return beginGizmoDrag(host, effectiveHit.boneIndex, bone.name, 'center', info.world)
   }
   const skeleton = scene.runtime.skeleton
   const parentWorld = parent >= 0 ? skeleton.world.slice(parent * 16, parent * 16 + 16) : null

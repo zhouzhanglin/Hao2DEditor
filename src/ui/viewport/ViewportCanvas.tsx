@@ -656,10 +656,12 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       return
     }
 
-    // 光标：斜切包围盒 > 小坐标轴 > 原点圈（移动）> 骨骼体（旋转）
+    // 光标：斜切包围盒 > 小坐标轴 > 原点圈（移动）> 骨骼体（旋转）> 约束准星
     const mode = useToolStore.getState().gizmo
     const shearEdge = mode === 'shear' ? scene.pickShearEdgeAt(world.x, world.y) : null
     const part = mode === 'shear' ? null : scene.pickGizmoAt(world.x, world.y)
+    // 约束准星悬停：骨骼层关掉时 hoveredBone 高亮看不见，光标给 pointer 提示「准星能点」
+    const overConstraint = !hit && scene.pickConstraintTargetAt(world.x, world.y) !== null
     const cursor = shearEdge
       ? shearEdge === 'top' || shearEdge === 'bottom'
         ? 'ew-resize'
@@ -685,7 +687,9 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
               : mode === 'scale'
                 ? 'nwse-resize'
                 : 'crosshair'
-          : 'default'
+          : overConstraint
+            ? 'pointer'
+            : 'default'
     if (event.currentTarget.style.cursor !== cursor) event.currentTarget.style.cursor = cursor
   }
 

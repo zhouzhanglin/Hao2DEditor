@@ -548,15 +548,64 @@ export class EditorScene {
 
   pickBoneAt(worldX: number, worldY: number): BoneHit | null {
     if (!this.bundle) return null
-    return pickBone(this.bundle.skeleton, worldX, worldY, this.viewport.pixelsToWorld(8))
+    // 骨骼层关掉时**不按骨骼体拾取**：看不见的骨骼点中了也不知道点的是谁（正是「准星选不中」
+    // 的根因 —— 准星旁边压着看不见的骨骼体，永远抢在约束兜底前面）。此时骨架里唯一可点的
+    // 记号就是「约束」层上的目标准星，见下面的兜底
+    if (this.viewState.overlay.bones) {
+      const hit = pickBone(this.bundle.skeleton, worldX, worldY, this.viewport.pixelsToWorld(8))
+      if (hit) return hit
+    }
+    // 约束手柄兜底：点在目标准星附近时，按「点中了目标骨骼」处理。
+    // 合并显示后，视口里的约束准星就是那条约束的**节点骨**（IK 目标骨）——
+    // 「只显示约束」时这是选中 / 拖拽 IK 节点的唯一入口。
+    // 命中半径屏幕恒定（10px，与准星环同量级），多条约束重叠取最近
+    const target = this.constraintTargetIndexAt(worldX, worldY)
+    return target >= 0 ? { boneIndex: target, distance: 0 } : null
+  }
+
+  /** 约束准星悬停：命中返回**目标骨骼名**（光标提示用；「约束」叠加层关着时恒为 null） */
+  pickConstraintTargetAt(worldX: number, worldY: number): string | null {
+    if (!this.bundle) return null
+    const target = this.constraintTargetIndexAt(worldX, worldY)
+    if (target < 0) return null
+    return this.bundle.asset.bones[target]?.name ?? null
+  }
+
+  /**
+   * 约束目标准星的拾取：开关与画手柄的「约束」叠加层一致（enabled、非 physics、有目标）。
+   * 返回目标骨骼下标（合并显示后「点约束」语义上就是点它的节点骨）；没命中返回 -1。
+   * 公开给工具层用：准星要排在附件拾取前面（IK 节点常压在角色图片上）
+   */
+  constraintTargetIndexAt(worldX: number, worldY: number): number {
+    if (!this.bundle || !this.viewState.overlay.constraints) return -1
+    const tolerance = this.viewport.pixelsToWorld(10)
+    let best = -1
+    let bestDistance = tolerance
+    for (const constraint of this.bundle.asset.constraints) {
+      if (!constraint.enabled || constraint.type === 'physics') continue
+      const target = constraint.targetBoneIndex
+      if (target < 0 || target >= this.bundle.skeleton.boneCount) continue
+      const distance = Math.hypot(
+        this.bundle.skeleton.boneWorldX(target) - worldX,
+        this.bundle.skeleton.boneWorldY(target) - worldY
+      )
+      if (distance <= bestDistance) {
+        bestDistance = distance
+        best = target
+      }
+    }
+    return best
   }
 
   /**
    * 骨骼拾取：原点圈（移动）/ 骨骼体（旋转）。
    * 原点圈是屏幕恒定大小，按 zoom 换算成世界半径再判定；缩放走小坐标轴。
+   *
+   * 骨骼层关掉时**一律不命中**：看不见的操作区不该有反应（拖拽起点、悬停高亮同此），
+   * 此时骨架里唯一可点的是「约束」准星（见 pickBoneAt 的兜底），选中后走 gizmo 拖拽
    */
   pickBoneHandleAt(worldX: number, worldY: number): BoneHandleHit | null {
-    if (!this.bundle) return null
+    if (!this.bundle || !this.viewState.overlay.bones) return null
     return pickBoneHandle(
       this.bundle.skeleton,
       worldX,

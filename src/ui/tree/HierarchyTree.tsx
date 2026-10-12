@@ -1263,6 +1263,26 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     return { bones, slots, displays, constraints }
   }, [query, bonesByParent, slotsByBone, constraintsByBone, document])
 
+  /**
+   * 可见骨骼的扁平顺序（与行的渲染顺序一致：DFS、搜索筛掉的子树不进列表、
+   * 折叠的分支不进列表）。Shift 点选 = 从锚点到点中行做**范围**选中
+   * （Finder / 资源管理器的列表习惯），没有这个顺序就算不出「之间」有哪些行。
+   */
+  const visibleBoneOrder = useMemo(() => {
+    const names: string[] = []
+    const walk = (bone: AuthoringBone): void => {
+      if (filter && !filter.bones.has(bone.name)) return
+      names.push(bone.name)
+      if (!filter && collapsed.has(bone.name)) return
+      for (const child of bonesByParent.get(bone.name) ?? []) walk(child)
+    }
+    for (const root of bonesByParent.get('') ?? []) walk(root)
+    return names
+  }, [filter, collapsed, bonesByParent])
+
+  /** Shift 范围点选的锚点：最近一次不带 Shift 点中的骨骼行 */
+  const [anchorBone, setAnchorBone] = useState('')
+
   const rows: React.ReactNode[] = []
 
   const pushBone = (bone: AuthoringBone, depth: number): void => {
@@ -1308,12 +1328,29 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         expandable={hasChildren}
         expanded={expanded}
         onToggle={() => toggle(bone.name)}
-        // Shift / Cmd / Ctrl 点击 = 加选 / 减选（多选后可一起旋转 / 移动 / 缩放）
-        onSelect={(event) =>
-          event.shiftKey || event.metaKey || event.ctrlKey
-            ? selection.toggleBone(bone.name)
-            : selection.selectBone(bone.name)
-        }
+        // Shift 点击 = 从锚点到点中行做范围选中（bone_8 → bone_10 会带上中间的 bone_9）；
+        // Cmd/Ctrl 点击 = 加选 / 减选（多选后可一起旋转 / 移动 / 缩放）；普通点击 = 单选并重设锚点
+        onSelect={(event) => {
+          if (event.shiftKey) {
+            const anchor = anchorBone || selection.bone || visibleBoneOrder[0] || bone.name
+            const from = visibleBoneOrder.indexOf(anchor)
+            const to = visibleBoneOrder.indexOf(bone.name)
+            if (from < 0 || to < 0) {
+              selection.toggleBone(bone.name)
+              return
+            }
+            const [start, end] = from <= to ? [from, to] : [to, from]
+            // 主选中 = 点中的那根（放组末，检查器显示它）；锚点不动，可继续 Shift 扩选
+            selection.selectBones([
+              ...visibleBoneOrder.slice(start, end + 1).filter((name) => name !== bone.name),
+              bone.name
+            ])
+            return
+          }
+          setAnchorBone(bone.name)
+          if (event.metaKey || event.ctrlKey) selection.toggleBone(bone.name)
+          else selection.selectBone(bone.name)
+        }}
         // 拖到骨骼行 = 在这根骨骼下新建一个插槽
         onDropImage={(imageNames) => addSlotFromImage(bone.name, imageNames)}
         onContextMenu={(event) => openMenu(event, { kind: 'bone', name: bone.name, bone: bone.parent })}

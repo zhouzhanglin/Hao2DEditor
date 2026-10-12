@@ -1,6 +1,7 @@
 import { createAuthoringAttachment, createAuthoringSlot } from '@core/model/authoring'
 import type {
   AuthoringAttachment,
+  AuthoringConstraint,
   AuthoringSkin,
   AuthoringSkinSlot,
   AuthoringVertex,
@@ -1197,6 +1198,47 @@ export function deleteSlot(doc: EditorDocument, slotName: string): boolean {
     for (const key of anim.drawOrder) {
       if (key.order.includes(slotName)) key.order = key.order.filter((name) => name !== slotName)
     }
+  }
+  return true
+}
+
+/**
+ * 删除骨骼并连带删除整棵子树：目标骨骼 + 所有子孙骨骼（传递闭包）+ 这些骨骼上挂载的全部
+ * 插槽，以及引用了被删骨骼的约束（避免悬挂引用）。动画里的骨骼轨、约束轨随骨骼 / 约束清理，
+ * 插槽轨 / deform / drawOrder 由 deleteSlot 一并清掉。
+ *
+ * 与层级树右键「删除骨骼」、行尾删除按钮共用：取代原来「只删单骨 + 把直接子骨挂到根层」的
+ * 行为，满足「删除节点时连同它的子节点一起删除」。
+ */
+export function deleteBone(doc: EditorDocument, boneName: string): boolean {
+  if (!doc.bones.some((b) => b.name === boneName)) return false
+
+  // 传递闭包收集要删的骨骼（含目标本身）
+  const toDelete = new Set<string>()
+  const stack = [boneName]
+  while (stack.length) {
+    const cur = stack.pop()!
+    if (toDelete.has(cur)) continue
+    toDelete.add(cur)
+    for (const child of doc.bones) if (child.parent === cur) stack.push(child.name)
+  }
+
+  // 这些骨骼挂载的插槽（deleteSlot 会顺带清掉动画里的插槽轨 / deform / drawOrder）
+  const slotNames = doc.slots.filter((s) => toDelete.has(s.bone)).map((s) => s.name)
+
+  // 引用了被删骨骼的约束：IK 的 target，或 constraints.bones 任一
+  const isDangling = (c: AuthoringConstraint): boolean => {
+    if (c.type === 'ik' && toDelete.has(c.target)) return true
+    return c.bones.some((b) => toDelete.has(b))
+  }
+  const constraintNames = new Set(doc.constraints.filter(isDangling).map((c) => c.name))
+
+  doc.bones = doc.bones.filter((b) => !toDelete.has(b.name))
+  for (const slotName of slotNames) deleteSlot(doc, slotName)
+  doc.constraints = doc.constraints.filter((c) => !constraintNames.has(c.name))
+  for (const anim of doc.animations) {
+    anim.bones = anim.bones.filter((t) => !toDelete.has(t.bone))
+    anim.constraints = anim.constraints.filter((t) => !constraintNames.has(t.constraint))
   }
   return true
 }

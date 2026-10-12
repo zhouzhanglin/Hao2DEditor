@@ -30,6 +30,14 @@ import { useShallow } from 'zustand/react/shallow'
 const GIZMO_KEYS: Record<string, GizmoMode> = { w: 'move', e: 'rotate', r: 'scale', t: 'shear' }
 const GIZMO_LABEL: Record<GizmoMode, string> = { move: '移动', rotate: '旋转', scale: '缩放', shear: '斜切' }
 
+/** 当前焦点是否在可编辑文本元素内（输入框 / 文本域 / contentEditable） */
+function activeEditableElement(): HTMLElement | null {
+  const el = typeof document !== 'undefined' ? document.activeElement : null
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return el
+  if (el instanceof HTMLElement && el.isContentEditable) return el
+  return null
+}
+
 /**
  * V/B/M/G/D → 编辑工具（与视口工具面板一致）。
  * M 与 D 是同一个顶点工具的两种模式别名：Pose 态叫「网格」、Animate 态叫「FFD 顶点」。
@@ -93,6 +101,7 @@ import type { ExportMode } from '@ui/widgets/ExportDialog'
 import NewProjectDialog from '@ui/widgets/NewProjectDialog'
 import { deleteSelectedTrack, keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
 import { PPU, deleteMeshVertex } from '@editor/commands/authoringCommands'
+import { copySelection, pasteSelection, duplicateSelection } from '@editor/commands/clipboardCommands'
 
 export default function App() {
   const mode = useModeStore((s) => s.mode)
@@ -429,7 +438,40 @@ export default function App() {
         case 'edit:delete':
           flash('删除操作请使用层级树里的删除按钮')
           return
-        case 'view:fitViewport':
+        case 'edit:copy': {
+          // 焦点在输入框：交给浏览器原生文本复制，避免破坏文本编辑
+          if (activeEditableElement()) {
+            document.execCommand('copy')
+            return
+          }
+          const count = copySelection()
+          if (count > 0) flash(`已复制 ${count} 项`)
+          return
+        }
+        case 'edit:paste': {
+          if (activeEditableElement()) {
+            document.execCommand('paste')
+            return
+          }
+          const count = pasteSelection()
+          flash(count > 0 ? `已粘贴 ${count} 项` : '没有可粘贴的内容')
+          return
+        }
+        case 'edit:duplicate': {
+          if (activeEditableElement()) return
+          const count = duplicateSelection()
+          if (count > 0) flash(`已复制生成 ${count} 项`)
+          return
+        }
+        case 'edit:selectAll': {
+          if (activeEditableElement()) {
+            document.execCommand('selectAll')
+            return
+          }
+          const doc = useProjectStore.getState().document
+          if (doc.bones.length > 0) useSelectionStore.getState().selectBones(doc.bones.map((b) => b.name))
+          return
+        }
           getActiveScene()?.fit()
           flash('已适配视野')
           return
@@ -589,6 +631,15 @@ export default function App() {
       } else if (mod && event.key.toLowerCase() === 'z') {
         event.preventDefault()
         handleCommand(event.shiftKey ? 'edit:redo' : 'edit:undo')
+      } else if (mod && event.key.toLowerCase() === 'c') {
+        event.preventDefault()
+        handleCommand('edit:copy')
+      } else if (mod && event.key.toLowerCase() === 'v') {
+        event.preventDefault()
+        handleCommand('edit:paste')
+      } else if (mod && event.key.toLowerCase() === 'd') {
+        event.preventDefault()
+        handleCommand('edit:duplicate')
       }
     }
     window.addEventListener('keydown', onKeyDown)

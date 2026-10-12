@@ -93,6 +93,8 @@ export type MenuCommand =
   | 'edit:undo'
   | 'edit:redo'
   | 'edit:delete'
+  | 'edit:copy'
+  | 'edit:paste'
   | 'edit:duplicate'
   | 'edit:selectAll'
   | 'view:fitViewport'

@@ -26,6 +26,7 @@ import { useRevealStore } from '@editor/store/revealStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { useThrottledPlayheadTime } from '@editor/store/playheadStore'
+import { useTreeUiStore } from '@editor/store/treeUiStore'
 import { keySlotDisplayNow, keyframeTargetsNow } from '@editor/timeline/actions'
 import { CONSTRAINT_CHANNEL_LABEL, CONSTRAINT_CHANNELS, slotDisplayNameAt } from '@editor/timeline/model'
 import type { KeyframeTarget } from '@editor/timeline/model'
@@ -39,6 +40,7 @@ import {
   addImageDisplay,
   createRegionFromImage,
   deleteAttachment,
+  deleteBone,
   deleteSlot,
   toggleSlotDisplay
 } from '@editor/commands/authoringCommands'
@@ -553,7 +555,10 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   const document = useProjectStore((s) => s.document)
   const update = useProjectStore((s) => s.update)
   const selection = useSelectionStore()
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
+  // 折叠状态提升到 store（见 treeUiStore）：复制 / 直接复制生成新节点时要把源节点的折叠
+  // 状态照搬到新节点，而粘贴逻辑在 editor 层，需要共享这块 UI 状态。
+  const collapsed = useTreeUiStore((s) => s.collapsed)
+  const setCollapsed = useTreeUiStore((s) => s.setCollapsed)
   /** 搜索框内容：空 = 不过滤；有值时只显示命中节点 + 其祖先（根骨骼始终保留），并临时全展开 */
   const [query, setQuery] = useState('')
   /** 树列表容器：拖放兜底判定要用它量各行的位置 */
@@ -1134,9 +1139,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         return
       }
       update('删除骨骼', (draft) => {
-        draft.bones = draft.bones.filter((b) => b.name !== target.name)
-        for (const child of draft.bones) if (child.parent === target.name) child.parent = ''
-        draft.slots = draft.slots.filter((s) => s.bone !== target.name)
+        deleteBone(draft, target.name)
       })
     })
   })
@@ -1449,9 +1452,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           document.bones.length > 1
             ? poseOnly(() =>
                 update('删除骨骼', (draft) => {
-                  draft.bones = draft.bones.filter((b) => b.name !== bone.name)
-                  for (const child of draft.bones) if (child.parent === bone.name) child.parent = ''
-                  draft.slots = draft.slots.filter((s) => s.bone !== bone.name)
+                  deleteBone(draft, bone.name)
                 })
               )
             : undefined

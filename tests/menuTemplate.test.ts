@@ -16,11 +16,15 @@ const template = (isMac: boolean): MenuItemConstructorOptions[] =>
   buildMenuTemplate({ appName: 'Hao2D Editor', isMac, dispatch: () => undefined })
 
 describe('应用菜单模板', () => {
-  it('挂了标准编辑角色：输入框的剪切 / 复制 / 粘贴 / 全选全靠它们（macOS 由菜单派发）', () => {
+  it('编辑菜单：剪切/全选保留原生角色，拷贝/粘贴改为自定义命令（输入框文本复制仍由渲染进程转发原生）', () => {
     const roles = flatten(template(true))
       .map((entry) => entry.role)
       .filter(Boolean)
-    expect(roles).toEqual(expect.arrayContaining(['cut', 'copy', 'paste', 'selectAll']))
+    // 剪切 / 全选仍是标准角色，输入框的文本编辑不丢
+    expect(roles).toEqual(expect.arrayContaining(['cut', 'selectAll']))
+    // 拷贝 / 粘贴不再挂原生角色：改走 edit:copy / edit:paste 自定义命令（见菜单命令派发测试）
+    expect(roles).not.toContain('copy')
+    expect(roles).not.toContain('paste')
   })
 
   it('不带 ⌘/Ctrl 的加速键只作提示、不注册（否则会在输入框里抢键：空格变播放、Delete 删对象）', () => {
@@ -58,6 +62,9 @@ describe('应用菜单模板', () => {
     })
     for (const entry of flatten(items)) if (entry.click) (entry.click as () => void)()
     expect(commands).toContain('edit:undo')
+    expect(commands).toContain('edit:copy')
+    expect(commands).toContain('edit:paste')
+    expect(commands).toContain('edit:duplicate')
     expect(commands).toContain('project:save')
     expect(commands).toContain('anim:playPause')
   })

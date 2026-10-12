@@ -73,10 +73,14 @@ export function buildMenuTemplate(options: MenuTemplateOptions): MenuItemConstru
       item('撤销', 'edit:undo', 'CmdOrCtrl+Z'),
       item('重做', 'edit:redo', 'CmdOrCtrl+Shift+Z'),
       { type: 'separator' },
-      // 标准编辑角色：输入框的 ⌘X / ⌘C / ⌘V / ⌘A 全靠这几项（见文件头注释 1）
+      // 拷贝 / 粘贴改成自定义命令：组合键在渲染进程里按上下文分流——
+      // 焦点在输入框时走浏览器原生文本复制（见 App 的 edit:copy / edit:paste），
+      // 否则复制 / 粘贴层级节点或关键帧。剪切 / 全选仍用标准角色，避免自实现文本编辑。
+      item('拷贝', 'edit:copy', 'CmdOrCtrl+C'),
+      item('粘贴', 'edit:paste', 'CmdOrCtrl+V'),
+      item('复制生成', 'edit:duplicate', 'CmdOrCtrl+D'),
+      { type: 'separator' },
       { role: 'cut', label: '剪切' },
-      { role: 'copy', label: '拷贝' },
-      { role: 'paste', label: '粘贴' },
       { role: 'selectAll', label: '全选' },
       { type: 'separator' },
       item('删除', 'edit:delete', 'Delete')

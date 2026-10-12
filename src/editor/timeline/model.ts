@@ -282,6 +282,65 @@ export function deleteKeys(doc: EditorDocument, animationName: string | null, se
   })
 }
 
+/** 粘贴关键帧时的一条：原始选择器（定位通道）+ 深拷贝的帧值 + 目标时间；display 通道需附带附件名 */
+export interface PasteKeyEntry {
+  selector: KeySelector
+  frame: AnyKeyframe
+  /** 仅 display 通道用：与 displayIndex 并行的附件名（运行期按名字解析显示项） */
+  displayName?: string
+  time: number
+}
+
+/**
+ * 把一组关键帧写入目标动画（按骨骼 / 插槽名匹配轨道）。
+ *
+ * 与 `editFrameTimes` 的区别：这里是**从已有帧拷贝值**，保留 easing / curve / value /
+ * 事件参数 / 绘制顺序等全部字段；而打帧是从运行态姿态取值。display 通道的「帧 + 附件名」
+ * 并行数组一并成对写入，避免名字错位（运行期显示成别的附件）。
+ * 同一时间点用 `upsertKeyframe` 覆盖 —— 直接粘贴到原位置即原地更新，不会叠加重复帧。
+ */
+export function pasteKeyframes(
+  doc: EditorDocument,
+  animationName: string | null,
+  entries: readonly PasteKeyEntry[]
+): number {
+  const animation = doc.animations.find((item) => item.name === animationName)
+  if (!animation) return 0
+  let count = 0
+  for (const entry of entries) {
+    const sel = entry.selector
+    if (sel.kind === 'slot' && sel.channel === 'display') {
+      const track = animation.slots.find((item) => item.slot === sel.target)
+      if (!track) continue
+      const time = entry.time
+      const value = (entry.frame.value as number) ?? 0
+      const easing = (entry.frame.easing as Easing) ?? Easing.Stepped
+      // 与 keySlotDisplay 同样的「帧 + 名字」成对维护，避免排序时错位
+      const pairs = track.displayIndex.map((frame, index) => ({ frame, name: track.displayAttachment[index] ?? '' }))
+      const existing = pairs.find((pair) => Math.abs(pair.frame.time - time) < 1e-4)
+      if (existing) {
+        existing.frame = { time, value, easing, curve: entry.frame.curve ?? null }
+        existing.name = entry.displayName ?? ''
+      } else {
+        pairs.push({ frame: { time, value, easing, curve: entry.frame.curve ?? null }, name: entry.displayName ?? '' })
+      }
+      pairs.sort((left, right) => left.frame.time - right.frame.time)
+      track.displayIndex = pairs.map((pair) => pair.frame)
+      track.displayAttachment = pairs.map((pair) => pair.name)
+      count++
+      continue
+    }
+    const frames = resolveTimeFrames(animation, sel)
+    if (!frames) continue
+    const copy: AnyKeyframe = { ...entry.frame, time: entry.time }
+    upsertKeyframe(frames, copy)
+    count++
+  }
+  pruneEmptyTracks(animation)
+  syncDuration(animation)
+  return count
+}
+
 /** 平移选中的关键帧（拖拽）：只改时间，保持排序；拖出原时长会自动延长动画 */
 export function moveKeys(
   doc: EditorDocument,

@@ -116,6 +116,8 @@ interface TreeRowProps {
   focusTarget?: FocusTarget
   /** 骨骼行用 `data-bone` 标出名字：定位（滚过来 + 闪一下）靠它查这一行 */
   dataBone?: string
+  /** display 行用 `data-attachment` 标出附件名：选中附件时按「插槽 + 附件」定位到这一行 */
+  dataAttachment?: string
   /** 非 0 时整行闪一下（定位请求；父组件 900ms 后清 0，靠这个开关重启动画） */
   flashKey?: number
 }
@@ -149,6 +151,7 @@ function TreeRow({
   onContextMenu,
   onDropImage,
   dataSlot,
+  dataAttachment,
   dragPayload,
   onDropNode,
   focusTarget,
@@ -189,6 +192,7 @@ function TreeRow({
       title={title}
       data-slot={dataSlot}
       data-bone={dataBone}
+      data-attachment={dataAttachment}
       onClick={onSelect}
       onDoubleClick={
         focus
@@ -559,12 +563,31 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   const revealNonce = useRevealStore((s) => s.nonce)
   const handledReveal = useRef(0)
   /**
-   * 正在闪烁的骨骼行（整行蓝底，见 `.hao-reveal-flash`）。
-   *
-   * 闪烁靠「加类 → 900ms 后清掉」这个开关重播动画，所以同一根骨骼在闪烁途中被再次
-   * 定位时不会从头发一遍 —— 那会儿它本来就还是蓝的，重新滚动到位已经足够。
+   * 正在闪烁的行（整行蓝底，见 `.hao-reveal-flash`）。三个来源：
+   * - 检查器的「定位」请求（force：无论可见与否都滚过来 + 闪）
+   * - **树外选中**（视口 / 时间轴 / 插槽面板…）：行不在可见区域时滚过去并闪一下；
+   *   行本来就可见则什么都不做 —— 树内点击同样走这里，零噪音
    */
-  const [flash, setFlash] = useState<{ name: string; nonce: number } | null>(null)
+  const [flash, setFlash] = useState<{
+    kind: 'bone' | 'slot' | 'display'
+    name: string
+    /** display 行还要配对插槽（不同插槽可能有同名附件） */
+    slot?: string
+    nonce: number
+    force?: boolean
+  } | null>(null)
+  const flashNonceRef = useRef(0)
+
+  /** 在已渲染的行里找闪烁目标（attribute 选择器与行的 data-* 一一对应） */
+  const findFlashRow = (target: NonNullable<typeof flash>): Element | null => {
+    const list = listRef.current
+    if (!list) return null
+    if (target.kind === 'bone') return list.querySelector(`[data-bone="${CSS.escape(target.name)}"]`)
+    if (target.kind === 'slot') return list.querySelector(`[data-slot="${CSS.escape(target.name)}"]`)
+    return list.querySelector(
+      `[data-slot="${CSS.escape(target.slot ?? '')}"][data-attachment="${CSS.escape(target.name)}"]`
+    )
+  }
 
   /**
    * 收到定位请求：清掉搜索过滤、展开祖先链，并记下要闪的那一行。
@@ -587,14 +610,72 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       }
       return next
     })
-    setFlash({ name: revealTarget, nonce: revealNonce })
+    setFlash({ kind: 'bone', name: revealTarget, nonce: revealNonce, force: true })
   }, [revealTarget, revealNonce])
+
+  /**
+   * 树外选中（视口点击 / 时间轴轨道 / 插槽面板 / 检查器联动）跟随：
+   * 对应行**不在可见区域**时展开祖先、滚过去并亮一下；已在可见区域就什么都不做 ——
+   * 树内点击走同一个 effect，不能每点一下都闪。
+   */
+  useEffect(() => {
+    let kind:
+      | { kind: 'bone'; name: string }
+      | { kind: 'slot'; name: string }
+      | { kind: 'display'; name: string; slot: string }
+      | null =
+      selection.kind === 'bone' && selection.bone
+        ? { kind: 'bone', name: selection.bone }
+        : selection.kind === 'slot' && selection.slot
+          ? { kind: 'slot', name: selection.slot }
+          : selection.kind === 'attachment' && selection.slot && selection.attachment
+            ? { kind: 'display', name: selection.attachment, slot: selection.slot }
+            : null
+    // 约束没有自己的行：寄宿在宿主骨上（IK = 目标骨，变换 / 路径 = 第一根驱动骨，物理 = 驱动骨）
+    if (!kind && selection.kind === 'constraint' && selection.constraint) {
+      const constraint = document.constraints.find((item) => item.name === selection.constraint)
+      const host = constraint ? constraintHost(constraint) : ''
+      if (host) kind = { kind: 'bone', name: host }
+    }
+    if (!kind) return
+
+    // 行已渲染且完全在可见区域内 → 不滚动也不闪（点树里的行就是这种情况）
+    const row = findFlashRow({ kind: kind.kind, name: kind.name, slot: 'slot' in kind ? kind.slot : undefined, nonce: 0 })
+    if (row) {
+      const list = listRef.current
+      const listRect = list?.getBoundingClientRect()
+      const rowRect = row.getBoundingClientRect()
+      if (listRect && rowRect.top >= listRect.top - 1 && rowRect.bottom <= listRect.bottom + 1) return
+    }
+
+    // 展开祖先链（骨骼父链 / 插槽宿主 / display 的宿主插槽），再交给滚动 effect 滚过去
+    const bones = useProjectStore.getState().document.bones
+    const slots = useProjectStore.getState().document.slots
+    const hostBone =
+      kind.kind === 'bone'
+        ? kind.name
+        : kind.kind === 'slot'
+          ? (slots.find((item) => item.name === kind.name)?.bone ?? '')
+          : (slots.find((item) => item.name === kind.slot)?.bone ?? '')
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (kind.kind === 'display' && kind.slot) next.delete(`slot:${kind.slot}`)
+      let parent = bones.find((bone) => bone.name === hostBone)?.parent ?? ''
+      while (parent) {
+        next.delete(parent)
+        parent = bones.find((bone) => bone.name === parent)?.parent ?? ''
+      }
+      return next
+    })
+    flashNonceRef.current += 1
+    setFlash({ ...kind, nonce: flashNonceRef.current })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection.kind, selection.bone, selection.slot, selection.attachment, selection.constraint])
 
   /** 行渲染出来之后再滚动（上面那批状态已生效），闪完自动收尾 */
   useEffect(() => {
     if (!flash) return
-    const row = listRef.current?.querySelector(`[data-bone="${CSS.escape(flash.name)}"]`)
-    row?.scrollIntoView({ block: 'nearest' })
+    findFlashRow(flash)?.scrollIntoView({ block: 'nearest' })
     const timer = window.setTimeout(
       () => setFlash((current) => (current && current.nonce === flash.nonce ? null : current)),
       900
@@ -1425,6 +1506,11 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         meta={showing ? (isMeshType(attachment.type) ? '显示中 · 网格' : '显示中') : isMeshType(attachment.type) ? '网格' : undefined}
         // display 行也算宿主插槽的地盘：拖到插槽下面（含子行）都是「给这个插槽加 display」
         dataSlot={slot.name}
+        // 选中附件（视口 / 检查器）时按「插槽 + 附件」定位到这一行（同名附件可能出现在多个插槽）
+        dataAttachment={attachment.name}
+        flashKey={
+          flash?.kind === 'display' && flash.name === attachment.name && flash.slot === slot.name ? flash.nonce : 0
+        }
         onDropImage={(imageNames) => addDisplay(slot.name, imageNames)}
         // 点**前面的小图标** = 切换显示 / 隐藏（图标就是这个开关），点文字只选中不改显示
         onIconClick={() => selectDisplay(slot.name, attachment.name)}
@@ -1468,6 +1554,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         depth={depth}
         label={slot.name}
         title={slotRowTitle(slot, displays.length, showing)}
+        flashKey={flash?.kind === 'slot' && flash.name === slot.name ? flash.nonce : 0}
         active={selection.kind === 'slot' && selection.slot === slot.name}
         icon={
           <span

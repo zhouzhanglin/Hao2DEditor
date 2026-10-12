@@ -12,6 +12,9 @@ import { registerLooseImages } from '@importers/looseImages'
 import { ASSET_DIR, copyAssets, planAssetCopies, resolveImagePaths } from './projectAssets'
 import type { AtlasRegion, PageSizes } from '@importers/uv'
 import { DEFAULT_PROJECT_NAME, useProjectStore } from '../store/projectStore'
+import { useModeStore } from '../store/modeStore'
+import { useTimelineStore } from '../store/timelineStore'
+import { getActiveScene } from '../activeScene'
 import { releaseDocumentAssets } from './assetCache'
 
 export interface IoResult {
@@ -386,6 +389,18 @@ function finishImport(
   useProjectStore.getState().setDocument(document, null, true)
   // 一上来就导入、工程还没名字：用被导入文件的名字当项目名（导出产物都跟它走）
   adoptProjectNameFromImport(sourcePath)
+  // 导入（整份替换骨架）后：回到 Pose（绑定）态、清空时间轴选中的动画，
+  // 并把视口复位到「原点居中」——空场景默认缩放 100%，有内容时按包围盒适配到合适大小。
+  // 菜单与拖入两条导入路都汇聚到这里，统一处理，避免各入口行为不一致。
+  useTimelineStore.getState().setAnimation(null)
+  useModeStore.getState().setMode('pose')
+  // 先 refresh 让新骨架的网格几何（meshResult.bounds）建好，否则 fit 读到的是旧/空包围盒，
+  // 缩放会退化成默认值而非适配内容
+  const scene = getActiveScene()
+  if (scene) {
+    scene.refresh()
+    scene.fit()
+  }
   return document
 }
 

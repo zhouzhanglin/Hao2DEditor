@@ -371,13 +371,20 @@ export default function App() {
   /** 「新建项目」弹窗：项目名与保存位置都要用户确认（项目名不能为空） */
   const [newProjectOpen, setNewProjectOpen] = useState(false)
 
-  /** 弹窗确认：清空工程 → 记住项目名与保存位置 → 立刻写出工程文件 → 视口复位 */
+  /** 弹窗确认：清空工程 → 记住项目名与保存位置 → 立刻写出工程文件 → 回 Pose 态 + 视口复位 */
   const createProject = useCallback(
     (name: string, dir: string) => {
       setNewProjectOpen(false)
-      run(createProjectAt(name, dir)).then(resetSceneView)
+      const task = createProjectAt(name, dir)
+      run(task, '正在新建项目…')
+      task.then((result) => {
+        if (!result.ok) return
+        // 新建后回到 Pose（绑定）态，视口原点居中、缩放 100%（空场景默认即 PPU）
+        setMode('pose')
+        resetSceneView()
+      })
     },
-    [run, resetSceneView]
+    [run, resetSceneView, setMode]
   )
 
   const handleCommand = useCallback(
@@ -484,7 +491,7 @@ export default function App() {
           flash('该命令将在对应模块接入后生效')
       }
     },
-    [doc.frameRate, flash, mode, run, setMode]
+    [doc.frameRate, flash, mode, run, setMode, resetSceneView]
   )
 
   useEffect(() => {

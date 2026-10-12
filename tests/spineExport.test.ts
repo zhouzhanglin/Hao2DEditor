@@ -4,8 +4,16 @@ import { RUNTIME_PPU } from '@core/codec/runtimeSkeJson'
 import type { RuntimeAsset } from '@core/model/asset'
 import type { SpineJson, SpineSkinJson } from '@importers/spineTypes'
 import type { AtlasRegion } from '@importers/uv'
-import { buildSpineJson } from '@editor/services/spineExport'
+import {
+  buildSpineJson,
+  collectRegionTrim,
+  serializeSpineAtlas,
+  spineAtlasRegionNames
+} from '@editor/services/spineExport'
 import type { SpineRegionLookup } from '@editor/services/spineExport'
+import { createAttachmentData } from '@core/model/types'
+import { createRuntimeAsset } from '@core/model/asset'
+import type { RuntimeAtlasJson, RuntimeAtlasRegion } from '@core/codec/runtimeSkeJson'
 
 /**
  * Spine 4.x 导出的两个易错点：
@@ -250,5 +258,201 @@ describe('mesh uvs 导出为区域相对坐标', () => {
       })
     )
     for (const [i, value] of RELATIVE_UVS.entries()) expect(uvs[i]).toBeCloseTo(value, 4)
+  })
+})
+
+/**
+ * `.atlas` 文本要能被 spine-unity 直接吃下，三处是踩过的坑：
+ * - 区域名以图片后缀结尾 → `SpineAtlasAsset.CreateRuntimeInstance` 按「行尾是图片后缀」找页，
+ *   会把它当成新的一页，材质数与区域归属全乱；
+ * - 老语法（`xy:` / `size:` / `orig:` / `offset:` / `index:`）该换成 4.2+ 的 `bounds:` / `offsets:`；
+ * - DB 导入的工程把裁剪放在附件上，`.atlas` 不写 `offsets` 就丢裁剪，那几个 sprite 在 Unity 里偏几像素。
+ */
+function atlasFixture(): RuntimeAtlasJson {
+  return {
+    format: 'hao2d-atlas',
+    version: 1,
+    pages: [
+      { image: 'Sheep_0.png', width: 1024, height: 512 },
+      { image: 'Sheep_1.png', width: 256, height: 256 }
+    ],
+    regions: [
+      { name: 'head', page: 0, x: 10, y: 20, width: 30, height: 40 },
+      {
+        name: 'beak',
+        page: 0,
+        x: 50,
+        y: 60,
+        width: 39,
+        height: 14,
+        origWidth: 73,
+        origHeight: 53,
+        offsetX: 24,
+        offsetY: 5
+      },
+      { name: 'wing', page: 1, x: 1, y: 2, width: 8, height: 9, rotate: 90 }
+    ]
+  }
+}
+
+function renameRegions(atlas: RuntimeAtlasJson, names: Map<string, string>): RuntimeAtlasJson {
+  return { ...atlas, regions: atlas.regions.map((r) => ({ ...r, name: names.get(r.name) ?? r.name })) }
+}
+
+describe('.atlas 文本对齐 4.2+ 语法', () => {
+  it('写 bounds:/offsets:，不写 xy/size/orig/offset/index/全局 scale', () => {
+    const text = serializeSpineAtlas(atlasFixture())
+    expect(text).toBe(
+      [
+        'Sheep_0.png',
+        '\tsize: 1024, 512',
+        '\tfilter: Linear, Linear',
+        'head',
+        '\tbounds: 10, 20, 30, 40',
+        'beak',
+        '\tbounds: 50, 60, 39, 14',
+        '\toffsets: 24, 5, 73, 53',
+        '',
+        'Sheep_1.png',
+        '\tsize: 256, 256',
+        '\tfilter: Linear, Linear',
+        'wing',
+        '\tbounds: 1, 2, 8, 9',
+        '\trotate: 90',
+        ''
+      ].join('\n')
+    )
+    expect(text).not.toMatch(/\torig:/)
+    expect(text).not.toMatch(/\toffset:/)
+    expect(text).not.toMatch(/\tindex:/)
+    expect(text).not.toMatch(/^scale:/m)
+    expect(text).not.toMatch(/rotate: true/)
+  })
+
+  it('页之间留空行（Spine 靠空行切页，缺了第二页页名会变成上一页的区域名）', () => {
+    const lines = serializeSpineAtlas(atlasFixture()).split('\n')
+    expect(lines[lines.indexOf('Sheep_1.png') - 1]).toBe('')
+  })
+
+  it('区域名去掉图片后缀，重名时加序号（页名保持原样）', () => {
+    const atlas = atlasFixture()
+    atlas.regions.push({ name: 'Sheep_0.png', page: 0, x: 0, y: 0, width: 1024, height: 512 })
+    atlas.regions.push({ name: 'head.PNG', page: 0, x: 1, y: 1, width: 2, height: 2 })
+    const names = spineAtlasRegionNames(atlas)
+    expect(names.get('Sheep_0.png')).toBe('Sheep_0')
+    expect(names.get('head.PNG')).toBe('head_1')
+    expect(names.has('head')).toBe(false)
+
+    const text = serializeSpineAtlas(renameRegions(atlas, names))
+    // 只有真正的图集页名才以 .png 结尾
+    expect(text.split('\n').filter((line) => /\.png$/i.test(line))).toEqual(['Sheep_0.png', 'Sheep_1.png'])
+    expect(text).toContain('Sheep_0\n\tbounds: 0, 0, 1024, 512')
+  })
+
+  it('附件 path 跟着区域改名（查表仍用原名）', () => {
+    const att = createAttachmentData({ name: 'head', size: { x: 0.3, y: 0.4 }, textureName: 'head.PNG' })
+    const asset = createRuntimeAsset({
+      skins: [{ name: 'default', slots: [{ slotName: 'head', attachments: [att] }] }]
+    })
+    const lookup: SpineRegionLookup = {
+      regions: new Map([
+        [
+          'head.PNG',
+          {
+            name: 'head.PNG',
+            page: 'Sheep_0.png',
+            x: 10,
+            y: 20,
+            width: 30,
+            height: 40,
+            rotate: 0,
+            origWidth: 30,
+            origHeight: 40,
+            offsetX: 0,
+            offsetY: 0
+          }
+        ]
+      ]),
+      pageSizes: { 'Sheep_0.png': { width: 1024, height: 512 } },
+      names: new Map([['head.PNG', 'head']])
+    }
+    const json = buildSpineJson(asset, lookup)
+    const skins = json.skins as SpineSkinJson[]
+    expect(skins[0].attachments?.head?.head?.path).toBe('head')
+  })
+})
+
+describe('DB 附件上的裁剪回填进 .atlas', () => {
+  // 取自 DragonBones 的 Rooster 下嘴：帧 73×53 / 区域 39×14 / frameX=-24, frameY=-34
+  const REGION: RuntimeAtlasRegion = { name: 'beak_lower', page: 0, x: 50, y: 60, width: 39, height: 14 }
+
+  function atlasWith(region: RuntimeAtlasRegion): RuntimeAtlasJson {
+    return {
+      format: 'hao2d-atlas',
+      version: 1,
+      pages: [{ image: 'Rooster_Ani_tex.png', width: 1024, height: 1024 }],
+      regions: [region]
+    }
+  }
+
+  function assetWith(...attachments: ReturnType<typeof createAttachmentData>[]) {
+    return createRuntimeAsset({
+      skins: [{ name: 'default', slots: [{ slotName: 'beak_lower', attachments }] }]
+    })
+  }
+
+  /** DB 导入的形态：size = 裁剪后尺寸，frameSize = 原图尺寸，contentOffset = 内容中心相对原图中心 */
+  function dbAttachment(partial: Partial<ReturnType<typeof createAttachmentData>> = {}) {
+    return createAttachmentData({
+      name: 'beak_lower',
+      textureName: 'beak_lower',
+      size: { x: 0.39, y: 0.14 },
+      frameSize: { x: 0.73, y: 0.53 },
+      contentOffset: { x: 0.07, y: -0.145 },
+      ...partial
+    })
+  }
+
+  it('按官方 ComputeUVs 反解 offsets（offsetY 是距原图底边，不是距顶边）', () => {
+    const { trim, conflicts } = collectRegionTrim(assetWith(dbAttachment()), atlasWith(REGION))
+    expect(conflicts).toEqual([])
+    expect(trim.get('beak_lower')).toEqual({ origWidth: 73, origHeight: 53, offsetX: 24, offsetY: 5 })
+  })
+
+  it('区域自带裁剪时以区域为准（Spine 图集导入的工程不回推）', () => {
+    const trimmed = { ...REGION, origWidth: 73, origHeight: 53, offsetX: 24, offsetY: 5 }
+    expect(collectRegionTrim(assetWith(dbAttachment()), atlasWith(trimmed)).trim.size).toBe(0)
+  })
+
+  it('区域尺寸与附件对不上（倍率导出 / 重新打包）时不回推', () => {
+    const scaled = { ...REGION, width: 20, height: 7 }
+    expect(collectRegionTrim(assetWith(dbAttachment()), atlasWith(scaled)).trim.size).toBe(0)
+  })
+
+  it('没裁剪的附件不回推', () => {
+    const flat = dbAttachment({ frameSize: { x: 0.39, y: 0.14 }, contentOffset: { x: 0, y: 0 } })
+    expect(collectRegionTrim(assetWith(flat), atlasWith(REGION)).trim.size).toBe(0)
+  })
+
+  it('同一块区域被不同裁剪引用时报冲突，宁可不写', () => {
+    const other = dbAttachment({ name: 'beak_lower_2', contentOffset: { x: 0.1, y: -0.145 } })
+    const { trim, conflicts } = collectRegionTrim(assetWith(dbAttachment(), other), atlasWith(REGION))
+    expect(conflicts).toEqual(['beak_lower'])
+    expect(trim.size).toBe(0)
+  })
+
+  it('裁剪过的附件在 json 里写原图尺寸（否则 Spine 的 regionScale 会把内容缩小一圈）', () => {
+    const json = buildSpineJson(assetWith(dbAttachment()))
+    const skins = json.skins as SpineSkinJson[]
+    const written = skins[0].attachments?.beak_lower?.beak_lower
+    expect(written?.width).toBe(73)
+    expect(written?.height).toBe(53)
+
+    // 没裁剪的附件仍是区域尺寸
+    const plain = buildSpineJson(
+      assetWith(dbAttachment({ frameSize: { x: 0, y: 0 }, contentOffset: { x: 0, y: 0 } }))
+    )
+    const plainSkins = plain.skins as SpineSkinJson[]
+    expect(plainSkins[0].attachments?.beak_lower?.beak_lower?.width).toBe(39)
   })
 })

@@ -144,6 +144,23 @@ function buildSlots(asset: RuntimeAsset): SpineSlotJson[] {
 export interface SpineRegionLookup {
   regions: Map<string, AtlasRegion>
   pageSizes: PageSizes
+  /**
+   * 区域改名表（原名 → 写进 `.atlas` 的名字），由 `spineAtlasRegionNames` 给出。
+   * 附件查表仍用**原名**，但写进 json 的 `path` 必须用新名，两边不一致 Spine 就找不到区域。
+   */
+  names?: Map<string, string>
+}
+
+/** 附件在图集里的区域名（原名，查表用） */
+function regionSource(att: AttachmentData): string | undefined {
+  return att.regionName ?? att.textureName
+}
+
+/** 附件写进 json 的 `path`：区域改过名时跟着改（见 `SpineRegionLookup.names`） */
+function regionPath(att: AttachmentData, lookup?: SpineRegionLookup): string | undefined {
+  const source = regionSource(att)
+  if (!source) return source
+  return lookup?.names?.get(source) ?? source
 }
 
 /** 把运行期图集（页 + 区域）转成导出侧查表用的区域表 */
@@ -173,8 +190,16 @@ export function buildRegionLookup(atlas: RuntimeAtlasJson): SpineRegionLookup {
   }
 }
 
+/** 单位 → 像素，顺手抹平浮点噪声（`frameSize` 是 px/100 存下来的，0.73×100 = 72.999…） */
+function toPixels(units: number): number {
+  const px = units * RUNTIME_PPU
+  const rounded = Math.round(px)
+  return Math.abs(px - rounded) < 1e-6 ? rounded : px
+}
+
 function spineAttachment(att: AttachmentData, lookup?: SpineRegionLookup): SpineAttachmentJson {
-  const path = att.regionName ?? att.textureName
+  const source = regionSource(att)
+  const path = regionPath(att, lookup)
   const base: SpineAttachmentJson = {
     name: att.name,
     path,
@@ -187,8 +212,20 @@ function spineAttachment(att: AttachmentData, lookup?: SpineRegionLookup): Spine
   }
   if (att.type === AttachmentType.Region) {
     base.type = 'region'
-    base.width = att.size.x * RUNTIME_PPU
-    base.height = att.size.y * RUNTIME_PPU
+    /*
+     * 这里写**原图（未裁剪）尺寸**，不是图集区域尺寸。
+     *
+     * Spine 官方 `RegionAttachment.ComputeUVs` 用 `regionScale = width / originalWidth` 把
+     * json 宽高换算回图集区域尺寸，再按区域的 offsets 把内容摆回原图里：
+     *   localX  = -width/2 + offsetX * regionScale
+     *   localX2 = localX + regionWidth * regionScale
+     * 只有 `width` == `originalWidth` 时 regionScale 才是 1、四边形才正好等于区域尺寸。
+     * 裁剪过的附件若仍写区域尺寸，Unity 端会被 regionScale 缩小一圈（DB 的 Rooster 下嘴
+     * 区域 39×14 挤在 73×53 的帧里，就只剩一半大小）。
+     * 未裁剪时 frameSize == size（老工程/手工附件是 0），取 max 即原行为。
+     */
+    base.width = toPixels(Math.max(att.size.x, att.frameSize.x))
+    base.height = toPixels(Math.max(att.size.y, att.frameSize.y))
     return base
   }
   if (att.type === AttachmentType.BoundingBox) {
@@ -208,7 +245,8 @@ function spineAttachment(att: AttachmentData, lookup?: SpineRegionLookup): Spine
   base.type = 'mesh'
   // Spine 的 mesh uvs 是**区域相对**坐标（v=0 指向区域顶边，官方 MeshAttachment.ComputeUVs 会
   // 再乘上区域尺寸），编辑器运行期存的是整页归一化 UV，这里必须换回去，否则 Unity 端取图整体错位。
-  const region = lookup && path ? lookup.regions.get(path) : undefined
+  // 查表用区域**原名**：区域改名只影响 .atlas 里的名字，UV 换算要的是那块矩形本身。
+  const region = lookup && source ? lookup.regions.get(source) : undefined
   base.uvs =
     region && lookup
       ? Array.from(pageUvsToRegionRelative(att.uvs, region, lookup.pageSizes))
@@ -727,40 +765,163 @@ function computeHash(text: string): string {
   return hash.toString(16).padStart(8, '0')
 }
 
-/** 把运行期图集（页 + 区域）写成 Spine `.atlas` 文本。
- *  - 每个图集页照原样落盘（区域里的子 sprite 也一并写出，而不是把整页当一块）；
- *  - 区域带旋转 / 原图尺寸 / 裁剪偏移，Spine 运行库据此还原每个 sprite 的取图矩形。 */
-export function serializeSpineAtlas(atlas: RuntimeAtlasJson): string {
-  const lines: string[] = ['scale: 1']
-  for (const page of atlas.pages) {
-    lines.push(page.image)
-    lines.push(`size: ${page.width}, ${page.height}`)
-    lines.push('filter: Linear,Linear')
-    lines.push('repeat: none')
+/** 图片文件后缀：区域名一旦带上它，spine-unity 就会把这行当成图集页 */
+const IMAGE_EXT_RE = /\.(png|jpe?g|webp|bmp|tga|gif|tiff?)$/i
+
+/**
+ * 区域改名表（原名 → 写进 `.atlas` 的名字）：区域名不能长得像图片文件名。
+ *
+ * spine-unity 的 `SpineAtlasAsset.CreateRuntimeInstance` 是按「行尾是图片后缀」找图集页的
+ * （它要据此组装 material 列表），所以一个叫 `Sheep_tex.png` 的区域会被当成新的一页，
+ * 页与区域的对应关系全乱：材质数对不上、后面的区域全挂到前一页。
+ * 编辑器里「整页当一块区域」的兜底区域正是拿页文件名当区域名（exportService 的 `name: page.image`），
+ * 这里统一把后缀摘掉；摘完重名时加序号，避免把两块区域压成同名。
+ */
+export function spineAtlasRegionNames(atlas: RuntimeAtlasJson): Map<string, string> {
+  const renamed = new Map<string, string>()
+  const used = new Set(atlas.regions.map((region) => region.name))
+  for (const region of atlas.regions) {
+    if (!IMAGE_EXT_RE.test(region.name)) continue
+    const stem = region.name.replace(IMAGE_EXT_RE, '') || 'region'
+    let name = stem
+    for (let i = 1; used.has(name); i++) name = `${stem}_${i}`
+    used.delete(region.name)
+    used.add(name)
+    renamed.set(region.name, name)
   }
+  return renamed
+}
+
+/** Spine `.atlas` 的裁剪四项（区域语义见 `serializeSpineAtlas`） */
+interface RegionTrim {
+  origWidth: number
+  origHeight: number
+  offsetX: number
+  offsetY: number
+}
+
+/**
+ * 收集「图集区域里没写、附件里却带着」的裁剪信息。
+ *
+ * DragonBones 导入的工程把裁剪记在附件上（`frameSize` = 原图尺寸，`contentOffset` = 内容中心
+ * 相对原图中心的偏移），图集区域则写成裁剪后的中性值（orig = 区域尺寸、offset = 0，
+ * 见 dragonBones.ts）。而 Spine 这边 `.atlas` 是裁剪信息的**唯一**载体：区域只描述「页里这块
+ * 矩形」，原图多大、内容落在原图哪里必须由 `offsets` 交代 —— 否则那几个被裁过的 sprite
+ * 在 Unity 里会整体偏几像素。所以导出前把附件上的裁剪反解回 Spine 语义：
+ *
+ *   官方 `RegionAttachment.ComputeUVs`（regionScale = 1，即 json 宽高 = 原图尺寸时）：
+ *     localX = -origW/2 + offsetX          内容中心 x = localX + packedW/2
+ *     localY = -origH/2 + offsetY          内容中心 y = localY + packedH/2
+ *   注意 localY 配的是区域**下**边（offsets[BLY]），即 offsetY 是「距原图底边多远」。
+ *   与 contentOffset（y 向上为正、相对原图中心）对齐：
+ *     offsetX = contentOffset.x + (origW - packedW)/2
+ *     offsetY = contentOffset.y + (origH - packedH)/2
+ *   拿 DB 的 Rooster 下嘴验算：帧 73×53 / 区域 39×14 / frameX=-24, frameY=-34
+ *     → contentOffset = (7, -14.5) → offsets = (24, 5)：左裁 24、距底边 5，与美术一致。
+ */
+export function collectRegionTrim(
+  asset: RuntimeAsset,
+  atlas: RuntimeAtlasJson
+): { trim: Map<string, RegionTrim>; conflicts: string[] } {
+  const trim = new Map<string, RegionTrim>()
+  const conflicts: string[] = []
+  const regionByName = new Map(atlas.regions.map((region) => [region.name, region]))
+  for (const skin of asset.skins) {
+    for (const slot of skin.slots) {
+      for (const att of slot.attachments) {
+        if (att.type !== AttachmentType.Region) continue
+        const name = regionSource(att)
+        if (!name) continue
+        const region = regionByName.get(name)
+        if (!region) continue
+        // 区域自带裁剪（Spine 图集导入的工程）→ 以区域为准，不回推
+        if (
+          (region.origWidth ?? 0) > region.width ||
+          (region.origHeight ?? 0) > region.height ||
+          (region.offsetX ?? 0) !== 0 ||
+          (region.offsetY ?? 0) !== 0
+        ) {
+          continue
+        }
+        // 旋转过的区域，宽高是页内摆放方向，跟裁剪尺寸对不上，跳过
+        if (region.rotate) continue
+        const derived = regionTrimOf(att, region)
+        if (!derived) continue
+        const prev = trim.get(name)
+        if (prev && !sameTrim(prev, derived)) {
+          // 同一块区域被不同裁剪引用说明数据本身有歧义，一处写错就是几像素的偏差 → 宁可按原样写出
+          conflicts.push(name)
+          trim.delete(name)
+          continue
+        }
+        if (!conflicts.includes(name)) trim.set(name, derived)
+      }
+    }
+  }
+  return { trim, conflicts }
+}
+
+function sameTrim(a: RegionTrim, b: RegionTrim): boolean {
+  return (
+    Math.abs(a.origWidth - b.origWidth) <= 0.5 &&
+    Math.abs(a.origHeight - b.origHeight) <= 0.5 &&
+    Math.abs(a.offsetX - b.offsetX) <= 0.5 &&
+    Math.abs(a.offsetY - b.offsetY) <= 0.5
+  )
+}
+
+/** 单个附件 → Spine 裁剪四项；区域与附件尺寸对不上（倍率导出 / 重新打包）或压根没裁剪时返回 null */
+function regionTrimOf(att: AttachmentData, region: RuntimeAtlasJson['regions'][number]): RegionTrim | null {
+  const packedW = att.size.x * RUNTIME_PPU
+  const packedH = att.size.y * RUNTIME_PPU
+  // 只有「区域正是这张图、且 1:1」才反解得准：缩放过的区域坐标与原尺寸不成比例
+  if (Math.abs(packedW - region.width) > 0.5 || Math.abs(packedH - region.height) > 0.5) return null
+  const origW = Math.max(att.frameSize.x * RUNTIME_PPU, region.width)
+  const origH = Math.max(att.frameSize.y * RUNTIME_PPU, region.height)
+  if (origW - region.width <= 0.5 && origH - region.height <= 0.5) return null
+  return {
+    origWidth: Math.round(origW),
+    origHeight: Math.round(origH),
+    offsetX: Math.round(att.contentOffset.x * RUNTIME_PPU + (origW - region.width) / 2),
+    offsetY: Math.round(att.contentOffset.y * RUNTIME_PPU + (origH - region.height) / 2)
+  }
+}
+
+/** 把运行期图集（页 + 区域）写成 Spine `.atlas` 文本，对齐 4.2+ 的 `bounds:` / `offsets:` 语法。
+ *  - 每个图集页照原样落盘（区域里的子 sprite 也一并写出，而不是把整页当一块）；
+ *  - 页与页之间留一个空行：Spine 靠空行切页，缺了它第二页的页名会被当成上一页的区域名；
+ *  - `bounds:` = 区域在页里的矩形；`offsets:` = 裁剪（offsetX 左裁 / offsetY 距原图**底边**多少），
+ *    只在真裁剪时才写 —— 不写时运行库取 originalWidth = bounds 宽，正好等价于「没裁」；
+ *  - 旋转写 4.2 的度数（`rotate: 90`），不再写 3.x 的 `rotate: true`；
+ *  - 不再写 `index`（4.2 起运行库默认 0）与全局 `scale`（4.2 里 `scale` 是**页**字段，
+ *    我们的页都是 1:1，省略即为 1）；`format` / `repeat` / `pma` 同样省略，取运行库默认值。 */
+export function serializeSpineAtlas(atlas: RuntimeAtlasJson): string {
   const byPage = new Map<number, RuntimeAtlasJson['regions']>()
   for (const region of atlas.regions) {
     const list = byPage.get(region.page) ?? []
     list.push(region)
     byPage.set(region.page, list)
   }
-  for (const page of atlas.pages) {
-    const regions = byPage.get(atlas.pages.indexOf(page)) ?? []
-    for (const region of regions) {
-      const rotate = region.rotate === 90 || region.rotate === 270 || region.rotate === true
-      const ow = region.origWidth ?? region.width
-      const oh = region.origHeight ?? region.height
-      const ox = region.offsetX ?? 0
-      const oy = region.offsetY ?? 0
+  const lines: string[] = []
+  atlas.pages.forEach((page, index) => {
+    if (index > 0) lines.push('')
+    lines.push(page.image)
+    lines.push(`\tsize: ${Math.round(page.width)}, ${Math.round(page.height)}`)
+    lines.push('\tfilter: Linear, Linear')
+    for (const region of byPage.get(index) ?? []) {
+      const w = Math.round(region.width)
+      const h = Math.round(region.height)
+      const ow = Math.round(region.origWidth ?? w)
+      const oh = Math.round(region.origHeight ?? h)
+      const ox = Math.round(region.offsetX ?? 0)
+      const oy = Math.round(region.offsetY ?? 0)
+      const rotate = typeof region.rotate === 'number' ? Math.round(region.rotate) : region.rotate === true ? 90 : 0
       lines.push(region.name)
-      lines.push(`\trotate: ${rotate ? 'true' : 'false'}`)
-      lines.push(`\txy: ${Math.round(region.x)}, ${Math.round(region.y)}`)
-      lines.push(`\tsize: ${Math.round(region.width)}, ${Math.round(region.height)}`)
-      lines.push(`\torig: ${Math.round(ow)}, ${Math.round(oh)}`)
-      lines.push(`\toffset: ${Math.round(ox)}, ${Math.round(oy)}`)
-      lines.push('\tindex: -1')
+      lines.push(`\tbounds: ${Math.round(region.x)}, ${Math.round(region.y)}, ${w}, ${h}`)
+      if (ow !== w || oh !== h || ox !== 0 || oy !== 0) lines.push(`\toffsets: ${ox}, ${oy}, ${ow}, ${oh}`)
+      if (rotate) lines.push(`\trotate: ${rotate}`)
     }
-  }
+  })
   return `${lines.join('\n')}\n`
 }
 
@@ -792,7 +953,23 @@ export async function writeSpineExport(dir: string, plan: RuntimeExportPlan): Pr
     newPageFiles.push(newFile)
     return { ...page, image: newFile }
   })
-  const atlas = { ...plan.atlas, pages: atlasPages }
+  /*
+   * 区域名与裁剪都要先「翻译」成 Spine 能接受的形态，否则 Unity 端会出坑：
+   *  - 名叫 `xxx.png` 的区域会被 spine-unity 当成图集页（材质表错乱）；
+   *  - DB 导入的工程裁剪只记在附件上，`.atlas` 不写 offsets 就会丢裁剪、sprite 偏几像素。
+   * 两处改动必须让 json 的 `path` 一起跟着改，所以改名表交给查表对象（见 SpineRegionLookup.names）。
+   */
+  const names = spineAtlasRegionNames(plan.atlas)
+  const { trim, conflicts } = collectRegionTrim(skeleton.asset, plan.atlas)
+  if (conflicts.length > 0) {
+    warnings.push(`区域 ${conflicts.join(' / ')} 被多个附件以不同裁剪引用，已按原样写出（不做裁剪换算）`)
+  }
+  const atlasRegions = plan.atlas.regions.map((region) => ({
+    ...region,
+    name: names.get(region.name) ?? region.name,
+    ...(trim.get(region.name) ?? {})
+  }))
+  const atlas = { ...plan.atlas, pages: atlasPages, regions: atlasRegions }
   const atlasText = serializeSpineAtlas(atlas)
 
   // 编码图集页（与运行期导出同一套）
@@ -809,7 +986,9 @@ export async function writeSpineExport(dir: string, plan: RuntimeExportPlan): Pr
     warnings.push(`图集页 ${pageBytes.failed.join(' / ')} 读不出内容（源图缺失或无法读取）`)
   }
 
-  const skeletonJson = buildSpineJson(skeleton.asset, buildRegionLookup(atlas))
+  // 查表用**未改名的**区域（UV 换算要的是那块矩形本身），页名用改名后的，附件 path 由 names 改写
+  const lookup: SpineRegionLookup = { ...buildRegionLookup({ ...plan.atlas, pages: atlasPages }), names }
+  const skeletonJson = buildSpineJson(skeleton.asset, lookup)
   const files: Array<{ path: string; text?: string; bytes?: Uint8Array }> = [
     { path: joinPath(outDir, `${base}.json`), text: `${JSON.stringify(skeletonJson, null, 2)}\n` },
     { path: joinPath(outDir, `${base}.atlas`), text: atlasText }

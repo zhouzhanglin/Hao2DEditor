@@ -96,7 +96,9 @@ function slotsOf(json: RuntimeSkeJson): SlotData[] {
       defaultDisplayIndex: num(raw.defaultDisplayIndex, -1),
       defaultZOrder: num(raw.defaultZOrder),
       z: num(raw.z),
-      setupAttachment: str(raw.setupAttachment)
+      setupAttachment: str(raw.setupAttachment),
+      // 旧版导出没有这个字段：缺省 true（保持「全部可见」的历史行为）
+      visible: bool(raw.visible, true)
     }
   })
 }

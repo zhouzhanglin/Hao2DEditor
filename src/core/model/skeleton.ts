@@ -105,7 +105,7 @@ export class Skeleton {
         this.setupDisplayIndex[i] = maps.setupDisplayIndex[i]
       }
       if (!this.hasDisplayOverride[i]) this.slotDisplayIndex[i] = this.setupDisplayIndex[i]
-      if (!this.hasVisOverride[i]) this.slotVisible[i] = 1
+      if (!this.hasVisOverride[i]) this.slotVisible[i] = this.setupVisibleAt(i) ? 1 : 0
     }
   }
 
@@ -138,7 +138,10 @@ export class Skeleton {
   }
 
   setupVisibleAt(slotIndex: number): boolean {
-    return this.hasVisOverride[slotIndex] ? this.visOverride[slotIndex] === 1 : true
+    // 运行期覆盖（编辑器里眼睛即时切换）优先；否则回落到编译产物的 setup 可见性
+    // （层级树的眼睛开关写的就是它；导入器没有这个概念，恒为 true）
+    if (this.hasVisOverride[slotIndex]) return this.visOverride[slotIndex] === 1
+    return this.asset.slots[slotIndex]?.visible !== false
   }
 
   /** 全量 FK */

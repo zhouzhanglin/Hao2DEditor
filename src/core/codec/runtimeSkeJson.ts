@@ -98,7 +98,8 @@ export function serializeRuntimeSke(
       defaultDisplayIndex: slot.defaultDisplayIndex,
       defaultZOrder: slot.defaultZOrder,
       z: slot.z,
-      setupAttachment: slot.setupAttachment
+      setupAttachment: slot.setupAttachment,
+      visible: slot.visible
     })),
     skins: asset.skins.map((skin) => ({
       name: skin.name,

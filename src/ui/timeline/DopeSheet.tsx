@@ -45,6 +45,25 @@ interface DragState {
   map: TimeMap
 }
 
+/**
+ * 选框左右边缘拖拽缩放会话。
+ *
+ * - `mode: 'scale'`：左右两边分别固定在 oppositeEdge / originEdge，拖曳边改变时按比例
+ *   拉伸 / 压缩所有选中的关键帧。
+ * - `mode: 'translate'`：所有选中关键帧挤在同一个时间点（宽度为 0），退化成平移整组。
+ */
+interface ScaleState {
+  side: 'left' | 'right'
+  mode: 'scale' | 'translate'
+  selectors: KeySelector[]
+  originTimes: number[]
+  originEdge: number
+  oppositeEdge: number
+  startTime: number
+  active: boolean
+  map: TimeMap
+}
+
 const ROW_HEIGHT = 22
 const LABEL_WIDTH = 172
 const RULER_HEIGHT = 30
@@ -109,6 +128,8 @@ export default function DopeSheet(props: DopeSheetProps) {
   const bandRef = useRef<{ x0: number; y0: number; active: boolean } | null>(null)
   /** 框选矩形（相对关键帧区的坐标），用于画选框 */
   const [band, setBand] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
+  /** 选中关键帧包围盒的左右缩放会话 */
+  const scaleRef = useRef<ScaleState | null>(null)
   /** 框选判定用的最新轨道 / 标记快照 + 选取逻辑（window 监听里用，避免闭包过期） */
   const pickRef = useRef<{ tracks: typeof tracks; markers: Array<Array<{ slot: number; selectors: KeySelector[] }>> }>({
     tracks,
@@ -459,10 +480,36 @@ export default function DopeSheet(props: DopeSheetProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 拖拽关键帧 / 拖动刻度尺：都在 window 上监听，避免指针移出面板后丢失事件
+  // 拖拽关键帧 / 拖动刻度尺 / 缩放选中框：都在 window 上监听，避免指针移出面板后丢失事件
   useEffect(() => {
     const onMove = (event: PointerEvent): void => {
       if (panRef.current) return
+
+      const scale = scaleRef.current
+      if (scale) {
+        scale.active = true
+        const times =
+          scale.mode === 'translate'
+            ? scale.originTimes.map((t) => snap(t + (timeAtClientX(event.clientX, scale.map) - scale.startTime)))
+            : (() => {
+                const raw = timeAtClientX(event.clientX, scale.map)
+                const clamped =
+                  scale.side === 'left'
+                    ? Math.min(raw, scale.oppositeEdge - 0.001)
+                    : Math.max(raw, scale.oppositeEdge + 0.001)
+                const edge = snap(clamped)
+                const originSpan = scale.originEdge - scale.oppositeEdge
+                if (Math.abs(originSpan) < 1e-6) return scale.originTimes
+                const factor = (edge - scale.oppositeEdge) / originSpan
+                return scale.originTimes.map((t) => snap(scale.oppositeEdge + (t - scale.oppositeEdge) * factor))
+              })()
+        propsRef.current.onSetTimes(scale.selectors.map((selector, index) => ({ selector, time: times[index] })))
+        // 选择器随之后移：下一次 move 才能定位到已移动的帧，同时保持选中高亮
+        scale.selectors = scale.selectors.map((selector, index) => ({ ...selector, time: times[index] }))
+        propsRef.current.onSelectKeys(scale.selectors)
+        return
+      }
+
       // 行区左键拖动 = 框选（拖过阈值才算，避免和「点一下定位播放头」打架）
       const bandState = bandRef.current
       if (bandState && !dragRef.current) {
@@ -492,6 +539,10 @@ export default function DopeSheet(props: DopeSheetProps) {
     }
     const onUp = (): void => {
       scrubRef.current = false
+      const scale = scaleRef.current
+      scaleRef.current = null
+      if (scale?.active) propsRef.current.onEndDrag()
+
       const bandState = bandRef.current
       bandRef.current = null
       if (bandState) {
@@ -537,6 +588,39 @@ export default function DopeSheet(props: DopeSheetProps) {
   const endPercent = percent(length)
   const playheadPercent = percent(time)
   const zoomed = Math.abs(zoom - 1) > 0.001
+
+  /**
+   * 已选关键帧的持久包围盒：框选结束后显示一个带左右拉伸手柄的蓝色矩形。
+   * 范围由「最早 / 最晚时间」×「最上 / 最下轨道行」决定。
+   */
+  const selectionBox = useMemo(() => {
+    if (selectedKeys.length === 0) return null
+    const times = selectedKeys.map((k) => k.time)
+    const minTime = Math.min(...times)
+    const maxTime = Math.max(...times)
+    let minRow = Infinity
+    let maxRow = -Infinity
+    for (let row = 0; row < visibleTracks.length; row++) {
+      const markers = markersByTrack[row] ?? []
+      for (const marker of markers) {
+        if (marker.selectors.some((s) => selectedKeys.some((k) => sameSelector(s, k)))) {
+          minRow = Math.min(minRow, row)
+          maxRow = Math.max(maxRow, row)
+        }
+      }
+    }
+    if (!isFinite(minRow) || !isFinite(maxRow)) return null
+    const leftRatio = span > 0 ? LEAD_RATIO + ((minTime - start) / span) * (1 - LEAD_RATIO) : LEAD_RATIO
+    const rightRatio = span > 0 ? LEAD_RATIO + ((maxTime - start) / span) * (1 - LEAD_RATIO) : LEAD_RATIO
+    return {
+      left: leftRatio * 100,
+      right: rightRatio * 100,
+      top: minRow * ROW_HEIGHT,
+      bottom: (maxRow + 1) * ROW_HEIGHT,
+      minTime,
+      maxTime
+    }
+  }, [selectedKeys, visibleTracks, markersByTrack, start, span])
 
   /**
    * 框选：把矩形覆盖到的关键帧全部选中。
@@ -605,6 +689,35 @@ export default function DopeSheet(props: DopeSheetProps) {
     dragRef.current = {
       selectors: next,
       originTimes: next.map((item) => item.time),
+      startTime: timeAtClientX(event.clientX),
+      active: false,
+      map: { ...mapRef.current }
+    }
+  }
+
+  /**
+   * 选中关键帧包围盒的左右边缘缩放：拖动左 / 右边把整组关键帧按对侧边缘为锚点拉伸或压缩。
+   * 当所有选中的帧都在同一时间点时退化为平移。
+   */
+  const startScale = (event: React.PointerEvent<HTMLButtonElement>, side: 'left' | 'right'): void => {
+    event.stopPropagation()
+    event.preventDefault()
+    if (event.button !== 0) return
+    // 直接读 store 的最新选择态，避免渲染间隙拿到过期数据
+    const live = useTimelineStore.getState().selectedKeys
+    if (live.length === 0) return
+    props.onBeginDrag()
+    const times = live.map((k) => k.time)
+    const minTime = Math.min(...times)
+    const maxTime = Math.max(...times)
+    const span = maxTime - minTime
+    scaleRef.current = {
+      side,
+      mode: span < 1e-6 ? 'translate' : 'scale',
+      selectors: live,
+      originTimes: times,
+      originEdge: side === 'left' ? minTime : maxTime,
+      oppositeEdge: side === 'left' ? maxTime : minTime,
       startTime: timeAtClientX(event.clientX),
       active: false,
       map: { ...mapRef.current }
@@ -826,12 +939,51 @@ export default function DopeSheet(props: DopeSheetProps) {
               <span className="absolute -left-[4px] top-0 h-0 w-0 border-x-[4px] border-t-[6px] border-x-transparent border-t-accent" />
             </div>
 
-            {/* 框选矩形 */}
+            {/* 框选矩形：拖拽时要盖在已选包围盒和手柄之上 */}
             {band ? (
               <div
-                className="pointer-events-none absolute z-30 rounded-sm border border-accent/70 bg-accent/10"
+                className="pointer-events-none absolute z-50 rounded-sm border border-accent/70 bg-accent/10"
                 style={{ left: band.left, top: band.top, width: band.width, height: band.height }}
               />
+            ) : null}
+
+            {/* 已选关键帧包围盒 + 左右缩放手柄 */}
+            {selectionBox ? (
+              <>
+                <div
+                  className="pointer-events-none absolute z-30 rounded-sm border border-accent/70 bg-accent/10"
+                  style={{
+                    left: `${selectionBox.left}%`,
+                    top: selectionBox.top,
+                    width: `${selectionBox.right - selectionBox.left}%`,
+                    height: selectionBox.bottom - selectionBox.top
+                  }}
+                />
+                <button
+                  type="button"
+                  title="左右拖动缩放选中关键帧"
+                  className="absolute z-40 w-1.5 cursor-ew-resize bg-accent/80 hover:bg-accent active:bg-white"
+                  style={{
+                    left: `${selectionBox.left}%`,
+                    top: selectionBox.top,
+                    height: selectionBox.bottom - selectionBox.top,
+                    transform: 'translateX(-50%)'
+                  }}
+                  onPointerDown={(event) => startScale(event, 'left')}
+                />
+                <button
+                  type="button"
+                  title="左右拖动缩放选中关键帧"
+                  className="absolute z-40 w-1.5 cursor-ew-resize bg-accent/80 hover:bg-accent active:bg-white"
+                  style={{
+                    left: `${selectionBox.right}%`,
+                    top: selectionBox.top,
+                    height: selectionBox.bottom - selectionBox.top,
+                    transform: 'translateX(-50%)'
+                  }}
+                  onPointerDown={(event) => startScale(event, 'right')}
+                />
+              </>
             ) : null}
 
             {visibleTracks.map((track, trackIndex) => (

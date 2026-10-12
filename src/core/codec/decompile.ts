@@ -206,7 +206,8 @@ export function decompileAsset(asset: RuntimeAsset, activeSkin = ''): EditorDocu
     zOrder: slot.defaultZOrder,
     z: slot.z,
     attachment: slot.setupAttachment,
-    visible: true,
+    // 还原插槽隐藏状态（层级树眼睛）；资产上没有该字段时（旧格式）按可见处理
+    visible: slot.visible !== false,
     locked: false
   }))
 

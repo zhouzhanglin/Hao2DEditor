@@ -120,7 +120,9 @@ function toSlotData(
       defaultDisplayIndex: -1,
       defaultZOrder: i,
       z: slot.z,
-      setupAttachment: slot.attachment
+      setupAttachment: slot.attachment,
+      // 层级树眼睛的开关值：骨架的 setup 可见性从这里来（见 Skeleton.setupVisibleAt）
+      visible: slot.visible
     })
   })
   return { slots, index, warnings }

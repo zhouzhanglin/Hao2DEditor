@@ -465,7 +465,9 @@ export function importDragonBones(input: DragonBonesImportInput): DragonBonesImp
     // 排序后的位次：compile 侧按它排序即恒等，层序在导入期就固化了
     defaultZOrder: i,
     z: 0,
-    setupAttachment: ''
+    setupAttachment: '',
+    // DB 没有插槽级可见性概念，全部按可见导入
+    visible: true
   }))
   const slotIndexByName = new Map<string, number>()
   slots.forEach((slot, i) => slotIndexByName.set(slot.name, i))

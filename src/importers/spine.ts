@@ -417,7 +417,9 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
       defaultDisplayIndex: -1,
       defaultZOrder: i,
       z: 0,
-      setupAttachment: slot.attachment ?? ''
+      setupAttachment: slot.attachment ?? '',
+      // Spine 没有插槽级可见性概念，全部按可见导入（隐藏靠动画 drawOrder / attachment 缺失表达）
+      visible: true
     })
   })
 

@@ -79,6 +79,14 @@ export interface SlotData {
    * 运行期在「当前合并皮肤」里按名解析默认显示下标；名字查不到才退回 defaultDisplayIndex。
    */
   setupAttachment: string
+  /**
+   * setup pose 的可见性（层级树行首眼睛 / 属性面板「可见」开关）。
+   *
+   * 眼睛只改文档里的 AuthoringSlot.visible，编译产物必须把它带下来 —— 否则骨架
+   * 无从得知「setup 时这根插槽是隐藏的」，切回 setup / Pose 或换肤后又显示出来
+   * （Spine / DragonBones 没有插槽级可见性概念，导入器恒填 true）。
+   */
+  visible: boolean
 }
 
 /**

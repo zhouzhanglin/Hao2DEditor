@@ -354,6 +354,16 @@ export function collectHao2dWarnings(asset: RuntimeAsset): string[] {
   if (!asset.runtimeIK) {
     warnings.push('该资源 runtimeIK = false：Unity 运行期不会再解算 IK（IK 已烘焙进骨骼轨道）')
   }
+  // 插槽 setup 可见性（层级树眼睛）不在 .hao2d 二进制里：格式与 Unity 参考库
+  // Hao2DCodec 逐字节一致，加字段会让读端从插槽段开始整体错位。隐藏状态只存工程 JSON
+  const hiddenSlots = asset.slots.filter((slot) => !slot.visible)
+  if (hiddenSlots.length > 0) {
+    warnings.push(
+      `有 ${hiddenSlots.length} 个插槽被眼睛隐藏（${hiddenSlots
+        .map((slot) => slot.name)
+        .join('、')}）：.hao2d 二进制不携带该状态，Unity 侧这些插槽仍会显示`
+    )
+  }
 
   const weightedWithFfd = asset.animations.some((anim) =>
     anim.deforms.some((deform) => {

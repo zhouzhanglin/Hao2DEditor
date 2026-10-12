@@ -187,11 +187,13 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
                 draggable
                 title="拖到视口 = 在落点新建插槽（先多选可以一次拖多张）；拖到层级树的插槽行 = 给该插槽加一个 display；拖到骨骼行 = 在该骨骼下新建插槽"
                 className={[
-                  // 行高比其他面板的列表项再矮一档：这里的缩略图本身就撑高度，内边距收紧 4px 正好
-                  'flex cursor-grab items-center gap-1.5 rounded border px-1.5 py-0.5 active:cursor-grabbing',
+                  // 与层级树 / slot 层级统一：无边框 mac 列表行 + 圆角实心选中块；
+                  // 原来的描边卡片是全应用里独一份的行样式，放在一起像两套组件。
+                  // 缩略图本身撑高度，内边距仍收着（py-0.5）
+                  'group relative mx-1 flex cursor-grab items-center gap-1.5 rounded-[5px] px-1.5 py-0.5 active:cursor-grabbing',
                   selectedSet.has(image.name)
-                    ? 'border-accent/60 bg-accent/15'
-                    : 'border-line/60 bg-ink-900/40 hover:border-accent/40'
+                    ? 'bg-accent-deep text-white'
+                    : 'text-content-hi hover:bg-white/[0.07]'
                 ].join(' ')}
                 onClick={(event) => pickImage(image.name, event)}
                 onDragStart={(event) => {

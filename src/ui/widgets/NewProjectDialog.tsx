@@ -7,12 +7,15 @@ import { PROJECT_EXTENSION } from '@core/codec/projectJson'
 
 export interface NewProjectDialogProps {
   onClose: () => void
-  /** 确认：项目名（非空）+ 保存位置（目录） */
-  onConfirm: (name: string, dir: string) => Promise<void> | void
+  /** 确认：项目名（非空）+ 保存位置（目录）+ 帧率（fps，默认 30） */
+  onConfirm: (name: string, dir: string, frameRate?: number) => Promise<void> | void
 }
 
+/** 可选的帧率档位 */
+const FRAME_RATES = [24, 30, 60]
+
 /**
- * 「新建项目」弹窗：填**项目名** + 选**保存位置**，两个都不能空。
+ * 「新建项目」弹窗：填**项目名** + 选**保存位置** + 选**帧率**，前两个都不能空。
  *
  * 项目名会直接当文件名用（`<目录>/<项目名>.hao2d.proj`），也是导出的图集名与输出目录名；
  * 与骨架名无关（一个项目里可以有多个骨架）。
@@ -21,6 +24,8 @@ export default function NewProjectDialog({ onClose, onConfirm }: NewProjectDialo
   /** 预填默认项目名（`hao2dProject`）：直接输入即替换，不改也可以直接建 */
   const [name, setName] = useState(DEFAULT_PROJECT_NAME)
   const [dir, setDir] = useState('')
+  /** 帧率：默认 30（与 createEmptyDocument 一致） */
+  const [frameRate, setFrameRate] = useState(30)
   const [busy, setBusy] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -64,7 +69,7 @@ export default function NewProjectDialog({ onClose, onConfirm }: NewProjectDialo
     if (!ready) return
     setBusy(true)
     try {
-      await onConfirm(trimmed, dir)
+      await onConfirm(trimmed, dir, frameRate)
     } finally {
       setBusy(false)
       onClose()
@@ -108,6 +113,32 @@ export default function NewProjectDialog({ onClose, onConfirm }: NewProjectDialo
             <button type="button" className="hao-btn shrink-0" onClick={() => void pickDir()}>
               <FolderOpen size={12} /> 选择…
             </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="hao-label w-[54px] shrink-0">帧率</span>
+            <div className="flex flex-wrap gap-1">
+              {FRAME_RATES.map((fps) => {
+                const active = fps === frameRate
+                return (
+                  <button
+                    key={fps}
+                    type="button"
+                    onClick={() => setFrameRate(fps)}
+                    className={[
+                      'h-[20px] rounded border px-2 text-3xs transition-colors duration-panel cursor-pointer',
+                      active
+                        ? 'border-transparent bg-accent-deep text-white'
+                        : 'border-line bg-ink-900/60 text-content-mid hover:text-content-hi'
+                    ].join(' ')}
+                    title={`${fps} 帧 / 秒`}
+                  >
+                    {fps}
+                  </button>
+                )
+              })}
+            </div>
+            <span className="text-content-lo text-2xs">fps</span>
           </div>
 
           <div className="hao-label leading-[16px]">

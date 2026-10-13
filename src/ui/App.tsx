@@ -385,9 +385,9 @@ export default function App() {
 
   /** 弹窗确认：清空工程 → 记住项目名与保存位置 → 立刻写出工程文件 → 回 Pose 态 + 视口复位 */
   const createProject = useCallback(
-    (name: string, dir: string) => {
+    (name: string, dir: string, frameRate?: number) => {
       setNewProjectOpen(false)
-      const task = createProjectAt(name, dir)
+      const task = createProjectAt(name, dir, frameRate)
       run(task, '正在新建项目…')
       task.then((result) => {
         if (!result.ok) return

@@ -100,7 +100,7 @@ function safeFileName(name: string): string {
  *
  * 新项目的图片池是空的：图片留给后面的「导入图片 / 导入 Spine / 导入 DragonBones」。
  */
-export async function createProjectAt(name: string, dir: string): Promise<IoResult> {
+export async function createProjectAt(name: string, dir: string, frameRate?: number): Promise<IoResult> {
   const platform = getPlatform()
   const trimmed = name.trim()
   if (trimmed.length === 0) return fail('项目名不能为空')
@@ -111,6 +111,14 @@ export async function createProjectAt(name: string, dir: string): Promise<IoResu
   releaseDocumentAssets()
   const store = useProjectStore.getState()
   store.reset()
+  // 帧率：用户选的（24/30/60）优先，否则退回默认的 30（与 createEmptyDocument 一致）
+  const fps = frameRate && frameRate > 0 ? frameRate : 30
+  if (fps !== useProjectStore.getState().document.frameRate) {
+    useProjectStore.setState((s) => ({
+      document: { ...s.document, frameRate: fps },
+      skeletons: s.skeletons.map((skeleton) => ({ ...skeleton, frameRate: fps }))
+    }))
+  }
   store.setProjectInfo({ projectName: trimmed, projectPath: path })
   const saved = await saveProject(false)
   if (!saved.ok) return saved

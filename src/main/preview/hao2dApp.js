@@ -150,13 +150,36 @@
       })
   }
 
+  /**
+   * 换一个全新的 canvas 元素再交给 pixi。
+   *
+   * pixi 销毁 renderer 时会连带丢掉当前 canvas 的 WebGL 上下文，而同一个 canvas 上再次
+   * getContext 拿到的仍是那个**已丢失**的 context：后续 createShader 返回 null，
+   * gl.shaderSource(null, src) 直接抛
+   * 「Failed to execute 'shaderSource' … parameter 1 is not of type 'WebGLShader'」。
+   * 切换骨架 / 清单更新都要重建 stage（见 mount），所以这里必须换元素才能拿到新上下文。
+   */
+  function freshCanvas() {
+    var next = document.createElement('canvas')
+    next.id = 'stage'
+    if (canvas.parentNode) canvas.parentNode.replaceChild(next, canvas)
+    else document.body.appendChild(next)
+    canvas = next
+    // 手势状态跟着旧元素一起作废，重新绑定到新元素上
+    pointers = {}
+    bindCanvasEvents()
+    return next
+  }
+
   function mount(entry) {
     if (stage) { stage.destroy(); stage = null }
     currentId = entry.id
+    // 必须在 createStage 之前换（原因见 freshCanvas）
+    var target = freshCanvas()
     showStatus('正在加载…')
     loadSkeleton(entry).then(function (data) {
       return Hao2dRuntime.createStage({
-        canvas: canvas,
+        canvas: target,
         pages: data.pages,
         skeText: data.skeText,
         atlasText: data.atlasText
@@ -260,45 +283,49 @@
   })
 
   // -------------------------------------------------------------- 相机手势
-  canvas.addEventListener('pointerdown', function (event) {
-    canvas.setPointerCapture(event.pointerId)
-    pointers[event.pointerId] = { x: event.clientX, y: event.clientY }
-  })
-  canvas.addEventListener('pointermove', function (event) {
-    var prev = pointers[event.pointerId]
-    if (!prev) return
-    var dx = event.clientX - prev.x
-    var dy = event.clientY - prev.y
-    pointers[event.pointerId] = { x: event.clientX, y: event.clientY }
-    var ids = Object.keys(pointers)
-    if (ids.length >= 2 && stage) {
-      // 双指：以中点为锚缩放
-      var a = pointers[ids[0]]
-      var b = pointers[ids[1]]
-      var dist = Math.hypot(a.x - b.x, a.y - b.y)
-      if (pinchDist > 0) {
-        var factor = dist / pinchDist
-        var midX = (a.x + b.x) / 2
-        var midY = (a.y + b.y) / 2
-        stage.zoomAt(factor, midX, midY)
+  // 绑成函数：切换骨架会换 canvas 元素（见 freshCanvas），换完必须重新绑一次
+  function bindCanvasEvents() {
+    var pinchDist = 0
+    canvas.addEventListener('pointerdown', function (event) {
+      canvas.setPointerCapture(event.pointerId)
+      pointers[event.pointerId] = { x: event.clientX, y: event.clientY }
+    })
+    canvas.addEventListener('pointermove', function (event) {
+      var prev = pointers[event.pointerId]
+      if (!prev) return
+      var dx = event.clientX - prev.x
+      var dy = event.clientY - prev.y
+      pointers[event.pointerId] = { x: event.clientX, y: event.clientY }
+      var ids = Object.keys(pointers)
+      if (ids.length >= 2 && stage) {
+        // 双指：以中点为锚缩放
+        var a = pointers[ids[0]]
+        var b = pointers[ids[1]]
+        var dist = Math.hypot(a.x - b.x, a.y - b.y)
+        if (pinchDist > 0) {
+          var factor = dist / pinchDist
+          var midX = (a.x + b.x) / 2
+          var midY = (a.y + b.y) / 2
+          stage.zoomAt(factor, midX, midY)
+        }
+        pinchDist = dist
+      } else if (stage) {
+        stage.pan(dx, dy)
       }
-      pinchDist = dist
-    } else if (stage) {
-      stage.pan(dx, dy)
+    })
+    function endPointer(event) {
+      delete pointers[event.pointerId]
+      if (Object.keys(pointers).length < 2) pinchDist = 0
     }
-  })
-  function endPointer(event) {
-    delete pointers[event.pointerId]
-    if (Object.keys(pointers).length < 2) pinchDist = 0
-  }
-  canvas.addEventListener('pointerup', endPointer)
-  canvas.addEventListener('pointercancel', endPointer)
-  var pinchDist = 0
+    canvas.addEventListener('pointerup', endPointer)
+    canvas.addEventListener('pointercancel', endPointer)
 
-  canvas.addEventListener('wheel', function (event) {
-    event.preventDefault()
-    if (stage) stage.zoomAt(Math.exp(-event.deltaY * 0.0015), event.clientX, event.clientY)
-  }, { passive: false })
+    canvas.addEventListener('wheel', function (event) {
+      event.preventDefault()
+      if (stage) stage.zoomAt(Math.exp(-event.deltaY * 0.0015), event.clientX, event.clientY)
+    }, { passive: false })
+  }
+  bindCanvasEvents()
 
   window.addEventListener('resize', function () {
     syncBgSize()

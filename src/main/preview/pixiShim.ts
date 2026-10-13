@@ -7,7 +7,11 @@
  *
  * 若某天运行库用到这里没列出的 pixi 导出，构建会报错，照着往下面加一行即可。
  */
-const PIXI = globalThis.PIXI
+// 全局没有 PIXI 的索引签名，这里显式说明「globalThis 上有个 pixi 命名空间」，
+// 顺带让下面的转发按 pixi 的真实类型走（而不是 any），运行库内部也能被类型检查覆盖。
+type PixiNamespace = typeof import('pixi.js')
+
+const PIXI = (globalThis as unknown as { PIXI: PixiNamespace }).PIXI
 
 export const Application = PIXI.Application
 export const Container = PIXI.Container

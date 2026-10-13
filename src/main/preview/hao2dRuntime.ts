@@ -52,6 +52,11 @@ export interface Hao2dStage {
   readonly duration: number
   readonly time: number
   readonly playing: boolean
+  /** 当前缩放（世界单位 → 像素）：下层 #bg 画棋盘格时用它决定格子疏密 */
+  readonly zoom: number
+  /** 视口中心对应的世界坐标（x 向右、y 向上）：#bg 按它对齐格线原点 */
+  readonly centerX: number
+  readonly centerY: number
   pan(dx: number, dy: number): void
   zoomAt(factor: number, sx: number, sy: number): void
   fit(): void

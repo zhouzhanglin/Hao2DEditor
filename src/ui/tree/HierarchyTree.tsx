@@ -4,6 +4,8 @@ import {
   Bone,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Eye,
   EyeOff,
   Grid3x3,
@@ -564,6 +566,9 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   // 状态照搬到新节点，而粘贴逻辑在 editor 层，需要共享这块 UI 状态。
   const collapsed = useTreeUiStore((s) => s.collapsed)
   const setCollapsed = useTreeUiStore((s) => s.setCollapsed)
+  /** 树里是否列出 display 行（工具栏最右侧的眼睛切换）；纯显示开关，不动数据 */
+  const showDisplays = useTreeUiStore((s) => s.showDisplays)
+  const setShowDisplays = useTreeUiStore((s) => s.setShowDisplays)
   /** 搜索框内容：空 = 不过滤；有值时只显示命中节点 + 其祖先（根骨骼始终保留），并临时全展开 */
   const [query, setQuery] = useState('')
   /** 树列表容器：拖放兜底判定要用它量各行的位置 */
@@ -712,6 +717,22 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       if (next.has(name)) next.delete(name)
       else next.add(name)
       return next
+    })
+  }
+
+  /**
+   * 工具栏「全部折叠 / 全部展开」：一个按钮两种状态。
+   * - 只要还有折叠着的节点（`collapsed` 非空）→ 全部展开（清空集合）
+   * - 全都展开时 → 一次折起所有骨骼与插槽（没有子节点的行也放进去，反正不显示箭头）
+   * 搜索期间树是强制展开的（见 `expanded`），这时按钮点了看不出变化，属于既有约定。
+   */
+  const toggleCollapseAll = (): void => {
+    setCollapsed((prev) => {
+      if (prev.size > 0) return new Set<string>()
+      const all = new Set<string>()
+      for (const bone of document.bones) all.add(bone.name)
+      for (const slot of document.slots) all.add(`slot:${slot.name}`)
+      return all
     })
   }
 
@@ -1580,7 +1601,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         // 行尾显示当前显示的 display 名，不用展开也知道显示的是哪一个。
         // Animate 态按关键帧采样（与 display 行的「显示中」标记同一数据源），不能直接看 setup
         meta={showing || (displays.length > 0 ? `${displays.length} 个 display` : undefined)}
-        expandable={displays.length > 0}
+        // 关掉 display 行时没有子行可展开，箭头一并收掉（行尾的「N 个 display」仍留着看数量）
+        expandable={showDisplays && displays.length > 0}
         expanded={expanded}
         dataSlot={slot.name}
         onToggle={() => toggle(`slot:${slot.name}`)}
@@ -1615,7 +1637,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       />
     )
 
-    if (!expanded) return
+    // 工具栏「显示 / 隐藏 display」关掉时：插槽行照旧（行尾还写着当前显示的是哪一个），只是不列子行
+    if (!expanded || !showDisplays) return
     for (const attachment of displays) rows.push(renderDisplay(slot, attachment, depth + 1))
   }
 
@@ -1687,7 +1710,34 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         >
           <Route size={14} />
         </button>
-        <span className="ml-auto font-mono text-3xs text-content-lo">{rows.length}</span>
+        {/* 右侧两个显示开关（`ml-auto` 靠右，与左边的「新建」按钮分开）：
+            全部折叠 / 全部展开，以及树里 display 行的显隐 */}
+        <button
+          type="button"
+          tabIndex={-1}
+          title={
+            collapsed.size > 0
+              ? '全部展开（骨骼 / 插槽 / display）'
+              : '全部折叠（只留顶层骨骼，再点一次全部展开）'
+          }
+          className="hao-btn ml-auto h-[18px] px-1.5 text-3xs"
+          onClick={toggleCollapseAll}
+        >
+          {collapsed.size > 0 ? <ChevronsUpDown size={13} /> : <ChevronsDownUp size={13} />}
+        </button>
+        <button
+          type="button"
+          tabIndex={-1}
+          title={showDisplays ? '隐藏 display 行（树里只留骨骼 / 插槽）' : '显示 display 行'}
+          className={[
+            'hao-btn h-[18px] px-1.5 text-3xs',
+            // 关掉时压暗：一眼看出树是被这个开关过滤过的，而不是工程里没有附件
+            showDisplays ? '' : 'text-content-lo'
+          ].join(' ')}
+          onClick={() => setShowDisplays(!showDisplays)}
+        >
+          {showDisplays ? <Eye size={13} /> : <EyeOff size={13} />}
+        </button>
       </div>
       {/* 搜索：按名字筛选树（骨骼 / 插槽 / display / 约束），根骨骼始终保留 —— 见上面的 filter */}
       <div className="relative shrink-0 border-b border-line/60 bg-ink-800/60 px-1 py-1">

@@ -330,10 +330,19 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     onStatus?.(result.ok ? '已停止在线预览' : `停止预览失败：${result.error}`)
   }
 
+  const copyLocalUrl = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(preview?.url ?? '')
+      onStatus?.('本机链接已复制')
+    } catch {
+      onStatus?.('复制失败，请手动选中上面的地址复制')
+    }
+  }
+
   const copyQrUrl = async (): Promise<void> => {
     try {
       await navigator.clipboard.writeText(qrUrl)
-      onStatus?.('链接已复制')
+      onStatus?.('手机扫码链接已复制')
     } catch {
       onStatus?.('复制失败，请手动选中上面的地址复制')
     }
@@ -672,9 +681,9 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
               </div>
               <div
                 className="hao-field h-auto min-h-[22px] w-full select-text break-all py-[3px] text-3xs"
-                title={qrUrl}
+                title={preview.url}
               >
-                {qrUrl}
+                {preview.url}
               </div>
               <div className="flex flex-wrap items-center gap-1">
                 <button
@@ -688,9 +697,9 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
                 <button
                   type="button"
                   className="hao-btn h-[18px] px-1.5 text-3xs"
-                  onClick={() => void copyQrUrl()}
+                  onClick={() => void copyLocalUrl()}
                 >
-                  <Copy size={11} /> 复制链接
+                  <Copy size={11} /> 复制本机链接
                 </button>
                 <button
                   type="button"
@@ -700,19 +709,32 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
                 >
                   <Square size={10} /> 停止预览
                 </button>
-                {otherLanUrls.length > 0 ? <span className="hao-label ml-1">其他网卡：</span> : null}
-                {otherLanUrls.map((url) => (
+                {preview.lanUrls.length > 0 ? (
                   <button
-                    key={url}
                     type="button"
                     className="hao-btn h-[18px] px-1.5 text-3xs"
-                    title={`二维码改成扫这个地址：${url}`}
-                    onClick={() => setQrUrl(url)}
+                    onClick={() => void copyQrUrl()}
                   >
-                    {hostOf(url)}
+                    <Copy size={11} /> 复制手机链接（{hostOf(qrUrl)}）
                   </button>
-                ))}
+                ) : null}
               </div>
+              {otherLanUrls.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-1">
+                  <span className="hao-label ml-1">切换扫码地址：</span>
+                  {preview.lanUrls.map((url) => (
+                    <button
+                      key={url}
+                      type="button"
+                      className={`hao-btn h-[18px] px-1.5 text-3xs ${url === qrUrl ? 'bg-accent/20' : ''}`}
+                      title={`二维码改成扫这个地址：${url}`}
+                      onClick={() => setQrUrl(url)}
+                    >
+                      {hostOf(url)}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               {previewWarnings.length > 0 ? (
                 <div className="hao-label text-warn/90">{previewWarnings.join(' / ')}</div>
               ) : null}

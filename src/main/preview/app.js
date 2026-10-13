@@ -170,7 +170,9 @@
     viewWidth: 1,
     viewHeight: 1,
     /** 用户自己拖过 / 缩过：这时视口变化不再自动取景，免得把人家调好的视角冲掉 */
-    touched: false
+    touched: false,
+    /** 画面脏了才需要重绘：暂停且相机/骨架都没动时跳过 render，省 CPU */
+    dirty: true
   }
 
   function currentEntry() {
@@ -267,6 +269,7 @@
     app.centerX = (minX + maxX) / 2
     app.centerY = (minY + maxY) / 2
     app.zoom = Math.min(app.viewWidth / (width * pad), app.viewHeight / (height * pad))
+    app.dirty = true
   }
 
   /** 自适应格子边长（世界单位）：保证屏幕上的格子边长落在 [minPx, maxPx]，2 的幂次步进。
@@ -426,6 +429,7 @@
       $('title').textContent = (app.manifest.title ? app.manifest.title + ' · ' : '') + entry.meta.name
       document.title = $('title').textContent
       ready()
+      app.dirty = true
     })
   }
 
@@ -446,6 +450,7 @@
     app.zoom = clamp(app.zoom * factor, limits[0], limits[1])
     app.centerX = worldX - (clientX - rect.left - app.viewWidth / 2) / app.zoom
     app.centerY = worldY + (clientY - rect.top - app.viewHeight / 2) / app.zoom
+    app.dirty = true
   }
 
   var pointers = []
@@ -508,6 +513,7 @@
       app.centerX = drag.centerX - (now.x - drag.startX) / app.zoom
       app.centerY = drag.centerY + (now.y - drag.startY) / app.zoom
     }
+    app.dirty = true
   })
 
   function endPointer(event) {
@@ -525,6 +531,7 @@
     event.preventDefault()
     app.touched = true
     zoomAt(event.clientX, event.clientY, Math.exp(-event.deltaY * 0.0015))
+    app.dirty = true
   }, { passive: false })
 
   // ------------------------------------------------------------------ UI
@@ -572,6 +579,7 @@
     app.skeleton.setSkin(event.target.value)
     app.skeleton.setupPoseSlots()
     app.skeleton.updateWorldTransform(spine.Physics.update)
+    app.dirty = true
   })
   $('loopCheck').addEventListener('change', function (event) {
     var entry = currentEntry()
@@ -583,6 +591,7 @@
     if (!entry || !entry.animation) return
     entry.trackTime = (Number(event.target.value) / 1000) * entry.animation.duration
     if (app.state) app.state.update(0)
+    app.dirty = true
   })
   $('progress').addEventListener('change', function () {
     seeking = false
@@ -598,17 +607,27 @@
     $('panel').hidden = true
   }
 
+  // 窗口大小变化后需要重绘（暂停时 frame 会跳过 render）
+  window.addEventListener('resize', function () {
+    app.dirty = true
+  })
+
   // ------------------------------------------------------------------ 主循环
   var lastTime = 0
   function frame(now) {
     var delta = lastTime ? Math.min((now - lastTime) / 1000, 0.1) : 0
     lastTime = now
-    if (app.state && app.skeleton) {
+    var shouldRender = app.dirty || app.playing
+    if (app.state && app.skeleton && (app.playing || app.dirty)) {
       if (app.playing) app.state.update(delta)
       app.state.apply(app.skeleton)
       app.skeleton.updateWorldTransform(spine.Physics.update)
+      shouldRender = true
     }
-    render()
+    if (shouldRender) {
+      render()
+      app.dirty = false
+    }
     updateTimeUI()
     requestAnimationFrame(frame)
   }

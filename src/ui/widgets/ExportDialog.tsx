@@ -6,6 +6,7 @@ import { getPlatform, stripExtension } from '@editor/platform'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSettingsStore } from '@editor/store/settingsStore'
 import { buildHao2dPreviewBundles, listFiles, prepareRuntimeExport, writeHao2dExport, writeRuntimeExport } from '@editor/services/exportService'
+import { saveProject } from '@editor/services/projectIo'
 import { buildSpineBundles, sanitize, writeSpineExport } from '@editor/services/spineExport'
 import type { PageSource, RuntimeExportPlan } from '@editor/services/exportService'
 import type { PageEncodePlan } from '@editor/services/pngEncoder'
@@ -81,11 +82,14 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   const skeletons = useProjectStore((s) => s.skeletons)
   const activeSkeleton = useProjectStore((s) => s.activeSkeleton)
   const projectName = useProjectStore((s) => s.projectName)
+  const projectPath = useProjectStore((s) => s.projectPath)
+  const setExportScale = useProjectStore((s) => s.setExportScale)
   const [dir, setDir] = useState(() => {
     if (typeof localStorage === 'undefined') return ''
     return localStorage.getItem(EXPORT_DIR_KEY) ?? ''
   })
-  const [scale, setScale] = useState(1)
+  /** 图集缩放：沿用上次导出保存的值（有存档时持久化在 editorMeta 里），否则默认 1 */
+  const [scale, setScale] = useState(() => doc.editorMeta.exportScale ?? 1)
   const [maxSize, setMaxSize] = useState(2048)
   const [page, setPage] = useState(0)
   const [busy, setBusy] = useState(false)
@@ -433,6 +437,11 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
             ? await writeHao2dExport(dir, plan)
             : await writeRuntimeExport(dir, plan)
       onStatus?.(result.message)
+      // 有存档：把这次选的图集缩放写进工程文件，下次导出默认沿用（不重选）
+      if (projectPath) {
+        setExportScale(scale)
+        await saveProject(false)
+      }
       onClose()
     } finally {
       setBusy(false)

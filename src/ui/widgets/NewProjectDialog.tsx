@@ -50,7 +50,13 @@ export default function NewProjectDialog({ onClose, onConfirm }: NewProjectDialo
   }, [onClose])
 
   const trimmed = name.trim()
-  const ready = trimmed.length > 0 && dir.length > 0 && !busy
+  /**
+   * 项目名合法性：导出时会用作图集名 / 输出目录名。
+   * 只禁用空格和文件系统非法字符（`/ \ : * ? " < > |`），中文 / Unicode 字母数字均可，
+   * 其余交给 `safeFileName` 兜底（与落盘的命名保持一致）。
+   */
+  const nameValid = !/[\s\\/:*?"<>|]/.test(trimmed)
+  const ready = nameValid && trimmed.length > 0 && dir.length > 0 && !busy
   /** 预览最终文件路径（非法字符替换成下划线，与落盘时一致） */
   const filePath = dir.length > 0 && trimmed.length > 0 ? joinPath(dir, `${trimmed.replace(/[\\/:*?"<>|]/g, '_')}.${PROJECT_EXTENSION}`) : ''
 
@@ -96,7 +102,7 @@ export default function NewProjectDialog({ onClose, onConfirm }: NewProjectDialo
             <input
               ref={inputRef}
               value={name}
-              placeholder="必填，例如 dragon"
+              placeholder="必填，不能含空格或 / \\ : * ? \" < > |，例如 dragon_01 或 龙_01"
               className="hao-field min-w-0 flex-1 text-panel text-content-hi"
               onChange={(event) => setName(event.target.value)}
               onKeyDown={(event) => {
@@ -151,7 +157,13 @@ export default function NewProjectDialog({ onClose, onConfirm }: NewProjectDialo
 
         <div className="flex shrink-0 items-center gap-2 border-t border-line bg-ink-700/60 px-2.5 py-2">
           <span className="hao-label mr-auto">
-            {trimmed.length === 0 ? '项目名不能为空' : dir.length === 0 ? '请选择保存位置' : ''}
+            {trimmed.length === 0
+              ? '项目名不能为空'
+              : !nameValid
+                ? '项目名不能含空格或文件系统非法字符（/ \\ : * ? " < > |）'
+                : dir.length === 0
+                  ? '请选择保存位置'
+                  : ''}
           </span>
           <button type="button" className="hao-btn" onClick={onClose} disabled={busy}>
             取消
@@ -160,7 +172,7 @@ export default function NewProjectDialog({ onClose, onConfirm }: NewProjectDialo
             type="button"
             className="hao-btn hao-btn-accent"
             disabled={!ready}
-            title={ready ? '创建项目并立刻写出工程文件' : '项目名与保存位置都不能为空'}
+            title={ready ? '创建项目并立刻写出工程文件' : '项目名不能含空格 / 文件系统非法字符，且需选择保存位置'}
             onClick={() => void confirm()}
           >
             {busy ? <Loader2 size={12} className="animate-spin" /> : null}

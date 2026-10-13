@@ -247,6 +247,8 @@ export interface EditorMeta {
     hardness: number
     normalize: boolean
   }
+  /** 上次导出的图集缩放（有存档时持久化进工程文件，下次导出默认沿用）；未设置按 1 处理 */
+  exportScale?: number
 }
 
 export const CURRENT_SCHEMA_VERSION = 1

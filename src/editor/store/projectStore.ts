@@ -60,6 +60,8 @@ export interface ProjectState {
   setActiveSkeleton: (index: number) => void
   /** 设置项目名 / 保存路径（新建项目弹窗、打开工程后调用） */
   setProjectInfo: (info: { projectName?: string; projectPath?: string | null }) => void
+  /** 写入导出图集缩放（静默，不进历史、不标脏：纯偏好，由导出时另存工程文件落地） */
+  setExportScale: (scale: number) => void
   /** 可撤销的编辑：mutate 在深拷贝的草稿上执行 */
   update: (label: string, mutate: (draft: EditorDocument) => void) => void
   /** 不可撤销的编辑（面板布局、视口状态等） */
@@ -327,6 +329,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       projectName: info.projectName ?? state.projectName,
       projectPath: info.projectPath === undefined ? state.projectPath : info.projectPath
     }))
+  },
+
+  setExportScale: (scale) => {
+    const state = get()
+    const list = state.skeletons.map((skeleton) => ({
+      ...skeleton,
+      editorMeta: { ...skeleton.editorMeta, exportScale: scale }
+    }))
+    set({ skeletons: list, document: list[state.activeSkeleton] })
   },
 
   update: (label, mutate) => {

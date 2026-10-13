@@ -732,9 +732,11 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
         <FieldGroup
           title={animating ? `动画变换 · ${time.toFixed(2)}s（改动即打关键帧）` : '局部变换（Setup）'}
         >
+          {/* 位置是浮点值：中键拖动 / 上下键都按 0.1 走（不写 step 会用 Vector2Field 的默认值 1，拖起来只能整数跳） */}
           <Vector2Field
             label="位置"
             value={shown.position}
+            step={0.1}
             onChange={(value) => writeTransform('translate', value, '位置')}
           />
           <NumberField
@@ -963,9 +965,11 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                 })
               }
             />
+            {/* 同骨骼位置：浮点值按 0.1 拖（默认 1 会让中键拖动只能整数跳） */}
             <Vector2Field
               label="位置"
               value={attachment.position}
+              step={0.1}
               onChange={(value) => update('修改附件位置', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.position = value }))}
             />
             <NumberField

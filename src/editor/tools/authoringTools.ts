@@ -357,16 +357,23 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
    */
   if (isMeshEditTool(tools.tool)) {
     /*
-     * Pose 工具的顶点**只让位于真正的骨骼手柄**：指针落在骨骼**原点圈**（移动手柄）
-     * 或小坐标轴上时才优先抓骨骼 —— 与本工程「附件与骨骼重叠时骨骼优先」同一原则，
-     * 否则骨骼原点旁边只要有顶点，骨骼就再也抓不起来了。
+     * Pose 工具的顶点**只让位于真正的骨骼手柄**：指针落在骨骼**原点圈**（移动手柄）、
+     * 小坐标轴、或斜切包围盒的边上时才优先抓骨骼 —— 与本工程「附件与骨骼重叠时骨骼优先」
+     * 同一原则，否则骨骼原点旁边只要有顶点，骨骼就再也抓不起来了。
      *
      * 不能拿 `pickBoneHandleAt` 的结果一概而论：它在没命中原点圈时会回退到**骨骼本体**
      * （那是留给「点骨骼体 = 旋转」的），而骨骼本体常常整条压在网格顶点上 ——
      * 那样顶点就永远拖不动（实测：离原点圈 29px 的顶点照样被判成骨骼）。
+     *
+     * 斜切模式没有小坐标轴（`pickGizmoAt` 在 shear 下恒返回 null），可拖的骨骼手柄
+     * 就是包围盒的边，所以这里要按模式分开判。
      */
     const boneHandle = tools.tool === 'pose' ? scene.pickBoneHandleAt(info.world.x, info.world.y) : null
-    const onGizmo = tools.tool === 'pose' && scene.pickGizmoAt(info.world.x, info.world.y) !== null
+    const onGizmo =
+      tools.tool === 'pose' &&
+      (tools.gizmo === 'shear'
+        ? scene.pickShearEdgeAt(info.world.x, info.world.y) !== null
+        : scene.pickGizmoAt(info.world.x, info.world.y) !== null)
     const bonePriority = boneHandle?.zone === 'origin' || onGizmo
     const vertex = bonePriority ? null : scene.pickVertexAt(info.world.x, info.world.y)
     if (vertex) {
@@ -407,8 +414,8 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   }
 
   // 斜切模式：包围盒优先。鼠标落在包围盒的边上拖动 → 沿该方向掰轴
-  // （bone 工具已经在上面按「画骨骼」处理并 return，走到这里的只剩选择工具）
-  if (tools.tool === 'select' && tools.gizmo === 'shear') {
+  // （bone 工具已经在上面按「画骨骼」处理并 return，走到这里的只剩选择工具与 Pose 工具）
+  if ((tools.tool === 'select' || tools.tool === 'pose') && tools.gizmo === 'shear') {
     const edge = scene.pickShearEdgeAt(info.world.x, info.world.y)
     const selectedName = scene.state.selectedBone
     if (edge && selectedName && !boneLocked(selectedName)) {
@@ -420,8 +427,14 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     }
   }
 
-  // 小坐标轴优先：它是选中骨骼的操作器，点中就必须由它接管
-  if (tools.tool === 'select') {
+  /*
+   * 小坐标轴优先：它是选中骨骼的操作器，点中就必须由它接管。
+   *
+   * **Pose 工具也要放行**：视口在 Pose 工具下照常画操作器（`showGizmo` 含 pose，
+   * 见 ViewportCanvas），画的就得能拖 —— 否则轴/圆环这些手柄全是点不动的假手柄
+   *（只剩骨骼本体与原点圈能用）。顶点的抢占已经在上面让开了这条路（见 `onGizmo`）。
+   */
+  if (tools.tool === 'select' || tools.tool === 'pose') {
     const part = scene.pickGizmoAt(info.world.x, info.world.y)
     const selectedName = scene.state.selectedBone
     const selectedIndex = selectedName ? (scene.runtime.boneIndex[selectedName] ?? -1) : -1

@@ -8,7 +8,8 @@
   "scripts": {
     "dev": "electron-vite dev",
     "dev:web": "vite --config vite.web.config.ts",
-    "build": "electron-vite build",
+    "build:hao2d-runtime": "node scripts/build-hao2d-runtime.mjs",
+    "build": "npm run build:hao2d-runtime && electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",

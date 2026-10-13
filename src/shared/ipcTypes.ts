@@ -80,6 +80,8 @@ export const IPC = {
   openProjectRequest: 'app:openProjectRequest',
   spinePreviewStart: 'preview:spineStart',
   spinePreviewStop: 'preview:spineStop',
+  hao2dPreviewStart: 'preview:hao2dStart',
+  hao2dPreviewStop: 'preview:hao2dStop',
   openExternal: 'shell:openExternal'
 } as const
 
@@ -130,7 +132,17 @@ export interface SpinePreviewSkeleton {
 
 /** 交给主进程起「在线预览」的整份会话数据 */
 export interface SpinePreviewSession {
+  /** 运行库类型：spine（官方运行时）/ hao2d（项目自带的 pixi 运行库） */
+  kind?: 'spine' | 'hao2d'
   /** 页面标题（项目名） */
+  title: string
+  pages: SpinePreviewPage[]
+  skeletons: SpinePreviewSkeleton[]
+}
+
+/** 导出运行时预览会话：数据与 spine 预览完全一致（页 + 各骨架 ske/atlas 文本），只是渲染运行库换成 hao2d 的 pixi 运行库 */
+export interface Hao2dPreviewSession {
+  kind: 'hao2d'
   title: string
   pages: SpinePreviewPage[]
   skeletons: SpinePreviewSkeleton[]
@@ -144,6 +156,8 @@ export interface SpinePreviewInfo {
   /** 会话路径里的随机段 */
   token: string
 }
+
+export type PreviewInfo = SpinePreviewInfo
 
 /** preload 暴露到 window.hao 的 API。 */
 export interface HaoBridge {
@@ -171,8 +185,11 @@ export interface HaoBridge {
   fileUrl(path: string): string
   /** 起本地在线预览服务（spine.js 运行时网页），open=true 时同时在浏览器打开；返回手机可扫码的地址 */
   startSpinePreview(session: SpinePreviewSession, open: boolean): Promise<IpcResult<SpinePreviewInfo>>
+  /** 起「导出运行时」预览服务：用项目里的 hao2d 计算方式 + pixi.js 渲染，open=true 时同时在浏览器打开 */
+  startHao2dPreview(session: Hao2dPreviewSession, open: boolean): Promise<IpcResult<SpinePreviewInfo>>
   /** 停止预览服务，释放端口与缓存 */
   stopSpinePreview(): Promise<IpcResult<void>>
+  stopHao2dPreview(): Promise<IpcResult<void>>
   /** 用系统默认程序打开 http(s) 链接（在线预览面板的「在浏览器打开」） */
   openExternal(url: string): Promise<IpcResult<void>>
   onMenuCommand(cb: (command: MenuCommand) => void): () => void

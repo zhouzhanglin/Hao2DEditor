@@ -617,6 +617,65 @@ export async function readPageBytes(
   return { bytes, failed }
 }
 
+/** 「导出运行时」预览包：不写任何文件，只把资源编进内存，交给主进程的本地网页服务 */
+export interface Hao2dPreviewPack {
+  pages: Array<{ name: string; bytes: Uint8Array }>
+  skeletons: Array<{
+    id: string
+    name: string
+    skeText: string
+    atlasText: string
+    animations: string[]
+    skins: string[]
+    defaultAnimation: string
+    defaultSkin: string
+  }>
+  warnings: string[]
+}
+
+/**
+ * 从「导出运行时」计划生成预览包（内存）。
+ *
+ * 复用与 `writeRuntimeExport` 完全相同的编码 / 序列化路径，只是不落盘：
+ * 图集页编成 PNG 字节（复制页直接读源文件），每个骨架序列化出 ske/atlas 文本。
+ * 预览页用项目里的 hao2d 计算方式（`loadRuntime`）解码，再用 pixi.js 渲染。
+ */
+export async function buildHao2dPreviewBundles(plan: RuntimeExportPlan): Promise<Hao2dPreviewPack> {
+  const platform = getPlatform()
+  const doc = useProjectStore.getState().document
+  for (const image of doc.images) {
+    const imageDir = dirName(image.path)
+    if (imageDir) await platform.registerAssetRoot(imageDir)
+  }
+  const bitmaps = new Map<string, ImageBitmap | null>()
+  const pngs = await encodeAtlasPages(
+    plan.pageSources.map((source) => (source.kind === 'packed' ? source.plan : null)),
+    async (name) => {
+      if (bitmaps.has(name)) return bitmaps.get(name) ?? null
+      const image = doc.images.find((entry) => entry.name === name)
+      const bitmap = image ? await loadImageBitmap(await platform.imageUrl(image.path)) : null
+      bitmaps.set(name, bitmap)
+      return bitmap
+    }
+  )
+  const pageBytes = await readPageBytes(plan, pngs)
+  // pageFiles 与 pageBytes 严格同序（readPageBytes 按 plan.pageFiles 对齐），且与 atlas.pages[].image 同名，纹理才能对上
+  const pages = plan.pageFiles
+    .map((name, index) => ({ name, bytes: pageBytes.bytes[index] ?? new Uint8Array() }))
+    .filter((page) => page.bytes && page.bytes.length > 0)
+  const skeletons = plan.skeletons.map((entry, index) => ({
+    id: `s${index}`,
+    name: entry.name,
+    skeText: serializeRuntimeSke(entry.asset, { atlasFileName: plan.atlasName, ppu: RUNTIME_PPU }),
+    atlasText: serializeRuntimeAtlas(plan.atlas),
+    animations: entry.asset.animations.map((animation) => animation.name),
+    skins: entry.asset.skins.map((skin) => skin.name),
+    defaultAnimation: entry.asset.animations[0]?.name ?? '',
+    defaultSkin: entry.asset.skins[0]?.name ?? ''
+  }))
+  return { pages, skeletons, warnings: pageBytes.failed }
+}
+
 /**
  * 文件 GUID：同目录已有 `.meta` 就沿用它的（保持 Unity 里既有的引用关系），
  * 否则按「工程名/文件名」确定性生成 —— 重复导出同一工程得到同一个 GUID。

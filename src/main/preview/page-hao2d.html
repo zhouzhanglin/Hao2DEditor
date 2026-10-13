@@ -1,0 +1,109 @@
+<!doctype html>
+<!--
+  导出运行时预览页：由主进程 previewServer.ts 以 ?raw 内联、原样返回给浏览器。
+  运行时用项目里的 hao2d 计算方式（解码 / 加载 / 播放），渲染用 pixi.js
+  （hao2d-runtime.js 路由，由构建期把运行库 + pixi 打包成自包含脚本），
+  整页不依赖任何外网资源。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+<meta name="color-scheme" content="dark" />
+<title>Hao2D 预览</title>
+<style>
+  :root {
+    --bg: #101218;
+    --card: rgba(24, 27, 35, 0.94);
+    --line: rgba(255, 255, 255, 0.1);
+    --text: #e7eaf0;
+    --muted: #8f96a6;
+    --accent: #5b8cff;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  #bg { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #stage { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #status, #error {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    padding: 12px 18px; border-radius: 10px; background: var(--card);
+    border: 1px solid var(--line); max-width: min(86vw, 460px); word-break: break-word;
+  }
+  #error { border-color: rgba(255, 110, 110, 0.5); color: #ffd2d2; white-space: pre-wrap; }
+  header {
+    position: fixed; left: 0; right: 0; top: 0; display: flex; align-items: center; gap: 10px;
+    padding: max(10px, env(safe-area-inset-top)) 12px 10px;
+    background: linear-gradient(180deg, rgba(10, 12, 16, 0.92), rgba(10, 12, 16, 0));
+  }
+  header .title { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header .spacer { flex: 1; }
+  select, button, input[type="range"] { font: inherit; color: var(--text); }
+  select, button {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 10px; min-height: 36px;
+  }
+  select:disabled { opacity: 0.5; }
+  button:active { background: #2a2f3c; }
+  button.primary { background: var(--accent); border-color: transparent; color: #fff; }
+  #panel {
+    position: fixed; right: 12px; bottom: max(12px, env(safe-area-inset-bottom));
+    width: min(320px, calc(100vw - 24px)); background: var(--card); border: 1px solid var(--line);
+    border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 10px;
+    backdrop-filter: blur(8px);
+  }
+  #panel[hidden] { display: none; }
+  .field { display: flex; align-items: center; gap: 8px; }
+  .field > span { color: var(--muted); white-space: nowrap; min-width: 42px; }
+  .field select { flex: 1; min-width: 0; }
+  .field input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+  .field .value { color: var(--muted); font-variant-numeric: tabular-nums; width: 96px; text-align: right; }
+  .row { display: flex; gap: 8px; }
+  .row button { flex: 1; }
+  label.check { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+  label.check input { width: 18px; height: 18px; accent-color: var(--accent); }
+  .hint { position: fixed; left: 12px; bottom: max(12px, env(safe-area-inset-bottom)); color: var(--muted); font-size: 12px; }
+  @media (max-width: 720px) {
+    #panel {
+      left: 0; right: 0; bottom: 0; width: 100%; border-radius: 16px 16px 0 0;
+      padding: 14px 14px max(14px, env(safe-area-inset-bottom));
+    }
+    .hint { display: none; }
+    header .title { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<canvas id="stage"></canvas>
+<div id="status">正在加载…</div>
+<div id="error" hidden></div>
+
+<header>
+  <span class="title" id="title">Hao2D 预览</span>
+  <span class="spacer"></span>
+  <select id="skeletonSelect" title="切换骨架"></select>
+  <button id="panelToggle" class="primary">控制</button>
+</header>
+
+<aside id="panel">
+  <label class="field"><span>动画</span><select id="animSelect"></select></label>
+  <label class="field"><span>皮肤</span><select id="skinSelect"></select></label>
+  <div class="row">
+    <button id="playBtn" class="primary">暂停</button>
+    <button id="restartBtn">重播</button>
+    <button id="fitBtn">适配</button>
+  </div>
+  <label class="field"><span>进度</span><input id="progress" type="range" min="0" max="1000" value="0" /><span class="value" id="timeLabel">0.00 / 0.00</span></label>
+  <label class="field"><span>速度</span><input id="speed" type="range" min="10" max="250" value="100" /><span class="value" id="speedLabel">1.00×</span></label>
+  <label class="check"><input id="loopCheck" type="checkbox" checked />循环播放</label>
+</aside>
+
+<div class="hint">拖拽平移 · 滚轮 / 双指缩放</div>
+
+<script src="hao2d-runtime.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

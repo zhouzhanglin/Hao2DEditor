@@ -4,12 +4,16 @@ import type { Socket } from 'node:net'
 import { randomBytes } from 'node:crypto'
 import { networkInterfaces } from 'node:os'
 import { shell } from 'electron'
-import type { SpinePreviewInfo, SpinePreviewSession } from '@shared/ipcTypes'
+import type { SpinePreviewInfo, SpinePreviewSession, Hao2dPreviewSession } from '@shared/ipcTypes'
 import { createLogger } from './logger'
 import previewPage from './preview/page.html?raw'
 import previewApp from './preview/app.js?raw'
+import previewPageHao2d from './preview/page-hao2d.html?raw'
+import hao2dApp from './preview/hao2dApp.js?raw'
 // 官方运行时直接内联进主进程包：预览页完全不依赖外网与本地 node_modules（打包后也能用）
 import spineCoreSource from '@esotericsoftware/spine-core/dist/iife/spine-core.min.js?raw'
+// hao2d 的 pixi 运行库（由 scripts/build-hao2d-runtime.mjs 用 esbuild 把运行库 + pixi 打包成自包含脚本）
+import hao2dRuntimeSource from './preview/hao2dRuntime.generated.js?raw'
 
 const log = createLogger('预览')
 
@@ -22,7 +26,7 @@ const log = createLogger('预览')
 let server: Server | null = null
 let port = 0
 let token = ''
-let session: SpinePreviewSession | null = null
+let session: SpinePreviewSession | Hao2dPreviewSession | null = null
 /** 会话版本号：每替换一次会话 +1，预览页据此自动重载 */
 let revision = 0
 /** 服务关闭时要一并断开的长连接（keep-alive 会让 close 迟迟不回调） */
@@ -95,18 +99,33 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   }
 
   const rest = pathname.slice(prefix.length)
+  // spine 与 hao2d 共享同一份资源（页面 + ske/atlas 文本 + 图集页），只是渲染运行库不同
+  const isHao2d = active.kind === 'hao2d'
   if (rest === '' || rest === 'index.html') {
-    send(res, 200, 'text/html; charset=utf-8', previewPage)
+    send(res, 200, 'text/html; charset=utf-8', isHao2d ? previewPageHao2d : previewPage)
     return
   }
   if (rest === 'spine-core.js') {
+    if (isHao2d) {
+      notFound(res, 'hao2d 预览不需要 spine 运行库')
+      return
+    }
     // 运行库内容由构建期内联，可长期缓存
     send(res, 200, 'text/javascript; charset=utf-8', spineCoreSource, 'public, max-age=86400')
     return
   }
+  if (rest === 'hao2d-runtime.js') {
+    if (!isHao2d) {
+      notFound(res, 'spine 预览不需要 hao2d 运行库')
+      return
+    }
+    // 运行库内容由构建期内联，可长期缓存
+    send(res, 200, 'text/javascript; charset=utf-8', hao2dRuntimeSource, 'public, max-age=86400')
+    return
+  }
   if (rest === 'app.js') {
     // 页面逻辑同样是构建期内联的，但改代码要立刻生效，所以不缓存
-    send(res, 200, 'text/javascript; charset=utf-8', previewApp)
+    send(res, 200, 'text/javascript; charset=utf-8', isHao2d ? hao2dApp : previewApp)
     return
   }
   if (rest === 'manifest.json') {
@@ -140,7 +159,8 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       notFound(res, `没有这个骨架：${id}`)
       return
     }
-    if (file.endsWith('.json')) {
+    // spine 预览请求 .json（spine json），hao2d 预览请求 .ske（内容是 hao2d ske 的 JSON 文本），两者都来自 skeleton.json 字段
+    if (file.endsWith('.json') || file.endsWith('.ske')) {
       send(res, 200, 'application/json; charset=utf-8', skeleton.json)
       return
     }
@@ -195,7 +215,7 @@ async function ensureServer(): Promise<number> {
 }
 
 /** 起（或替换）预览会话；返回本机与局域网地址。open 为真时同时在系统浏览器里打开 */
-export async function startPreviewSession(next: SpinePreviewSession, open: boolean): Promise<SpinePreviewInfo> {
+async function serveSession(next: SpinePreviewSession | Hao2dPreviewSession, open: boolean): Promise<SpinePreviewInfo> {
   if (next.skeletons.length === 0) throw new Error('没有可预览的骨架')
   const fresh = !server
   session = next
@@ -213,6 +233,14 @@ export async function startPreviewSession(next: SpinePreviewSession, open: boole
   return info
 }
 
+export async function startPreviewSession(next: SpinePreviewSession, open: boolean): Promise<SpinePreviewInfo> {
+  return serveSession(next, open)
+}
+
+export async function startHao2dPreview(next: Hao2dPreviewSession, open: boolean): Promise<SpinePreviewInfo> {
+  return serveSession(next, open)
+}
+
 /** 停止预览：断开连接并释放端口与缓存 */
 export async function stopPreviewSession(): Promise<void> {
   session = null
@@ -226,4 +254,9 @@ export async function stopPreviewSession(): Promise<void> {
   sockets.clear()
   await new Promise<void>((resolve) => active.close(() => resolve()))
   log.info(`预览服务已停止（原端口 ${oldPort}）`)
+}
+
+/** hao2d 预览与 spine 预览共用同一服务实例，停止逻辑完全一致 */
+export async function stopHao2dPreview(): Promise<void> {
+  return stopPreviewSession()
 }

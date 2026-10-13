@@ -43,6 +43,8 @@ const bridge: HaoBridge = {
 
   startSpinePreview: (session, open) => invoke(IPC.spinePreviewStart, session, open),
   stopSpinePreview: () => invoke<void>(IPC.spinePreviewStop),
+  startHao2dPreview: (session, open) => invoke(IPC.hao2dPreviewStart, session, open),
+  stopHao2dPreview: () => invoke<void>(IPC.hao2dPreviewStop),
   openExternal: (url: string) => invoke<void>(IPC.openExternal, url),
 
   fileUrl: (absPath: string): string => {

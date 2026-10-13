@@ -1,10 +1,16 @@
 import { BrowserWindow, ipcMain, shell } from 'electron'
 import { FILE_SCHEME } from './protocol'
 import * as fs from './fileService'
-import { startPreviewSession, stopPreviewSession } from './previewServer'
+import {
+  startPreviewSession,
+  stopPreviewSession,
+  startHao2dPreview,
+  stopHao2dPreview
+} from './previewServer'
 import { IPC } from '@shared/ipcTypes'
 import type {
   BatchFile,
+  Hao2dPreviewSession,
   OpenDialogOptions,
   SaveDialogOptions,
   SpinePreviewSession
@@ -70,6 +76,12 @@ export function registerIpcHandlers(): void {
     fs.safe(() => startPreviewSession(session, Boolean(open)))
   )
   ipcMain.handle(IPC.spinePreviewStop, () => fs.safe(() => stopPreviewSession()))
+
+  // 在线预览：导出运行时预览（hao2d 计算方式 + pixi.js 渲染），地址不变、可反复替换资源
+  ipcMain.handle(IPC.hao2dPreviewStart, (_e, session: Hao2dPreviewSession, open: boolean) =>
+    fs.safe(() => startHao2dPreview(session, Boolean(open)))
+  )
+  ipcMain.handle(IPC.hao2dPreviewStop, () => fs.safe(() => stopHao2dPreview()))
 
   // 在线预览的「在浏览器打开」：只放行 http(s)，别让渲染层的字符串借系统去执行别的东西
   ipcMain.handle(IPC.openExternal, (_e, url: string) => fs.safe(() => openExternal(url)))

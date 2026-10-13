@@ -2,6 +2,7 @@ import type {
   BatchFile,
   DirEntry,
   HaoBridge,
+  Hao2dPreviewSession,
   ImageInfo,
   IpcResult,
   SpinePreviewInfo,
@@ -62,8 +63,10 @@ export interface Platform {
    * 这里**故意**不做 unwrap：失败原因（没有骨架 / 端口起不来）要原样显示给用户，不能吞成空值。
    */
   startSpinePreview(session: SpinePreviewSession, open: boolean): Promise<IpcResult<SpinePreviewInfo>>
+  startHao2dPreview(session: Hao2dPreviewSession, open: boolean): Promise<IpcResult<SpinePreviewInfo>>
   /** 停止预览服务：断开连接、释放端口与内存里的资源 */
   stopSpinePreview(): Promise<IpcResult<void>>
+  stopHao2dPreview(): Promise<IpcResult<void>>
   /** 用系统默认浏览器打开链接（在线预览面板的「在浏览器打开」） */
   openExternal(url: string): Promise<void>
   onMenuCommand(cb: (command: string) => void): () => void
@@ -187,6 +190,20 @@ class ElectronPlatform implements Platform {
 
   stopSpinePreview(): Promise<IpcResult<void>> {
     return this.bridge.stopSpinePreview()
+  }
+
+  async startHao2dPreview(session: Hao2dPreviewSession, open: boolean): Promise<IpcResult<SpinePreviewInfo>> {
+    const call = this.bridge.startHao2dPreview as
+      | ((s: Hao2dPreviewSession, o: boolean) => Promise<IpcResult<SpinePreviewInfo>>)
+      | undefined
+    if (typeof call !== 'function') {
+      return { ok: false, error: '预览服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）' }
+    }
+    return call.call(this.bridge, session, open)
+  }
+
+  stopHao2dPreview(): Promise<IpcResult<void>> {
+    return this.bridge.stopHao2dPreview()
   }
 
   async openExternal(url: string): Promise<void> {
@@ -350,6 +367,14 @@ class MemoryPlatform implements Platform {
   }
 
   async stopSpinePreview(): Promise<IpcResult<void>> {
+    return { ok: true, data: undefined }
+  }
+
+  async startHao2dPreview(): Promise<IpcResult<SpinePreviewInfo>> {
+    return { ok: false, error: '浏览器模式没有本地预览服务，请在桌面版里使用' }
+  }
+
+  async stopHao2dPreview(): Promise<IpcResult<void>> {
     return { ok: true, data: undefined }
   }
 

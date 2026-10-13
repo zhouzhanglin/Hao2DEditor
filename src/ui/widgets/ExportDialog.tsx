@@ -5,7 +5,7 @@ import qrcode from 'qrcode-generator'
 import { getPlatform, stripExtension } from '@editor/platform'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSettingsStore } from '@editor/store/settingsStore'
-import { listFiles, prepareRuntimeExport, writeHao2dExport, writeRuntimeExport } from '@editor/services/exportService'
+import { buildHao2dPreviewBundles, listFiles, prepareRuntimeExport, writeHao2dExport, writeRuntimeExport } from '@editor/services/exportService'
 import { buildSpineBundles, sanitize, writeSpineExport } from '@editor/services/spineExport'
 import type { PageSource, RuntimeExportPlan } from '@editor/services/exportService'
 import type { PageEncodePlan } from '@editor/services/pngEncoder'
@@ -114,6 +114,8 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   const [previewError, setPreviewError] = useState('')
   /** 二维码里放的地址：默认第一个局域网地址，多网卡时可切换 */
   const [qrUrl, setQrUrl] = useState('')
+  /** 当前预览的运行库种类：spine（官方）或 hao2d（项目自带的 pixi 运行库），用于停止时调对通道 */
+  const [previewKind, setPreviewKind] = useState<'spine' | 'hao2d'>('spine')
   const qrRef = useRef<HTMLCanvasElement | null>(null)
 
   // 编译 + 打包 + UV 重映射（纯计算，不写盘）：改缩放 / 页尺寸后立刻重算预览。
@@ -265,6 +267,10 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     setPreviewBusy(true)
     setPreviewError('')
     try {
+      if (mode === 'runtime') {
+        await startHao2dPreviewInternal()
+        return
+      }
       const previewPlan = prepareRuntimeExport({
         scale,
         maxSize,
@@ -304,6 +310,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
       }
       setPreview(result.data)
       setPreviewWarnings(warnings)
+      setPreviewKind('spine')
       setQrUrl(result.data.lanUrls[0] ?? result.data.url)
       onStatus?.(
         result.data.lanUrls.length > 0
@@ -323,12 +330,62 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     }
   }
 
+  const startHao2dPreviewInternal = async (): Promise<void> => {
+    const previewPlan = prepareRuntimeExport({
+      scale,
+      maxSize,
+      skeletons: skeletons.map((_, index) => index),
+      atlasScope: 'all'
+    })
+    const pack = await buildHao2dPreviewBundles(previewPlan)
+    if (pack.skeletons.length === 0) {
+      setPreviewError('没有可预览的骨架')
+      return
+    }
+    const result = await getPlatform().startHao2dPreview(
+      {
+        kind: 'hao2d',
+        title: projectName || 'Hao2D',
+        pages: pack.pages,
+        skeletons: pack.skeletons.map((skeleton) => ({
+          id: skeleton.id,
+          name: skeleton.name,
+          json: skeleton.skeText,
+          atlas: skeleton.atlasText,
+          animations: skeleton.animations,
+          skins: skeleton.skins,
+          defaultAnimation: skeleton.defaultAnimation,
+          defaultSkin: skeleton.defaultSkin
+        }))
+      },
+      true
+    )
+    if (!result.ok) {
+      setPreviewError(result.error)
+      onStatus?.(`预览失败：${result.error}`)
+      return
+    }
+    setPreview(result.data)
+    setPreviewWarnings(pack.warnings)
+    setPreviewKind('hao2d')
+    setQrUrl(result.data.lanUrls[0] ?? result.data.url)
+    onStatus?.(
+      result.data.lanUrls.length > 0
+        ? `预览已启动（hao2d 运行时）：手机扫码，或访问 ${result.data.lanUrls[0]}`
+        : '预览已启动，但没找到局域网地址（手机可能连不上）'
+    )
+  }
+
   const stopPreview = async (): Promise<void> => {
-    const result = await getPlatform().stopSpinePreview()
+    const result =
+      previewKind === 'hao2d'
+        ? await getPlatform().stopHao2dPreview()
+        : await getPlatform().stopSpinePreview()
     setPreview(null)
     setQrUrl('')
     setPreviewWarnings([])
     setPreviewError('')
+    setPreviewKind('spine')
     onStatus?.(result.ok ? '已停止在线预览' : `停止预览失败：${result.error}`)
   }
 
@@ -394,7 +451,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   const pagePlan = previewPlanOf(pageSource, pageInfo)
   /** 除当前二维码之外的其他局域网地址（多网卡时可切换，别的网段手机未必连得上） */
   const otherLanUrls = preview ? preview.lanUrls.filter((url) => url !== qrUrl) : []
-  const canPreview = mode === 'spine' && getPlatform().isElectron
+  const canPreview = (mode === 'spine' || mode === 'runtime') && getPlatform().isElectron
 
   return createPortal(
     // 预览面板是可展开的，窗口矮的时候弹窗会变高：所以这里让遮罩可滚动，别把内容顶出屏幕

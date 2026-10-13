@@ -632,19 +632,33 @@ export function importDragonBones(input: DragonBonesImportInput): DragonBonesImp
       height: input.pageSizes[name]?.height ?? 0,
       loose: subs ? false : undefined,
       regions: subs
-        ? subs.map((s) => ({
-            name: s.name,
-            x: s.x,
-            y: s.y,
-            width: s.width,
-            height: s.height,
-            rotate: 0,
-            // DB 的显示尺寸已在附件里按打包尺寸取好，图集区域按打包尺寸记录即可（offset 置 0）
-            origWidth: s.width,
-            origHeight: s.height,
-            offsetX: 0,
-            offsetY: 0
-          }))
+        ? subs.map((s) => {
+            // DB 的裁剪（trim）信息必须完整保留到 atlas 区域，否则导出到 Spine 后
+            // trimmed 子图（如 logo24、Rooster 的 beak_lower）的尺寸/位置会错乱。
+            //
+            // 对应关系（y 向上，与编辑器 contentOffset 真值对齐）：
+            //   editor.contentOffset.x = (packedW - frameW)/2 - frameX
+            //   editor.contentOffset.y = (frameH - packedH)/2 + frameY
+            // spine RegionAttachment 渲染四边形中心 = -frame/2 + offset + packed/2，
+            // 反推得：offsetX = -frameX，offsetY = (frameH - packedH) + frameY，
+            // 且 origWidth/Height = frame（原图含留白），region.width/height = 打包尺寸。
+            const frameW = s.frameWidth
+            const frameH = s.frameHeight
+            const fx = s.frameX
+            const fy = s.frameY
+            return {
+              name: s.name,
+              x: s.x,
+              y: s.y,
+              width: s.width,
+              height: s.height,
+              rotate: 0,
+              origWidth: frameW,
+              origHeight: frameH,
+              offsetX: -fx,
+              offsetY: frameH - s.height + fy
+            }
+          })
         : undefined
     }
   })

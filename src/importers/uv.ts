@@ -92,13 +92,18 @@ export function mapRegionRelativeUvs(
 }
 
 /**
- * `mapRegionRelativeUvs` 的**逆运算**：把「图集页归一化 UV」（v 左下原点）还原成「区域相对 UV」
- * （v=0 指向区域顶边）。
+ * `mapRegionRelativeUvs` 的**逆运算**：把「图集页归一化 UV」（v 左下原点）还原成 Spine 的
+ * 「区域相对 UV」（relU 向右、relV **向下**，即 v=0 指向区域顶边，与 DragonBones 的 mesh uvs 同款）。
  *
  * Spine / DragonBones 的 mesh `uvs` 都是区域相对坐标，而编辑器运行期一律存整页 UV，
- * 所以往 Spine 写 `.json` 时必须反算 —— 否则 Unity 里每个网格附件都会按整页坐标去乘区域尺寸，
- * 取到错位的贴图块（表现是「贴图整体偏移 / 串图」）。
- * 旋转分支是上面四个正向公式的代数逆解，两者必须成对修改。
+ * 所以往 Spine 写 `.json` 时必须反算 —— 否则运行库会按整页坐标去乘区域尺寸，取到错位的贴图块
+ * （表现是「贴图整体偏移 / 串图」）。
+ *
+ * v 方向坑：编辑器模型里 v 是**左下原点**（v=0 图像底部），而这里解出来的是 relV（向下、
+ * v=0 区域顶边）—— 两者不是简单互补关系，`py = (1 - v) * th` 这一步已经把左下原点的 v 换成了
+ * 左上原点的行号，**不能再补一次 `1 - v`**：多翻一次会让整张网格纹理在区域内上下颠倒
+ * （Dora 的 mouth_d、Sheep 的 ear_rt 都栽在这上面；表现是位置对、贴图内容镜像）。
+ * 旋转分支是 `mapRegionRelativeUvs` 四个正向公式的代数逆解，两者必须成对修改。
  */
 export function pageUvsToRegionRelative(
   uvs: ArrayLike<number>,
@@ -134,6 +139,7 @@ export function pageUvsToRegionRelative(
       u = (px - x) / w
       v = (py - y) / h
     }
+    // 这里得到的 (u, v) 已经是 Spine 要的 relU/relV（向下），直接写出，别再翻 v
     out[i] = u
     out[i + 1] = v
   }

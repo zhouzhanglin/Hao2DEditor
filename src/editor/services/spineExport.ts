@@ -8,7 +8,8 @@ import type { RuntimeAsset } from '@core/model/asset'
 import type { BoneData, AttachmentData, RGBA, VertexWeight } from '@core/model/types'
 import { AttachmentType, BlendMode } from '@core/model/types'
 import { Easing } from '@core/model/animation'
-import type { AnimData, BoneAnim, SlotAnim, DeformAnim, ConstraintAnim, DrawOrderKeyframe } from '@core/model/animation'
+import type { AnimData, BoneAnim, FloatKeyframe, SlotAnim, DeformAnim, ConstraintAnim, DrawOrderKeyframe } from '@core/model/animation'
+import { angleDiff } from '@core/math/utils'
 import { sortConstraints } from '@core/model/constraints'
 import { triangulateFromHull } from '@core/mesh/triangulate'
 import type { SpineJson, SpineSlotJson, SpineSkinJson, SpineAttachmentJson, SpineAnimationJson, SpineCurveKeyframe, SpineTransformConstraintJson, SpinePathConstraintJson } from '@importers/spineTypes'
@@ -262,8 +263,11 @@ function spineAttachment(att: AttachmentData, lookup?: SpineRegionLookup): Spine
   base.triangles = triangles
   base.hull = att.hull
   if (att.edges && att.edges.length > 0) base.edges = [...att.edges]
-  // 包围盒尺寸（像素）
-  const verts = att.vertices
+  // 包围盒尺寸（像素）。未加权网格的顶点会先烘上附件 TRS，宽高要按烘完的算才自洽；
+  // 加权网格的 `vertices` 是「骨骼影响列表」而非 xy 对，仍按建模顶点算。
+  const weightedMesh = !!att.weights && att.weights.length > 0
+  const bakedVerts = weightedMesh ? null : bakeMeshTransform(att)
+  const verts = bakedVerts ?? att.vertices
   let minX = Infinity
   let minY = Infinity
   let maxX = -Infinity
@@ -278,12 +282,50 @@ function spineAttachment(att: AttachmentData, lookup?: SpineRegionLookup): Spine
     base.width = (maxX - minX) * RUNTIME_PPU
     base.height = (maxY - minY) * RUNTIME_PPU
   }
-  if (att.weights && att.weights.length > 0) {
+  if (weightedMesh) {
     base.vertices = meshWeightedVertices(att)
   } else {
-    base.vertices = Array.from(att.vertices).map((v) => v * RUNTIME_PPU)
+    base.vertices = bakedVerts!.map((v) => v * RUNTIME_PPU)
   }
+  /*
+   * mesh 的 x/y/rotation/scale 一律写 0/1。
+   *
+   * Spine 4.x 读 `"mesh"` 分支时**只**取 path/uvs/vertices/triangles/edges/hull 与宽高，
+   * 根本不会读这四个字段（见 spine-core `SkeletonJson`），网格顶点只受骨骼矩阵变换；
+   * 而编辑器渲染未加权网格时走 `MeshBuilder.attachmentWorld`，会叠加附件自身的 TRS。
+   * 两边要对上，只能把 TRS 烘进顶点（加权网格两边都不叠加附件 TRS，保持原样）。
+   * 之前没烘：Dora 的 mouth_d 平移 15px、旋转 -3°，Ubbie 的 leg_l 旋转 91.6° 全丢，
+   * 表现就是「位置整体错位 + 贴图对不上」。
+   */
+  base.x = 0
+  base.y = 0
+  base.rotation = 0
+  base.scaleX = 1
+  base.scaleY = 1
   return base
+}
+
+/**
+ * 未加权网格：把附件自身的 TRS 烘进顶点（与 `MeshBuilder.attachmentWorld` 的 `trsInto` 同构：
+ * x' = cos·sx·vx − sin·sy·vy + px，y' = sin·sx·vx + cos·sy·vy + py）。
+ */
+function bakeMeshTransform(att: AttachmentData): number[] {
+  const rad = (att.rotation * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  const sx = att.scale.x
+  const sy = att.scale.y
+  const px = att.position.x
+  const py = att.position.y
+  const src = att.vertices
+  const out: number[] = new Array(src.length)
+  for (let i = 0; i + 1 < src.length; i += 2) {
+    const vx = src[i]
+    const vy = src[i + 1]
+    out[i] = cos * sx * vx - sin * sy * vy + px
+    out[i + 1] = sin * sx * vx + cos * sy * vy + py
+  }
+  return out
 }
 
 /** 加权网格顶点：Spine 格式 `[count, boneIdx, lx, ly, w, ...] × 顶点`（lx/ly 为骨骼局部像素坐标） */
@@ -402,6 +444,29 @@ function buildConstraints(asset: RuntimeAsset): SpineJson['constraints'] {
 
 // ---------------- 动画 ----------------
 
+/**
+ * rotate 通道写 json 前的**连续化**：每一键换成与前一键同方向、跨度落在 (-180°, 180°] 内的等价角。
+ *
+ * 编辑器/参考库的采样走最短弧（`sampleAngle → lerpAngle`），而官方运行库对 rotate 是
+ * **按取值直接线性插值**（`RotateTimeline.apply → getCurveValue`，没有任何环绕处理）。
+ * DragonBones 的旋转帧是作者拖出来的**未归一化**值 —— 例如 hair3 的 `-358.05`（≡ +1.95，
+ * 本意只是根头发轻轻摆一下）、forearm_r 的 `-186.79`；照字面写进 json，官方库会在两键之间
+ * **朝反方向绕一整圈**（实测 hair3 中途 180.91°、forearm_r 偏差 348°，整个角色翻过来）。
+ *
+ * 逐键按最短弧累积成等价角后，官方库的直线插值与编辑器逐帧严格一致
+ * （相邻键差正好是 `angleDiff`，与 `lerpAngle` 同一条曲线）；差 360° 是同一个姿态，
+ * 这一步只改数值表示，不改任何一帧的样子。跨度本来就 ≤180° 的轨道一字不动。
+ */
+function continuousRotate(keys: readonly FloatKeyframe[], setupRot: number): number[] {
+  const out: number[] = new Array(keys.length)
+  if (keys.length === 0) return out
+  out[0] = keys[0].value - setupRot
+  for (let i = 1; i < keys.length; i++) {
+    out[i] = out[i - 1] + angleDiff(keys[i - 1].value, keys[i].value)
+  }
+  return out
+}
+
 function buildBoneTimeline(track: BoneAnim, bone: BoneData): SpineAnimationJson['bones'] {
   const json: SpineAnimationJson['bones'] = {}
   const tl: Record<string, SpineCurveKeyframe[]> = {}
@@ -409,6 +474,7 @@ function buildBoneTimeline(track: BoneAnim, bone: BoneData): SpineAnimationJson[
   const setupRot = bone.rotation
   const setupScale = bone.localScale
   const setupShear = bone.localShear
+  const rotateWrite = continuousRotate(track.rotate, setupRot)
 
   const emit = (channel: 'rotate' | 'translate' | 'scale' | 'shear', keys: { time: number; value: number | { x: number; y: number }; easing: Easing; curve: number[] | null }[]): void => {
     if (keys.length === 0) return
@@ -420,8 +486,8 @@ function buildBoneTimeline(track: BoneAnim, bone: BoneData): SpineAnimationJson[
       const t2 = next ? next.time : k.time
       let frame: SpineCurveKeyframe
       if (channel === 'rotate') {
-        const v1 = (k.value as number) - setupRot
-        const v2 = next ? (next.value as number) - setupRot : v1
+        const v1 = rotateWrite[i]
+        const v2 = next ? rotateWrite[i + 1] : v1
         frame = { time: t1, value: v1 }
         const curve = spineCurve(k.easing, k.curve, t1, t2, v1, v2)
         if (curve !== undefined) frame.curve = curve
@@ -473,13 +539,39 @@ function buildSlotTimeline(track: SlotAnim, asset: RuntimeAsset): SpineAnimation
   if (name.length === 0) return {}
   const tl: SpineAnimationJson['slots'] = {}
   const rgba: SpineCurveKeyframe[] = track.color.map((k) => ({ time: k.time, color: rgbaToHex(k.value) }))
-  const attachment: SpineCurveKeyframe[] = track.displayIndex.map((k, i) => ({
-    time: k.time,
-    name: track.displayAttachment[i] ?? ''
-  }))
+  const attachment: SpineCurveKeyframe[] = track.displayIndex.map((k, i) => {
+    const displayName = resolveDisplayAttachment(asset, name, track.displayAttachment[i], k.value)
+    // 没有附件（displayIndex 为 -1 / 越界）时**不能写空串**：运行库判定「清空附件」用的是
+    // `name == null`，空串会拿去做 `getAttachment`，直接抛 `placeholder cannot be null.` ——
+    // 这就是「setup 正常、一播动画就崩/黑」的原因。省掉 name 字段即 null = 隐藏该插槽。
+    return displayName.length > 0 ? { time: k.time, name: displayName } : { time: k.time }
+  })
   if (rgba.length > 0) tl[name] = { rgba }
   if (attachment.length > 0) tl[name] = { ...(tl[name] as object), attachment }
   return tl
+}
+
+/**
+ * 附件轨道的一帧 → 附件名（空串表示该帧没有附件）。
+ *
+ * DragonBones 的 slot 轨道只存 `displayIndex`（指向该槽附件列表的下标，-1 = 隐藏），并**没有名字**，
+ * 导入器把 `displayAttachment` 一律填成空串；编辑器运行期是按下标去查当前皮肤的附件数组的。
+ * 所以导出时必须按**运行期同一张皮肤**（默认皮肤）把下标反解成名字，否则整条附件轨道都成了空串：
+ *   - 有名字（Spine 导入的工程）→ 直接用；
+ *   - 没名字 → 用下标查默认皮肤该槽的附件列表；
+ *   - 下标越界 / 为负 → 空串，由调用方写成「清空附件」的帧。
+ */
+function resolveDisplayAttachment(
+  asset: RuntimeAsset,
+  slotName: string,
+  byName: string,
+  index: number
+): string {
+  if (byName) return byName
+  let def = asset.defaultSkinIndex
+  if (def < 0 || def >= asset.skins.length) def = 0
+  const skinSlot = asset.skins[def]?.slots.find((s) => s.slotName === slotName)
+  return skinSlot?.attachments[index]?.name ?? ''
 }
 
 function skinOfAttachment(asset: RuntimeAsset, slotName: string, attachmentName: string): string {
@@ -518,11 +610,16 @@ function deformAttachmentName(asset: RuntimeAsset, slotName: string, track: Defo
 /**
  * 一帧 FFD 偏移 → Spine 的 `deform.vertices`。
  *
- * 两个必须对齐的地方：
+ * 三个必须对齐的地方：
  * - Spine 的数组按**影响**展开（每根影响的骨内 (x,y) 各一份，加权网格逐骨骼复制），
  *   编辑器运行期按**顶点**存一份（见 meshBuilder 的 accumulateWeighted）；
  * - 偏移在**显示空间**时，要按该影响的 bindpose 方向换算到骨内空间，
- *   与运行期 `!ffdInBoneSpace` 分支完全一致（`ffdInBoneSpace` 由 compile 归一化，正常恒为 false）。
+ *   与运行期 `!ffdInBoneSpace` 分支完全一致（`ffdInBoneSpace` 由 compile 归一化，正常恒为 false）；
+ * - **未加权网格**的偏移要按附件自身的 TRS 线性部分转一次：编辑器是在**附件坐标**里
+ *   `vertex + offset` 之后才走刚体变换的（`emitMesh` 的 rigid 分支），而导出的顶点已经烘过
+ *   附件 TRS（`bakeMeshTransform`），Spine 又只会在骨内坐标上直接加偏移 —— 少转这一下，
+ *   偏移就等于没跟着附件的旋转/缩放走：Ubbie 的披风（附件旋转约 50°、偏移上千像素）整块
+ *   被扯歪，最大偏差 250px，而偏移为 0 的顶点却完好（这是「setup 对、一播动画就错」的由来）。
  *
  * 数组长度严格等于附件顶点数 ×2（加权网格 = 影响数 ×2）：短了参考库按 0 补齐没问题，
  * 长了 `Array.Copy` 直接越界抛异常。
@@ -533,12 +630,20 @@ function deformFrameVertices(asset: RuntimeAsset, att: AttachmentData, frame: De
   const base = Math.max(0, frame.vertexOffset)
   const out: number[] = []
   const bindposes = asset.bindposes
+  // 未加权网格的偏移先过附件 TRS（与 bakeMeshTransform 同一套线性部分，不含平移）
+  const rad = (att.rotation * Math.PI) / 180
+  const cos = Math.cos(rad)
+  const sin = Math.sin(rad)
+  const ta = cos * att.scale.x
+  const tb = -sin * att.scale.y
+  const tc = sin * att.scale.x
+  const td = cos * att.scale.y
   for (let i = 0; i < count; i++) {
     const at = (base + i) * 2
     const dx = frame.offsets[at] ?? 0
     const dy = frame.offsets[at + 1] ?? 0
     if (!weighted) {
-      out.push(dx * RUNTIME_PPU, dy * RUNTIME_PPU)
+      out.push((ta * dx + tb * dy) * RUNTIME_PPU, (tc * dx + td * dy) * RUNTIME_PPU)
       continue
     }
     const w = att.weights[i]
@@ -600,27 +705,43 @@ function buildDeforms(asset: RuntimeAsset, animation: AnimData): SpineAnimationJ
   return attachments
 }
 
+/**
+ * 一帧完整抽取顺序 → Spine 的 `offsets`。
+ *
+ * 参考库的读法（`SkeletonJson.readDrawOrder`）是**沿 setup 下标单向扫描**：
+ * 维护 originalIndex 从 0 往 n-1 走，遇到一条 offset 就先把沿途未改动的槽收进 unchanged，
+ * 再把当前槽放到 `slotIndex + offset` 位置；扫完剩下的槽按 setup 顺序回填空位。
+ * 因此：
+ * - entries 必须按槽的 **setup 下标升序**：顺序反了 `while (originalIndex !== index)` 永远
+ *   追不上（index 比 originalIndex 小），originalIndex 一路涨到 2^32-1，报
+ *   `RangeError: Invalid array length`（Dora_zorder 就是这么炸的）；
+ * - offset 是相对 **setup 顺序**的位移，每帧独立还原、不叠加前一帧；旧实现按上一帧推算，
+ *   多帧重排时就会写出反向 / 过量的 entries；
+ * - 未出现在 entries 里的槽由参考库按 setup 顺序回填，所以只需给
+ *   `targetPos != setupIndex` 的槽写 entry，entries 数量天然 ≤ 槽数，不会越界。
+ */
 function buildDrawOrder(asset: RuntimeAsset, animation: AnimData): SpineCurveKeyframe[] {
   if (animation.drawOrder.length === 0) return []
   const setupOrder = asset.slots.map((s) => s.name)
-  let current = [...setupOrder]
   const frames: SpineCurveKeyframe[] = []
   for (const key of animation.drawOrder) {
-    const target = key.order
-    const offsets: Array<{ slot: string; offset: number }> = []
-    // 计算每个插槽相对「当前顺序」的位移，顺序模拟 Spine 的逐条 offset 应用
-    let working = [...current]
-    for (let pos = 0; pos < target.length; pos++) {
-      const slot = target[pos]
-      const curPos = working.indexOf(slot)
-      if (curPos === pos) continue
-      const offset = pos - curPos
-      offsets.push({ slot, offset })
-      if (curPos >= 0) working.splice(curPos, 1)
-      working.splice(pos, 0, slot)
+    // order 存的是槽索引，写进 json 必须是槽名（spine-core 按 name 查槽）
+    const targetPos = new Map<string, number>()
+    for (let pos = 0; pos < key.order.length; pos++) {
+      const slotName = asset.slots[key.order[pos]]?.name
+      if (slotName && !targetPos.has(slotName)) targetPos.set(slotName, pos)
     }
-    if (offsets.length > 0) frames.push({ time: key.time, offsets } as unknown as SpineCurveKeyframe)
-    current = [...target]
+    const offsets: Array<{ slot: string; offset: number }> = []
+    for (let si = 0; si < setupOrder.length; si++) {
+      const pos = targetPos.get(setupOrder[si])
+      if (pos === undefined || pos === si) continue
+      offsets.push({ slot: setupOrder[si], offset: pos - si })
+    }
+    // 即使这一帧就是「setup 顺序」也要保留时间点：运行库对没有 offsets 的帧按 **setup 顺序**处理
+    // （`DrawOrderTimeline.apply`：null → 拷回 setup），漏掉这一帧会让上一帧的重排一直生效到下一帧。
+    frames.push(
+      (offsets.length > 0 ? { time: key.time, offsets } : { time: key.time }) as unknown as SpineCurveKeyframe
+    )
   }
   return frames
 }

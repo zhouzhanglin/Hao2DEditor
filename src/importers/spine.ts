@@ -333,7 +333,13 @@ function convertAttachment(
         vertices[i * 2 + 1] = pxToUnit(rawVertices[i * 2 + 1] ?? 0)
       }
     }
-    const uvs = region ? mapRegionRelativeUvs(meshUvs, region, ctx.pageSizes) : Float32Array.from(meshUvs)
+    // Spine 的 mesh `uvs` 是区域相对坐标（relU 向右、relV **向下**，v=0 指向区域顶边），
+    // 与 DragonBones 的 mesh uvs 同款，`mapRegionRelativeUvs` 正好按这个方向转成整页 UV，
+    // 这里**不能**再翻一次 v —— 多翻会让导入进来的网格贴图上下颠倒，而导出侧
+    // `pageUvsToRegionRelative` 又按 relV 向下反算，两边错误互相抵消，只有往返测试看不出来。
+    const uvs = region
+      ? mapRegionRelativeUvs(meshUvs, region, ctx.pageSizes)
+      : Float32Array.from(meshUvs)
     const weights = weighted ? parseWeights(rawVertices, vertexCount, ctx) : []
     return createAttachmentData({
       ...base,

@@ -20,7 +20,14 @@ interface LayoutSizes {
   timeline: number
 }
 
-const DEFAULTS: LayoutSizes = { left: 268, right: 300, timeline: 236 }
+/**
+ * 首次启动（localStorage 里还没有布局记录）时的默认尺寸。
+ *
+ * `left` 比原来多给 30px：层级树一行里除了骨骼 / 插槽名，行尾还要并排显示显示哪一个
+ * display 与 px 值，268 时名字经常被截断。只影响第一次打开 —— 拖过分隔条之后
+ * 以存下来的宽度为准（`loadSizes` 里保存值覆盖默认值）。
+ */
+const DEFAULTS: LayoutSizes = { left: 300, right: 300, timeline: 236 }
 const STORAGE_KEY = 'hao2d:layout'
 const MIN_SIDE = 180
 const MAX_SIDE = 520

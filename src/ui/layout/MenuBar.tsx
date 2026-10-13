@@ -13,6 +13,7 @@ import {
   Redo2
 } from 'lucide-react'
 import type { EditorMode } from '@editor/store/modeStore'
+import { getPlatform } from '@editor/platform'
 import { recentProjects } from '@editor/services/projectIo'
 
 export interface MenuBarProps {
@@ -174,6 +175,10 @@ function ExportMenu({ onCommand }: { onCommand: (command: string) => void }) {
  * 根元素带 `hao-window-drag`：窗口用 `titleBarStyle: 'hiddenInset'`（标题栏被隐藏），
  * 不显式声明拖动区的话**整个窗口都拖不动**（详见 src/styles/index.css 里的说明与来源）。
  * 里面的按钮等交互控件由样式中的 `no-drag` 规则自动排除，点击不受影响。
+ *
+ * 左侧那 86px 空位是给 macOS 的窗口按钮（交通灯）让位的（见 src/main/index.ts 的
+ * `trafficLightPosition`）。Windows / Linux 走系统原生标题栏（`titleBarStyle: 'default'`），
+ * 窗口按钮不在这一行上 —— 那里就不留空位，品牌与快捷动作整体往前挪。
  */
 export default function MenuBar({
   documentName,
@@ -183,8 +188,15 @@ export default function MenuBar({
   onCommand,
   onOpenRecent
 }: MenuBarProps) {
+  /*
+   * 交通灯只在 macOS 下才会浮到菜单栏上；Windows / Linux（原生标题栏）与浏览器模式
+   * （dev:web，本来就没有窗口按钮）都用普通内边距，别白占掉左边一块。
+   */
+  const leftInset = getPlatform().platform === 'darwin' ? 'pl-[86px]' : 'pl-2'
   return (
-    <header className="hao-window-drag flex h-[30px] items-center gap-2 border-b border-line bg-ink-800 pl-[86px] pr-2">
+    <header
+      className={`hao-window-drag flex h-[30px] items-center gap-2 border-b border-line bg-ink-800 ${leftInset} pr-2`}
+    >
       <div className="flex items-center gap-1.5">
         <Bone size={14} className="text-accent" />
         <span className="text-panel font-semibold tracking-wide text-content-hi">Hao2D</span>

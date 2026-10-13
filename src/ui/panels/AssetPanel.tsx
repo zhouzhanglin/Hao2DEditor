@@ -1,13 +1,15 @@
 import { useRef, useState } from 'react'
-import { ImagePlus, Layers, Package, Plus } from 'lucide-react'
+import { ImagePlus, Layers, Package, Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { getPlatform } from '@editor/platform'
 import { importDroppedPaths } from '@editor/services/projectIo'
 import { PanelEmpty } from '@ui/widgets/PanelShell'
-import { createRegionFromImage } from '@editor/commands/authoringCommands'
+import { countImageReferences, createRegionFromImage } from '@editor/commands/authoringCommands'
 import { hasExternalFiles, setDraggingImage, setImageDragData } from '@ui/widgets/dragDrop'
 import { ImageHoverPreview, ImageThumb } from './ImageThumb'
+import ContextMenu from '@ui/widgets/ContextMenu'
+import type { ContextMenuItem } from '@ui/widgets/ContextMenu'
 import type { AuthoringImage } from '@core/model/authoring'
 
 export interface AssetPanelProps {
@@ -20,6 +22,8 @@ export interface AssetPanelProps {
 export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
   const document = useProjectStore((s) => s.document)
   const update = useProjectStore((s) => s.update)
+  const removeImage = useProjectStore((s) => s.removeImage)
+  const replaceImage = useProjectStore((s) => s.replaceImage)
   const selection = useSelectionStore()
   /** 从系统拖文件悬停在本面板上（面板范围内的高亮，不是整窗覆盖层） */
   const [fileDragging, setFileDragging] = useState(false)
@@ -29,6 +33,8 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
   const [picked, setPicked] = useState<string[]>([])
   /** Shift 范围选择的锚点（上一次普通点击 / Cmd 点击的行） */
   const anchorRef = useRef<string | null>(null)
+  /** 右键菜单：位置 + 目标图片名 */
+  const [rowMenu, setRowMenu] = useState<{ x: number; y: number; name: string } | null>(null)
 
   // 图片可能被删除 / 改名，选中列表里失效的名字直接忽略
   const selected = picked.filter((name) => document.images.some((item) => item.name === name))
@@ -63,6 +69,58 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
     const result = await importDroppedPaths(paths.filter(Boolean))
     if (result.message) onStatus?.(result.message)
   }
+
+  /** 删除图片：被附件引用时先确认，确认后清空引用（纯色）并移除条目 */
+  const handleDeleteImage = (name: string): void => {
+    const refs = countImageReferences(document, name)
+    if (refs > 0) {
+      const ok = window.confirm(
+        `图片「${name}」正被 ${refs} 个附件引用。\n删除后这些附件会丢失贴图、退化为纯色块（附件本身保留）。\n确定删除？`
+      )
+      if (!ok) return
+    }
+    removeImage(name)
+    setPicked((current) => current.filter((item) => item !== name))
+    onStatus?.(refs > 0 ? `已删除「${name}」（${refs} 个附件的贴图已清空）` : `已删除「${name}」`)
+  }
+
+  /** 替换图片：选一张新图，保持原名（附件引用自动跟随），更新来源与尺寸 */
+  const handleReplaceImage = async (name: string): Promise<void> => {
+    const platform = getPlatform()
+    const pickedFiles = await platform.pickFiles({
+      title: `替换图片「${name}」`,
+      filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }]
+    })
+    if (pickedFiles.length === 0) return
+    const infos = await platform.imageInfo(pickedFiles.slice(0, 1))
+    const info = infos[0]
+    if (!info || !info.path) {
+      onStatus?.(`读取「${pickedFiles[0] ?? ''}」失败，替换取消`)
+      return
+    }
+    replaceImage(name, { path: info.path, width: info.width, height: info.height })
+    onStatus?.(`已用「${info.path}」替换「${name}」（${info.width}×${info.height}）`)
+  }
+
+  /** 右键菜单项 */
+  const imageMenuItems = (name: string): ContextMenuItem[] => [
+    {
+      key: 'replace',
+      label: '替换图片…',
+      icon: <RefreshCw size={12} />,
+      hint: '选一张新图，保持原名（引用它的附件自动跟随）',
+      onSelect: () => void handleReplaceImage(name)
+    },
+    { key: 'sep', separator: true },
+    {
+      key: 'delete',
+      label: '删除图片',
+      icon: <Trash2 size={12} />,
+      danger: true,
+      hint: '从工程移除该图片（被引用的附件退化为纯色）',
+      onSelect: () => handleDeleteImage(name)
+    }
+  ]
 
   const activeSkin = selection.skin && document.skins.some((s) => s.name === selection.skin) ? selection.skin : ''
   // 新附件的挂载骨骼：优先用当前选中的骨骼，否则退回第一根骨骼
@@ -185,7 +243,11 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
               <li
                 key={image.name}
                 draggable
-                title="拖到视口 = 在落点新建插槽（先多选可以一次拖多张）；拖到层级树的插槽行 = 给该插槽加一个 display；拖到骨骼行 = 在该骨骼下新建插槽"
+                title="拖到视口 = 在落点新建插槽（先多选可以一次拖多张）；拖到层级树的插槽行 = 给该插槽加一个 display；拖到骨骼行 = 在该骨骼下新建插槽；右键可替换 / 删除"
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  setRowMenu({ x: event.clientX, y: event.clientY, name: image.name })
+                }}
                 className={[
                   // 与层级树 / slot 层级统一：无边框 mac 列表行 + 圆角实心选中块；
                   // 原来的描边卡片是全应用里独一份的行样式，放在一起像两套组件。
@@ -276,6 +338,16 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
         <ImageHoverPreview
           image={document.images.find((item) => item.name === hovered.image.name) ?? hovered.image}
           anchor={hovered.row}
+        />
+      ) : null}
+
+      {rowMenu ? (
+        <ContextMenu
+          x={rowMenu.x}
+          y={rowMenu.y}
+          title={`图片「${rowMenu.name}」`}
+          items={imageMenuItems(rowMenu.name)}
+          onClose={() => setRowMenu(null)}
         />
       ) : null}
     </div>

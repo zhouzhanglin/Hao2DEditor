@@ -3,6 +3,7 @@ import type { EditorDocument } from '@core/model/authoring'
 import { ROOT_BONE_NAME, createAuthoringBone, createEmptyDocument } from '@core/model/authoring'
 import { History } from '../history'
 import type { ProjectSnapshot } from '../history'
+import { deleteImage, replaceImage } from '../commands/authoringCommands'
 import { repairAnimationDurations, repairDisplayNames } from '../timeline/model'
 
 export interface ProjectState {
@@ -51,6 +52,10 @@ export interface ProjectState {
   removeSkeleton: (index: number) => void
   /** 重命名某个骨架（改它的 `armatureName`） */
   renameSkeleton: (index: number, name: string) => void
+  /** 删除图片（跨所有骨架清理引用，引用它的附件退化为纯色） */
+  removeImage: (name: string) => void
+  /** 替换图片：保持 name 不变，更新 path / width / height */
+  replaceImage: (name: string, info: { path: string; width: number; height: number }) => void
   /** 切换当前编辑的骨架 */
   setActiveSkeleton: (index: number) => void
   /** 设置项目名 / 保存路径（新建项目弹窗、打开工程后调用） */
@@ -278,6 +283,43 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (at === state.activeSkeleton) return
     // 只换引用，不动数据；撤销快照里带着 activeSkeleton，所以历史不用清
     set({ document: state.skeletons[at], activeSkeleton: at })
+  },
+
+  removeImage: (name) => {
+    const state = get()
+    if (!state.document.images.some((image) => image.name === name)) return
+    history.push('删除图片', snapshotOf(state))
+    // 图片池被所有骨架共享：逐个骨架深拷贝后清理，再重新对齐回同一个池子
+    const list = state.skeletons.map((skeleton) => {
+      const draft = cloneDocument(skeleton)
+      deleteImage(draft, name)
+      return draft
+    })
+    const withPool = shareImages(list, state.activeSkeleton)
+    set({
+      document: withPool[state.activeSkeleton],
+      skeletons: withPool,
+      dirty: true,
+      ...syncFlags(state)
+    })
+  },
+
+  replaceImage: (name, info) => {
+    const state = get()
+    if (!state.document.images.some((image) => image.name === name)) return
+    history.push('替换图片', snapshotOf(state))
+    const list = state.skeletons.map((skeleton) => {
+      const draft = cloneDocument(skeleton)
+      replaceImage(draft, name, info)
+      return draft
+    })
+    const withPool = shareImages(list, state.activeSkeleton)
+    set({
+      document: withPool[state.activeSkeleton],
+      skeletons: withPool,
+      dirty: true,
+      ...syncFlags(state)
+    })
   },
 
   setProjectInfo: (info) => {

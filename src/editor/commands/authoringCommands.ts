@@ -206,6 +206,59 @@ export function addImageDisplay(
 }
 
 /**
+ * 删除图片：从图片池移除该条目。
+ * 所有引用它的附件（`attachment.image`）会被清空（退化为「纯色」，附件本身保留），
+ * 避免留下悬挂引用导致导出裂图。
+ * 返回受影响的附件数（用于状态栏提示 / 删除前确认）。
+ */
+export function deleteImage(doc: EditorDocument, name: string): number {
+  if (!doc.images.some((image) => image.name === name)) return 0
+  doc.images = doc.images.filter((image) => image.name !== name)
+  let touched = 0
+  for (const skin of doc.skins) {
+    for (const skinSlot of skin.slots) {
+      for (const attachment of skinSlot.attachments) {
+        if (attachment.image === name) {
+          attachment.image = ''
+          touched++
+        }
+      }
+    }
+  }
+  return touched
+}
+
+/**
+ * 替换图片：保持 `name` 不变（附件引用自动跟随新像素），只更新来源与尺寸。
+ * `regions` / `loose` 沿用原条目（图集页替换整页 png 时 regions 仍有效）。
+ */
+export function replaceImage(
+  doc: EditorDocument,
+  name: string,
+  next: { path: string; width: number; height: number }
+): boolean {
+  const image = doc.images.find((item) => item.name === name)
+  if (!image) return false
+  image.path = next.path
+  image.width = next.width
+  image.height = next.height
+  return true
+}
+
+/** 统计某个图片被多少附件引用（跨全部皮肤） */
+export function countImageReferences(doc: EditorDocument, name: string): number {
+  let count = 0
+  for (const skin of doc.skins) {
+    for (const skinSlot of skin.slots) {
+      for (const attachment of skinSlot.attachments) {
+        if (attachment.image === name) count++
+      }
+    }
+  }
+  return count
+}
+
+/**
  * 切换插槽当前显示的 display：传入**当前正在显示的那一个**则隐藏（空串 = 一个都不显示），
  * 否则切到它 —— 插槽只有这两种状态，空串在运行期解析成 displayIndex = -1，是合法值。
  *

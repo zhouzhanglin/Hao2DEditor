@@ -385,6 +385,8 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     0
   )
   const copyPages = plan.pageSources.filter((item) => item.kind === 'copy').length
+  /** 源图全部是图集（整页复制，不重打包）：缩放无意义，隐藏「图集缩放」控件 */
+  const allAtlas = copyPages === pages.length && pages.length > 0
   const pageInfo = pages[current]
   const pageSource = plan.pageSources[current]
   const pagePlan = previewPlanOf(pageSource, pageInfo)
@@ -521,7 +523,8 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          {!allAtlas && (
+            <div className="flex items-center gap-2">
               <span className="hao-label w-[54px] shrink-0">图集缩放</span>
               <input
                 type="range"
@@ -549,6 +552,12 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
                 ))}
               </div>
             </div>
+          )}
+          {allAtlas ? (
+            <div className="hao-label text-content-lo">
+              源图已是图集（整页复制，不重打包），图集缩放不生效，已隐藏。
+            </div>
+          ) : null}
 
           <div className="flex items-center gap-2">
             <span className="hao-label shrink-0">单页最大</span>

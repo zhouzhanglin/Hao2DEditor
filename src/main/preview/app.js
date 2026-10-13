@@ -11,8 +11,15 @@
   var spine = window.spine
   var $ = function (id) { return document.getElementById(id) }
   var canvas = $('stage')
+  var bg = $('bg')
+  var bgctx = bg.getContext('2d')
+  var dpr = 1
   var statusBox = $('status')
   var errorBox = $('error')
+
+  // 棋盘格两档底色，与编辑器视口一致（checkerboard.ts 的 LIGHT / DARK）
+  var LIGHT = '#3a3a3c'
+  var DARK = '#2c2c2e'
 
   function fail(message) {
     statusBox.hidden = true
@@ -173,7 +180,7 @@
 
   /** 同步画布像素尺寸与视口，返回 css 视口尺寸是否变了（首次进来、转屏、拉窗口都算） */
   function viewportSize() {
-    var dpr = Math.min(window.devicePixelRatio || 1, 2)
+    dpr = Math.min(window.devicePixelRatio || 1, 2)
     var cssWidth = canvas.clientWidth || 1
     var cssHeight = canvas.clientHeight || 1
     var resized = cssWidth !== app.viewWidth || cssHeight !== app.viewHeight
@@ -185,6 +192,10 @@
       canvas.width = width
       canvas.height = height
     }
+    if (bg.width !== width || bg.height !== height) {
+      bg.width = width
+      bg.height = height
+    }
     gl.viewport(0, 0, width, height)
     return resized
   }
@@ -192,7 +203,9 @@
   function render() {
     // 首帧时视口尺寸才刚确定（fitView 要按它算缩放），所以这里补一次自动取景
     if (viewportSize() && app.skeleton && !app.touched) fitView()
-    gl.clearColor(0.06, 0.07, 0.09, 1)
+    drawBackground()
+    // 透明清屏：背景棋盘格 / 轴线由下层 #bg 画布提供，角色经混合后透出来
+    gl.clearColor(0, 0, 0, 0)
     gl.clear(gl.COLOR_BUFFER_BIT)
     if (!app.skeleton) return
     gl.enable(gl.BLEND)
@@ -254,6 +267,70 @@
     app.centerX = (minX + maxX) / 2
     app.centerY = (minY + maxY) / 2
     app.zoom = Math.min(app.viewWidth / (width * pad), app.viewHeight / (height * pad))
+  }
+
+  /** 自适应格子边长（世界单位）：保证屏幕上的格子边长落在 [minPx, maxPx]，2 的幂次步进。
+   *  与编辑器 checkerboard.ts 的 pickCellSize 同算法，所以预览和编辑器同一缩放下格子大小一致。 */
+  function pickCellSize(zoom, base, minPx, maxPx) {
+    base = base || 1
+    minPx = minPx || 12
+    maxPx = maxPx || 32
+    if (!(zoom > 0)) return base
+    var cell = base
+    var guard = 0
+    while (cell * zoom > maxPx && guard++ < 40) cell /= 2
+    guard = 0
+    while (cell * zoom < minPx && guard++ < 40) cell *= 2
+    return cell
+  }
+
+  /** 画背景：棋盘格 + 沿世界原点的 XY 轴线，与编辑器视口一致。盖在 WebGL 画布之下。
+   *  背景只在相机 / 视口尺寸变化时才重画（脏标记），动画播放但相机不动时整帧跳过，
+   *  否则每帧几千次 fillRect 软件渲染会吃满 CPU。 */
+  var bgState = null
+  function drawBackground() {
+    var same = bgState &&
+      bgState.zoom === app.zoom &&
+      bgState.centerX === app.centerX &&
+      bgState.centerY === app.centerY &&
+      bgState.w === app.viewWidth &&
+      bgState.h === app.viewHeight
+    if (same) return
+    bgState = { zoom: app.zoom, centerX: app.centerX, centerY: app.centerY, w: app.viewWidth, h: app.viewHeight }
+
+    var ctx = bgctx
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, app.viewWidth, app.viewHeight)
+
+    var worldCell = pickCellSize(app.zoom)
+    var cellPx = Math.max(1, worldCell * app.zoom)
+    // 世界原点 (0,0) 的屏幕坐标（y 轴向上，所以屏幕 y 用减号）
+    var ox = app.viewWidth / 2 - app.centerX * app.zoom
+    var oy = app.viewHeight / 2 + app.centerY * app.zoom
+
+    var kStart = Math.floor((0 - ox) / cellPx)
+    var kEnd = Math.ceil((app.viewWidth - ox) / cellPx)
+    var mStart = Math.floor((oy - app.viewHeight) / cellPx)
+    var mEnd = Math.floor(oy / cellPx)
+    for (var k = kStart; k <= kEnd; k++) {
+      for (var m = mStart; m <= mEnd; m++) {
+        var x = ox + k * cellPx
+        var y = oy - (m + 1) * cellPx
+        // 同奇偶（k+m 偶数）→ 深格，与编辑器纹理 (0,0) 处一致
+        ctx.fillStyle = (((k & 1) ^ (m & 1)) === 0) ? DARK : LIGHT
+        ctx.fillRect(x, y, cellPx, cellPx)
+      }
+    }
+
+    // 坐标轴：沿世界 x=0 / y=0 的黑色细线，铺满可见范围，画在角色之下
+    ctx.strokeStyle = '#000000'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(Math.round(ox) + 0.5, 0)
+    ctx.lineTo(Math.round(ox) + 0.5, app.viewHeight)
+    ctx.moveTo(0, Math.round(oy) + 0.5)
+    ctx.lineTo(app.viewWidth, Math.round(oy) + 0.5)
+    ctx.stroke()
   }
 
   // ------------------------------------------------------------------ 数据加载
@@ -341,6 +418,9 @@
       // 4.3 起是 setupPose()（旧名字 setToSetupPose 已不存在）
       app.skeleton.setupPose()
       app.skeleton.updateWorldTransform(spine.Physics.update)
+      // 默认适配大小：加载完成后立刻按真实视口取一次景（用户手动拖过 / 缩过才解除）
+      app.touched = false
+      viewportSize()
       fitView()
       play(wantAnim)
       $('title').textContent = (app.manifest.title ? app.manifest.title + ' · ' : '') + entry.meta.name

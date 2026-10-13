@@ -35,7 +35,7 @@ import { focusNode } from '@editor/focusNode'
 import type { FocusTarget } from '@editor/focusNode'
 import { createIkConstraint, createPathConstraint, createTransformConstraint } from '@core/model/constraints'
 import type { AuthoringBone, AuthoringConstraint, AuthoringImage, EditorDocument } from '@core/model/authoring'
-import { createAuthoringBone, createAuthoringSlot } from '@core/model/authoring'
+import { createAuthoringBone, createAuthoringSlot, rootBoneName } from '@core/model/authoring'
 import {
   addImageDisplay,
   createRegionFromImage,
@@ -555,6 +555,11 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   const document = useProjectStore((s) => s.document)
   const update = useProjectStore((s) => s.update)
   const selection = useSelectionStore()
+  /**
+   * 层级根骨骼名：整棵树的根，其他骨骼 / 插槽都挂在它之下。
+   * 「未选中 / 落到空白处」的挂载目标、根骨骼的移动与删除保护都用它。
+   */
+  const rootName = rootBoneName(document.bones)
   // 折叠状态提升到 store（见 treeUiStore）：复制 / 直接复制生成新节点时要把源节点的折叠
   // 状态照搬到新节点，而粘贴逻辑在 editor 层，需要共享这块 UI 状态。
   const collapsed = useTreeUiStore((s) => s.collapsed)
@@ -834,7 +839,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
 
     if (payload.kind === 'bone') {
       if (target.kind !== 'bone') {
-        onStatus?.('骨骼只能放到骨骼下面（或拖到列表空白处成为根骨骼）')
+        onStatus?.('骨骼只能放到骨骼下面（拖到列表空白处 = 挂到根骨骼下）')
         return
       }
       const check = validateBoneMove(document, payload.name, target.name)
@@ -965,22 +970,25 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   const selectedBone = (): string => (selection.kind === 'bone' && selection.bone ? selection.bone : '')
 
   const addBone = (parent = selectedBone()): void => {
+    // 未选中（含从空白处右键）时挂到层级根骨骼 root 下：其他骨骼都必须待在它之下
+    const host = parent || rootName
     update('新建骨骼', (draft) => {
       const baseName = parent ? `${parent}_child` : 'bone'
       draft.bones.push(
         createAuthoringBone({
           name: uniqueName(draft.bones.map((b) => b.name), baseName),
-          parent,
+          parent: host,
           length: 0.4
         })
       )
     })
-    if (parent) setCollapsed((prev) => (prev.has(parent) ? new Set([...prev].filter((n) => n !== parent)) : prev))
+    if (host) setCollapsed((prev) => (prev.has(host) ? new Set([...prev].filter((n) => n !== host)) : prev))
   }
 
   const addSlot = (bone = selectedBone()): void => {
     update('新建插槽', (draft) => {
-      const host = bone || draft.bones[0]?.name || ''
+      // 宿主兜底到层级根骨骼：插槽必须挂在骨骼上，挂在 root 下总能看见内容
+      const host = bone || rootBoneName(draft.bones)
       const name = uniqueName(draft.slots.map((s) => s.name), 'slot')
       draft.slots.push(createAuthoringSlot({ name, bone: host, zOrder: draft.slots.length }))
       draft.skins[0]?.slots.push({ slot: name, attachments: [] })
@@ -989,8 +997,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   }
 
   /**
-   * 「添加 IK 约束」菜单项的副标题：**新建一根 IK 节点骨**当目标（挂根层、摆在链尾末端，
-   * spineboy 的 front-ankle-ik 就是这么长的），而不是征用现有骨骼 —— 目标骨要能独立拖动 /
+   * 「添加 IK 约束」菜单项的副标题：**新建一根 IK 节点骨**当目标（挂在层级根骨骼 root 下、
+   * 摆在链尾末端，spineboy 的 front-ankle-ik 就是这么长的），而不是征用现有骨骼 —— 目标骨要能独立拖动 /
    * 打帧，拿链上的骨骼当目标会让 IK 拉着自己跑。链取当前多选（父→子连续），没多选就驱动右键那根。
    */
   const ikCreateHint = (host: string): string => {
@@ -1001,7 +1009,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           ? [host]
           : []
     if (chain.length === 0) return '未指定驱动骨骼：先选中骨骼再点'
-    return `新建 IK 节点骨驱动：${chain.join(' → ')}（节点骨挂根层，可拖动 / 可打帧）`
+    return `新建 IK 节点骨驱动：${chain.join(' → ')}（节点骨挂在 root 下，可拖动 / 可打帧）`
   }
 
   const addConstraint = (kind: AuthoringConstraint['type'], bone = selectedBone()): void => {
@@ -1028,11 +1036,11 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       const name = uniqueName(draft.constraints.map((c) => c.name), kind)
       const base = { name, order: draft.constraints.length, enabled: true, bones: [] as string[], target: '' }
       if (kind === 'ik') {
-        // IK 节点骨：挂根层、零长度（就是个把手）、约束红 —— 与视口里 IK 手柄同色
+        // IK 节点骨：挂在层级根骨骼 root 下、零长度（就是个把手）、约束红 —— 与视口里 IK 手柄同色
         draft.bones.push(
           createAuthoringBone({
             name: nodeName,
-            parent: '',
+            parent: rootBoneName(draft.bones),
             localPosition: tip ?? { x: 0, y: 0 },
             length: 0,
             color: '#e4572e'
@@ -1120,29 +1128,34 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
    * 删除改的同样是绑定数据，所以 Animate 态一律拒绝；但菜单在 Animate 态仍留着它 ——
    * 直接隐藏会让人以为「删不掉」，点了给一句「切回 Pose」反而更清楚。
    */
-  const deleteItem = (target: MenuTarget): ContextMenuItem => ({
-    key: 'delete',
-    label: `删除「${target.name}」`,
-    danger: true,
-    disabled: target.kind === 'bone' && document.bones.length <= 1,
-    hint: target.kind === 'bone' && document.bones.length <= 1 ? '至少保留一根骨骼' : undefined,
-    icon: <Trash2 size={12} />,
-    onSelect: poseOnly(() => {
-      if (target.kind === 'slot') {
-        update('删除插槽', (draft) => {
-          deleteSlot(draft, target.name)
+  const deleteItem = (target: MenuTarget): ContextMenuItem => {
+    // 层级根骨骼不给删：它一没，其他节点就失去共同的祖先（整棵子树会跟着一起消失）
+    const isRoot = target.kind === 'bone' && target.name === rootName
+    const lastBone = target.kind === 'bone' && document.bones.length <= 1
+    return {
+      key: 'delete',
+      label: `删除「${target.name}」`,
+      danger: true,
+      disabled: isRoot || lastBone,
+      hint: isRoot ? `「${rootName}」是层级根骨骼，不能删除` : lastBone ? '至少保留一根骨骼' : undefined,
+      icon: <Trash2 size={12} />,
+      onSelect: poseOnly(() => {
+        if (target.kind === 'slot') {
+          update('删除插槽', (draft) => {
+            deleteSlot(draft, target.name)
+          })
+          return
+        }
+        if (target.kind === 'constraint') {
+          removeConstraint(update, target.name)
+          return
+        }
+        update('删除骨骼', (draft) => {
+          deleteBone(draft, target.name)
         })
-        return
-      }
-      if (target.kind === 'constraint') {
-        removeConstraint(update, target.name)
-        return
-      }
-      update('删除骨骼', (draft) => {
-        deleteBone(draft, target.name)
       })
-    })
-  })
+    }
+  }
 
   /**
    * 约束的关键帧菜单项（Animate 态）。独立约束行（物理 / 宿主缺失）的整条菜单与
@@ -1244,7 +1257,14 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     // 约束行：整条菜单只有「删除」（参数在检查器里改，「添加骨骼 / 插槽」对它也没有意义）
     if (target.kind === 'constraint') return [deleteItem(target)]
     const host = target.kind === 'bone' ? target.name : target.bone
-    const where = target.kind === 'bone' ? `挂在「${target.name}」下` : host ? `挂在「${host}」下` : '挂在根层'
+    const where =
+      target.kind === 'bone'
+        ? `挂在「${target.name}」下`
+        : host
+          ? `挂在「${host}」下`
+          : rootName
+            ? `挂在根骨骼「${rootName}」下`
+            : '挂在根骨骼下'
     const items: ContextMenuItem[] = [
       {
         key: 'bone',
@@ -1448,8 +1468,9 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
               if (target) target.locked = !target.locked
             })
         }}
+        // 层级根骨骼不显示删除按钮（同右键菜单：root 不能删）
         onDelete={
-          document.bones.length > 1
+          document.bones.length > 1 && bone.name !== rootName
             ? poseOnly(() =>
                 update('删除骨骼', (draft) => {
                   deleteBone(draft, bone.name)
@@ -1641,7 +1662,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-[24px] shrink-0 items-center gap-1 border-b border-line/60 bg-ink-800/80 px-1">
-        <button type="button" title="新建骨骼（挂在当前选中骨骼下；未选中时建在根层）" className="hao-btn h-[18px] px-1.5 text-3xs" onClick={poseOnly(() => addBone())}>
+        <button type="button" title="新建骨骼（挂在当前选中骨骼下；未选中时挂在根骨骼 root 下）" className="hao-btn h-[18px] px-1.5 text-3xs" onClick={poseOnly(() => addBone())}>
           <Bone size={11} />
           <span>骨骼</span>
         </button>
@@ -1651,7 +1672,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         </button>
         <button
           type="button"
-          title="新建 IK 约束（自动新建一根 IK 节点骨挂在根层、摆在链尾末端；先多选链根 → 链尾再点，可一次配好骨链）"
+          title="新建 IK 约束（自动新建一根 IK 节点骨挂在根骨骼 root 下、摆在链尾末端；先多选链根 → 链尾再点，可一次配好骨链）"
           className="hao-btn h-[18px] px-1.5 text-3xs"
           onClick={poseOnly(() => addConstraint('ik'))}
         >
@@ -1708,7 +1729,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         className="min-h-0 flex-1 overflow-auto hao-scroll pb-1"
         title={
           '右键骨骼行 / 空白处：添加骨骼、插槽、约束（IK 寄宿在目标骨、变换 / 路径寄宿在第一根驱动骨，参数在属性面板；物理约束单独成行）\n' +
-          '拖动行调整层级：骨骼 → 骨骼下（拖到空白处成为根骨骼）、插槽 → 骨骼下（拖到空白处挂到第一根骨骼）、display → 插槽下\n' +
+          '拖动行调整层级：骨骼 → 骨骼下（拖到空白处挂到根骨骼 root 下）、插槽 → 骨骼下（拖到空白处挂到根骨骼 root 下）、display → 插槽下\n' +
+          '根骨骼 root 是层级结构的根：它自己不能拖动 / 删除，其他骨骼也不能被拖到它旁边与它平级\n' +
           '拖到行的上 / 下沿 = 排到那一行的前 / 后（骨骼会一起换到它所在的父级下）\n' +
           '资源面板的图片：拖到插槽行（含它下面的 display 行）= 给该插槽加一个 display；拖到骨骼行 = 在该骨骼下新建插槽\n' +
           '改绑定数据（拖动行 / 拖图片 / 新建 / 删除）只在 Pose 态可用'
@@ -1728,7 +1750,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           event.preventDefault()
           event.stopPropagation()
           if (tree) {
-            // 落到列表空白处：骨骼变根骨骼、插槽挂到第一根骨骼；display 不在这里收
+            // 落到列表空白处：骨骼 / 插槽都挂到层级根骨骼 root 下；display 不在这里收
             const payload = readTreeDrag(event.dataTransfer)
             if (!payload) return
             if (payload.kind === 'bone') {
@@ -1740,11 +1762,11 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
               return
             }
             if (payload.kind === 'slot') {
-              const first = document.bones[0]?.name ?? ''
-              if (!first) return
+              const root = rootBoneName(document.bones)
+              if (!root) return
               let result: MoveResult = { ok: false, message: '' }
               update('调整插槽层级', (draft) => {
-                result = moveSlot(draft, payload.name, first, null, { worldMatrixOf: worldMatrixOfBone })
+                result = moveSlot(draft, payload.name, root, null, { worldMatrixOf: worldMatrixOfBone })
               })
               if (result.message) onStatus?.(result.message)
               return

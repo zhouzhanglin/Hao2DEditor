@@ -27,6 +27,8 @@ import { runAutoWeightsForBones } from '@editor/tools/authoringTools'
 import { buildGridMesh, buildOutlineMesh } from '@editor/commands/meshActions'
 import type { RenameKind } from '@editor/commands/authoringCommands'
 import type { AuthoringConstraint, EditorDocument } from '@core/model/authoring'
+import { rootBoneName } from '@core/model/authoring'
+import { isDescendantOf } from '@editor/commands/hierarchyCommands'
 import { weightPaletteColor } from '@core/weightPalette'
 import {
   CheckboxField,
@@ -605,6 +607,8 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   if (selection.kind === 'bone') {
     const bone = document.bones.find((b) => b.name === selection.bone)
     if (!bone) return <PanelEmpty title="骨骼不存在" description="该骨骼可能已被删除，请重新选择。" />
+    /** 层级根骨骼：整棵树的根，没有父级可选（面板也不能把它挂到别的骨骼下） */
+    const isRootBone = bone.name === rootBoneName(document.bones)
 
     /**
      * Animate 态：局部变换显示「当前动画在播放头时间的值」，改动即在该时间打关键帧；
@@ -658,11 +662,24 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             commitOnBlur
             onChange={(next) => rename('bone', bone.name, next, { label: '骨骼', reselect: () => selection.selectBone(next.trim()) })}
           />
+          {/*
+            父级下拉只列**层级树里能拖成的那些组合**：层级根骨骼不可选父级（其他骨骼都在它之下），
+            其余骨骼也只列「不是自己、也不在自己子树里」的目标 —— 拖进自己的后代会把层级绕成环。
+          */}
           <SelectField
             label="父级"
             value={bone.parent}
-            disabled={animating}
-            options={[{ value: '', label: '（无 / 根骨骼）' }, ...document.bones.filter((b) => b.name !== bone.name).map((b) => ({ value: b.name, label: b.name }))]}
+            disabled={animating || isRootBone}
+            options={[
+              ...(isRootBone
+                ? [{ value: '', label: '（层级根骨骼）' }]
+                : bone.parent
+                  ? []
+                  : [{ value: '', label: '（未挂载）' }]),
+              ...document.bones
+                .filter((b) => b.name !== bone.name && !isDescendantOf(document.bones, b.name, bone.name))
+                .map((b) => ({ value: b.name, label: b.name }))
+            ]}
             onChange={(value) =>
               update('修改骨骼父级', (draft) => {
                 const target = draft.bones.find((b) => b.name === bone.name)
@@ -670,6 +687,9 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
               })
             }
           />
+          {isRootBone ? (
+            <p className="text-3xs text-content-lo">层级根骨骼：其他骨骼都在它之下，它没有父级</p>
+          ) : null}
           <NumberField
             label="长度"
             value={bone.length}

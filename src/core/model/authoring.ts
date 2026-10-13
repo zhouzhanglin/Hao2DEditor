@@ -282,6 +282,26 @@ export function createDefaultMeta(): EditorMeta {
   }
 }
 
+/**
+ * 层级根骨骼的约定名：**唯一一根顶层骨骼**（`parent === ''`），其他骨骼 / 插槽都挂在它之下。
+ *
+ * 它是一根普通骨骼（能选中、能加关键帧），但结构上是整棵层级树的根：
+ * 新建项目时自动补一根（见 projectStore 的 `withDefaultRoot`），别处都别再建第二根顶层骨骼 ——
+ * 新建骨骼 / 拖图进视口 / 层级拖动落空处，统一用它兜底（见 `rootBoneName`）。
+ */
+export const ROOT_BONE_NAME = 'root'
+
+/**
+ * 取层级根骨骼名：优先「顶层且名为 root」的那根，其次任意顶层骨骼，最后退回第一根骨骼；
+ * 空骨架返回空串（调用方据此提示「先建一根骨骼」）。老工程里根骨骼被改过名也能找到。
+ */
+export function rootBoneName(bones: readonly AuthoringBone[]): string {
+  const named = bones.find((bone) => bone.name === ROOT_BONE_NAME && !bone.parent)
+  if (named) return named.name
+  const top = bones.find((bone) => !bone.parent)
+  return top?.name ?? bones[0]?.name ?? ''
+}
+
 export function createAuthoringBone(partial?: Partial<AuthoringBone>): AuthoringBone {
   return {
     name: 'bone',

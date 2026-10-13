@@ -140,10 +140,29 @@ describe('层级拖动：骨骼', () => {
     expect(doc.bones.find((item) => item.name === 'boneB')?.parent).toBe('root')
   })
 
-  it('拖到空白 = 变成根骨骼', () => {
+  it('拖到空白 = 挂到根骨骼 root 下（不会变成与它平级的顶层骨骼）', () => {
     const doc = setup()
-    moveBone(doc, 'childA', '', 'inside')
-    expect(doc.bones.find((item) => item.name === 'childA')?.parent).toBe('')
+    const result = moveBone(doc, 'childA', '', 'inside')
+    expect(result.ok).toBe(true)
+    expect(doc.bones.find((item) => item.name === 'childA')?.parent).toBe('root')
+    // 顶层骨骼始终只有 root 一根
+    expect(doc.bones.filter((item) => !item.parent).map((item) => item.name)).toEqual(['root'])
+  })
+
+  it('层级根骨骼 root：自己不能移动（它是整棵树的根）', () => {
+    const doc = setup()
+    expect(validateBoneMove(doc, 'root', 'boneA').ok).toBe(false)
+    const moved = moveBone(doc, 'root', '', 'inside')
+    expect(moved.ok).toBe(false)
+    expect(moved.message).toContain('层级根骨骼')
+    expect(doc.bones.find((item) => item.name === 'root')?.parent).toBe('')
+  })
+
+  it('贴 root 行的上下沿 = 挂到 root 下（层级根没有平级位置）', () => {
+    const doc = setup()
+    moveBone(doc, 'childA', 'root', 'below')
+    expect(doc.bones.find((item) => item.name === 'childA')?.parent).toBe('root')
+    expect(doc.bones.filter((item) => !item.parent).map((item) => item.name)).toEqual(['root'])
   })
 
   it('挡掉「拖到自己身上」与「拖进自己的子树」', () => {
@@ -182,15 +201,16 @@ describe('重设父级保持世界变换', () => {
     expectSameMatrix(worldOf(doc.bones, 'arm') as Float32Array, before as Float32Array)
   })
 
-  it('变成根骨骼：世界矩阵同样保持不变', () => {
+  it('拖到空白 = 挂到 root 下：世界矩阵同样保持不变', () => {
     const doc = createEmptyDocument('t')
     const root = { ...bone('root', ''), localPosition: { x: 3, y: -2 }, rotation: 20, localScale: { x: 1.5, y: 0.75 } }
-    const arm = { ...bone('arm', 'root'), localPosition: { x: 2, y: 1 }, rotation: 40, localScale: { x: 1, y: 1 } }
-    doc.bones.push(root, arm)
+    const holder = { ...bone('holder', 'root'), localPosition: { x: 2, y: 1 }, rotation: 40, localScale: { x: 1, y: 1 } }
+    const arm = { ...bone('arm', 'holder'), localPosition: { x: 0.5, y: 0.75 }, rotation: -10, localScale: { x: 1, y: 1 } }
+    doc.bones.push(root, holder, arm)
 
     const before = worldOf(doc.bones, 'arm') as Float32Array
     moveBone(doc, 'arm', '', 'inside', { worldMatrixOf: (name) => worldOf(doc.bones, name) })
-    expect(doc.bones.find((item) => item.name === 'arm')?.parent).toBe('')
+    expect(doc.bones.find((item) => item.name === 'arm')?.parent).toBe('root')
     expectSameMatrix(worldOf(doc.bones, 'arm') as Float32Array, before)
   })
 
@@ -225,11 +245,13 @@ describe('重设父级保持世界变换', () => {
   it('关闭继承的骨骼：局部 TRS 原样保留（不做逆推）', () => {
     const doc = createEmptyDocument('t')
     const root = { ...bone('root', ''), localPosition: { x: 7, y: 1 } }
+    const holder = { ...bone('holder', 'root'), localPosition: { x: 2, y: 3 }, rotation: 30 }
     const free = { ...bone('free', 'root'), localPosition: { x: 1, y: 2 }, rotation: 12, inheritRotation: false }
-    doc.bones.push(root, free)
+    doc.bones.push(root, holder, free)
 
-    moveBone(doc, 'free', '', 'inside', { worldMatrixOf: (name) => worldOf(doc.bones, name) })
+    moveBone(doc, 'free', 'holder', 'inside', { worldMatrixOf: (name) => worldOf(doc.bones, name) })
     const moved = doc.bones.find((item) => item.name === 'free')
+    expect(moved?.parent).toBe('holder')
     expect(moved?.localPosition).toEqual({ x: 1, y: 2 })
     expect(moved?.rotation).toBe(12)
   })

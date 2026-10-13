@@ -1,4 +1,5 @@
 import type { AuthoringAttachment, AuthoringBone, EditorDocument } from '@core/model/authoring'
+import { rootBoneName } from '@core/model/authoring'
 import { MAT4_LENGTH, decomposeTrs, invert, mul, trs } from '@core/math/matrix'
 import { DEG2RAD } from '@core/math/utils'
 import { findSkinSlot } from './authoringCommands'
@@ -7,7 +8,8 @@ import { findSkinSlot } from './authoringCommands'
  * 层级树里的拖动重排：骨骼换父级 / 插槽换宿主 / display 换插槽。
  *
  * 规则（与编辑器里的说法一致）：
- * - 骨骼只能放到**骨骼**下面（inside = 成为子骨骼，above/below = 与目标同级并排）；放到空白处 = 根骨骼
+ * - 骨骼只能放到**骨骼**下面（inside = 成为子骨骼，above/below = 与目标同级并排）；放到空白处 = 挂到根骨骼下
+ * - 层级根骨骼 `root` 是**唯一**的顶层骨骼：它自己不能移动，别的骨骼也不能被拖到它旁边与它平级
  * - 插槽只能放到**骨骼**下面（inside = 换宿主骨骼，贴骨骼行上下沿 = 排到该骨骼插槽列表的首/尾）
  * - display 只能待在**插槽**下面（落到 display 行 = 在同一插槽内排序）
  *
@@ -102,6 +104,13 @@ export function isDescendantOf(bones: readonly Bones[number][], name: string, an
 export function validateBoneMove(doc: EditorDocument, name: string, targetBone: string): MoveResult {
   if (!doc.bones.some((item) => item.name === name)) return { ok: false, message: `找不到骨骼「${name}」` }
   if (name === targetBone) return { ok: false, message: '骨骼不能拖到它自己下面' }
+  /*
+   * 层级根骨骼是整棵树的根：它一动，下面所有骨骼的世界变换都要跟着漂，
+   * 「唯一顶层骨骼」这个结构前提也没了 —— 直接拒绝（它自己也没有可平级的位置）。
+   */
+  if (name === rootBoneName(doc.bones)) {
+    return { ok: false, message: `「${name}」是层级根骨骼：其他骨骼都在它之下，它自己不能移动` }
+  }
   if (targetBone && isDescendantOf(doc.bones, targetBone, name)) {
     return { ok: false, message: `「${targetBone}」在「${name}」的子树里，拖进去会形成环` }
   }
@@ -113,8 +122,9 @@ export function validateBoneMove(doc: EditorDocument, name: string, targetBone: 
 
 /**
  * 移动骨骼。
- * - `inside`：targetBone 为空串时变成根骨骼，否则成为它的子骨骼
- * - `above` / `below`：与 targetBone 同级，并排到它的前 / 后（数组顺序即树的显示顺序）
+ * - `inside`：成为 targetBone 的子骨骼；targetBone 为空串（拖到列表空白处）= 挂到层级根骨骼 root 下
+ * - `above` / `below`：与 targetBone 同级，并排到它的前 / 后（数组顺序即树的显示顺序）；
+ *   贴**根骨骼**行的上下沿则挂到它下面 —— 层级根是唯一的顶层，不存在与它平级的位置
  */
 export function moveBone(
   doc: EditorDocument,
@@ -128,9 +138,23 @@ export function moveBone(
   const bone = doc.bones.find((item) => item.name === name)
   if (!bone) return check
 
-  // 新父级：inside = 目标骨骼本身；above / below = 与目标同级（挂到目标的父级）
+  /*
+   * 新父级：inside = 目标骨骼本身（目标是空白 = 层级根骨骼）；
+   * above / below = 与目标同级（挂到目标的父级），目标就是层级根时改挂到它下面。
+   *
+   * `|| root` 是**兜底**：老工程里若存在第二根顶层骨骼（`parent` 为空），
+   * 贴它上下沿也不会落到顶层去与根骨骼平级。
+   */
+  const root = rootBoneName(doc.bones)
   const target = targetBone ? doc.bones.find((item) => item.name === targetBone) : null
-  const parent = zone === 'inside' ? targetBone : targetBone ? (target?.parent ?? '') : ''
+  const parent =
+    zone === 'inside'
+      ? targetBone || root
+      : target
+        ? target.name === root
+          ? root
+          : target.parent || root
+        : root
 
   /*
    * 保持世界变换：用**拖动前**的世界矩阵（父链还是旧的那条）反推出新的局部 TRS。
@@ -147,10 +171,10 @@ export function moveBone(
   }
 
   if (zone === 'inside' || !targetBone) {
-    bone.parent = targetBone
+    bone.parent = parent
   } else {
     if (!target) return { ok: false, message: `找不到骨骼「${targetBone}」` }
-    bone.parent = target.parent
+    bone.parent = parent
     const from = doc.bones.indexOf(bone)
     if (from >= 0) doc.bones.splice(from, 1)
     const at = doc.bones.indexOf(target)
@@ -163,7 +187,9 @@ export function moveBone(
       ? zone === 'inside'
         ? `骨骼「${name}」已移到「${targetBone}」下`
         : `骨骼「${name}」已移到「${targetBone}」旁（与它同父级）`
-      : `骨骼「${name}」已变成根骨骼`
+      : root
+        ? `骨骼「${name}」已移到根骨骼「${root}」下`
+        : `骨骼「${name}」已变成根骨骼`
   }
 }
 

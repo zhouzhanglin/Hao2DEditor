@@ -1,4 +1,4 @@
-import { createAuthoringAttachment, createAuthoringSlot } from '@core/model/authoring'
+import { createAuthoringAttachment, createAuthoringSlot, rootBoneName } from '@core/model/authoring'
 import type {
   AuthoringAttachment,
   AuthoringConstraint,
@@ -1209,9 +1209,14 @@ export function deleteSlot(doc: EditorDocument, slotName: string): boolean {
  *
  * 与层级树右键「删除骨骼」、行尾删除按钮共用：取代原来「只删单骨 + 把直接子骨挂到根层」的
  * 行为，满足「删除节点时连同它的子节点一起删除」。
+ *
+ * **层级根骨骼（见 `rootBoneName`）一律拒绝**：它是整棵层级树的唯一根，删了其他节点就失去共同
+ * 祖先（连带整棵子树一起消失）。层级树的行尾按钮 / 右键菜单已经在 UI 层拦了一道，这里再兜一层，
+ * 保证任何调用方（含后续新增入口）都删不掉它。
  */
 export function deleteBone(doc: EditorDocument, boneName: string): boolean {
   if (!doc.bones.some((b) => b.name === boneName)) return false
+  if (boneName === rootBoneName(doc.bones)) return false
 
   // 传递闭包收集要删的骨骼（含目标本身）
   const toDelete = new Set<string>()

@@ -1,4 +1,5 @@
 import type { AuthoringBone } from '@core/model/authoring'
+import { rootBoneName } from '@core/model/authoring'
 import { uniqueName } from './authoringCommands'
 import { useClipboardStore } from '../store/clipboardStore'
 import type { ClipboardNodeData } from '../store/clipboardStore'
@@ -89,6 +90,11 @@ export function pasteNodes(): number {
 
   const newNames: string[] = []
   const rename = new Map<string, string>()
+  /*
+   * 顶层骨骼（`parent` 为空）粘贴后挂到层级根骨骼 root 下：结构上只允许一个根，
+   * 复制 root 本身（连它整棵子树）不能粘出第二根与它平级的顶层骨骼。
+   */
+  const fallbackParent = rootBoneName(useProjectStore.getState().document.bones)
   useProjectStore.getState().update('粘贴节点', (draft) => {
     const existingBones = draft.bones.map((b) => b.name)
     const existingSlots = draft.slots.map((s) => s.name)
@@ -101,7 +107,7 @@ export function pasteNodes(): number {
       rename.set(bone.name, newName)
       existingBones.push(newName)
       const parent = rename.get(bone.parent) ?? bone.parent
-      draft.bones.push({ ...structuredClone(bone), name: newName, parent })
+      draft.bones.push({ ...structuredClone(bone), name: newName, parent: parent || fallbackParent })
     }
 
     for (const slot of data.slots) {

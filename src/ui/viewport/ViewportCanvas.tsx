@@ -34,6 +34,7 @@ import {
 import { hasImageDrag, readImageDrag } from '@ui/widgets/dragDrop'
 import { gridDropLayout } from '@ui/viewport/dropLayout'
 import type { AuthoringImage } from '@core/model/authoring'
+import { rootBoneName } from '@core/model/authoring'
 
 /**
  * 权重刷的鼠标光标：**形状本身就是提示** —— 加号=增加、减号=减少、圆点=覆盖（直接替换）。
@@ -744,8 +745,9 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
    *
    * 支持一次多张（资源面板里多选后整组拖动）：以落点为中心排成紧凑网格，避免互相盖住；
    * 全部在**同一次 update** 里创建，撤销时整组一起退回。
-   * 宿主骨骼优先取鼠标下的那根，其次当前选中骨骼，再退回第一根；
-   * 一根骨骼都没有（空白工程）时先补一根根骨骼，这样直接拖图就能开工。
+   * 宿主骨骼：鼠标下压着的那根（明确的「挂到它身上」意图），否则挂到层级根骨骼 `root` 下 ——
+   * 刻意不看当前选中骨骼：列表里选着的骨骼常和这次拖入无关，静默挂过去很难发现。
+   * 一根骨骼都没有（老工程 / 空白骨架）时提示先画一根骨骼。
    * 只在 Pose 态建档：插槽 / 附件属于绑定数据，Animate 态改 setup 会污染动画基线。
    */
   const onImageDrop = (event: React.DragEvent<HTMLDivElement>): void => {
@@ -775,10 +777,9 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     // 并阻止渲染循环随后又自动 fit 把视角拉走（表现为图片「不在鼠标位置」）
     const emptyScene = !scene.hasVisibleContent
     const hit = scene.pickBoneAt(world.x, world.y)
-    const selection = useSelectionStore.getState()
     let host = (hit && scene.runtime ? scene.runtime.asset.bones[hit.boneIndex]?.name : '') ?? ''
-    if (!host) host = selection.kind === 'bone' ? selection.bone : ''
-    if (!host) host = store.document.bones[0]?.name ?? ''
+    // 没压在骨骼上就挂到层级根骨骼 root 下：插槽 / 附件与其他节点一样，都必须在 root 之下
+    if (!host) host = rootBoneName(store.document.bones)
     if (!host) {
       onStatus('场景里还没有骨骼：先用「绑骨骼 (B)」画一根骨骼，再把图片拖进来')
       return

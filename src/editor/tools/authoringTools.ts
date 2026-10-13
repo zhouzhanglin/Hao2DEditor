@@ -5,7 +5,7 @@ import type { GizmoPart, ShearEdge } from '@render/picking'
 import { GIZMO_AXIS_LENGTH } from '@render/overlays/boneOverlay'
 import { RAD2DEG } from '@core/math/utils'
 import type { EditorDocument } from '@core/model/authoring'
-import { createAuthoringBone } from '@core/model/authoring'
+import { createAuthoringBone, rootBoneName } from '@core/model/authoring'
 import type { EditorScene } from '../scene'
 import type { Selection } from '../store/selectionStore'
 import { isMeshEditTool } from '../store/toolStore'
@@ -318,7 +318,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
 
   // 绑骨骼工具：在视口里拖拽「画」骨骼（连续绑定）。
   // 起点落在已有骨骼上就吸附到它的轴线并以它为父（明确的「接着画」意图）；
-  // 落在空白处一律建在根层 —— 选中态不参与，避免误挂到上次选中的骨骼下面。
+  // 落在空白处一律挂在层级根骨骼 root 下 —— 选中态不参与，避免误挂到上次选中的骨骼下面。
   if (tools.tool === 'bone') {
     if (host.mode !== 'pose') {
       host.status('骨骼属于绑定数据：切到 Pose 状态再画')
@@ -342,7 +342,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
         ? `已吸附到「${parent}」的骨骼端点：拖动决定长度与方向，松开生成（一根接一根就是骨骼链）`
         : parent
           ? `从「${parent}」接着画：拖动决定长度与方向，松开生成（可以一根接一根拖成骨骼链）`
-          : '拖动决定长度与方向，松开生成骨骼（建在根层；从骨骼上起笔才会挂到它下面）') +
+          : '拖动决定长度与方向，松开生成骨骼（挂在根骨骼下；从骨骼上起笔才会挂到它下面）') +
         '；拖到插槽上松手会把该插槽挂过来（锁定中的插槽除外）'
     )
     return true
@@ -1325,7 +1325,7 @@ const BONE_ENDPOINT_SNAP_PIXELS = 20
  *
  * 「接着上一根画骨骼链」必须接在**末端那个点**上，只投影到轴线是不够的：
  * 投影点会落在离末端还差鼠标偏移量的地方，链节之间就有肉眼可见的缝；
- * 偏差稍大时（超过骨骼体的拾取半径）更是连父子关系都建不上，直接掉到根层。
+ * 偏差稍大时（超过骨骼体的拾取半径）更是连「接着画」的父子关系都建不上，退化成挂在根骨骼下。
  */
 function snapToBoneEndpoint(
   host: ToolHost,
@@ -1379,7 +1379,9 @@ function snapToBoneAxis(host: ToolHost, world: Vec2): Vec2 {
 
 /**
  * 新骨骼的父级：**只看起点是否落在某根骨骼上**（「从这根骨骼接着画」的明确意图），
- * 否则一律建在根层。
+ * 否则挂在层级根骨骼 root 下（`rootBoneName`）—— 其他骨骼都必须待在 root 之下。
+ *
+ * 空骨架（连 root 都没有）才会返回空串：那时这根新骨骼自己就是后来的顶层根骨骼。
  *
  * 这里**刻意不看当前选中骨骼**：画骨骼工具下选中态不参与建档，
  * 否则「上次选中的骨骼」会静默成为新骨骼的父级，很容易不小心把骨骼挂错地方。
@@ -1391,7 +1393,8 @@ function resolveCreateParent(host: ToolHost, world: Vec2): string {
     const name = bundle.asset.bones[hit.boneIndex]?.name ?? ''
     if (name) return name
   }
-  return ''
+  // 运行时骨骼数据不带 parent，找不出层级根 —— 去编辑期模型里找
+  return rootBoneName(useProjectStore.getState().document.bones)
 }
 
 /**

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { EditorDocument } from '@core/model/authoring'
-import { createAuthoringBone, createEmptyDocument } from '@core/model/authoring'
+import { ROOT_BONE_NAME, createAuthoringBone, createEmptyDocument } from '@core/model/authoring'
 import { History } from '../history'
 import type { ProjectSnapshot } from '../history'
 import { repairAnimationDurations, repairDisplayNames } from '../timeline/model'
@@ -83,9 +83,12 @@ export const DEFAULT_PROJECT_NAME = 'hao2dProject'
 /**
  * 给新骨架补一根 `root`：空骨架连一根骨骼都没有时，没法「选中骨骼」继续搭，
  * 插槽也必须挂在骨骼上。参数与层级树的「新建骨骼」按钮一致（长度 0.4）。
+ *
+ * 它是**层级结构的根**（唯一的顶层骨骼）：新画的骨骼、拖进来的图片都挂在它下面，
+ * 别的节点也不能从它里面拖出去与它平级（见 hierarchyCommands 的 validateBoneMove）。
  */
 function withDefaultRoot(doc: EditorDocument): EditorDocument {
-  doc.bones.push(createAuthoringBone({ name: 'root', parent: '', length: 0.4 }))
+  doc.bones.push(createAuthoringBone({ name: ROOT_BONE_NAME, parent: '', length: 0.4 }))
   return doc
 }
 

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "轻量 2D 骨骼动画编辑器（Electron + TypeScript + pixiJS），支持蒙皮与 FFD 变形",
-  "author": "Hao2D",
+  "author": "zhouzhanglin",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -17,7 +17,10 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "package": "npm run build && electron-builder --dir"
+    "package": "npm run build && electron-builder --dir",
+    "package:mac": "npm run build && electron-builder --mac",
+    "package:win": "npm run build && electron-builder --win",
+    "package:all": "npm run build && electron-builder --mac --win"
   },
   "dependencies": {
     "@esotericsoftware/spine-core": "^4.3.13",
@@ -58,10 +61,46 @@
       "out/**/*",
       "package.json"
     ],
+    "artifactName": "Hao2D.Editor-${version}-${os}-${arch}.${ext}",
     "mac": {
+      "category": "public.app-category.graphics-design",
       "target": [
-        "dir"
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ]
+    },
+    "dmg": {
+      "title": "Hao2D Editor ${version}"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Hao2D Editor"
     }
   }
 }

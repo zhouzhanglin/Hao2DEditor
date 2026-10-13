@@ -10,9 +10,10 @@ import { SkeletonView } from '@render/skeletonView'
  * hao2d 的 pixi 运行库（预览页用）。
  *
  * 把项目里「hao2d 的 pixi 计算方式」（解码 / 加载 / 播放 / 渲染）原样搬到浏览器：
- * 由 `scripts/build-hao2d-runtime.mjs` 用 esbuild 把它和 `pixi.js` 一起打包成
- * 自包含 IIFE（`hao2dRuntime.generated.js`），再由预览服务以 `?raw` 内联发给浏览器，
- * 整页不依赖任何外网资源（与 spine 预览架构一致）。
+ * 由 `scripts/build-hao2d-runtime.mjs` 用 esbuild 打包成 IIFE（`hao2dRuntime.generated.js`）。
+ * **pixi 不打包进本库**——`import ... from 'pixi.js'` 被 alias 重定向到 `pixiShim.ts`，
+ * 运行时从全局 `PIXI` 取，pixi 由预览页用独立的 `<script src="pixi.js">` 单独加载
+ * （与 spine 预览把 spine-core 单独加载同思路）。
  *
  * 相机变换完全复刻编辑器 `render/viewport.ts`：世界容器 `scale.set(zoom, -zoom)`（y 轴向上），
  * 世界原点落在视口中心 + 偏移。
@@ -160,21 +161,24 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
   function fit(): void {
     offsetX = 0
     offsetY = 0
-    const bounds = view.result?.bounds
-    const degenerate = !bounds || bounds.maxX - bounds.minX < 1e-6 || bounds.maxY - bounds.minY < 1e-6
-    if (degenerate) {
+    // 直接用 MeshBuilder 算出来的真实顶点包围盒（skeleton 世界坐标系，y 轴向上），
+    // 这是编辑器视口取景用的同一份数据，比 pixi 的 getLocalBounds 对自定义 Mesh 更可靠。
+    const b = view.result?.bounds
+    if (!b || b.maxX - b.minX < 1e-6 || b.maxY - b.minY < 1e-6) {
       zoom = EMPTY_ZOOM
-    } else {
-      // 与 spine 预览一致：以角色包围盒中心取景、四周留 1.12 倍边距
-      const pad = 1.12
-      const width = Math.max(1, bounds.maxX - bounds.minX)
-      const height = Math.max(1, bounds.maxY - bounds.minY)
-      const cx = (bounds.minX + bounds.maxX) / 2
-      const cy = (bounds.minY + bounds.maxY) / 2
-      zoom = clampZoom(Math.min(viewWidth() / (width * pad), viewHeight() / (height * pad)))
-      offsetX = -cx * zoom
-      offsetY = cy * zoom
+      applyCamera()
+      dirty = true
+      return
     }
+    // 与 spine 预览一致：以角色包围盒中心取景、四周留 1.12 倍边距
+    const pad = 1.12
+    const width = Math.max(1, b.maxX - b.minX)
+    const height = Math.max(1, b.maxY - b.minY)
+    const cx = (b.minX + b.maxX) / 2
+    const cy = (b.minY + b.maxY) / 2
+    zoom = clampZoom(Math.min(viewWidth() / (width * pad), viewHeight() / (height * pad)))
+    offsetX = -cx * zoom
+    offsetY = cy * zoom
     applyCamera()
     dirty = true
   }
@@ -194,12 +198,15 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
       player.update(delta * speed)
       view.markDirty()
     }
-    const rebuilt = view.update(skeleton)
-    if (autoFit && rebuilt && view.result && view.result.bounds.maxX - view.result.bounds.minX > 1e-6) {
-      fit()
-      autoFit = false
+    view.update(skeleton)
+    if (autoFit) {
+      const b = view.result?.bounds
+      if (b && b.maxX - b.minX > 1e-6 && b.maxY - b.minY > 1e-6) {
+        fit()
+        autoFit = false
+      }
     }
-    if (playing || dirty || rebuilt) {
+    if (playing || dirty) {
       app.render()
       dirty = false
     }
@@ -208,6 +215,11 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
 
   applyCamera()
   if (defaultAnimation) player.play(defaultAnimation, true)
+  // 先把骨架摆到动画第 0 帧并算出世界矩阵，再构建一次几何 —— 这样 mount() 里同步调用的
+  // fit() 就能拿到有效的包围盒、立刻把角色居中，不再等到首帧（首帧若包围盒退化会退化成原点居中）。
+  player.refresh()
+  skeleton.updateFk()
+  view.update(skeleton)
   requestAnimationFrame(frame)
 
   return {

@@ -2,7 +2,7 @@
 <!--
   导出运行时预览页：由主进程 previewServer.ts 以 ?raw 内联、原样返回给浏览器。
   运行时用项目里的 hao2d 计算方式（解码 / 加载 / 播放），渲染用 pixi.js
-  （hao2d-runtime.js 路由，由构建期把运行库 + pixi 打包成自包含脚本），
+  （pixi.js 独立加载，hao2d-runtime.js 只含 hao2d 自己的计算/渲染逻辑，不打包 pixi），
   整页不依赖任何外网资源。
 -->
 <html lang="zh-CN">
@@ -103,6 +103,7 @@
 
 <div class="hint">拖拽平移 · 滚轮 / 双指缩放</div>
 
+<script src="pixi.js"></script>
 <script src="hao2d-runtime.js"></script>
 <script src="app.js"></script>
 </body>

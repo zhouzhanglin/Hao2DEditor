@@ -12,7 +12,11 @@ import previewPageHao2d from './preview/page-hao2d.html?raw'
 import hao2dApp from './preview/hao2dApp.js?raw'
 // 官方运行时直接内联进主进程包：预览页完全不依赖外网与本地 node_modules（打包后也能用）
 import spineCoreSource from '@esotericsoftware/spine-core/dist/iife/spine-core.min.js?raw'
-// hao2d 的 pixi 运行库（由 scripts/build-hao2d-runtime.mjs 用 esbuild 把运行库 + pixi 打包成自包含脚本）
+// pixi 单独加载（不打包进运行库）：与 spine-core 同思路，独立文件、可长期缓存。
+// 注意：pixi.js v8 的 `exports` 禁止直接 import 其 dist 子路径，主进程运行期 Node
+// 又解析不到 `?raw`，故改为引入项目内 vendor 副本（由 scripts/copy-vendor.mjs 同步）。
+import pixiSource from './preview/vendor/pixi.min.js?raw'
+// hao2d 运行库（由 scripts/build-hao2d-runtime.mjs 生成；pixi 已拆出，这里只含 hao2d 自己的计算/渲染逻辑）
 import hao2dRuntimeSource from './preview/hao2dRuntime.generated.js?raw'
 
 const log = createLogger('预览')
@@ -121,6 +125,15 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     }
     // 运行库内容由构建期内联，可长期缓存
     send(res, 200, 'text/javascript; charset=utf-8', hao2dRuntimeSource, 'public, max-age=86400')
+    return
+  }
+  if (rest === 'pixi.js') {
+    if (!isHao2d) {
+      notFound(res, 'spine 预览不需要 pixi 运行库')
+      return
+    }
+    // pixi 单独提供（不在运行库里）；内容由构建期内联，可长期缓存
+    send(res, 200, 'text/javascript; charset=utf-8', pixiSource, 'public, max-age=86400')
     return
   }
   if (rest === 'app.js') {

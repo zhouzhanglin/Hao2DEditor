@@ -13,7 +13,12 @@ const alias = {
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    /*
+     * spine 官方运行时要以 `?raw` 内联进主进程包（在线预览页由本地服务直接把它发给浏览器，不依赖外网）。
+     * 默认的 externalizeDepsPlugin 会把 `@esotericsoftware/spine-core/...` 当外部依赖，`?raw` 就不生效了，
+     * 所以把它排除在外部化之外，让构建期真的把源码读成字符串打进来。
+     */
+    plugins: [externalizeDepsPlugin({ exclude: ['@esotericsoftware/spine-core'] })],
     build: {
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/main/index.ts') }

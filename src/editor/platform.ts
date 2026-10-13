@@ -1,4 +1,12 @@
-import type { BatchFile, DirEntry, HaoBridge, ImageInfo, IpcResult } from '@shared/ipcTypes'
+import type {
+  BatchFile,
+  DirEntry,
+  HaoBridge,
+  ImageInfo,
+  IpcResult,
+  SpinePreviewInfo,
+  SpinePreviewSession
+} from '@shared/ipcTypes'
 
 /**
  * 统一文件/对话框访问层。
@@ -48,6 +56,16 @@ export interface Platform {
   releaseImageCache(): void
   /** 从系统拖入的 File 取绝对路径；浏览器模式返回内存路径 */
   pathForDroppedFile(file: File): Promise<string>
+  /**
+   * 在线预览：主进程起一个本地网页服务（用 spine 官方 JS 运行时播放角色），返回本机与局域网地址。
+   *
+   * 这里**故意**不做 unwrap：失败原因（没有骨架 / 端口起不来）要原样显示给用户，不能吞成空值。
+   */
+  startSpinePreview(session: SpinePreviewSession, open: boolean): Promise<IpcResult<SpinePreviewInfo>>
+  /** 停止预览服务：断开连接、释放端口与内存里的资源 */
+  stopSpinePreview(): Promise<IpcResult<void>>
+  /** 用系统默认浏览器打开链接（在线预览面板的「在浏览器打开」） */
+  openExternal(url: string): Promise<void>
   onMenuCommand(cb: (command: string) => void): () => void
 }
 
@@ -150,6 +168,29 @@ class ElectronPlatform implements Platform {
 
   async pathForDroppedFile(file: File): Promise<string> {
     return this.bridge.getPathForFile(file)
+  }
+
+  async startSpinePreview(session: SpinePreviewSession, open: boolean): Promise<IpcResult<SpinePreviewInfo>> {
+    /*
+     * 开发时热更新只会换掉渲染层：主进程 / preload 还是上次启动的那份，通道根本不存在。
+     * 这时若直接调下去只会抛一句看不懂的 TypeError，界面表现出来就是「点了没反应」，
+     * 所以这里把它翻译成一句能照做的提示。
+     */
+    const call = this.bridge.startSpinePreview as
+      | ((s: SpinePreviewSession, o: boolean) => Promise<IpcResult<SpinePreviewInfo>>)
+      | undefined
+    if (typeof call !== 'function') {
+      return { ok: false, error: '预览服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）' }
+    }
+    return call.call(this.bridge, session, open)
+  }
+
+  stopSpinePreview(): Promise<IpcResult<void>> {
+    return this.bridge.stopSpinePreview()
+  }
+
+  async openExternal(url: string): Promise<void> {
+    unwrap(await this.bridge.openExternal(url), undefined)
   }
 
   onMenuCommand(cb: (command: string) => void): () => void {
@@ -301,6 +342,20 @@ class MemoryPlatform implements Platform {
 
   async pathForDroppedFile(file: File): Promise<string> {
     return this.storeFile(file)
+  }
+
+  /** 浏览器模式没有主进程，起不了本地服务（dev:web 里忽略这个功能） */
+  async startSpinePreview(): Promise<IpcResult<SpinePreviewInfo>> {
+    return { ok: false, error: '浏览器模式没有本地预览服务，请在桌面版里使用' }
+  }
+
+  async stopSpinePreview(): Promise<IpcResult<void>> {
+    return { ok: true, data: undefined }
+  }
+
+  /** 浏览器模式：直接开新标签（被弹窗拦截也无所谓，链接就显示在旁边） */
+  async openExternal(url: string): Promise<void> {
+    if (typeof window !== 'undefined') window.open(url, '_blank', 'noopener')
   }
 
   onMenuCommand(): () => void {

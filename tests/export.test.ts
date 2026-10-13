@@ -9,7 +9,7 @@ import { createSampleDocument } from '@core/sample'
 import { prepareRuntimeExport } from '@editor/services/exportService'
 import type { RuntimeExportPlan } from '@editor/services/exportService'
 import { useProjectStore } from '@editor/store/projectStore'
-import { buildRegionLookup, buildSpineJson } from '@editor/services/spineExport'
+import { buildRegionLookup, buildSpineJson, serializeSpineAtlas } from '@editor/services/spineExport'
 import { importSpine } from '@importers/spine'
 import type { AtlasRegion } from '@importers/uv'
 import { createAuthoringAttachment } from '@core/model/authoring'
@@ -477,5 +477,74 @@ describe('已经是图集的资源：导出时不再重打包', () => {
     useProjectStore.getState().setDocument(parsed, null, false)
     const plan = prepareRuntimeExport({ scale: 1, maxSize: 2048 })
     expect(plan.pageSources.map((source) => source.kind)).toEqual(['packed'])
+  })
+})
+
+describe('Spine 导出：图集缩放由 regionScale 补偿（与运行期导出一致）', () => {
+  /**
+   * 切到 Spine 模式后「图集缩放」重新可用：纹理按比例缩小、region 附件的 JSON 仍写原图尺寸，
+   * Spine 运行时用 regionScale = width / 区域宽 把四边形拉回原大小，角色视觉不变。钉住这条不变量，
+   * 免得哪天又被误改成 scale 写死 1。
+   */
+  function oneImageDocument(): EditorDocument {
+    const doc = createSampleDocument()
+    for (const skin of doc.skins) {
+      for (const slot of skin.slots) {
+        for (const attachment of slot.attachments) attachment.image = 'hero.png'
+      }
+    }
+    doc.images = [{ name: 'hero.png', path: '/art/hero.png', width: 200, height: 100, loose: true }]
+    return doc
+  }
+
+  /** 从 Spine JSON 里捞出所有带 width/height 的附件（主要是 region）尺寸 */
+  function spineAttachmentSizes(json: unknown): Array<{ w: number; h: number }> {
+    const sizes: Array<{ w: number; h: number }> = []
+    const skins = (json as { skins?: Array<{ attachments: Record<string, Record<string, { width?: number; height?: number }>> }> }).skins ?? []
+    for (const skin of skins) {
+      for (const slot of Object.values(skin.attachments)) {
+        for (const attachment of Object.values(slot)) {
+          if (attachment.width != null && attachment.height != null) {
+            sizes.push({ w: attachment.width, h: attachment.height })
+          }
+        }
+      }
+    }
+    return sizes
+  }
+
+  it('缩放只缩小图集占位，region 附件 JSON 宽高保持原图尺寸', () => {
+    useProjectStore.getState().setDocument(oneImageDocument(), null, false)
+    const full = prepareRuntimeExport({ scale: 1, maxSize: 2048 })
+    const half = prepareRuntimeExport({ scale: 0.5, maxSize: 2048 })
+
+    // 图集区域随 scale 缩小（200×100 → 100×50）
+    expect(full.atlas.regions).toHaveLength(1)
+    expect(full.atlas.regions[0].width).toBe(200)
+    expect(full.atlas.regions[0].height).toBe(100)
+    expect(half.atlas.regions[0].width).toBe(100)
+    expect(half.atlas.regions[0].height).toBe(50)
+
+    // 单页纹理尺寸也跟着缩（trimPages 取内容上限的 2 的幂：256 → 128）
+    expect(half.atlas.pages[0].width).toBeLessThan(full.atlas.pages[0].width)
+
+    // Spine JSON 里 region 附件尺寸与 scale 无关 —— 图集缩小、附件尺寸不变，
+    // 运行时靠 regionScale = width / 区域宽 把四边形拉回原大小，角色视觉不变。
+    const fullJson = buildSpineJson(full.skeletons[0].asset, buildRegionLookup(full.atlas))
+    const halfJson = buildSpineJson(half.skeletons[0].asset, buildRegionLookup(half.atlas))
+    const fullSizes = spineAttachmentSizes(fullJson)
+    const halfSizes = spineAttachmentSizes(halfJson)
+    expect(fullSizes.length).toBeGreaterThan(0)
+    expect(halfSizes).toEqual(fullSizes)
+  })
+
+  it('.atlas 文本的 size:/bounds: 反映缩放后的像素', () => {
+    useProjectStore.getState().setDocument(oneImageDocument(), null, false)
+    const half = prepareRuntimeExport({ scale: 0.5, maxSize: 2048 })
+    const text = serializeSpineAtlas(half.atlas)
+    const page = half.atlas.pages[0]
+    const region = half.atlas.regions[0]
+    expect(text).toContain(`size: ${page.width}, ${page.height}`)
+    expect(text).toContain(`bounds: ${region.x}, ${region.y}, ${region.width}, ${region.height}`)
   })
 })

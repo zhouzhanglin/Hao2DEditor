@@ -1053,56 +1053,65 @@ export interface SpineExportOptions {
   atlasTxt?: boolean
 }
 
+/** 图集页（PNG 字节；源图读不出来时是空数组） */
+export interface SpineBundlePage {
+  /** 页文件名：写进 `.atlas` 的 `image:` 行，也是预览页上的资源名 */
+  name: string
+  bytes: Uint8Array
+}
+
+/** 单个骨架的产物：json + atlas + 图集页，落盘与在线预览共用 */
+export interface SpineBundle {
+  /** 骨架显示名（原名，界面用） */
+  name: string
+  /** 清洗过的文件名主体 */
+  base: string
+  /** `<骨架名>.json` 文本 */
+  json: string
+  /** `<骨架名>.atlas` 文本（页名已按 `pageName` 改写） */
+  atlasText: string
+  pages: SpineBundlePage[]
+  /** 动画名（按资产顺序） */
+  animations: string[]
+  /** 皮肤名（按资产顺序） */
+  skins: string[]
+  defaultAnimation: string
+  defaultSkin: string
+}
+
+export interface BuildSpineBundlesOptions {
+  /**
+   * 图集页文件名规则。默认 `<base>_<序号><扩展名>`（落盘形态，与 json 同名配对）；
+   * 预览时多个骨架共用同一份页字节，传 `(_, index, ext) => `page${index}${ext}`` 让页名统一。
+   */
+  pageName?: (base: string, index: number, ext: string) => string
+}
+
+export interface SpineBundleResult {
+  bundles: SpineBundle[]
+  warnings: string[]
+}
+
 /**
- * 把准备好的产物写成 Spine 数据：`<骨架名>.json` + `<骨架名>.atlas[.txt]` + `<骨架名>_<序号>.<扩展名>` 图集页。
- * 复用运行期图集的打包结果（只重命名页文件，使 Spine 加载器按 `<json 同名>.atlas` 找到配套资源）。
+ * 把导出计划编译成「可直接落盘、也可直接喂在线预览」的产物：每个骨架一份 json + atlas + 图集页字节。
+ *
+ * 图集页只编码一次（计划里的图集本身就是所有骨架共用的），每个骨架各自做区域改名与裁剪换算 ——
+ * 同一块区域在不同骨架里的附件裁剪可能不同。
  */
-export async function writeSpineExport(
-  dir: string,
+export async function buildSpineBundles(
   plan: RuntimeExportPlan,
-  options: SpineExportOptions = {}
-): Promise<ExportResult> {
+  options: BuildSpineBundlesOptions = {}
+): Promise<SpineBundleResult> {
   const platform = getPlatform()
-  const skeleton = plan.skeletons[0]
-  if (!skeleton) return { ok: false, message: '没有可导出的骨架', warnings: [], files: [] }
-  const base = sanitize(stripExtension(skeleton.name) || skeleton.armatureName || 'skeleton')
-  const warnings = [...plan.warnings]
-  const outDir = joinPath(dir, base)
   const doc = useProjectStore.getState().document
+  const warnings = [...plan.warnings]
+  const bundles: SpineBundle[] = []
+  if (plan.skeletons.length === 0) return { bundles, warnings }
 
   for (const image of doc.images) {
     const imageDir = dirName(image.path)
     if (imageDir) await platform.registerAssetRoot(imageDir)
   }
-
-  // 把页文件名改成 `<base>_<序号>.<原扩展名>`，同时改写 atlas 页名，保证 Spine 同名配对
-  const newPageFiles: string[] = []
-  const atlasPages = plan.atlas.pages.map((page, i) => {
-    const oldFile = page.image
-    const dot = oldFile.lastIndexOf('.')
-    const ext = dot > 0 ? oldFile.slice(dot) : '.png'
-    const newFile = `${base}_${i}${ext}`
-    newPageFiles.push(newFile)
-    return { ...page, image: newFile }
-  })
-  /*
-   * 区域名与裁剪都要先「翻译」成 Spine 能接受的形态，否则 Unity 端会出坑：
-   *  - 名叫 `xxx.png` 的区域会被 spine-unity 当成图集页（材质表错乱）；
-   *  - DB 导入的工程裁剪只记在附件上，`.atlas` 不写 offsets 就会丢裁剪、sprite 偏几像素。
-   * 两处改动必须让 json 的 `path` 一起跟着改，所以改名表交给查表对象（见 SpineRegionLookup.names）。
-   */
-  const names = spineAtlasRegionNames(plan.atlas)
-  const { trim, conflicts } = collectRegionTrim(skeleton.asset, plan.atlas)
-  if (conflicts.length > 0) {
-    warnings.push(`区域 ${conflicts.join(' / ')} 被多个附件以不同裁剪引用，已按原样写出（不做裁剪换算）`)
-  }
-  const atlasRegions = plan.atlas.regions.map((region) => ({
-    ...region,
-    name: names.get(region.name) ?? region.name,
-    ...(trim.get(region.name) ?? {})
-  }))
-  const atlas = { ...plan.atlas, pages: atlasPages, regions: atlasRegions }
-  const atlasText = serializeSpineAtlas(atlas)
 
   // 编码图集页（与运行期导出同一套）
   const loadSource = async (name: string): Promise<ImageBitmap | null> => {
@@ -1114,23 +1123,83 @@ export async function writeSpineExport(
     loadSource
   )
   const pageBytes = await readPageBytes(plan, pngs)
+
+  const pageName =
+    options.pageName ?? ((base: string, index: number, ext: string): string => `${base}_${index}${ext}`)
+
+  for (const skeleton of plan.skeletons) {
+    const base = sanitize(stripExtension(skeleton.name || skeleton.asset.armatureName) || 'skeleton')
+    /*
+     * 区域名与裁剪都要先「翻译」成 Spine 能接受的形态，否则 Unity 端会出坑：
+     *  - 名叫 `xxx.png` 的区域会被 spine-unity 当成图集页（材质表错乱）；
+     *  - DB 导入的工程裁剪只记在附件上，`.atlas` 不写 offsets 就会丢裁剪、sprite 偏几像素。
+     * 两处改动必须让 json 的 `path` 一起跟着改，所以改名表交给查表对象（见 SpineRegionLookup.names）。
+     */
+    const names = spineAtlasRegionNames(plan.atlas)
+    const { trim, conflicts } = collectRegionTrim(skeleton.asset, plan.atlas)
+    if (conflicts.length > 0) {
+      warnings.push(`区域 ${conflicts.join(' / ')} 被多个附件以不同裁剪引用，已按原样写出（不做裁剪换算）`)
+    }
+    const pages = plan.atlas.pages.map((page, i) => {
+      const oldFile = page.image
+      const dot = oldFile.lastIndexOf('.')
+      const ext = dot > 0 ? oldFile.slice(dot) : '.png'
+      return { ...page, image: pageName(base, i, ext) }
+    })
+    const atlasRegions = plan.atlas.regions.map((region) => ({
+      ...region,
+      name: names.get(region.name) ?? region.name,
+      ...(trim.get(region.name) ?? {})
+    }))
+    // 查表用**未改名的**区域（UV 换算要的是那块矩形本身），页名用改名后的，附件 path 由 names 改写
+    const lookup: SpineRegionLookup = { ...buildRegionLookup({ ...plan.atlas, pages }), names }
+    const skeletonJson = buildSpineJson(skeleton.asset, lookup)
+    const skinCount = skeleton.asset.skins.length
+    const defaultSkinIndex = skinCount > 0 ? Math.min(Math.max(skeleton.asset.defaultSkinIndex, 0), skinCount - 1) : -1
+    bundles.push({
+      name: skeleton.name || skeleton.asset.armatureName || base,
+      base,
+      json: `${JSON.stringify(skeletonJson, null, 2)}\n`,
+      atlasText: serializeSpineAtlas({ ...plan.atlas, pages, regions: atlasRegions }),
+      pages: pages.map((page, i) => ({ name: page.image, bytes: pageBytes.bytes[i] ?? new Uint8Array() })),
+      animations: skeleton.asset.animations.map((anim) => anim.name),
+      skins: skeleton.asset.skins.map((skin) => skin.name),
+      defaultAnimation: skeleton.asset.animations[0]?.name ?? '',
+      defaultSkin: defaultSkinIndex >= 0 ? skeleton.asset.skins[defaultSkinIndex].name : ''
+    })
+  }
+
   if (pageBytes.failed.length > 0) {
     warnings.push(`图集页 ${pageBytes.failed.join(' / ')} 读不出内容（源图缺失或无法读取）`)
   }
 
-  // 查表用**未改名的**区域（UV 换算要的是那块矩形本身），页名用改名后的，附件 path 由 names 改写
-  const lookup: SpineRegionLookup = { ...buildRegionLookup({ ...plan.atlas, pages: atlasPages }), names }
-  const skeletonJson = buildSpineJson(skeleton.asset, lookup)
+  return { bundles, warnings }
+}
+
+/**
+ * 把准备好的产物写成 Spine 数据：`<骨架名>.json` + `<骨架名>.atlas[.txt]` + `<骨架名>_<序号>.<扩展名>` 图集页。
+ * 复用运行期图集的打包结果（只重命名页文件，使 Spine 加载器按 `<json 同名>.atlas` 找到配套资源）。
+ */
+export async function writeSpineExport(
+  dir: string,
+  plan: RuntimeExportPlan,
+  options: SpineExportOptions = {}
+): Promise<ExportResult> {
+  const platform = getPlatform()
+  if (plan.skeletons.length === 0) return { ok: false, message: '没有可导出的骨架', warnings: [], files: [] }
+  const { bundles, warnings } = await buildSpineBundles(plan)
+  const bundle = bundles[0]
+  const base = bundle.base
+  const outDir = joinPath(dir, base)
   const atlasFile = `${base}.atlas${options.atlasTxt ? '.txt' : ''}`
   const files: Array<{ path: string; text?: string; bytes?: Uint8Array }> = [
-    { path: joinPath(outDir, `${base}.json`), text: `${JSON.stringify(skeletonJson, null, 2)}\n` },
-    { path: joinPath(outDir, atlasFile), text: atlasText }
+    { path: joinPath(outDir, `${base}.json`), text: bundle.json },
+    { path: joinPath(outDir, atlasFile), text: bundle.atlasText }
   ]
-  newPageFiles.forEach((file, index) => {
-    const bytes = pageBytes.bytes[index]
-    if (!bytes || bytes.length === 0) return
-    files.push({ path: joinPath(outDir, file), bytes })
-  })
+  for (const page of bundle.pages) {
+    if (page.bytes.length === 0) continue
+    files.push({ path: joinPath(outDir, page.name), bytes: page.bytes })
+  }
 
   await platform.writeBatch(files)
   await platform.revealInFolder(joinPath(outDir, `${base}.json`))
@@ -1138,7 +1207,7 @@ export async function writeSpineExport(
 
   return {
     ok: true,
-    message: `已导出到 ${base}/：${base}.json / ${atlasFile} / ${newPageFiles.length} 张图集页`,
+    message: `已导出到 ${base}/：${base}.json / ${atlasFile} / ${bundle.pages.length} 张图集页`,
     warnings,
     files: files.map((file) => baseName(file.path))
   }

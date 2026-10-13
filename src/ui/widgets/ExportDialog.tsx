@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronLeft, ChevronRight, FolderOpen, Loader2, Package, X } from 'lucide-react'
+import { AlertTriangle, ChevronLeft, ChevronRight, Copy, ExternalLink, FolderOpen, Loader2, Package, Play, QrCode, Square, X } from 'lucide-react'
+import qrcode from 'qrcode-generator'
 import { getPlatform, stripExtension } from '@editor/platform'
 import { useProjectStore } from '@editor/store/projectStore'
 import { listFiles, prepareRuntimeExport, writeHao2dExport, writeRuntimeExport } from '@editor/services/exportService'
-import { writeSpineExport, sanitize } from '@editor/services/spineExport'
+import { buildSpineBundles, sanitize, writeSpineExport } from '@editor/services/spineExport'
 import type { PageSource, RuntimeExportPlan } from '@editor/services/exportService'
 import type { PageEncodePlan } from '@editor/services/pngEncoder'
 import type { RuntimeAtlasPage } from '@core/codec/runtimeSkeJson'
+import type { SpinePreviewInfo } from '@shared/ipcTypes'
 import { collectHao2dWarnings } from '@core/codec/hao2dWriter'
 import { loadImageElement } from '@render/imageLoader'
 
@@ -33,6 +35,18 @@ const MODE_TITLE: Record<ExportMode, string> = {
   runtime: '导出运行时数据',
   unity: '导出 Unity',
   spine: '导出 Spine'
+}
+
+/** 二维码的显示边长（按整数格 + 设备像素绘制，缩放后依然锐利） */
+const QR_DISPLAY_SIZE = 168
+
+/** `http://192.168.1.7:51234/p/xxx/` → `192.168.1.7:51234`（多网卡时用来区分是哪个地址） */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
 }
 
 /**
@@ -88,15 +102,27 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   /** 预览用的已加载图片（按源图名缓存，切页 / 调参数不用重新解码） */
   const loadedRef = useRef(new Map<string, HTMLImageElement>())
+  /** 在线预览：正在编译产物 */
+  const [previewBusy, setPreviewBusy] = useState(false)
+  /** 在线预览：主进程返回的地址（null = 当前没开预览） */
+  const [preview, setPreview] = useState<SpinePreviewInfo | null>(null)
+  /** 在线预览的告警（某张图集页读不出来之类），照实显示 */
+  const [previewWarnings, setPreviewWarnings] = useState<string[]>([])
+  /** 在线预览失败的原因：编译报错 / 服务起不来 / 通道不存在，都必须写在界面上 */
+  const [previewError, setPreviewError] = useState('')
+  /** 二维码里放的地址：默认第一个局域网地址，多网卡时可切换 */
+  const [qrUrl, setQrUrl] = useState('')
+  const qrRef = useRef<HTMLCanvasElement | null>(null)
 
   // 编译 + 打包 + UV 重映射（纯计算，不写盘）：改缩放 / 页尺寸后立刻重算预览。
-  // Spine 要求图集与附件尺寸 1:1（scale 固定 1），且按单骨架（当前骨架）导出。
+  // Spine 走单骨架（当前骨架）导出；缩放同样生效——纹理按 ratio 缩小、附件 JSON 仍写原图尺寸，
+  // 由 Spine 运行时的 regionScale 补偿，角色视觉大小不变（仅整页复制的旧图集页保持 1:1）。
   // 单文档工程里 store.skeletons 为空、activeSkeleton 为 -1，此时取索引 0（即 document 本身）。
   const spineSkeleton = skeletons.length > 0 ? Math.max(0, activeSkeleton) : 0
   const plan = useMemo<RuntimeExportPlan>(
     () =>
       mode === 'spine'
-        ? prepareRuntimeExport({ scale: 1, maxSize, skeletons: [spineSkeleton], atlasScope })
+        ? prepareRuntimeExport({ scale, maxSize, skeletons: [spineSkeleton], atlasScope })
         : prepareRuntimeExport({ scale, maxSize, skeletons: selected, atlasScope }),
     [mode, scale, maxSize, doc, skeletons, selected, spineSkeleton, atlasScope]
   )
@@ -106,7 +132,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   const spineBase = useMemo(() => {
     const skeleton = plan.skeletons[0]
     if (!skeleton) return 'skeleton'
-    return sanitize(stripExtension(skeleton.name) || skeleton.armatureName || 'skeleton')
+    return sanitize(stripExtension(skeleton.name || skeleton.asset.armatureName) || 'skeleton')
   }, [plan])
 
   /**
@@ -206,6 +232,113 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     }
   }, [plan, current, pages, doc.images])
 
+  /** 二维码：把当前地址画成码（格子取整，扫起来才清楚） */
+  useEffect(() => {
+    const canvas = qrRef.current
+    if (!canvas || !qrUrl) return
+    const qr = qrcode(0, 'M')
+    qr.addData(qrUrl)
+    qr.make()
+    const modules = qr.getModuleCount()
+    const dpr = Math.min(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1, 3)
+    const cell = Math.max(2, Math.ceil((QR_DISPLAY_SIZE * dpr) / modules))
+    const size = modules * cell
+    canvas.width = size
+    canvas.height = size
+    canvas.style.width = `${Math.round(size / dpr)}px`
+    canvas.style.height = `${Math.round(size / dpr)}px`
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    qr.renderTo2dContext(ctx, cell)
+  }, [qrUrl])
+
+  /**
+   * 起「在线预览」：把整份工程编译成 spine 产物，交给主进程的本地网页服务。
+   *
+   * 这里**不复用**导出计划：预览页要能切骨架，所以不管弹窗里勾了哪些，所有骨架都编进去
+   * （缩放同样生效，见下方 scale——纹理缩小、附件 JSON 写原图尺寸，由 regionScale 补偿）。
+   */
+  const startPreview = async (): Promise<void> => {
+    setPreviewBusy(true)
+    setPreviewError('')
+    try {
+      const previewPlan = prepareRuntimeExport({
+        scale,
+        maxSize,
+        skeletons: skeletons.map((_, index) => index),
+        atlasScope: 'all'
+      })
+      const { bundles, warnings } = await buildSpineBundles(previewPlan, {
+        // 所有骨架共用同一份图集页：页名统一成 page<序号>，不然每个骨架都要各存一份
+        pageName: (_base, index, ext) => `page${index}${ext}`
+      })
+      const first = bundles[0]
+      if (!first) {
+        setPreviewError('没有可预览的骨架')
+        return
+      }
+      const result = await getPlatform().startSpinePreview(
+        {
+          title: projectName || 'Hao2D',
+          pages: first.pages.map((page) => ({ name: page.name, bytes: page.bytes })),
+          skeletons: bundles.map((bundle, index) => ({
+            id: `s${index}`,
+            name: bundle.name,
+            json: bundle.json,
+            atlas: bundle.atlasText,
+            animations: bundle.animations,
+            skins: bundle.skins,
+            defaultAnimation: bundle.defaultAnimation,
+            defaultSkin: bundle.defaultSkin
+          }))
+        },
+        true
+      )
+      if (!result.ok) {
+        setPreviewError(result.error)
+        onStatus?.(`预览失败：${result.error}`)
+        return
+      }
+      setPreview(result.data)
+      setPreviewWarnings(warnings)
+      setQrUrl(result.data.lanUrls[0] ?? result.data.url)
+      onStatus?.(
+        result.data.lanUrls.length > 0
+          ? `预览已启动：手机扫码，或访问 ${result.data.lanUrls[0]}`
+          : '预览已启动，但没找到局域网地址（手机可能连不上）'
+      )
+    } catch (err) {
+      /*
+       * 这条链路上任何一步抛异常（编码图集、IPC 通道不存在……）都必须落到界面上。
+       * 之前这里没有 catch，异常被无声吞掉，表现就是「点了预览按钮没反应」。
+       */
+      const message = err instanceof Error ? err.message : String(err)
+      setPreviewError(message)
+      onStatus?.(`预览失败：${message}`)
+    } finally {
+      setPreviewBusy(false)
+    }
+  }
+
+  const stopPreview = async (): Promise<void> => {
+    const result = await getPlatform().stopSpinePreview()
+    setPreview(null)
+    setQrUrl('')
+    setPreviewWarnings([])
+    setPreviewError('')
+    onStatus?.(result.ok ? '已停止在线预览' : `停止预览失败：${result.error}`)
+  }
+
+  const copyQrUrl = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(qrUrl)
+      onStatus?.('链接已复制')
+    } catch {
+      onStatus?.('复制失败，请手动选中上面的地址复制')
+    }
+  }
+
   const pickDir = async (): Promise<void> => {
     const picked = await getPlatform().pickFiles({
       directory: true,
@@ -246,12 +379,16 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   const pageInfo = pages[current]
   const pageSource = plan.pageSources[current]
   const pagePlan = previewPlanOf(pageSource, pageInfo)
+  /** 除当前二维码之外的其他局域网地址（多网卡时可切换，别的网段手机未必连得上） */
+  const otherLanUrls = preview ? preview.lanUrls.filter((url) => url !== qrUrl) : []
+  const canPreview = mode === 'spine' && getPlatform().isElectron
 
   return createPortal(
-    <div className="fixed inset-0 z-[900] flex items-center justify-center bg-black/55">
+    // 预览面板是可展开的，窗口矮的时候弹窗会变高：所以这里让遮罩可滚动，别把内容顶出屏幕
+    <div className="fixed inset-0 z-[900] flex items-start justify-center overflow-auto bg-black/55 p-4">
       <div
         ref={rootRef}
-        className="flex w-[780px] max-w-[94vw] flex-col rounded border border-line bg-ink-800 shadow-2xl shadow-black/60"
+        className="my-auto flex w-[780px] max-w-[94vw] flex-col rounded border border-line bg-ink-800 shadow-2xl shadow-black/60"
       >
         {/* 标题栏 */}
         <div className="flex h-[30px] shrink-0 items-center gap-2 border-b border-line bg-ink-700 px-2.5">
@@ -375,8 +512,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
             </div>
           </div>
 
-          {mode !== 'spine' && (
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
               <span className="hao-label w-[54px] shrink-0">图集缩放</span>
               <input
                 type="range"
@@ -404,7 +540,6 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
                 ))}
               </div>
             </div>
-          )}
 
           <div className="flex items-center gap-2">
             <span className="hao-label shrink-0">单页最大</span>
@@ -518,8 +653,96 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
           </div>
         ) : null}
 
+        {/* 在线预览面板：二维码 + 地址 + 停止。
+            地址跟着服务走（不随点击变化），所以手机扫一次码就够 —— 再点预览只是换一版资源，页面会自己重载 */}
+        {preview ? (
+          <div className="mx-2.5 mb-2 flex shrink-0 items-stretch gap-3 rounded border border-accent/45 bg-accent/[0.08] p-2.5">
+            <div className="shrink-0 self-center rounded-[6px] bg-white p-1.5">
+              <canvas ref={qrRef} className="block" />
+            </div>
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <div className="flex items-center gap-1.5 text-panel font-semibold text-content-hi">
+                <QrCode size={12} className="text-accent" />
+                手机扫码看角色
+                <span className="hao-label">（页面里能切换骨架 / 皮肤 / 动画）</span>
+              </div>
+              <div className="hao-label">
+                手机与电脑连同一个 Wi-Fi，用相机扫码即可；页面已适配手机（拖拽平移、双指缩放）。
+                这里再点「更新预览」＝ 换一版资源，已开着的页面会自动重载，不用重新扫码。
+              </div>
+              <div
+                className="hao-field h-auto min-h-[22px] w-full select-text break-all py-[3px] text-3xs"
+                title={qrUrl}
+              >
+                {qrUrl}
+              </div>
+              <div className="flex flex-wrap items-center gap-1">
+                <button
+                  type="button"
+                  className="hao-btn h-[18px] px-1.5 text-3xs"
+                  title="用系统默认浏览器打开本机预览地址"
+                  onClick={() => void getPlatform().openExternal(preview.url)}
+                >
+                  <ExternalLink size={11} /> 在浏览器打开
+                </button>
+                <button
+                  type="button"
+                  className="hao-btn h-[18px] px-1.5 text-3xs"
+                  onClick={() => void copyQrUrl()}
+                >
+                  <Copy size={11} /> 复制链接
+                </button>
+                <button
+                  type="button"
+                  className="hao-btn h-[18px] px-1.5 text-3xs"
+                  title="停掉本地服务并释放内存里的图集"
+                  onClick={() => void stopPreview()}
+                >
+                  <Square size={10} /> 停止预览
+                </button>
+                {otherLanUrls.length > 0 ? <span className="hao-label ml-1">其他网卡：</span> : null}
+                {otherLanUrls.map((url) => (
+                  <button
+                    key={url}
+                    type="button"
+                    className="hao-btn h-[18px] px-1.5 text-3xs"
+                    title={`二维码改成扫这个地址：${url}`}
+                    onClick={() => setQrUrl(url)}
+                  >
+                    {hostOf(url)}
+                  </button>
+                ))}
+              </div>
+              {previewWarnings.length > 0 ? (
+                <div className="hao-label text-warn/90">{previewWarnings.join(' / ')}</div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {/* 预览失败原因：宁可写得直白，也不能让「点了没反应」这种情况发生 */}
+        {previewError ? (
+          <div className="mx-2.5 mb-2 flex shrink-0 items-start gap-1.5 rounded border border-warn/40 bg-warn/10 px-2 py-1">
+            <AlertTriangle size={12} className="mt-[2px] shrink-0 text-warn" />
+            <span className="select-text break-all text-3xs text-warn/90">{previewError}</span>
+          </div>
+        ) : null}
+
         {/* 底部操作 */}
         <div className="flex shrink-0 items-center gap-2 border-t border-line bg-ink-700/60 px-2.5 py-2">
+          {/* 在线预览：本地起个网页，用 spine 官方 JS 运行时播放，手机扫码也能看 */}
+          {canPreview ? (
+            <button
+              type="button"
+              title="在浏览器里用 spine 官方运行时播放这个角色（可切换骨架 / 皮肤 / 动画，手机扫码也能看）"
+              className="hao-btn hao-btn-accent h-[24px] shrink-0 gap-1.5 px-3 font-semibold"
+              disabled={previewBusy}
+              onClick={() => void startPreview()}
+            >
+              {previewBusy ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+              {previewBusy ? '正在生成…' : preview ? '更新预览' : '预览'}
+            </button>
+          ) : null}
           <span className="hao-label mr-auto">
             缩放不影响角色大小，只改变纹理分辨率：调小可以把更多碎图塞进更少的页
           </span>

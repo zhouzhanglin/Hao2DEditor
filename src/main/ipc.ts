@@ -1,11 +1,26 @@
-import { BrowserWindow, ipcMain } from 'electron'
+import { BrowserWindow, ipcMain, shell } from 'electron'
 import { FILE_SCHEME } from './protocol'
 import * as fs from './fileService'
+import { startPreviewSession, stopPreviewSession } from './previewServer'
 import { IPC } from '@shared/ipcTypes'
-import type { BatchFile, OpenDialogOptions, SaveDialogOptions } from '@shared/ipcTypes'
+import type {
+  BatchFile,
+  OpenDialogOptions,
+  SaveDialogOptions,
+  SpinePreviewSession
+} from '@shared/ipcTypes'
 
 function focusedWindow(): BrowserWindow | null {
   return BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null
+}
+
+/** 用系统默认程序打开链接；只认 http(s) */
+async function openExternal(url: string): Promise<void> {
+  const parsed = new URL(url)
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`不支持的链接：${url}`)
+  }
+  await shell.openExternal(parsed.toString())
 }
 
 export function registerIpcHandlers(): void {
@@ -49,4 +64,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(`${FILE_SCHEME}:allow`, (_e, dir: string) =>
     fs.safe(() => fs.registerAssetRootFor(dir))
   )
+
+  // 在线预览：起本地网页服务（spine.js 运行时播放），地址不变、可反复替换资源
+  ipcMain.handle(IPC.spinePreviewStart, (_e, session: SpinePreviewSession, open: boolean) =>
+    fs.safe(() => startPreviewSession(session, Boolean(open)))
+  )
+  ipcMain.handle(IPC.spinePreviewStop, () => fs.safe(() => stopPreviewSession()))
+
+  // 在线预览的「在浏览器打开」：只放行 http(s)，别让渲染层的字符串借系统去执行别的东西
+  ipcMain.handle(IPC.openExternal, (_e, url: string) => fs.safe(() => openExternal(url)))
 }

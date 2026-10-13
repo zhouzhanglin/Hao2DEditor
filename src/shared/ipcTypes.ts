@@ -77,7 +77,10 @@ export const IPC = {
   revealInFolder: 'shell:reveal',
   setTitle: 'win:setTitle',
   menuCommand: 'menu:command',
-  openProjectRequest: 'app:openProjectRequest'
+  openProjectRequest: 'app:openProjectRequest',
+  spinePreviewStart: 'preview:spineStart',
+  spinePreviewStop: 'preview:spineStop',
+  openExternal: 'shell:openExternal'
 } as const
 
 export type MenuCommand =
@@ -106,6 +109,41 @@ export type MenuCommand =
   | 'anim:keySelected'
   | 'mode:toggle'
 
+/** 在线预览：一页图集（PNG 字节；所有骨架共用同一份） */
+export interface SpinePreviewPage {
+  name: string
+  bytes: Uint8Array
+}
+
+/** 在线预览：单个骨架的文本产物（页数据在 `SpinePreviewSession.pages` 里按名引用） */
+export interface SpinePreviewSkeleton {
+  id: string
+  name: string
+  json: string
+  atlas: string
+  animations: string[]
+  skins: string[]
+  defaultAnimation: string
+  defaultSkin: string
+}
+
+/** 交给主进程起「在线预览」的整份会话数据 */
+export interface SpinePreviewSession {
+  /** 页面标题（项目名） */
+  title: string
+  pages: SpinePreviewPage[]
+  skeletons: SpinePreviewSkeleton[]
+}
+
+export interface SpinePreviewInfo {
+  /** 本机打开用的地址 */
+  url: string
+  /** 同一局域网内其他设备（手机）可用的地址，可能有多个网卡 */
+  lanUrls: string[]
+  /** 会话路径里的随机段 */
+  token: string
+}
+
 /** preload 暴露到 window.hao 的 API。 */
 export interface HaoBridge {
   readonly isElectron: true
@@ -130,6 +168,12 @@ export interface HaoBridge {
   setTitle(title: string): Promise<IpcResult<void>>
   /** 把绝对路径转成渲染层可直接加载的 URL */
   fileUrl(path: string): string
+  /** 起本地在线预览服务（spine.js 运行时网页），open=true 时同时在浏览器打开；返回手机可扫码的地址 */
+  startSpinePreview(session: SpinePreviewSession, open: boolean): Promise<IpcResult<SpinePreviewInfo>>
+  /** 停止预览服务，释放端口与缓存 */
+  stopSpinePreview(): Promise<IpcResult<void>>
+  /** 用系统默认程序打开 http(s) 链接（在线预览面板的「在浏览器打开」） */
+  openExternal(url: string): Promise<IpcResult<void>>
   onMenuCommand(cb: (command: MenuCommand) => void): () => void
   onOpenProjectRequest(cb: (path: string) => void): () => void
 }

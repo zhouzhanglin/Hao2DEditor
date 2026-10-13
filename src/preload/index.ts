@@ -41,6 +41,10 @@ const bridge: HaoBridge = {
   revealInFolder: (path: string) => invoke<void>(IPC.revealInFolder, path),
   setTitle: (title: string) => invoke<void>(IPC.setTitle, title),
 
+  startSpinePreview: (session, open) => invoke(IPC.spinePreviewStart, session, open),
+  stopSpinePreview: () => invoke<void>(IPC.spinePreviewStop),
+  openExternal: (url: string) => invoke<void>(IPC.openExternal, url),
+
   fileUrl: (absPath: string): string => {
     const encoded = xorEncode(absPath)
     return `${FILE_SCHEME}://local/${encoded}`

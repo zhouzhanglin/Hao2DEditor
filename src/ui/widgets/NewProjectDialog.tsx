@@ -102,7 +102,7 @@ export default function NewProjectDialog({ onClose, onConfirm }: NewProjectDialo
             <input
               ref={inputRef}
               value={name}
-              placeholder="必填，不能含空格或 / \\ : * ? \" < > |，例如 dragon_01 或 龙_01"
+              placeholder={'必填，不能含空格或 / \\ : * ? " < > |，例如 dragon_01 或 龙_01'}
               className="hao-field min-w-0 flex-1 text-panel text-content-hi"
               onChange={(event) => setName(event.target.value)}
               onKeyDown={(event) => {

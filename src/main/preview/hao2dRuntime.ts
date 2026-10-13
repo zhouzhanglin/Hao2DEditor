@@ -119,6 +119,9 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
   let speed = 1
   let playing = true
   let dirty = true
+  /** 用户自己拖过 / 缩过：之后视口尺寸变化不再自动取景（与 spine 预览的 touched 同语义） */
+  let touched = false
+  /** 还欠一次「按内容取景」：挂载时包围盒若退化，等首帧几何变有效再补上 */
   let autoFit = true
   let last = 0
   let destroyed = false
@@ -146,6 +149,8 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
   }
 
   function pan(dx: number, dy: number): void {
+    // 手动拖过就交出相机控制权：resize 与首帧兜底都不再自动取景
+    touched = true
     offsetX += dx
     offsetY += dy
     applyCamera()
@@ -153,6 +158,7 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
   }
 
   function zoomAt(factor: number, sx: number, sy: number): void {
+    touched = true
     const before = screenToWorld(sx, sy)
     zoom = clampZoom(zoom * factor)
     applyCamera()
@@ -164,6 +170,8 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
   }
 
   function fit(): void {
+    // 适配 = 把相机交还给自动取景：之后视口尺寸变化会重新按内容取景（与 spine 预览一致）
+    touched = false
     offsetX = 0
     offsetY = 0
     // 直接用 MeshBuilder 算出来的真实顶点包围盒（skeleton 世界坐标系，y 轴向上），
@@ -173,8 +181,10 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
       zoom = EMPTY_ZOOM
       applyCamera()
       dirty = true
+      // 这次没按内容取景成功：保留 autoFit，等几何变有效后由首帧兜底补一次
       return
     }
+    autoFit = false
     // 与 spine 预览一致：以角色包围盒中心取景、四周留 1.12 倍边距
     const pad = 1.12
     const width = Math.max(1, b.maxX - b.minX)
@@ -191,7 +201,10 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
   function resize(width: number, height: number): void {
     if (destroyed || width <= 0 || height <= 0) return
     app.renderer.resize(width, height)
-    applyCamera()
+    // 视口尺寸变了（含手机横竖屏切换）：用户没手动调过相机就重新取景，
+    // 免得按旧视口算出来的缩放让角色跑出视野
+    if (touched) applyCamera()
+    else fit()
     dirty = true
   }
 
@@ -204,12 +217,11 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
       view.markDirty()
     }
     view.update(skeleton)
-    if (autoFit) {
+    // 首帧兜底：挂载时包围盒退化（空骨架 / 几何未就绪）就等有效几何再取景一次。
+    // 用户碰过相机（touched）后不再兜底，避免把调好的视角冲掉
+    if (autoFit && !touched) {
       const b = view.result?.bounds
-      if (b && b.maxX - b.minX > 1e-6 && b.maxY - b.minY > 1e-6) {
-        fit()
-        autoFit = false
-      }
+      if (b && b.maxX - b.minX > 1e-6 && b.maxY - b.minY > 1e-6) fit()
     }
     if (playing || dirty) {
       app.render()

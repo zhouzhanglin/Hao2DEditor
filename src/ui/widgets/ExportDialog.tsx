@@ -4,6 +4,7 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Copy, ExternalLink, FolderOpe
 import qrcode from 'qrcode-generator'
 import { getPlatform, stripExtension } from '@editor/platform'
 import { useProjectStore } from '@editor/store/projectStore'
+import { useSettingsStore } from '@editor/store/settingsStore'
 import { listFiles, prepareRuntimeExport, writeHao2dExport, writeRuntimeExport } from '@editor/services/exportService'
 import { buildSpineBundles, sanitize, writeSpineExport } from '@editor/services/spineExport'
 import type { PageSource, RuntimeExportPlan } from '@editor/services/exportService'
@@ -88,8 +89,9 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   const [maxSize, setMaxSize] = useState(2048)
   const [page, setPage] = useState(0)
   const [busy, setBusy] = useState(false)
-  /** Spine 导出：图集文件名后缀 `.txt`（`xxx.atlas.txt`），默认不勾 */
-  const [atlasTxt, setAtlasTxt] = useState(false)
+  /** Spine 导出：图集文件名后缀 `.txt`（`xxx.atlas.txt`）—— 走全局设置，跨工程保留 */
+  const atlasTxt = useSettingsStore((s) => s.spineAtlasTxt)
+  const setAtlasTxt = useSettingsStore((s) => s.setSpineAtlasTxt)
   /** 勾选要导出的骨架：默认全选（一个项目可以有多个骨架，每个骨架单独出一份资源） */
   const [picked, setPicked] = useState<number[]>(() => skeletons.map((_, index) => index))
   /** 图集范围：默认装**所有骨架**用到的图；也可以只装这次要导出的骨架用到的图 */

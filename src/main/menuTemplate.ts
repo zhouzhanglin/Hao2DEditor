@@ -64,6 +64,8 @@ export function buildMenuTemplate(options: MenuTemplateOptions): MenuItemConstru
       item('导出 Unity…', 'project:exportHao2d', 'CmdOrCtrl+Shift+E'),
       item('导出 Spine…', 'project:exportSpine', 'CmdOrCtrl+Alt+E'),
       { type: 'separator' },
+      item('设置…', 'app:settings'),
+      { type: 'separator' },
       isMac ? { role: 'close', label: '关闭窗口' } : { role: 'quit', label: '退出' }
     ]
   }

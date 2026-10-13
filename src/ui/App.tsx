@@ -99,6 +99,7 @@ import {
 import ExportDialog from '@ui/widgets/ExportDialog'
 import type { ExportMode } from '@ui/widgets/ExportDialog'
 import NewProjectDialog from '@ui/widgets/NewProjectDialog'
+import SettingsDialog from '@ui/widgets/SettingsDialog'
 import { deleteSelectedTrack, keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
 import { PPU, deleteMeshVertex } from '@editor/commands/authoringCommands'
 import { copySelection, pasteSelection, duplicateSelection } from '@editor/commands/clipboardCommands'
@@ -143,6 +144,8 @@ export default function App() {
   const [curveHeight, setCurveHeight] = useState(() => loadPanelHeight(CURVE_PANEL_KEY, CURVE_PANEL_HEIGHT, CURVE_PANEL_MIN, CURVE_PANEL_MAX))
   /** 导出弹窗（选目录 / 调图集缩放 / 预览）：null = 未打开 */
   const [exportMode, setExportMode] = useState<ExportMode | null>(null)
+  /** 全局设置弹窗（与工程无关、跨工程保留）：false = 未打开 */
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const booted = useRef(false)
 
   const flash = useCallback((message: string) => {
@@ -429,6 +432,9 @@ export default function App() {
           return
         case 'project:exportSpine':
           setExportMode('spine')
+          return
+        case 'app:settings':
+          setSettingsOpen(true)
           return
         case 'edit:undo':
           useProjectStore.getState().undo()
@@ -819,6 +825,8 @@ export default function App() {
       {newProjectOpen ? (
         <NewProjectDialog onClose={() => setNewProjectOpen(false)} onConfirm={createProject} />
       ) : null}
+
+      {settingsOpen ? <SettingsDialog onClose={() => setSettingsOpen(false)} /> : null}
     </div>
   )
 }

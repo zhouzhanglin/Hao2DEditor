@@ -103,6 +103,7 @@ export type MenuCommand =
   | 'edit:selectAll'
   | 'view:fitViewport'
   | 'view:resetLayout'
+  | 'app:settings'
   | 'anim:playPause'
   | 'anim:nextFrame'
   | 'anim:prevFrame'

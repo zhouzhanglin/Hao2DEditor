@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useProjectStore } from '@editor/store/projectStore'
 import { hasTreeDrag, readTreeDrag } from './dragDrop'
 
@@ -294,6 +294,8 @@ export interface Vector2FieldProps {
   value: { x: number; y: number }
   onChange: (value: { x: number; y: number }) => void
   step?: number
+  /** 行尾的小动作按钮（如「恢复到图片大小」）；不传就不渲染 */
+  action?: ReactNode
 }
 
 /**
@@ -368,12 +370,13 @@ function VectorInput({
   )
 }
 
-export function Vector2Field({ label, value, onChange, step = 1 }: Vector2FieldProps) {
+export function Vector2Field({ label, value, onChange, step = 1, action }: Vector2FieldProps) {
   return (
     <div className="flex items-center gap-1.5">
       <span className="hao-label w-[52px] shrink-0">{label}</span>
       <VectorInput value={value.x} step={step} onCommit={(x) => onChange({ x, y: value.y })} />
       <VectorInput value={value.y} step={step} onCommit={(y) => onChange({ x: value.x, y })} />
+      {action}
     </div>
   )
 }

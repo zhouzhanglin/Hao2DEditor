@@ -908,7 +908,10 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     if (result.message) onStatus?.(result.message)
   }
 
-  /** 资源面板拖到骨骼行：在该骨骼下新建插槽，图片作为它的第一个 display */
+  /**
+   * 资源面板拖图片进层级窗口：在 `boneName` 下新建插槽，图片作为它的第一个 display。
+   * 两个入口共用：拖到**骨骼行** = 那根骨骼；拖到列表**空白处** = 层级根骨骼 root。
+   */
   const addSlotFromImage = (boneName: string, imageNames: string[]): void => {
     if (!canEditBinding()) return
     const images = imageNames
@@ -932,9 +935,18 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       }
     )
     const first = created[0]
-    if (!first) return
+    if (!first) {
+      onStatus?.(`无法用「${images[0].name}」新建插槽`)
+      return
+    }
     selection.selectAttachment(first.slot, first.attachment)
     expandBone(boneName)
+    // 报出宿主骨骼：空白处落点挂到 root，不提示的话很难看出这一笔挂到了哪里
+    onStatus?.(
+      created.length === 1
+        ? `已新建插槽「${first.slot}」挂到骨骼「${boneName}」下（图片「${images[0].name}」是它的 display）`
+        : `已新建 ${created.length} 个插槽挂到骨骼「${boneName}」下（${created.map((item) => item.slot).join('、')}）`
+    )
   }
 
   /** 展开某根骨骼（新建子对象后自动展开，避免「加了却看不见」） */
@@ -946,25 +958,6 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   /** 插槽挂在哪根骨骼上（拖放后展开宿主用） */
   const boneOfSlot = (slotName: string): string =>
     document.slots.find((item) => item.name === slotName)?.bone ?? ''
-
-  /**
-   * 拖到「插槽下面」的区域（行与行之间的缝隙、插槽子行的下沿等）时，
-   * 按 Y 坐标找鼠标上方最近的那个插槽行，把这次拖拽算到它头上。
-   */
-  const slotUnderPointer = (clientY: number): string => {
-    const list = listRef.current
-    if (!list) return ''
-    let found = ''
-    let top = Number.NEGATIVE_INFINITY
-    for (const row of Array.from(list.querySelectorAll<HTMLElement>('[data-slot]'))) {
-      const rect = row.getBoundingClientRect()
-      if (rect.top <= clientY && rect.top > top) {
-        top = rect.top
-        found = row.dataset.slot ?? ''
-      }
-    }
-    return found
-  }
 
   /** 当前选中的骨骼（工具栏「+」按钮用它作为挂载目标） */
   const selectedBone = (): string => (selection.kind === 'bone' && selection.bone ? selection.bone : '')
@@ -1732,14 +1725,14 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           '拖动行调整层级：骨骼 → 骨骼下（拖到空白处挂到根骨骼 root 下）、插槽 → 骨骼下（拖到空白处挂到根骨骼 root 下）、display → 插槽下\n' +
           '根骨骼 root 是层级结构的根：它自己不能拖动 / 删除，其他骨骼也不能被拖到它旁边与它平级\n' +
           '拖到行的上 / 下沿 = 排到那一行的前 / 后（骨骼会一起换到它所在的父级下）\n' +
-          '资源面板的图片：拖到插槽行（含它下面的 display 行）= 给该插槽加一个 display；拖到骨骼行 = 在该骨骼下新建插槽\n' +
+          '资源面板的图片：拖到插槽行（含它下面的 display 行）= 给该插槽加一个 display；拖到骨骼行 = 在该骨骼下新建插槽；拖到空白处 = 在根骨骼 root 下新建插槽\n' +
           '改绑定数据（拖动行 / 拖图片 / 新建 / 删除）只在 Pose 态可用'
         }
         onContextMenu={(event) => openMenu(event, { kind: 'root', name: '', bone: '' })}
         onDragOver={(event) => {
           const tree = hasTreeDrag(event.dataTransfer)
           if (!hasImageDrag(event.dataTransfer) && !tree) return
-          // 行本身没接住时（行间缝隙 / 插槽下方）在这里兜底，同时别冒泡去触发整窗导入覆盖层
+          // 行本身没接住时（列表空白处）在这里兜底，同时别冒泡去触发整窗导入覆盖层
           event.preventDefault()
           event.stopPropagation()
           event.dataTransfer.dropEffect = tree ? 'move' : 'copy'
@@ -1774,9 +1767,19 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             onStatus?.('display 只能放到插槽下面')
             return
           }
+          /*
+           * 图片落到列表**空白处**：到这里说明落点不在骨骼行 / 插槽行 / display 行上
+           * （那三种行自己接了 dragover + drop，事件不会冒泡下来），算「拖到层级窗口的空白处」，
+           * 在层级根骨骼 root 下新建插槽 —— 与「拖到骨骼行 = 在该骨骼下新建插槽」
+           * 「拖到插槽行 / display 行 = 给该插槽加一个 display」组成完整的三条规则。
+           */
           const imageNames = readImageDrag(event.dataTransfer)
-          const slotName = slotUnderPointer(event.clientY)
-          if (imageNames.length > 0 && slotName) addDisplay(slotName, imageNames)
+          if (imageNames.length === 0) return
+          if (!rootName) {
+            onStatus?.('场景里还没有骨骼：先用工具栏的「骨骼」新建一根骨骼，再把图片拖进来')
+            return
+          }
+          addSlotFromImage(rootName, imageNames)
         }}
       >
         {rows}

@@ -1,4 +1,4 @@
-import { Brush, Crosshair, Grid3x3, Layers, Trash2 } from 'lucide-react'
+import { Brush, Crosshair, Grid3x3, Layers, RotateCcw, Trash2 } from 'lucide-react'
 import { BlendMode } from '@core/model/types'
 import { curvePercent } from '@core/anim/interpolation'
 import { useProjectStore } from '@editor/store/projectStore'
@@ -18,6 +18,7 @@ import {
   deleteAttachment,
   deleteMeshVertex,
   patchAttachment,
+  PPU,
   removeWeightBone,
   resolveAttachment,
   setVertexWeight,
@@ -503,6 +504,25 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   }
 
   /**
+   * 把 Region 附件的「尺寸」恢复到它的图片大小：像素 ÷ PPU，与拖图创建时
+   * `regionAttachmentFromImage` 算出的初始值同一口径。改乱了想找回原尺寸时点一下。
+   */
+  const resetAttachmentSize = (slotName: string, attachmentName: string, imageName: string): void => {
+    const image = document.images.find((item) => item.name === imageName)
+    if (!image) {
+      onStatus(`找不到图片「${imageName}」：它可能已被删除，先在「图片」下拉里换一张`)
+      return
+    }
+    const size = { x: Math.max(1, image.width) / PPU, y: Math.max(1, image.height) / PPU }
+    update('恢复附件尺寸', (draft) => {
+      patchAttachment(draft, slotName, attachmentName, (a) => {
+        a.size = size
+      })
+    })
+    onStatus(`已把「${attachmentName}」的尺寸恢复到图片大小（${image.width} × ${image.height} px）`)
+  }
+
+  /**
    * 权重刷的目标骨骼 —— 就是选中数据里的 `bone` 字段，**与 `kind` 无关**：
    * 刷权重时 kind 常常是 attachment（那才是要刷的网格），骨骼只作"刷哪一根"用；
    * 这里若按 kind 过滤，面板的 Bone 就会在真正开刷时显示成「（未选）」。
@@ -974,6 +994,20 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                 value={attachment.size}
                 step={0.05}
                 onChange={(value) => update('修改附件尺寸', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.size = value }))}
+                // 行尾小图标：一键恢复到图片大小（仅 Region；纯色附件没有图可恢复，不显示）
+                action={
+                  attachment.type === 'region' && attachment.image ? (
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      title="恢复到图片大小（按图片像素 ÷ PPU 折算，与拖图创建时一致）"
+                      className="shrink-0 text-content-lo hover:text-content-hi"
+                      onClick={() => resetAttachmentSize(slot.name, attachment.name, attachment.image)}
+                    >
+                      <RotateCcw size={11} />
+                    </button>
+                  ) : null
+                }
               />
             ) : null}
             {attachment.frameSize.x > 1e-4 &&

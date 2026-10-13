@@ -52,28 +52,45 @@ export class History {
     return this.future.length > 0 ? this.future[this.future.length - 1].label : null
   }
 
-  /** 记一条编辑记录（传入**修改前**的项目快照） */
+  /**
+   * 记一条编辑记录（传入**修改前**的项目快照）。
+   *
+   * 事务（`begin` … `end`）期间不单独记：整段连续操作由 pending 合并成一条，
+   * 否则一次拖拽会在撤销栈里塞进几十条等价记录。
+   */
   push(label: string, before: ProjectSnapshot): void {
+    if (this.pending) return
     this.past.push({ label, snapshot: clone(before) })
     if (this.past.length > this.limit) this.past.shift()
     this.future.length = 0
   }
 
-  /** 连续操作的起点（拖拽开始）；重复调用只保留第一次 */
+  /** 连续操作的起点（拖拽 / 批量命令开始）；重复调用只保留第一次 */
   begin(label: string, before: ProjectSnapshot): void {
     if (this.pending) return
     this.pending = { label, snapshot: clone(before) }
   }
 
-  /** 连续操作的终点（拖拽结束）；把整段操作合并成一条记录 */
+  /** 连续操作的终点（拖拽 / 批量命令结束）；把整段操作合并成一条记录 */
   end(): void {
     if (!this.pending) return
-    this.push(this.pending.label, this.pending.snapshot)
+    const entry = this.pending
     this.pending = null
+    this.push(entry.label, entry.snapshot)
   }
 
   cancelPending(): void {
     this.pending = null
+  }
+
+  /**
+   * 放弃事务：取出 pending 快照（调用方拿它把文档恢复回 `begin` 时的状态）并清空 pending。
+   * `/batch` 批量执行中途失败时走这里 —— 不留半套改动，也不留撤销记录。
+   */
+  takePending(): ProjectSnapshot | null {
+    const pending = this.pending
+    this.pending = null
+    return pending ? pending.snapshot : null
   }
 
   undo(current: ProjectSnapshot): ProjectSnapshot | null {

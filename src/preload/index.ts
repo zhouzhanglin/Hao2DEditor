@@ -10,6 +10,8 @@ import type {
   OpenDialogOptions,
   SaveDialogOptions
 } from '@shared/ipcTypes'
+import { COMMAND_CHANNEL } from '@shared/commandTypes'
+import type { CommandRequest, CommandResponse } from '@shared/commandTypes'
 
 const FILE_SCHEME = 'hao2d-file'
 
@@ -66,6 +68,18 @@ const bridge: HaoBridge = {
     return () => {
       ipcRenderer.off(IPC.openProjectRequest, listener)
     }
+  },
+
+  onCommandRequest: (cb: (request: CommandRequest) => void) => {
+    const listener = (_e: unknown, request: CommandRequest): void => cb(request)
+    ipcRenderer.on(COMMAND_CHANNEL.request, listener)
+    return () => {
+      ipcRenderer.off(COMMAND_CHANNEL.request, listener)
+    }
+  },
+
+  sendCommandResult: (response: CommandResponse) => {
+    ipcRenderer.send(COMMAND_CHANNEL.result, response)
   }
 }
 

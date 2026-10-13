@@ -16,6 +16,8 @@ import {
   openProjectAt,
   saveProject
 } from '@editor/services/projectIo'
+import { catalog, executeCommand, installCommands } from '@editor/commands'
+import { connectCommandBridge } from '@editor/services/commandBridge'
 
 /**
  * 调试钩子：把 store、平台层与工程 IO 挂到全局，
@@ -39,6 +41,11 @@ const debugTarget = globalThis as unknown as {
     saveProject: typeof saveProject
     importDroppedPaths: typeof importDroppedPaths
   }
+  /** 命令注册表：控制台里 `__haoCmd.execute('listBones')` 可直接试跑命令 */
+  __haoCmd?: {
+    execute: typeof executeCommand
+    catalog: typeof catalog
+  }
 }
 debugTarget.__haoStores = {
   project: useProjectStore,
@@ -49,6 +56,13 @@ debugTarget.__haoStores = {
 }
 debugTarget.__haoPlatform = getPlatform()
 debugTarget.__haoProject = { lastProject, newProject, openProject, openProjectAt, saveProject, importDroppedPaths }
+
+// 命令注册表：UI 与 AI（本地服务）共用同一套命令，启动时注册一次
+installCommands()
+debugTarget.__haoCmd = { execute: executeCommand, catalog }
+
+// 接上主进程的本地命令服务：AI 发来的 HTTP / WebSocket 请求都会在这里执行
+connectCommandBridge()
 
 const container = document.getElementById('root')
 if (!container) {

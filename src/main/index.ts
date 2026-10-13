@@ -4,6 +4,7 @@ import { createLogger } from './logger'
 import { registerSchemes, registerProtocolHandlers } from './protocol'
 import { registerIpcHandlers } from './ipc'
 import { buildAppMenu } from './menu'
+import { startCommandServer, stopCommandServer } from './commandServer'
 
 const log = createLogger('main')
 
@@ -59,9 +60,17 @@ app.whenReady().then(() => {
   buildAppMenu()
   createWindow()
 
+  // 本地命令服务：AI / 脚本用 HTTP / WebSocket 操作编辑器
+  // 地址与 token 写进 userData/command-server.json，也会打进日志
+  void startCommandServer(() => mainWindow)
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+app.on('will-quit', () => {
+  void stopCommandServer()
 })
 
 app.on('window-all-closed', () => {

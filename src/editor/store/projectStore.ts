@@ -64,11 +64,26 @@ export interface ProjectState {
   setExportScale: (scale: number) => void
   /** 可撤销的编辑：mutate 在深拷贝的草稿上执行 */
   update: (label: string, mutate: (draft: EditorDocument) => void) => void
+  /**
+   * 命令系统专用的可撤销编辑：**撤销记录在 mutate 成功之后才写**。
+   *
+   * 与 `update` 的唯一差别：mutate 返回 `false` 表示「这次什么都没改」，
+   * 此时既不写历史、也不替换文档。命令参数来自外部（AI / HTTP），
+   * 传错名字、附件类型不对是常态，用 `update` 会留下一堆无效撤销记录。
+   *
+   * 返回是否真的提交了改动；mutate 抛异常时直接上抛（调用方折成 ok:false 回给 AI）。
+   */
+  runCommand: (label: string, mutate: (draft: EditorDocument) => boolean | void) => boolean
   /** 不可撤销的编辑（面板布局、视口状态等） */
   updateSilent: (mutate: (draft: EditorDocument) => void) => void
   /** 连续编辑（拖拽）事务 */
   beginTransaction: (label: string) => void
   endTransaction: () => void
+  /**
+   * 放弃当前事务：把文档恢复到 `beginTransaction` 时的快照，不产生撤销记录。
+   * 供 `/batch` 批量命令中途失败时整体回滚。
+   */
+  rollbackTransaction: () => boolean
   undo: () => void
   redo: () => void
   clearHistory: () => void
@@ -354,6 +369,26 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     })
   },
 
+  runCommand: (label, mutate) => {
+    const state = get()
+    const before = snapshotOf(state)
+    const draft = cloneDocument(state.document)
+    /*
+     * 先在草稿上跑完再决定要不要记账。
+     * 抛异常时直接上抛：撤销栈没动过，文档也没被替换，编辑器保持原样。
+     */
+    if (mutate(draft) === false) return false
+    history.push(label, before)
+    set({
+      document: draft,
+      // 同 update：草稿写回骨架列表，并重新对齐共享图片池
+      skeletons: shareImages(replaceSkeleton(state.skeletons, state.activeSkeleton, draft), state.activeSkeleton),
+      dirty: true,
+      ...syncFlags(state)
+    })
+    return true
+  },
+
   updateSilent: (mutate) => {
     const state = get()
     const draft = cloneDocument(state.document)
@@ -371,6 +406,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   endTransaction: () => {
     history.end()
     set({ dirty: true, ...syncFlags(get()) })
+  },
+
+  rollbackTransaction: () => {
+    const snapshot = history.takePending()
+    if (!snapshot) return false
+    set(restoreSnapshot(snapshot, get()))
+    return true
   },
 
   undo: () => {

@@ -1,3 +1,5 @@
+import type { CommandRequest, CommandResponse } from './commandTypes'
+
 /**
  * 主进程与渲染进程共享的 IPC 契约。
  * 所有 invoke 通道统一返回 IpcResult<T>，渲染进程无需 try/catch。
@@ -192,6 +194,13 @@ export interface HaoBridge {
   stopHao2dPreview(): Promise<IpcResult<void>>
   /** 用系统默认程序打开 http(s) 链接（在线预览面板的「在浏览器打开」） */
   openExternal(url: string): Promise<IpcResult<void>>
+  /**
+   * 本地命令服务（AI / 脚本用）：监听主进程转来的命令请求。
+   * 执行完用 `sendCommandResult` 送回结果；返回值是取消监听的函数。
+   */
+  onCommandRequest(cb: (request: CommandRequest) => void): () => void
+  /** 把命令执行结果送回主进程（由命令桥接调用） */
+  sendCommandResult(response: CommandResponse): void
   onMenuCommand(cb: (command: MenuCommand) => void): () => void
   onOpenProjectRequest(cb: (path: string) => void): () => void
 }

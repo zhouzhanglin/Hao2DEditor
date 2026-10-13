@@ -481,6 +481,7 @@ export default function App() {
           if (doc.bones.length > 0) useSelectionStore.getState().selectBones(doc.bones.map((b) => b.name))
           return
         }
+        case 'view:fitViewport':
           getActiveScene()?.fit()
           flash('已适配视野')
           return
@@ -511,7 +512,9 @@ export default function App() {
           timeline.togglePlaying()
           return
         }
-        case 'anim:keyframe': {
+        // 菜单发的是 anim:keySelected（见 menuTemplate），快捷键 K 发的是 anim:keyframe，同一实现
+        case 'anim:keyframe':
+        case 'anim:keySelected': {
           if (mode !== 'animate') {
             flash('打关键帧只在 Animate 状态可用（Tab 切换）')
             return

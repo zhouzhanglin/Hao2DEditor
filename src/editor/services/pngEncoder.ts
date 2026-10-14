@@ -121,8 +121,10 @@ export async function cropRegionPngs(
  * 与 `mapRegionRelativeUvs` 的四个分支互为逆运算（那边是区域坐标 → 页坐标），改一处必须改另一处：
  *   90°：(X, Y) → (width - Y, X)      270°：(X, Y) → (Y, height - X)
  *   180°：(X, Y) → (width - X, height - Y)
+ *
+ * 导出是为了让单测能按这套口径核对「裁出来的像素 ↔ 附件 UV」是一回事。
  */
-function cropMatrix(
+export function cropMatrix(
   rotate: number,
   width: number,
   height: number

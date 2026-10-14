@@ -4,7 +4,7 @@ import { useProjectStore } from '@editor/store/projectStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { findKeyframe } from '@editor/timeline/model'
 import type { AnyKeyframe, KeySelector } from '@editor/timeline/model'
-import { ColorField, NumberField, TextField, ToggleField, Vector2Field } from '@ui/widgets/fields'
+import { ColorField, NumberField, PX_PER_UNIT, TextField, ToggleField, Vector2Field } from '@ui/widgets/fields'
 
 const KIND_LABEL: Record<KeySelector['kind'], string> = {
   bone: '骨骼',
@@ -128,7 +128,7 @@ export default function KeyframeValueBar() {
               {channels || single.channel} · <span className="font-mono">{single.time.toFixed(3)}s</span>
               （第 {frameIndex} 帧）
             </span>
-            <FrameValueEditor frame={frame} onEdit={(label, mutate) => editFrames(label, mutate)} />
+            <FrameValueEditor frame={frame} channel={single.channel} onEdit={(label, mutate) => editFrames(label, mutate)} />
           </>
         )
       ) : (
@@ -153,14 +153,19 @@ function InfoChip({ label, value }: { label: string; value: string }) {
 /** 按关键帧值的实际形状分派编辑控件（数值 / 二维 / 颜色 / 布尔 / FFD 数组） */
 function FrameValueEditor({
   frame,
+  channel,
   onEdit
 }: {
   frame: AnyKeyframe | null
+  /** 轨道名（translate / rotate / scale / …）：同一控件承载不同物理量，长度类要按轨道决定是否按像素显示 */
+  channel: string
   onEdit: (label: string, mutate: (frame: AnyKeyframe) => void) => void
 }) {
   const value = frame?.value
 
   if (typeof value === 'number') {
+    // 标量轨道无量纲（rotate 是度、mix 是权重）：不换算。
+    // 路径 position / spacing 的量纲随 spacingMode 变化（percent 模式是比例），暂不换算
     return (
       <div className={SLOT}>
         <NumberField
@@ -188,12 +193,15 @@ function FrameValueEditor({
 
   if (value && typeof value === 'object' && 'x' in value && 'y' in value) {
     const vec = value as { x: number; y: number }
+    // 位移轨道是位置量（世界单位），与检查器同口径按像素显示；缩放 / 斜切是比例，不换算
+    const isTranslate = channel === 'translate'
     return (
       <div className={SLOT}>
         <Vector2Field
           label="值"
           value={vec}
-          step={0.01}
+          unitScale={isTranslate ? PX_PER_UNIT : undefined}
+          step={isTranslate ? 1 : 0.01}
           onChange={(next) => onEdit('修改关键帧值', (item) => { item.value = { x: next.x, y: next.y } })}
         />
       </div>

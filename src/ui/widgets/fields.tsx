@@ -1,6 +1,21 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { PPU } from '@editor/commands/authoringCommands'
 import { useProjectStore } from '@editor/store/projectStore'
 import { hasTreeDrag, readTreeDrag } from './dragDrop'
+
+/**
+ * 世界单位 → 像素的显示换算系数。
+ *
+ * 内部数据（工程文件 / 导出 Spine / `.hao2d` / 运行时包）一律用**世界单位**存长度
+ * （1 单位 = PPU 像素）；该系数只服务界面，让长度类数值按美术稿的像素口径显示与输入，
+ * 不改变任何存储值与导出结果。
+ */
+export const PX_PER_UNIT = PPU
+
+/** 世界单位 → 像素（仅用于界面显示；换算不改动数据本身） */
+export function unitsToPx(units: number): number {
+  return units * PX_PER_UNIT
+}
 
 /**
  * 拖动步长的**兜底**：调用方没声明 `step` 时，按当前值是否是整数猜（整数 ±1、浮点 ±0.1）。
@@ -106,6 +121,12 @@ export interface NumberFieldProps {
   label: string
   value: number
   onChange: (value: number) => void
+  /**
+   * 显示换算（默认 1 = 不换算）：显示值 = `value × unitScale`，提交值 ÷ `unitScale` 写回。
+   * `step / min / max / precision` 一律按**显示空间**解释。
+   * 长度类字段传 `PX_PER_UNIT` 即按像素显示（输入 200 写回 2 个世界单位）。
+   */
+  unitScale?: number
   step?: number
   min?: number
   max?: number
@@ -119,6 +140,7 @@ export function NumberField({
   label,
   value,
   onChange,
+  unitScale = 1,
   step = 1,
   min,
   max,
@@ -126,28 +148,31 @@ export function NumberField({
   disabled,
   suffix
 }: NumberFieldProps) {
-  const [text, setText] = useState(format(value, precision))
+  // 显示空间 = 内部值 × unitScale；输入 / 拖动 / 上下键都在显示空间走，提交时除回去
+  const scale = unitScale > 0 ? unitScale : 1
+  const shown = value * scale
+  const [text, setText] = useState(format(shown, precision))
   const editing = useRef(false)
 
   useEffect(() => {
-    if (!editing.current) setText(format(value, precision))
-  }, [value, precision])
+    if (!editing.current) setText(format(shown, precision))
+  }, [shown, precision])
 
   const commit = (raw: string): void => {
     const parsed = Number(raw)
     if (!Number.isFinite(parsed)) {
-      setText(format(value, precision))
+      setText(format(shown, precision))
       return
     }
     let next = parsed
     if (min !== undefined) next = Math.max(min, next)
     if (max !== undefined) next = Math.min(max, next)
-    onChange(next)
+    onChange(next / scale)
     setText(format(next, precision))
   }
 
   // 中键左右拖动调值：步长与字段的 step 一致（与上下键微调同步）
-  const scrub = useScrubDrag(value, (next) => commit(String(next)), {
+  const scrub = useScrubDrag(shown, (next) => commit(String(next)), {
     enabled: !disabled,
     min,
     max,
@@ -178,7 +203,7 @@ export function NumberField({
           } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
             e.preventDefault()
             const delta = (e.key === 'ArrowUp' ? step : -step) * (e.shiftKey ? 10 : 1)
-            commit(String(value + delta))
+            commit(String(shown + delta))
           }
         }}
         {...scrub}
@@ -293,6 +318,8 @@ export interface Vector2FieldProps {
   label: string
   value: { x: number; y: number }
   onChange: (value: { x: number; y: number }) => void
+  /** 显示换算（语义同 `NumberFieldProps.unitScale`），x / y 用同一系数；长度类字段传 `PX_PER_UNIT` */
+  unitScale?: number
   step?: number
   /** 行尾的小动作按钮（如「恢复到图片大小」）；不传就不渲染 */
   action?: ReactNode
@@ -307,35 +334,40 @@ export interface Vector2FieldProps {
 function VectorInput({
   value,
   onCommit,
+  unitScale = 1,
   step = 1
 }: {
   value: number
   onCommit: (next: number) => void
+  unitScale?: number
   step?: number
 }) {
-  const [text, setText] = useState(format(value))
+  // 显示空间 = 内部值 × unitScale（与 NumberField 同口径）：显示 / 输入 / 拖动都在显示空间走
+  const scale = unitScale > 0 ? unitScale : 1
+  const shown = value * scale
+  const [text, setText] = useState(format(shown))
   const editing = useRef(false)
 
   // 外部改动（拖拽、撤销、选中别的对象）时同步显示；编辑期间不覆盖用户输入
   useEffect(() => {
-    if (!editing.current) setText(format(value))
-  }, [value])
+    if (!editing.current) setText(format(shown))
+  }, [shown])
 
   const commit = (raw: string): void => {
     const parsed = Number(raw)
     if (!Number.isFinite(parsed)) {
-      setText(format(value))
+      setText(format(shown))
       return
     }
-    onCommit(parsed)
+    onCommit(parsed / scale)
     setText(format(parsed))
   }
 
   // 中键左右拖动调值：步长与字段的 step 一致（与上下键微调同步）
   const scrub = useScrubDrag(
-    value,
+    shown,
     (next) => {
-      onCommit(next)
+      onCommit(next / scale)
       setText(format(next))
     },
     { step }
@@ -362,7 +394,7 @@ function VectorInput({
         } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
           event.preventDefault()
           const delta = (event.key === 'ArrowUp' ? step : -step) * (event.shiftKey ? 10 : 1)
-          commit(String(value + delta))
+          commit(String(shown + delta))
         }
       }}
       {...scrub}
@@ -370,12 +402,12 @@ function VectorInput({
   )
 }
 
-export function Vector2Field({ label, value, onChange, step = 1, action }: Vector2FieldProps) {
+export function Vector2Field({ label, value, onChange, unitScale, step = 1, action }: Vector2FieldProps) {
   return (
     <div className="flex items-center gap-1.5">
       <span className="hao-label w-[52px] shrink-0">{label}</span>
-      <VectorInput value={value.x} step={step} onCommit={(x) => onChange({ x, y: value.y })} />
-      <VectorInput value={value.y} step={step} onCommit={(y) => onChange({ x: value.x, y })} />
+      <VectorInput value={value.x} unitScale={unitScale} step={step} onCommit={(x) => onChange({ x, y: value.y })} />
+      <VectorInput value={value.y} unitScale={unitScale} step={step} onCommit={(y) => onChange({ x: value.x, y })} />
       {action}
     </div>
   )

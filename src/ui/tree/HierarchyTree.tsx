@@ -66,6 +66,7 @@ import {
   setTreeDragData
 } from '@ui/widgets/dragDrop'
 import type { TreeDragPayload, TreeDropPosition } from '@ui/widgets/dragDrop'
+import { unitsToPx } from '@ui/widgets/fields'
 
 /** 右键菜单的目标：root = 空白处 */
 interface MenuTarget {
@@ -480,9 +481,9 @@ function boneRowTitle(
     `骨骼「${bone.name}」`,
     `父级：${bone.parent || '（根骨骼）'}`,
     `挂载：${attached.length > 0 ? attached.join(' · ') : '（空）'}`,
-    // 与行尾 meta 同一口径（length 是 100 倍刻度，树里一直按 px 显示）；
+    // 与行尾 meta 同一口径（length 存世界单位，树里按 px 显示，换算走 unitsToPx）；
     // rotation 存的是**局部**值，有父级时写明基准，免得跟视口里看到的世界角度对不上
-    `长度 ${(bone.length * 100).toFixed(0)}px · ${
+    `长度 ${unitsToPx(bone.length).toFixed(0)}px · ${
       bone.parent ? `相对父级旋转 ${bone.rotation.toFixed(1)}°` : `旋转 ${bone.rotation.toFixed(1)}°`
     }`
   ]
@@ -1442,7 +1443,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         }
         active={selection.kind === 'bone' && selection.bones.includes(bone.name)}
         secondary={selection.kind === 'bone' && selection.bone !== bone.name}
-        meta={bone.length > 0 ? `${(bone.length * 100).toFixed(0)}px` : undefined}
+        meta={bone.length > 0 ? `${unitsToPx(bone.length).toFixed(0)}px` : undefined}
         expandable={hasChildren}
         expanded={expanded}
         onToggle={() => toggle(bone.name)}

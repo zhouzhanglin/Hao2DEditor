@@ -37,10 +37,12 @@ import {
   CommitTextField,
   FieldGroup,
   NumberField,
+  PX_PER_UNIT,
   SelectField,
   SliderField,
   TextField,
   ToggleField,
+  unitsToPx,
   Vector2Field
 } from '@ui/widgets/fields'
 import { PanelEmpty } from '@ui/widgets/PanelShell'
@@ -397,6 +399,7 @@ function ConstraintEditor({
 
       {constraint.type === 'path' ? (
         <FieldGroup title="路径参数">
+          {/* position / spacing 的量纲随 spacingMode 变化（percent 模式是 0..1 比例），不做像素显示换算 */}
           <NumberField
             label="位置"
             value={constraint.position}
@@ -710,12 +713,15 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
           {isRootBone ? (
             <p className="text-3xs text-content-lo">层级根骨骼：其他骨骼都在它之下，它没有父级</p>
           ) : null}
+          {/* 长度按像素显示 / 输入（step 5px）；写回仍是世界单位，换算在字段内做 */}
           <NumberField
             label="长度"
             value={bone.length}
-            step={0.05}
+            unitScale={PX_PER_UNIT}
+            step={5}
             min={0}
-            precision={3}
+            precision={1}
+            suffix="px"
             disabled={animating}
             onChange={(value) =>
               update('修改骨骼长度', (draft) => {
@@ -732,11 +738,12 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
         <FieldGroup
           title={animating ? `动画变换 · ${time.toFixed(2)}s（改动即打关键帧）` : '局部变换（Setup）'}
         >
-          {/* 位置是浮点值：中键拖动 / 上下键都按 0.1 走（不写 step 会用 Vector2Field 的默认值 1，拖起来只能整数跳） */}
+          {/* 位置按像素显示 / 输入（中键拖动 / 上下键按 10px 走）；写回仍是世界单位 */}
           <Vector2Field
             label="位置"
             value={shown.position}
-            step={0.1}
+            unitScale={PX_PER_UNIT}
+            step={10}
             onChange={(value) => writeTransform('translate', value, '位置')}
           />
           <NumberField
@@ -965,11 +972,12 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                 })
               }
             />
-            {/* 同骨骼位置：浮点值按 0.1 拖（默认 1 会让中键拖动只能整数跳） */}
+            {/* 同骨骼位置：按像素显示 / 输入（中键拖动 / 上下键按 10px 走），写回仍是世界单位 */}
             <Vector2Field
               label="位置"
               value={attachment.position}
-              step={0.1}
+              unitScale={PX_PER_UNIT}
+              step={10}
               onChange={(value) => update('修改附件位置', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.position = value }))}
             />
             <NumberField
@@ -996,7 +1004,8 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
               <Vector2Field
                 label="尺寸"
                 value={attachment.size}
-                step={0.05}
+                unitScale={PX_PER_UNIT}
+                step={5}
                 onChange={(value) => update('修改附件尺寸', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.size = value }))}
                 // 行尾小图标：一键恢复到图片大小（仅 Region；纯色附件没有图可恢复，不显示）
                 action={
@@ -1019,7 +1028,8 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             (Math.abs(attachment.frameSize.x - attachment.size.x) > 1e-4 ||
               Math.abs(attachment.frameSize.y - attachment.size.y) > 1e-4) ? (
               <p className="text-3xs text-content-lo">
-                原图（含裁剪留白）：{attachment.frameSize.x.toFixed(2)} × {attachment.frameSize.y.toFixed(2)} ——
+                原图（含裁剪留白）：{unitsToPx(attachment.frameSize.x).toFixed(1)} ×{' '}
+                {unitsToPx(attachment.frameSize.y).toFixed(1)} px ——
                 选中轮廓/手柄按它走，渲染仍只有上面「尺寸」那块
               </p>
             ) : null}

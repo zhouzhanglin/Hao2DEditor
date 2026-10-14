@@ -64,6 +64,18 @@ export const COMMAND_CHANNEL = {
 } as const
 
 /**
+ * 给 AI 的通信方式指引。
+ *
+ * AI 在「获取命令 / 发现服务」时从各处读到同一份文案：`GET /commands` 响应顶层、
+ * MCP `initialize` 的 `instructions`、WS 握手消息、工程目录 `hao2d-ai-server.json`、
+ * userData `command-server.json` —— 拿到命令之后按结构化通道通信，
+ * 不要经 shell 拼 curl（curl 只留给人工调试）。
+ */
+export const AI_TRANSPORT_NOTICE =
+  '与 Hao2DEditor 通信请勿经 shell 执行 curl 拼命令：已加载 MCP 时直接调用对应工具（tools/call）；' +
+  '否则请用你自己的 HTTP 请求能力（fetch / requests 等）访问本服务地址。curl 仅供人工调试。'
+
+/**
  * 本地服务的握手信息，启动后写到 userData 目录下的文件里。
  *
  * AI 不需要预先知道端口：读这个文件就能拿到地址与 token（见 `commandServer.ts`）。
@@ -75,4 +87,6 @@ export interface CommandServerInfo {
   url: string
   /** 握手文件自身的路径 */
   file: string
+  /** 通信指引（`AI_TRANSPORT_NOTICE`）：AI 读握手文件发现服务时同步读到 */
+  instructions: string
 }

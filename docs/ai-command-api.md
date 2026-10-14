@@ -25,11 +25,13 @@
   "port": 52741,
   "token": "8Yk…（一段随机串）",
   "url": "http://127.0.0.1:52741",
-  "file": "/Users/you/Library/Application Support/hao2d-editor/command-server.json"
+  "file": "/Users/you/Library/Application Support/hao2d-editor/command-server.json",
+  "instructions": "与 Hao2DEditor 通信请勿经 shell 执行 curl 拼命令：…（通信指引，见 8.4）"
 }
 ```
 
 拿 `url` + `token` 就能开干。token 三种带法都认：`?token=…`、`x-hao2d-token` 头、`Authorization: Bearer …`。
+`instructions` 是给 AI 的通信指引（同 8.4），读文件时就一并拿到。
 
 ## 2. 端点
 
@@ -39,7 +41,13 @@
 | GET | `/commands` | **全部命令的自描述**（名字、标题、参数、返回值）——先读它再动手 |
 | POST | `/command` | 执行一条命令：`{ "name": "addBone", "args": { … } }` |
 | POST | `/batch` | 批量：`{ "commands": [ … ], "transaction": true }` |
-| WS | `/ws` | 长连接版；消息 `{ id?, name, args }` 或 `{ id?, batch: [...], transaction? }` |
+| WS | `/ws` | 长连接版；消息 `{ id?, name, args }` 或 `{ id?, batch: [...], transaction? }`。连上先收到一条 `{ id: null, hello: "hao2d-command", instructions }` 握手消息（就是 8.4 的通信指引） |
+
+> **下面代码块里的 `curl` 只是本文档的演示工具，不是必须的调用方式。**
+> AI 工具请走 MCP（第 8 节）或用自己的 HTTP 请求能力（fetch / requests 等），
+> **不要经 shell 拼 curl**；curl 只留给人工调试。这条指引会随各入口主动交给 AI：
+> `GET /commands` 响应顶层、MCP `initialize`、WS 握手消息、以及两份发现文件
+> （工程目录 `hao2d-ai-server.json`、userData `command-server.json`）都带 `instructions`（见 8.4）。
 
 ```bash
 BASE=http://127.0.0.1:52741
@@ -128,6 +136,8 @@ POST /batch
   - 找不到该文件时，才回退去用户目录读 command-server.json：
     macOS ~/Library/Application Support/hao2d-editor/、Windows %APPDATA%\hao2d-editor\、Linux ~/.config/hao2d-editor\；
     或去编辑器启动日志搜「命令服务已启动」
+- 通信方式：不要经 shell 执行 curl 拼命令。已加载 MCP 时直接调用对应工具（tools/call）；
+  否则用你自己的 HTTP 请求能力（fetch / requests 等）请求上面的 url。curl 只用于人工调试
 - 工作方式：
   1) POST {url}/command  {"name":"getProjectState"} 了解当前工程
   2) 需要知道有哪些能力时，先 GET {url}/commands 读命令目录（含参数说明），不要凭记忆猜命令名
@@ -186,3 +196,20 @@ POST /batch
 
 > 端口随机、token 每次启动重新生成；以面板显示的地址为准（或读 `command-server.json`）。
 > 关掉编辑器后服务停止、发现文件被删，客户端会提示连接失败 —— 重新打开编辑器即可。
+
+### 8.4 内建的「不要用 curl」指引
+
+AI 不管从哪个入口接入，拿到命令时都会同时收到同一条 `instructions`：
+
+| 入口 | 位置 |
+| --- | --- |
+| MCP | `initialize` 返回的 `instructions`（支持该字段的客户端会注入 AI 上下文） |
+| HTTP | `GET /commands` 响应顶层的 `instructions` |
+| WebSocket | 连接建立即推送 `{ id: null, hello: "hao2d-command", instructions }`；另，WS 上请求 `__catalog` 的响应也带 |
+| 工程目录 | `hao2d-ai-server.json` 的 `instructions` |
+| userData | `command-server.json` 的 `instructions`（发现服务时读到） |
+
+内容一致：**不要经 shell 执行 curl 拼命令** —— 已加载 MCP 就直接调工具（tools/call），
+否则用你自己的 HTTP 请求能力（fetch / requests 等）；curl 仅供人工调试。
+文案集中定义在 `src/shared/commandTypes.ts` 的 `AI_TRANSPORT_NOTICE`，各处共用一份。
+WS 握手消息没有 `ok` 字段、`id` 为 `null`：客户端按数字 `id` 匹配响应时不会把它错认成某条命令的结果。

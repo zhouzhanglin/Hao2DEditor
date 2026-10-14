@@ -8,7 +8,7 @@ import { app, ipcMain } from 'electron'
 import type { BrowserWindow } from 'electron'
 import { WebSocketServer } from 'ws'
 import type { WebSocket } from 'ws'
-import { COMMAND_CHANNEL } from '@shared/commandTypes'
+import { COMMAND_CHANNEL, AI_TRANSPORT_NOTICE } from '@shared/commandTypes'
 import type { CommandResponse, CommandServerInfo, CommandSpec } from '@shared/commandTypes'
 import { commandSpecToMcpTool } from '@shared/mcpSchema'
 import { createLogger } from './logger'
@@ -22,8 +22,9 @@ const log = createLogger('命令服务')
  * **执行在渲染进程**（命令请求走 IPC 转给窗口，文档状态只在那里）。
  *
  * 端点：GET /health、GET /commands（命令自描述）、POST /command、POST /batch、WS /ws。
- * 端口不固定，启动后把 `{ port, token, url, file }` 写进 userData/command-server.json，
- * AI 读它即可发现服务（路径也会打进启动日志）。
+ * 端口不固定，启动后把 `{ port, token, url, file, instructions }` 写进 userData/command-server.json，
+ * AI 读它即可发现服务（路径也会打进启动日志）。通信指引（AI_TRANSPORT_NOTICE）随每个
+ * 「获取命令」的入口一同下发：GET /commands 顶层、MCP initialize、WS 握手消息、两份发现文件。
  */
 
 const CALL_TIMEOUT_MS = 20_000
@@ -245,7 +246,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return
     }
     if (url.pathname === '/commands' && (method === 'GET' || method === 'POST')) {
-      sendJson(res, 200, await callRenderer('__catalog', {}))
+      // 顶层带一条通信指引：AI 读命令目录时就知道后面不要走 curl（见 AI_TRANSPORT_NOTICE）
+      sendJson(res, 200, { ...(await callRenderer('__catalog', {})), instructions: AI_TRANSPORT_NOTICE })
       return
     }
     if (method === 'POST' && url.pathname === '/command') {
@@ -315,7 +317,10 @@ async function handleSocketMessage(socket: WebSocket, raw: string): Promise<void
       socket.send(JSON.stringify({ id, ok: false, error: '消息里要给 name（命令名），或 batch（命令数组）' }))
       return
     }
-    socket.send(JSON.stringify({ id, ...(await callRenderer(name, record.args)) }))
+    // 与 HTTP 的 GET /commands 对齐：WS 上请求命令目录时，响应同样带通信指引
+    const result = await callRenderer(name, record.args)
+    const extra = name === '__catalog' ? { instructions: AI_TRANSPORT_NOTICE } : {}
+    socket.send(JSON.stringify({ id, ...extra, ...result }))
   } catch (err) {
     socket.send(JSON.stringify({ id, ok: false, error: err instanceof Error ? err.message : String(err) }))
   }
@@ -372,7 +377,9 @@ async function handleMcpMessage(req: IncomingMessage, res: ServerResponse, body:
       result: {
         protocolVersion: MCP_PROTOCOL_VERSION,
         capabilities: { tools: {} },
-        serverInfo: { name: 'hao2d-editor', version: '0.1.0' }
+        serverInfo: { name: 'hao2d-editor', version: '0.1.0' },
+        // MCP 规范里的全局说明：客户端会把它注入 AI 上下文，先于任何 tools/call
+        instructions: AI_TRANSPORT_NOTICE
       }
     })
     return
@@ -469,6 +476,9 @@ export async function startCommandServer(getWindow: () => BrowserWindow | null):
       socket.close(4401, 'token 无效')
       return
     }
+    // WS 没有「命令目录」这种入口，连接建立即推一条握手消息把通信指引送达：
+    // 结构与命令响应刻意不同（id 为 null、带 hello、没有 ok），客户端按 id 匹配响应时不会错认
+    socket.send(JSON.stringify({ id: null, hello: 'hao2d-command', instructions: AI_TRANSPORT_NOTICE }))
     socket.on('message', (data) => {
       void handleSocketMessage(socket, data.toString())
     })
@@ -481,7 +491,8 @@ export async function startCommandServer(getWindow: () => BrowserWindow | null):
   ipcMain.on(COMMAND_CHANNEL.result, onCommandResult)
 
   const file = discoveryFile()
-  const payload: CommandServerInfo = { port, token, url: `http://127.0.0.1:${port}`, file }
+  // instructions 与 GET /commands、MCP initialize、WS 握手消息同源：AI 从哪个入口发现服务都能读到
+  const payload: CommandServerInfo = { port, token, url: `http://127.0.0.1:${port}`, file, instructions: AI_TRANSPORT_NOTICE }
   try {
     await writeFile(file, `${JSON.stringify(payload, null, 2)}\n`, 'utf8')
   } catch (err) {

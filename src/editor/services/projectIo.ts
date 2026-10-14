@@ -1,4 +1,5 @@
 import { getPlatform, baseName, dirName, joinPath, stripExtension } from '../platform'
+import { AI_TRANSPORT_NOTICE } from '@shared/commandTypes'
 import type { Platform } from '../platform'
 import { parseProject, projectNameFromPath, serializeProject, PROJECT_EXTENSION } from '@core/codec/projectJson'
 import { decompileAsset } from '@core/codec/decompile'
@@ -171,6 +172,8 @@ async function exportAiCompanionFiles(projectDir: string): Promise<void> {
       url: mcp.data.url,
       token: mcp.data.token,
       updatedAt: new Date().toISOString(),
+      // 通信指引：AI 读连接信息时同步读到「别用 curl」（与 MCP instructions、GET /commands 顶层一致）
+      instructions: AI_TRANSPORT_NOTICE,
       note: '由 Hao2DEditor 在保存/打开工程时自动生成。编辑器关闭后命令服务停止、token 失效；重新打开编辑器并保存/打开工程即可刷新本文件。'
     }
     await platform.writeText(joinPath(projectDir, AI_SERVER_INFO_NAME), `${JSON.stringify(payload, null, 2)}\n`)

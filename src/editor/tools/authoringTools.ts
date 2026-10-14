@@ -6,6 +6,7 @@ import { GIZMO_AXIS_LENGTH } from '@render/overlays/boneOverlay'
 import { RAD2DEG } from '@core/math/utils'
 import type { EditorDocument } from '@core/model/authoring'
 import { createAuthoringBone, rootBoneName } from '@core/model/authoring'
+import { attachmentFrameBox } from '@core/model/types'
 import type { EditorScene } from '../scene'
 import type { Selection } from '../store/selectionStore'
 import { isMeshEditTool } from '../store/toolStore'
@@ -20,16 +21,19 @@ import { moveSlot, validateSlotMove } from '../commands/hierarchyCommands'
 import type { MoveResult } from '../commands/hierarchyCommands'
 import {
   autoWeights,
+  deleteMeshVertex,
   findAttachment,
   insertMeshVertex,
   meshVertexSamples,
   paintWeights,
   patchAttachment,
-  uniqueName
+  uniqueName,
+  weightBonesOf
 } from '../commands/authoringCommands'
 import type { BrushMode, VertexSample } from '../commands/authoringCommands'
-import type { BrushModeSetting } from '../store/toolStore'
-import { fitUvField, isInteriorVertex } from '@core/mesh/triangulate'
+import type { BrushModeSetting, MeshSubtool } from '../store/toolStore'
+import { MESH_SUBTOOLS, useToolStore } from '../store/toolStore'
+import { fitUvField, isInteriorVertex, polygonUvs, triangulatePolygon } from '@core/mesh/triangulate'
 
 export interface PointerInfo {
   world: Vec2
@@ -47,7 +51,17 @@ export interface ToolHost {
   status: (text: string) => void
 }
 
-type DragKind = 'bone-translate' | 'bone-create' | 'gizmo' | 'shear-box' | 'vertex' | 'paint' | 'attachment' | 'none'
+type DragKind =
+  | 'bone-translate'
+  | 'bone-create'
+  | 'gizmo'
+  | 'shear-box'
+  | 'vertex'
+  | 'paint'
+  | 'attachment'
+  /** 网格子工具「自定义布线」：从一个顶点拖到另一个顶点，松手连线 */
+  | 'mesh-rewire'
+  | 'none'
 
 /** 多骨骼拖拽：每根骨骼各自按下时的本地值（增量都按自己的起始值重算，避免累积误差） */
 interface MultiBoneStart {
@@ -113,6 +127,11 @@ interface DragSession {
   attachment: string
   vertex: number
   startWorld: Vec2
+  /**
+   * 指针的当前世界坐标（按下时先记成起点）。
+   * 只有「自定义布线」用得上：松手时 `toolPointerUp` 拿不到坐标，得靠这里记的落点去找目标顶点。
+   */
+  lastWorld: Vec2
   /** 附件空间下的累计位移（顶点拖拽） */
   totalDelta: Vec2
   /**
@@ -182,6 +201,7 @@ const IDLE: DragSession = {
   attachment: '',
   vertex: -1,
   startWorld: { x: 0, y: 0 },
+  lastWorld: { x: 0, y: 0 },
   totalDelta: { x: 0, y: 0 },
   uvField: null,
   paintMode: 'replace',
@@ -356,6 +376,11 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
    * 顶点工具则到此为止（它的活只有顶点）。
    */
   if (isMeshEditTool(tools.tool)) {
+    /*
+     * 网格子工具（左下角图标条切出来的添加 / 删除 / 画边界 / 布线）先接管：
+     * 它们的点击语义与「拖顶点」完全不同，而且只在 Pose 态可用（见 meshSubtoolPointerDown）。
+     */
+    if (tools.tool === 'ffd' && tools.meshSubtool !== 'edit' && meshSubtoolPointerDown(host, info)) return true
     /*
      * Pose 工具的顶点**只让位于真正的骨骼手柄**：指针落在骨骼**原点圈**（移动手柄）、
      * 小坐标轴、或斜切包围盒的边上时才优先抓骨骼 —— 与本工程「附件与骨骼重叠时骨骼优先」
@@ -1229,6 +1254,12 @@ export function toolPointerMove(host: ToolHost, info: PointerInfo): void {
 
 /** 拖拽分发（从 toolPointerMove 拆出来，好让「网格跟随」在前后统一处理） */
 function moveActiveDrag(host: ToolHost, info: PointerInfo): void {
+  // 自定义布线：只拖一条橡皮筋，不动任何几何
+  if (drag.kind === 'mesh-rewire') {
+    rewireDragMove(host, info.world)
+    return
+  }
+
   if (drag.kind === 'paint') {
     /*
      * 按**移动距离**节流：不足 2 屏幕像素就不再叠加。
@@ -1317,6 +1348,14 @@ function moveActiveDrag(host: ToolHost, info: PointerInfo): void {
 }
 
 export function toolPointerUp(host: ToolHost): void {
+  // 自定义布线：松开即连线（落在同一个顶点上等于没连，会报一声）
+  if (drag.kind === 'mesh-rewire') {
+    const session = drag
+    drag = { ...IDLE }
+    rewireDragEnd(host, session)
+    return
+  }
+
   // 画骨骼：松开即生成（长度 / 角度按拖拽的两点算），并把新骨骼选中，方便接着拖下一根
   if (drag.kind === 'bone-create') {
     const session = drag
@@ -1785,6 +1824,653 @@ function resolveVertex(host: ToolHost, vertexIndex: number): { slot: string; att
   const current = host.scene.attachmentAt(slotIndex, display)
   if (!current) return null
   return { slot: slotData.name, attachment: current.name, vertex: mesh.sourceVertex[vertexIndex] }
+}
+
+/* --------------------------------------------------------------------------------------------- *
+ * 网格子工具（Pose 态的「网格工具 M」）：添加 / 删除顶点、绘制边界、自定义布线
+ *
+ * 图标条在视口左下角（`MeshSubtoolBar`），这里只负责「鼠标按下之后做什么」。三个约定：
+ * 1. 只作用于**当前选中的那个网格附件**（Region 得先转成网格）；
+ * 2. 只在 **Pose 态**可用 —— 它改的是绑定网格；Animate 态动网格写的是 FFD 帧，语义完全不同；
+ * 3. 拓扑类操作（删点 / 重画边界 / 布线）改完都整份重建场景（顶点数与索引都变了）。
+ * --------------------------------------------------------------------------------------------- */
+
+/** 子工具作用的网格附件（选中项 + 文档里的真实数据） */
+interface MeshTarget {
+  slot: string
+  attachment: string
+  data: NonNullable<ReturnType<typeof findAttachment>>
+}
+
+/** 子工具的显示名（状态提示用，文案与图标条共用 `MESH_SUBTOOLS`） */
+function meshSubtoolLabel(subtool: MeshSubtool): string {
+  return MESH_SUBTOOLS.find((item) => item.id === subtool)?.label ?? '网格子工具'
+}
+
+/** 当前选中的网格附件；没选中 / 不是网格 → null */
+function meshTargetOf(host: ToolHost): MeshTarget | null {
+  const selection = host.selection
+  if (selection.kind !== 'attachment' || !selection.slot || !selection.attachment) return null
+  const data = findAttachment(useProjectStore.getState().document, selection.slot, selection.attachment)
+  if (!data || data.type !== 'mesh') return null
+  return { slot: selection.slot, attachment: selection.attachment, data }
+}
+
+/** 拓扑改动后把文档喂回场景：顶点数 / 索引都变了，必须整份重建（与 Alt+插点同一套） */
+function meshSubtoolSync(host: ToolHost): void {
+  host.scene.setDocument(useProjectStore.getState().document, host.selection.skin)
+  host.scene.refresh()
+}
+
+/**
+ * 网格子工具的鼠标按下。返回 true 表示这次点击已被子工具吃掉（调用方别再走默认选择逻辑）。
+ */
+export function meshSubtoolPointerDown(host: ToolHost, info: PointerInfo): boolean {
+  const subtool = host.tools.meshSubtool
+  if (subtool === 'edit') return false
+  const target = meshTargetOf(host)
+  if (!target) {
+    host.status(`「${meshSubtoolLabel(subtool)}」要先选中一个网格附件（Region 可右键「转为网格」再改）`)
+    return true
+  }
+  if (host.mode !== 'pose') {
+    host.status(`「${meshSubtoolLabel(subtool)}」改的是绑定网格：请切到 Pose 状态（Animate 态拖顶点写的是 FFD 帧）`)
+    return true
+  }
+  switch (subtool) {
+    case 'add':
+      return addMeshVertexByTool(host, target, info.world)
+    case 'remove':
+      return removeMeshVertexByTool(host, target, info.world)
+    case 'boundary':
+      return boundaryPointerDown(host, target, info.world)
+    case 'rewire':
+      return rewirePointerDown(host, target, info.world)
+    default:
+      return false
+  }
+}
+
+/**
+ * 网格子工具的光标移动（没在拖拽时）：画边界更新橡皮筋；删顶点 / 布线高亮指到的顶点，
+ * 让「这一下会点到谁」提前看得见。
+ */
+export function meshSubtoolHover(host: ToolHost, world: Vec2): void {
+  const subtool = host.tools.meshSubtool
+  const scene = host.scene
+  if (subtool === 'boundary') {
+    const path = scene.state.pendingMeshPath
+    if (!path) return
+    const local = scene.worldToAttachmentLocal(path.slot, path.attachment, world.x, world.y)
+    if (!local) return
+    // 橡皮筋末端也夹进 region 框：画出来的那个落点就是松手会真正落下的位置
+    const target = meshTargetOf(host)
+    const cursor =
+      target && target.slot === path.slot && target.attachment === path.attachment
+        ? clampToFrame(meshFrameBox(target.data), local)
+        : local
+    scene.setViewState({ pendingMeshPath: { ...path, cursor } })
+    return
+  }
+  if (subtool === 'remove' || subtool === 'rewire') {
+    const hit = scene.pickVertexAt(world.x, world.y)
+    const next = hit ? hit.vertexIndex : -1
+    if (scene.state.hoveredVertex !== next) scene.setViewState({ hoveredVertex: next })
+  }
+}
+
+/**
+ * 右键退出网格子工具：正在画边界的话**先收尾闭合**（把最后一个点连回第一个点），
+ * 其余情况就是把没落地的临时状态清掉（包括刚拖到一半的布线）。调用方随后把 `meshSubtool` 切回 `edit`。
+ */
+export function meshSubtoolCancel(host: ToolHost): boolean {
+  if (host.tools.meshSubtool === 'boundary' && host.scene.state.pendingMeshPath) return closeMeshBoundary(host)
+  drag = { ...IDLE }
+  host.scene.setViewState({ pendingMeshPath: null, hoveredVertex: -1 })
+  return false
+}
+
+/** 「添加顶点」：点一下就插一个（等同原来的 Alt+点击） */
+function addMeshVertexByTool(host: ToolHost, target: MeshTarget, world: Vec2): boolean {
+  const local = host.scene.worldToAttachmentLocal(target.slot, target.attachment, world.x, world.y)
+  if (!local) {
+    host.status('插入位置不在附件上：点在网格覆盖的区域内')
+    return true
+  }
+  let created: number | null = null
+  // runCommand：点不在网格内部时草稿丢掉，不留空的撤销记录
+  useProjectStore.getState().runCommand('插入网格顶点', (draft) => {
+    const index = insertMeshVertex(draft, target.slot, target.attachment, local as Vec2)
+    if (index === null) return false
+    created = index
+  })
+  const index = created as number | null
+  if (index === null) {
+    host.status('该位置不在网格内部：点在网格覆盖的区域内才能插入顶点')
+    return true
+  }
+  meshSubtoolSync(host)
+  useSelectionStore.getState().selectVertices([index])
+  host.status(`已插入顶点 #${index}（UV 与权重按位置插值；落在网格线上会把那条边一分为二）`)
+  return true
+}
+
+/** 「删除顶点」：点一个顶点把它删掉（引用它的三角形就地重新三角化补上） */
+function removeMeshVertexByTool(host: ToolHost, target: MeshTarget, world: Vec2): boolean {
+  const hit = host.scene.pickVertexAt(world.x, world.y)
+  const ref = hit ? resolveVertex(host, hit.vertexIndex) : null
+  if (!ref || ref.slot !== target.slot || ref.attachment !== target.attachment) {
+    host.status('删除顶点：对准要删的顶点再点（网格至少得留 3 个顶点）')
+    return true
+  }
+  let removed = false
+  // runCommand：删不动（会剩不到一个三角形）时不写撤销记录
+  useProjectStore.getState().runCommand('删除网格顶点', (draft) => {
+    const ok = deleteMeshVertex(draft, ref.slot, ref.attachment, ref.vertex)
+    if (!ok) return false
+    removed = true
+  })
+  if (!removed) {
+    host.status('删不掉：网格至少得保留 3 个顶点')
+    return true
+  }
+  meshSubtoolSync(host)
+  host.status(`已删除顶点 #${ref.vertex}（引用它的三角形就地重新三角化补上）`)
+  return true
+}
+
+/**
+ * 「自己绘制边界」：一次点击落一个点。
+ * 已经有 3 个点时，点在起点附近（10 屏幕像素内）就算**闭合**，等价右键收尾。
+ *
+ * 落点会被 `clampToFrame` 夹进**图片的 region 框**里：边界不允许画到图片范围之外
+ *（这也是视口里画那个虚框（见 Scene.drawBoundaryFrame）的原因 —— 夹过之后点停在框边上，
+ * 用户一眼能看出「这一下贴边了」）。
+ */
+function boundaryPointerDown(host: ToolHost, target: MeshTarget, world: Vec2): boolean {
+  const scene = host.scene
+  const local = scene.worldToAttachmentLocal(target.slot, target.attachment, world.x, world.y)
+  if (!local) {
+    host.status('边界点要落在附件所在的插槽上')
+    return true
+  }
+  const point = clampToFrame(meshFrameBox(target.data), local)
+  const clamped = point.x !== local.x || point.y !== local.y
+  const path = scene.state.pendingMeshPath
+  const mine = path && path.slot === target.slot && path.attachment === target.attachment ? path.points : []
+  // 闭合判定用**夹过之后**的位置：鼠标贴着框边挪到起点附近时也得能闭合
+  if (mine.length >= 3 && nearMeshPathStart(scene, target.slot, mine[0], point)) {
+    // 点回起点 = 闭合：边界画成了就退出「绘制边界」（右键那条路退出见 ViewportCanvas）
+    if (closeMeshBoundary(host)) useToolStore.getState().setMeshSubtool('edit')
+    return true
+  }
+  /*
+   * 夹过之后可能正好压在上一个点上（在框外同一条边上连点几下最典型）：零长度的边毫无意义，
+   * 还会让收尾时的耳切切出退化三角形，这种一下直接丢掉。
+   */
+  if (mine.length > 0 && tooCloseToLast(scene, target.slot, mine[mine.length - 1], point)) {
+    host.status('这个点离上一个点太近，没有落下')
+    return true
+  }
+
+  const points = [...mine, point]
+  scene.setViewState({
+    pendingMeshPath: { slot: target.slot, attachment: target.attachment, points, cursor: point }
+  })
+  const suffix = clamped ? '；该点在图片范围外，已贴到最近的框边' : ''
+  host.status(
+    points.length < 3
+      ? `边界点 ${points.length}：继续点（至少 3 个点，点回起点或右键收尾）；点错了按 Ctrl+Z 撤回上一个${suffix}`
+      : `边界点 ${points.length}：点回起点（第一个大圆点）或按右键收尾闭合；点错了按 Ctrl+Z 撤回上一个${suffix}`
+  )
+  return true
+}
+
+/** 世界坐标是否落在折线起点的「闭合圈」里（10 屏幕像素内，缩放到哪都点得中） */
+function nearMeshPathStart(scene: EditorScene, slotName: string, first: Vec2, local: Vec2): boolean {
+  const matrix = scene.attachmentWorldByName(slotName)
+  if (!matrix) return false
+  const anchor = mulPoint(matrix, first)
+  const cursor = mulPoint(matrix, local)
+  return Math.hypot(anchor.x - cursor.x, anchor.y - cursor.y) <= scene.viewport.pixelsToWorld(10)
+}
+
+/** 两个附件空间的点在世界里是否近到「几乎是同一个」（2 屏幕像素内），比较时按附件的实际大小缩放 */
+function tooCloseToLast(scene: EditorScene, slotName: string, last: Vec2, next: Vec2): boolean {
+  const matrix = scene.attachmentWorldByName(slotName)
+  if (!matrix) return false
+  const a = mulPoint(matrix, last)
+  const b = mulPoint(matrix, next)
+  return Math.hypot(a.x - b.x, a.y - b.y) <= scene.viewport.pixelsToWorld(2)
+}
+
+/**
+ * 附件的**原图框**（region 范围，附件局部空间）：绘制边界时用它画范围提示
+ *（Scene.drawBoundaryFrame）与把落点夹进来 —— 两边共用同一个 `attachmentFrameBox`。
+ */
+function meshFrameBox(data: MeshTarget['data']): { center: Vec2; size: Vec2 } {
+  return attachmentFrameBox(data)
+}
+
+/** 把点夹进原图框里：绘制边界时不允许跑出图片范围（框尺寸无效时原样返回） */
+function clampToFrame(box: { center: Vec2; size: Vec2 }, point: Vec2): Vec2 {
+  const halfX = box.size.x * 0.5
+  const halfY = box.size.y * 0.5
+  if (halfX <= 1e-6 || halfY <= 1e-6) return point
+  return {
+    x: Math.min(box.center.x + halfX, Math.max(box.center.x - halfX, point.x)),
+    y: Math.min(box.center.y + halfY, Math.max(box.center.y - halfY, point.y))
+  }
+}
+
+/**
+ * 收尾「绘制边界」：把画好的多边形换成这个网格的新外边界。
+ *
+ * 顶点换成画的点、三角形重新耳切、UV 由**原网格的「位置 → UV」拟合结果**反算 ——
+ * 于是「重画外形」时贴图停在原位，不会跟着跳（拟合不出来才退回包围盒映射）。
+ * 代价是原**内部顶点会被丢弃**（任意凹边界 + 保留内部点需要约束三角化，这里不做），
+ * 而且**绑定权重与 FFD 关键帧一起清掉**：这条路的语义就是「整块重画」，用户点工具时
+ * 已经被确认框告知过（见 MeshSubtoolBar 的 BOUNDARY_REDRAW_WARNING）。
+ */
+export function closeMeshBoundary(host: ToolHost): boolean {
+  return closeMeshBoundaryOn(host.scene, host.status)
+}
+
+/**
+ * 收尾「绘制边界」，只需要场景 + 状态提示（图标条在视口外，拿不到 ToolHost，走这个入口）。
+ */
+export function closeMeshBoundaryOn(scene: EditorScene, status: (message: string) => void): boolean {
+  const path = scene.state.pendingMeshPath
+  scene.setViewState({ pendingMeshPath: null, hoveredVertex: -1 })
+  if (!path || path.points.length < 3) {
+    if (path) status('绘制边界已取消：至少要 3 个点才围得成一个边界；已回到「编辑顶点」')
+    return false
+  }
+  let built: { vertices: number; triangles: number } | null = null
+  // 用 runCommand：重建失败（点共线 / 已不是网格）时**不写撤销记录**，免得白留一条空的
+  useProjectStore.getState().runCommand('重绘网格边界', (draft) => {
+    const rebuilt = rebuildMeshBoundary(draft, path.slot, path.attachment, path.points)
+    if (!rebuilt) return false
+    built = rebuilt
+  })
+  const result = built as { vertices: number; triangles: number } | null
+  if (!result) {
+    status('边界重建失败：这 3 个点几乎共线，或附件已经不是网格了')
+    return false
+  }
+  scene.setDocument(useProjectStore.getState().document, useSelectionStore.getState().skin)
+  scene.refresh()
+  status(
+    `已按新边界重建网格：${result.vertices} 个顶点 / ${result.triangles} 个三角面（贴图停在原位；原网格点、绑定权重与 FFD 关键帧已清除，要蒙皮请重新绑骨骼并算权重）；已回到「编辑顶点」`
+  )
+  return true
+}
+
+/**
+ * 「重绘网格边线」会丢什么 —— 图标条（`MeshSubtoolBar`）据此决定进这个子工具前要不要弹确认：
+ * **选中项是网格、而且确实有东西可丢**才弹，空网格 / 没选中网格不打扰用户。
+ */
+export interface BoundaryRedrawLoss {
+  slot: string
+  attachment: string
+  /** 会被替换掉的旧网格点数 */
+  vertices: number
+  /** 会被清掉的绑定骨骼数（0 = 从没绑过权重） */
+  bones: number
+  /** 会被删掉的 FFD 关键帧数 */
+  ffdFrames: number
+  /** 这些 FFD 帧散布在几个动画里（0 = 没有 FFD 帧） */
+  ffdAnims: number
+}
+
+/**
+ * 选中项「重画边界会真的丢东西」时返回明细，否则 null（没选中附件 / 不是网格 / 三个数组都空）。
+ *
+ * 三处计数与 `rebuildMeshBoundary` 实际清掉的东西一一对应（旧点数、`bones`、该附件的 FFD 帧），
+ * 改那边记得同步这里；确认框拿它把「这次会丢多少」直接写出来。
+ */
+export function boundaryRedrawLoss(): BoundaryRedrawLoss | null {
+  const selection = useSelectionStore.getState()
+  if (selection.kind !== 'attachment' || !selection.slot || !selection.attachment) return null
+  const { slot, attachment: name } = selection
+  const doc = useProjectStore.getState().document
+  const attachment = findAttachment(doc, slot, name)
+  if (!attachment || attachment.type !== 'mesh') return null
+
+  const bones = weightBonesOf(attachment).length
+  let ffdFrames = 0
+  let ffdAnims = 0
+  for (const animation of doc.animations) {
+    let count = 0
+    for (const track of animation.deforms) {
+      if (track.slot === slot && track.attachment === name) count += track.frames.length
+    }
+    if (count > 0) {
+      ffdFrames += count
+      ffdAnims += 1
+    }
+  }
+
+  const vertices = attachment.vertices.length
+  if (vertices === 0 && bones === 0 && ffdFrames === 0) return null
+  return { slot, attachment: name, vertices, bones, ffdFrames, ffdAnims }
+}
+
+/**
+ * 「自己绘制边界」进行中按 Ctrl+Z / 点菜单「撤销」的语义：**撤回上一个已落的点**，
+ * 而不是撤销文档命令（App.tsx 的 `edit:undo` 会先问这里）。
+ *
+ * 为什么必须接管：落下的点只活在视图状态里（`pendingMeshPath`，不进历史），而此刻历史栈顶
+ * 多半是「转为网格」这类**把网格造出来**的命令 —— 真让它撤销，正在画边界的那个网格就没了。
+ * 所以这个状态下整条 Ctrl+Z 都归这边：点还没落下时也吃掉，只提示一句（要撤销文档请先退出子工具）。
+ *
+ * 返回 true = 这次撤销已被吃掉，调用方**不要**再走 `projectStore.undo`。
+ */
+export function undoMeshBoundaryPoint(scene: EditorScene, status?: (message: string) => void): boolean {
+  // `boundaryTarget` 有值 == 正处在「自己绘制边界」（Pose + 网格工具 + 该子工具 + 选中网格）：
+  // 拿它当开关，就不必再从图标条 / store 那边取一遍子工具状态
+  if (!scene.state.boundaryTarget) return false
+  const path = scene.state.pendingMeshPath
+  const points = path ? path.points.slice(0, -1) : []
+  // 点全部撤完就退回「还没开始画」：橡皮筋收掉（region 框会留着，接着点就行）
+  scene.setViewState({ pendingMeshPath: points.length > 0 && path ? { ...path, points } : null })
+  if (!path || path.points.length === 0) {
+    status?.('还没有落下边界点；要撤销文档命令，请先退出「自己绘制边界」')
+  } else if (points.length === 0) {
+    status?.('已撤回最后一个边界点：重新开始点（点回起点或右键收尾）')
+  } else {
+    status?.(`已撤回上一个边界点：还剩 ${points.length} 个（继续点 / 点回起点 / 右键收尾）`)
+  }
+  return true
+}
+
+/**
+ * 用画好的多边形重画网格外边界（见 `closeMeshBoundary` 的说明）。
+ * 返回 null 表示没改（点太少 / 共线 / 已不是网格），此时**不碰文档**。
+ */
+function rebuildMeshBoundary(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  points: readonly Vec2[]
+): { vertices: number; triangles: number } | null {
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment || attachment.type !== 'mesh' || points.length < 3) return null
+  const triangles = triangulatePolygon(points)
+  if (triangles.length < 3) return null
+  // 样本只服务「位置 → UV」拟合，权重不再往下带（见下）
+  const sources = attachment.vertices.map((vertex, index) => ({
+    x: vertex.x,
+    y: vertex.y,
+    u: attachment.uvs[index * 2] ?? 0,
+    v: attachment.uvs[index * 2 + 1] ?? 0
+  }))
+  const field = fitUvField(sources)
+  const fallback = polygonUvs(points, attachment.size)
+  /*
+   * 新顶点**不带任何权重**：位置整圈换过了，就近继承会把权重绑到用户根本没画到的骨骼上，
+   * 形变比「没有蒙皮」更离谱；而这一步用户点工具时已经确认过（确认框里明说了会删权重）。
+   * 顶点与绑定列表一起清空 → 网格回到「只跟着插槽走」的刚性状态（与未加权网格同一套渲染）。
+   */
+  attachment.vertices = points.map((point) => ({ x: point.x, y: point.y, weights: [] }))
+  attachment.bones = []
+  attachment.uvs = points.flatMap((point, index) => {
+    if (!field) return [fallback[index * 2] ?? 0, fallback[index * 2 + 1] ?? 0]
+    const mapped = field(point.x, point.y)
+    return [mapped.u, mapped.v]
+  })
+  attachment.triangles = triangles
+  // 顶点全在边界上 → hull = 顶点数；edges 按「成对下标」存一圈外轮廓
+  attachment.hull = points.length
+  attachment.edges = points.flatMap((_, index) => [index, (index + 1) % points.length])
+  // 顶点数变了：旧 FFD 关键帧按满顶点长度存 offsets，留着会整体错位 —— 全部清掉
+  // （这正是确认框里说的「删除相对应的时间轴关键帧」；同 autoGenerateRegionMesh）
+  for (const animation of doc.animations) {
+    animation.deforms = animation.deforms.filter(
+      (track) => !(track.slot === slotName && track.attachment === attachmentName)
+    )
+  }
+  return { vertices: attachment.vertices.length, triangles: triangles.length / 3 }
+}
+
+/** 「自定义布线」按下：抓住线段起点那个顶点开始拖 */
+function rewirePointerDown(host: ToolHost, target: MeshTarget, world: Vec2): boolean {
+  const hit = host.scene.pickVertexAt(world.x, world.y)
+  const ref = hit ? resolveVertex(host, hit.vertexIndex) : null
+  if (!ref || ref.slot !== target.slot || ref.attachment !== target.attachment) {
+    host.status('自定义布线：从网格的一个顶点上按住，拖到另一个顶点上松手')
+    return true
+  }
+  const from = target.data.vertices[ref.vertex]
+  if (!from) return true
+  drag = {
+    ...IDLE,
+    kind: 'mesh-rewire',
+    slot: target.slot,
+    attachment: target.attachment,
+    vertex: ref.vertex,
+    startWorld: { ...world },
+    lastWorld: { ...world }
+  }
+  // 拖拽期间不动文档（只有一条橡皮筋），连线在松手时一次 update 完成 ——
+  // 不需要 begin / end 事务：那样等于替同一次改动记两条撤销（其中一条还是空的）
+  const start = { x: from.x, y: from.y }
+  host.scene.setViewState({
+    pendingMeshPath: { slot: target.slot, attachment: target.attachment, points: [start], cursor: start }
+  })
+  host.status(`从顶点 #${ref.vertex} 拖到另一个顶点：松手即在这两点之间连一条线`)
+  return true
+}
+
+/** 「自定义布线」拖拽中：橡皮筋跟着指针走 */
+function rewireDragMove(host: ToolHost, world: Vec2): void {
+  drag.lastWorld = { ...world }
+  const path = host.scene.state.pendingMeshPath
+  if (!path) return
+  const local = host.scene.worldToAttachmentLocal(path.slot, path.attachment, world.x, world.y)
+  if (local) host.scene.setViewState({ pendingMeshPath: { ...path, cursor: local } })
+}
+
+/** 「自定义布线」松手：落在**另一个**顶点上才连线（沿这条线重新三角化） */
+function rewireDragEnd(host: ToolHost, session: DragSession): void {
+  const scene = host.scene
+  scene.setViewState({ pendingMeshPath: null })
+  const target = meshTargetOf(host)
+  if (!target || target.slot !== session.slot || target.attachment !== session.attachment) return
+  const hit = scene.pickVertexAt(session.lastWorld.x, session.lastWorld.y)
+  const ref = hit ? resolveVertex(host, hit.vertexIndex) : null
+  if (!ref || ref.slot !== session.slot || ref.attachment !== session.attachment || ref.vertex === session.vertex) {
+    host.status('自定义布线：要落到**另一个**顶点上才会连线，这次什么都没改')
+    return
+  }
+  // runCommand：连线跑不通（已经连着 / 没横穿内部）时草稿直接丢掉，不留空的撤销记录
+  const committed = useProjectStore
+    .getState()
+    .runCommand('自定义布线', (draft) =>
+      connectMeshVertices(draft, session.slot, session.attachment, session.vertex, ref.vertex)
+    )
+  if (!committed) {
+    host.status('这两点之间连不上：已经连着线了，或这条线没有横穿网格内部')
+    return
+  }
+  meshSubtoolSync(host)
+  host.status(`已在顶点 #${session.vertex} 与 #${ref.vertex} 之间连上线（只重排这条通道上的三角形）`)
+}
+
+/** 二维叉积（判点在直线哪一侧 / 求交点参数都用它） */
+function cross2(ax: number, ay: number, bx: number, by: number): number {
+  return ax * by - ay * bx
+}
+
+/**
+ * 在顶点 a、b 之间连一条线（自定义布线）：沿线段 a→b 把**经过的三角形**切开，
+ * 让这条线成为真正的三角边 —— 只重排这条「通道」上的三角形，其余区域一个面都不动。
+ *
+ * 三步：
+ * ① **走一遍**：从 a 出发，每次穿过一条边进入相邻面，直到走进含 b 的面，收集这条通道上的所有面；
+ * ② **取外圈**：只被通道里**一个**面用到的边就是通道的外轮廓，把它们串成一个环；
+ * ③ **拆环重切**：环在 a、b 处拆成两条链（各是 a…b 的一条简单多边形），分别耳切，
+ *    两条链各自都带 a–b 这条边，于是「a–b 成为三角边」自动成立。
+ *
+ * 返回 false = 这条线已经有 / 走不通（线段正好擦过某个顶点等退化情况），此时**不动文档**。
+ */
+function connectMeshVertices(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  a: number,
+  b: number
+): boolean {
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment || attachment.type !== 'mesh') return false
+  const vertices = attachment.vertices
+  const triangles = attachment.triangles
+  const faceCount = Math.floor(triangles.length / 3)
+  if (a === b || a < 0 || b < 0 || a >= vertices.length || b >= vertices.length) return false
+  if (faceCount === 0) return false
+
+  const keyOf = (i: number, j: number): number => (i < j ? i * 65536 + j : j * 65536 + i)
+  for (let face = 0; face < faceCount; face++) {
+    const corners = [triangles[face * 3], triangles[face * 3 + 1], triangles[face * 3 + 2]]
+    if (corners.includes(a) && corners.includes(b)) return false
+  }
+  // 边 → 用到它的面（走通道与「谁在外圈」都靠它）
+  const owners = new Map<number, number[]>()
+  for (let face = 0; face < faceCount; face++) {
+    for (let k = 0; k < 3; k++) {
+      const key = keyOf(triangles[face * 3 + k], triangles[face * 3 + ((k + 1) % 3)])
+      const list = owners.get(key)
+      if (list) list.push(face)
+      else owners.set(key, [face])
+    }
+  }
+
+  const start = vertices[a]
+  const end = vertices[b]
+  const dx = end.x - start.x
+  const dy = end.y - start.y
+  if (dx === 0 && dy === 0) return false
+  /** 点在直线 a→b 的哪一侧（>0 / <0 / =0 在线上） */
+  const sideOf = (point: Vec2): number => dx * (point.y - start.y) - dy * (point.x - start.x)
+
+  // ① 起点面：包含 a、且 a→b 的方向落在它这个角里面（线段一离开 a 就进这个面）
+  let face = -1
+  for (let candidate = 0; candidate < faceCount; candidate++) {
+    const corners = [triangles[candidate * 3], triangles[candidate * 3 + 1], triangles[candidate * 3 + 2]]
+    if (!corners.includes(a)) continue
+    const others = corners.filter((index) => index !== a)
+    const cu = cross2(vertices[others[0]].x - start.x, vertices[others[0]].y - start.y, dx, dy)
+    const cv = cross2(vertices[others[1]].x - start.x, vertices[others[1]].y - start.y, dx, dy)
+    if (cu === 0 || cv === 0) return false // 线段刚好沿着这个面的边：退化
+    if (cu * cv < 0) {
+      face = candidate
+      break
+    }
+  }
+  if (face < 0) return false
+
+  const crossed: number[] = []
+  const visited = new Set<number>()
+  let entryT = -1
+  for (let guard = 0; face >= 0; guard++) {
+    if (guard > faceCount + 4 || visited.has(face)) return false // 打转：数据坏了，别动它
+    visited.add(face)
+    crossed.push(face)
+    const corners = [triangles[face * 3], triangles[face * 3 + 1], triangles[face * 3 + 2]]
+    if (corners.includes(b)) break
+    // 出口 = 这个面里「参数 t 比入口大」的那条穿越边（凸面内至多一条）
+    let exitFace = -1
+    let exitT = Infinity
+    for (let k = 0; k < 3; k++) {
+      const i = corners[k]
+      const j = corners[(k + 1) % 3]
+      if (i === a || j === a || i === b || j === b) continue // 起止点所在的边不是出口
+      const pi = vertices[i]
+      const pj = vertices[j]
+      const si = sideOf(pi)
+      const sj = sideOf(pj)
+      if (si === 0 || sj === 0) return false // 线段正好擦过第三个顶点：退化
+      if (si * sj > 0) continue
+      const ex = pj.x - pi.x
+      const ey = pj.y - pi.y
+      const denom = cross2(dx, dy, ex, ey)
+      if (denom === 0) continue
+      const t = cross2(pi.x - start.x, pi.y - start.y, ex, ey) / denom
+      if (t <= 0 || t >= 1 || t <= entryT + 1e-9 || t >= exitT) continue
+      exitT = t
+      exitFace = owners.get(keyOf(i, j))?.find((other) => other !== face) ?? -1
+    }
+    if (exitFace < 0) return false // 走到网格边界外了：这条线连不通
+    entryT = exitT
+    face = exitFace
+  }
+
+  // ② 通道外圈：只被通道里一个面用到的边
+  const outline: Array<[number, number]> = []
+  const links = new Map<number, number[]>()
+  const link = (from: number, to: number): void => {
+    const list = links.get(from)
+    if (list) list.push(to)
+    else links.set(from, [to])
+  }
+  for (const crossedFace of crossed) {
+    const corners = [triangles[crossedFace * 3], triangles[crossedFace * 3 + 1], triangles[crossedFace * 3 + 2]]
+    for (let k = 0; k < 3; k++) {
+      const i = corners[k]
+      const j = corners[(k + 1) % 3]
+      const shared = (owners.get(keyOf(i, j)) ?? []).filter((other) => visited.has(other)).length
+      if (shared > 1) continue
+      outline.push([i, j])
+      link(i, j)
+      link(j, i)
+    }
+  }
+  // ③ 串成环（从 a 出发，绕一圈回到 a），再在 b 处拆成两条链
+  const loop: number[] = [a]
+  const used = new Set<number>([a])
+  let cursor = a
+  while (used.size <= outline.length) {
+    const next = (links.get(cursor) ?? []).find((candidate) => !used.has(candidate))
+    if (next === undefined) break
+    loop.push(next)
+    used.add(next)
+    cursor = next
+  }
+  const indexB = loop.indexOf(b)
+  if (indexB <= 0 || loop.length < 4) return false
+  const chains = [loop.slice(0, indexB + 1), [...loop.slice(indexB), a]]
+  if (chains.some((chain) => chain.length < 3)) return false
+
+  // 绕向对齐原网格：三角化统一按逆时针出，这里按原面的符号翻一下，免得新面「翻面」
+  const orientationOf = (i0: number, i1: number, i2: number): number => {
+    const p0 = vertices[i0]
+    const p1 = vertices[i1]
+    const p2 = vertices[i2]
+    return Math.sign((p1.x - p0.x) * (p2.y - p0.y) - (p2.x - p0.x) * (p1.y - p0.y))
+  }
+  const base = orientationOf(triangles[0], triangles[1], triangles[2]) || 1
+  const added: number[] = []
+  for (const chain of chains) {
+    const local = triangulatePolygon(chain.map((index) => vertices[index]))
+    for (let t = 0; t + 2 < local.length; t += 3) {
+      const i0 = chain[local[t]]
+      const i1 = chain[local[t + 1]]
+      const i2 = chain[local[t + 2]]
+      if (orientationOf(i0, i1, i2) === base) added.push(i0, i1, i2)
+      else added.push(i0, i2, i1)
+    }
+  }
+  if (added.length === 0) return false
+
+  const kept: number[] = []
+  for (let face2 = 0; face2 < faceCount; face2++) {
+    if (visited.has(face2)) continue
+    kept.push(triangles[face2 * 3], triangles[face2 * 3 + 1], triangles[face2 * 3 + 2])
+  }
+  // 只换 triangles：新增的是一条**内部**线，外轮廓（edges / hull）一点没变。
+  // 别把 a-b 塞进 edges —— 那是「外环成对下标」，多一对会让导出时按 edges 走的外环串不回去
+  attachment.triangles = [...kept, ...added]
+  return true
 }
 
 export type { VertexSample }

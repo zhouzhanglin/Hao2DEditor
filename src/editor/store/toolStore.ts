@@ -88,6 +88,74 @@ export const GIZMO_ORDER: ReadonlyArray<{ mode: GizmoMode; key: string; label: s
 ]
 
 /**
+ * 网格工具（Pose 态的「网格工具 M」）的**子工具**：决定鼠标在网格上做什么。
+ *
+ * 只有 `edit`（拖顶点）是常驻状态，其余四个都是临时的：在视口里按右键就回到 `edit`
+ * （见 MeshSubtoolBar 与视口的右键处理）；其中 `boundary` 画完轮廓（点回起点或右键闭合）
+ * 会自己回到 `edit`，因为一个网格只该有一个外边界。
+ *
+ * - `add`：点网格内部插入顶点（等同原来的 Alt+点击）
+ * - `remove`：点顶点把它删掉（引用它的三角形就地重新三角化）
+ * - `boundary`：依次点击画出网格外边界，点回起点 / 右键自动闭合；这期间视口只留图片的 region 框
+ *   （旧网格线框与顶点全藏起来，落点也会被夹在框内，见 Scene.drawBoundaryFrame）
+ * - `rewire`：从一个顶点拖到另一个顶点松手，在两点之间连一条线
+ */
+export type MeshSubtool = 'edit' | 'add' | 'remove' | 'boundary' | 'rewire'
+
+/**
+ * 子工具图标条的顺序与文案（工具条、状态提示共用一处，改一处即可）。
+ * `divider` 标记「与上一项之间画一条分隔线」—— 前三个是顶点级操作，后两个是拓扑级。
+ */
+export const MESH_SUBTOOLS: ReadonlyArray<{
+  id: MeshSubtool
+  label: string
+  hint: string
+  divider?: boolean
+}> = [
+  {
+    id: 'edit',
+    label: '编辑顶点',
+    hint: '编辑顶点（默认）：拖动顶点改网格几何；Pose 态改的是绑定网格，贴图留在原地'
+  },
+  {
+    id: 'add',
+    label: '添加顶点',
+    hint: '添加顶点：点网格的边或三角形内部插入一个顶点（UV / 权重按位置插值，等同按住 Alt 点击）'
+  },
+  {
+    id: 'remove',
+    label: '删除顶点',
+    hint: '删除顶点：点一个顶点把它删掉，引用它的三角形会就地重新三角化补上'
+  },
+  {
+    id: 'boundary',
+    label: '自己绘制边界',
+    hint: '自己绘制边界：沿着轮廓依次点击（点不能超出图片的 region 框，画的时候只显示 region 框与轮廓，网格与顶点临时隐藏）；点回起点（第一个大圆点）或按右键即收尾闭合（闭合会丢弃原网格点、绑定权重与 FFD 关键帧），闭合后回到「编辑顶点」；点错了按 Ctrl+Z 撤回上一个点（此时 Ctrl+Z 只撤点，不动文档）',
+    divider: true
+  },
+  {
+    id: 'rewire',
+    label: '自定义布线',
+    hint: '自定义布线：从一个顶点按住拖到另一个顶点松手，即可在这两点之间连一条线（沿这条线重新三角化）'
+  }
+]
+
+/**
+ * 点「自己绘制边界」时那个确认弹窗的**正文**：这个子工具是整块重画，进去之前必须把
+ * 「会丢什么」说清楚（撤销能救回来，但用户得先知道自己在丢什么）。
+ *
+ * 弹窗本体是 `ConfirmDialog`（与「新建工程 / 导出」同一套样式），触发点在 `MeshSubtoolBar`：
+ * 选中项确实有东西可丢时才弹（判定见 authoringTools 的 `boundaryRedrawLoss`）。
+ *
+ * 文案里承诺的三件事都真的会发生，改动 `rebuildMeshBoundary` 时要同步：
+ * 1. 旧顶点全部换成画的这一圈点（内部顶点直接丢弃）；
+ * 2. 所有绑定权重清空（`vertices[].weights` 与 `bones` 一起清），网格回到刚性；
+ * 3. 该附件在各动画里的 FFD 关键帧（时间轴上的那些帧）全部删除。
+ */
+export const BOUNDARY_REDRAW_WARNING =
+  '重绘网格边线会删除当前选中图片上所有已添加的网格点，删除所有绑定的骨骼权重，并删除相对应的时间轴关键帧。\n\n您确定要手动重绘网格边线吗？'
+
+/**
  * 视口叠加层开关。
  *
  * **刻意只留「与在编辑谁无关」的两项**：骨骼骨架、约束手柄 —— 它们在任何工具下看的都是同一件事。
@@ -118,8 +186,15 @@ export interface ToolState {
    * 就加入它的权重骨骼列表。刻意与 tool 解耦（独立字段），切换工具 / gizmo 时自动清掉。
    */
   pendingWeightBone: { slot: string; attachment: string } | null
+  /**
+   * 网格工具的子工具（编辑顶点 / 添加 / 删除 / 画边界 / 自定义布线）。
+   * 与 `pendingWeightBone` 一样刻意与 tool 解耦：换工具 / 换 gizmo 都回到 `edit`，
+   * 免得下次切回网格工具时鼠标还停在「删顶点」这种危险的语义上。
+   */
+  meshSubtool: MeshSubtool
   setTool: (tool: EditorTool) => void
   setGizmo: (mode: GizmoMode) => void
+  setMeshSubtool: (subtool: MeshSubtool) => void
   setOverlay: (overlay: OverlayState) => void
   toggleOverlay: (key: keyof OverlayState) => void
   setBrush: (brush: Partial<BrushState>) => void
@@ -141,6 +216,7 @@ export const useToolStore = create<ToolState>((set, get) => ({
   brush: { mode: 'addSubtract', size: 40, hardness: 1.5, normalize: true },
   gridDivisions: 4,
   pendingWeightBone: null,
+  meshSubtool: 'edit',
 
   /**
    * 换工具**不再改任何显示层**：网格线框与顶点、FFD、权重着色都由工具与选中项驱动
@@ -148,8 +224,8 @@ export const useToolStore = create<ToolState>((set, get) => ({
    * 见 Scene.drawOverlays）。这里的 overlay 只留给「骨架 / 约束」两个纯显示开关。
    */
   setTool: (tool) => {
-    // 换工具就放弃「等待点选骨骼」，免得换个工具后第一次点击被旧等待态吃掉
-    set({ tool, pendingWeightBone: null })
+    // 换工具就放弃「等待点选骨骼」与网格子工具，免得换个工具后第一次点击被旧状态吃掉
+    set({ tool, pendingWeightBone: null, meshSubtool: 'edit' })
   },
   /**
    * 选择变换工具（移动/旋转/缩放/斜切）时**自动退出绘制类工具**，见 `isDrawTool`。
@@ -158,15 +234,16 @@ export const useToolStore = create<ToolState>((set, get) => ({
     const tool = get().tool
     set(
       isDrawTool(tool)
-        ? { gizmo, tool: 'select', pendingWeightBone: null }
-        : { gizmo, pendingWeightBone: null }
+        ? { gizmo, tool: 'select', pendingWeightBone: null, meshSubtool: 'edit' }
+        : { gizmo, pendingWeightBone: null, meshSubtool: 'edit' }
     )
   },
   setOverlay: (overlay) => set({ overlay }),
   toggleOverlay: (key) => set({ overlay: { ...get().overlay, [key]: !get().overlay[key] } }),
   setBrush: (brush) => set({ brush: { ...get().brush, ...brush } }),
   setGridDivisions: (value) => set({ gridDivisions: Math.max(1, Math.min(24, Math.round(value))) }),
-  setPendingWeightBone: (target) => set({ pendingWeightBone: target })
+  setPendingWeightBone: (target) => set({ pendingWeightBone: target }),
+  setMeshSubtool: (meshSubtool) => set({ meshSubtool })
 }))
 
 export function currentTools(): ToolState {

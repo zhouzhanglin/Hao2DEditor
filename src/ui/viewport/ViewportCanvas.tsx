@@ -15,11 +15,14 @@ import {
   baseBrushMode,
   brushModeFor,
   isDragging,
+  meshSubtoolCancel,
+  meshSubtoolHover,
   slotLocked,
   toolPointerDown,
   toolPointerMove,
   toolPointerUp
 } from '@editor/tools/authoringTools'
+import { meshSubtoolCursor } from './MeshSubtoolBar'
 import type { ToolHost } from '@editor/tools/authoringTools'
 import { BRUSH_MODE_COLORS } from '@core/weightPalette'
 import type { BrushMode } from '@editor/commands/authoringCommands'
@@ -281,6 +284,22 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         isolateMeshAttachment:
           tools.tool === 'ffd' && selection.kind === 'attachment' ? selection.attachment : '',
         /*
+         * 「自己绘制边界」的目标附件：视口据此把旧网格线框 / 顶点 / 选中轮廓全藏起来，
+         * 改成画图片的 region 框（见 Scene.drawOverlays）。只在「Pose 态 + 网格工具 + 该子工具
+         * + 选中的是网格」时给值 —— 其它情况（换了子工具、没选中网格）显示照旧，
+         * 于是「退出绘制边界就恢复显示 Mesh 和顶点」是自动的，不用谁去还原。
+         */
+        boundaryTarget:
+          tools.tool === 'ffd' &&
+          mode === 'pose' &&
+          tools.meshSubtool === 'boundary' &&
+          selection.kind === 'attachment' &&
+          Boolean(selection.slot) &&
+          Boolean(selection.attachment) &&
+          selectedAttachmentData?.type === 'mesh'
+            ? { slot: selection.slot, attachment: selection.attachment }
+            : null,
+        /*
          * 只看 `slot`、不看 `kind`：权重工具里「先选骨骼、再点顶点刷」是常态，那时 kind 是 bone，
          * 但 slot 仍指向要刷的网格 —— 按 kind 卡死会让权重着色与顶点一起消失。
          */
@@ -449,6 +468,22 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
           ? `已绑定「${boneName}」；可继续点选其它骨骼，完成后右键或再点按钮结束`
           : `「${boneName}」已在列表里；继续点选，或右键结束绑定`
       )
+      return
+    }
+
+    /*
+     * 网格子工具（左下角图标条）：右键 = 收尾并回到「编辑顶点」。
+     * 「自己绘制边界」正画到一半的话，右键先按规则把最后一个点连回起点闭合（见 meshSubtoolCancel）。
+     */
+    const meshTools = useToolStore.getState()
+    if (event.button === 2 && meshTools.tool === 'ffd' && meshTools.meshSubtool !== 'edit') {
+      event.preventDefault()
+      const meshHost = buildHost()
+      // 正在画边界：右键 = 收尾闭合，成功与否它自己报（那条提示比这句笼统的更具体）
+      const boundaryDraw = meshTools.meshSubtool === 'boundary' && Boolean(meshHost?.scene.state.pendingMeshPath)
+      if (meshHost) meshSubtoolCancel(meshHost)
+      if (!boundaryDraw) onStatus('网格工具：已回到「编辑顶点」')
+      meshTools.setMeshSubtool('edit')
       return
     }
 
@@ -622,6 +657,30 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       const host = buildHost()
       if (host) toolPointerMove(host, { world, shift: event.shiftKey, ctrl: event.ctrlKey, alt: event.altKey })
       return
+    }
+
+    /*
+     * 网格子工具（视口左下角图标条，只在 Pose 态的网格工具下出现）：
+     * - 光标换成本子工具带徽标的指针 —— 不看光标也知道这下点下去是加点还是删点；
+     * - 悬停预览交回子工具：画边界时橡皮筋跟着鼠标走，删点 / 布线时高亮鼠标底下的顶点。
+     * 「编辑顶点」是默认态：不换光标、也不吃掉后面的骨骼 / 操作器光标逻辑。
+     */
+    const meshTools = useToolStore.getState()
+    if (meshTools.tool === 'ffd' && useModeStore.getState().mode === 'pose') {
+      if (meshTools.meshSubtool !== 'edit') {
+        const cursor = meshSubtoolCursor(meshTools.meshSubtool)
+        if (event.currentTarget.style.cursor !== cursor) event.currentTarget.style.cursor = cursor
+        // 选择工具留下的悬停轮廓（下面的悬停预览逻辑被跳过了）顺手清掉：子工具接管了鼠标，那圈高亮会误导
+        if (scene.state.hoveredDisplay) {
+          scene.setViewState({ hoveredDisplay: null })
+          scene.markDirty()
+        }
+        const meshHost = buildHost()
+        if (meshHost) meshSubtoolHover(meshHost, world)
+        return
+      }
+      // 回到默认态：清掉上一次留下的徽标光标（React 只在值变化时写 style，得手动还原）
+      if (event.currentTarget.style.cursor) event.currentTarget.style.cursor = ''
     }
     const hit = scene.pickBoneHandleAt(world.x, world.y)
     const name = hit && scene.runtime ? (scene.runtime.asset.bones[hit.boneIndex]?.name ?? '') : ''
@@ -855,6 +914,13 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         }
         // 刷子半径圈同理：它是跟着鼠标走的光标，鼠标出去了就该收起来
         if (scene?.state.brushRing) scene.setViewState({ brushRing: null })
+        // 网格子工具的悬停 / 橡皮筋末端也是跟鼠标走的，出去一并清掉
+        if (scene) {
+          const path = scene.state.pendingMeshPath
+          if (scene.state.hoveredVertex >= 0 || path?.cursor) {
+            scene.setViewState({ hoveredVertex: -1, pendingMeshPath: path ? { ...path, cursor: null } : null })
+          }
+        }
         pointer.current.boneClick = null
       }}
       onWheel={onWheel}

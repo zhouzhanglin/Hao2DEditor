@@ -38,6 +38,18 @@ import type { BoneHandleHit, BoneHit, GizmoPart, ShearEdge, VertexHit } from '@r
 import { ImageAlphaCache } from '@render/imageAlpha'
 import { AttachmentType, attachmentFrameBox } from '@core/model/types'
 
+/**
+ * 网格子工具正在画的折线颜色（绘制边界 / 自定义布线）。
+ * 取亮青色：与网格线框（灰）、骨骼（黄）、权重（红绿蓝）都不撞色，压在网格上也看得清。
+ */
+const MESH_PATH_COLOR = 0x38bdf8
+
+/**
+ * 「自己绘制边界」时画的那个**图片 region 框**（原图框）的颜色：中性浅灰白，不跟贴图内容抢眼，
+ * 也跟网格线框（灰蓝）、正在画的折线（亮青）区分得开。底下垫一圈深色描边，深浅背景上都看得见。
+ */
+const REGION_FRAME_COLOR = 0xe2e8f0
+
 /** 斜切包围盒：局部 AABB + 世界坐标四角（左上 → 右上 → 右下 → 左下） */
 export interface ShearBox {
   minX: number
@@ -48,7 +60,7 @@ export interface ShearBox {
 }
 import type { MeshBuildResult } from '@core/skin/meshBuilder'
 import type { AttachmentData } from '@core/model/types'
-import type { EditorDocument } from '@core/model/authoring'
+import type { AuthoringAttachment, EditorDocument } from '@core/model/authoring'
 import { animationDuration, buildRuntime, needsRebuild } from './runtime'
 import type { RuntimeBundle } from './runtime'
 import type { OverlayState } from './store/toolStore'
@@ -127,6 +139,32 @@ export interface SceneViewState {
   isolateMeshSlot: string
   /** 隔离插槽上要显示的附件名（空串 = 沿用当前显示项） */
   isolateMeshAttachment: string
+  /**
+   * 网格子工具正在画的折线预览（绘制边界 / 自定义布线），null = 没在画。
+   *
+   * 点存的是**附件显示空间**坐标（与 `attachment.vertices` 同一坐标系），画的时候才按附件
+   * 世界矩阵变换到世界坐标 —— 于是它跟网格顶点永远对齐（摆 POSE、切动画都不会错位）。
+   */
+  pendingMeshPath: PendingMeshPath | null
+  /**
+   * 「自己绘制边界」正在给哪个**网格附件**画（Pose 态 + 网格工具 + 该子工具，选中项是网格时才有值）。
+   *
+   * 有值期间视口会把旧网格的形状整个让开：**不画网格线框、不画顶点、也不画它的选中轮廓**，
+   * 改成画图片的 region 框（见 `drawBoundaryFrame`）。理由：重画边界时旧网格的形状与顶点全是
+   * 干扰 —— 用户只需要知道「图片范围在哪、笔尖要落在里面」（点子工具的落点也会被夹进这个框）。
+   */
+  boundaryTarget: { slot: string; attachment: string } | null
+}
+
+/**
+ * 网格子工具（绘制边界 / 自定义布线）正在画的折线：
+ * `points` 是已经落下的点，`cursor` 是当前光标位置（画橡皮筋用），都是附件显示空间坐标。
+ */
+export interface PendingMeshPath {
+  slot: string
+  attachment: string
+  points: Vec2[]
+  cursor: Vec2 | null
 }
 
 export interface EditorSceneOptions {
@@ -162,6 +200,10 @@ export class EditorScene {
   private readonly axes = new Graphics()
   /** 权重刷的刷子指示（软边圆 + 中心点）：画在最上层，它就是个「跟着鼠标的光标」 */
   private readonly brushRing = new Graphics()
+  /** 「自己绘制边界」时提示范围的图片 region 框（画在折线之下） */
+  private readonly regionFrame = new Graphics()
+  /** 网格子工具正在画的折线（画边界 / 自定义布线）：同样画在最上层 */
+  private readonly meshPath = new Graphics()
   /** 软边圆用的径向渐变（按模式缓存：颜色与停止点都是固定的，与半径无关） */
   private readonly brushGradients = new Map<BrushMode, FillGradient>()
   /** 需要画成空心的骨骼名集合（编辑期模型才有 hollow 字段） */
@@ -196,7 +238,9 @@ export class EditorScene {
     selectedAttachment: null,
     selectedDisplay: null,
     hoveredDisplay: null,
-    weightBones: []
+    weightBones: [],
+    pendingMeshPath: null,
+    boundaryTarget: null
   }
 
   constructor(options: EditorSceneOptions) {
@@ -216,7 +260,9 @@ export class EditorScene {
       this.meshFill,
       this.gizmoFill,
       this.gizmoStroke,
-      this.brushRing
+      this.brushRing,
+      this.regionFrame,
+      this.meshPath
     )
     this.viewport.overlayLayer.addChild(this.overlay)
     this.viewport.axisLayer.addChild(this.axes)
@@ -350,6 +396,10 @@ export class EditorScene {
     if (patch.overlay || patch.selectedVertices || patch.hoveredVertex !== undefined) this.markDirty()
     // 刷子半径圈跟着鼠标走，每帧都可能变（拖动 / 修饰键切换模式）
     if (patch.brushRing !== undefined) this.markDirty()
+    // 网格子工具的折线同理：橡皮筋每动一下就要重画
+    if (patch.pendingMeshPath !== undefined) this.markDirty()
+    // 进出「自己绘制边界」要换一整帧的显示（藏网格 / 画 region 框）
+    if (patch.boundaryTarget !== undefined) this.markDirty()
 
     // 外部改时间（拖时间轴 / 逐帧 / 切关键帧）→ 立即 seek 到播放器并重建一帧。
     // 播放中同样生效，这样「拖时间轴时画面跟着走」和「继续播放」不会互相打架。
@@ -643,6 +693,23 @@ export class EditorScene {
   }
 
   /**
+   * 文档里某个附件（按当前皮肤名找，找不到退回第一套皮肤）。
+   *
+   * 运行期附件（`attachmentAt`）只有「此刻真正显示的那一个」，改不到被关键帧切走的附件；
+   * 顶点编辑 / region 框这些「按名字指名道姓」的事都得走这里。
+   */
+  private documentAttachment(slotName: string, attachmentName: string): AuthoringAttachment | null {
+    const doc = this.document
+    if (!doc) return null
+    const skin = doc.skins.find((item) => item.name === this.skinName) ?? doc.skins[0]
+    return (
+      skin?.slots
+        .find((item) => item.slot === slotName)
+        ?.attachments.find((item) => item.name === attachmentName) ?? null
+    )
+  }
+
+  /**
    * 世界坐标 → 附件显示空间。
    * 附件世界矩阵 = 骨骼世界矩阵 · TRS(附件)，网格顶点编辑（插入顶点）要先把鼠标落到这一层。
    */
@@ -657,10 +724,7 @@ export class EditorScene {
     if (!bundle || !doc) return null
     const slot = doc.slots.find((item) => item.name === slotName)
     if (!slot) return null
-    const skin = doc.skins.find((item) => item.name === this.skinName) ?? doc.skins[0]
-    const attachment = skin?.slots
-      .find((item) => item.slot === slotName)
-      ?.attachments.find((item) => item.name === attachmentName)
+    const attachment = this.documentAttachment(slotName, attachmentName)
     const boneIndex = bundle.boneIndex[slot.bone]
     if (!attachment || boneIndex === undefined) return null
 
@@ -837,6 +901,17 @@ export class EditorScene {
       attachment.scale.y
     )
     return mul(boneWorld, local)
+  }
+
+  /**
+   * 附件显示空间 → 世界坐标（`attachmentWorldAt` 的正向变换，网格顶点编辑的反向换算见
+   * `worldToAttachmentLocal`）。
+   *
+   * 网格子工具的折线预览用：点存的是附件空间坐标，画的时候才变换 —— 网格一动它跟着动。
+   */
+  attachmentLocalToWorld(slotIndex: number, x: number, y: number): Vec2 | null {
+    const world = this.attachmentWorldAt(slotIndex)
+    return world ? mulPoint(world, { x, y }) : null
   }
 
   /**
@@ -1128,11 +1203,102 @@ export class EditorScene {
     return gradient
   }
 
+  /**
+   * 网格子工具正在画的折线（绘制边界 / 自定义布线）。
+   *
+   * 三段画法：**已落下的折线**（实线 + 落点圆点）、**橡皮筋**（最后一点 → 光标，虚线；已有两个点时
+   * 再补一条 光标 → 起点 的虚线，提示「点回起点就闭合」）、**起点**（画大一圈，同「闭合目标」）。
+   * 点本来就是附件空间坐标，这里逐点乘附件世界矩阵，于是网格摆成什么姿态都跟得住。
+   */
+  private drawPendingMeshPath(unitPerPixel: number): void {
+    const path = this.viewState.pendingMeshPath
+    const bundle = this.bundle
+    this.meshPath.clear()
+    const world = bundle && path ? this.attachmentWorldByName(path.slot) : null
+    if (!path || !world || path.points.length === 0) {
+      this.meshPath.visible = false
+      return
+    }
+    const toWorld = (point: Vec2): Vec2 => mulPoint(world, point)
+    const points = path.points.map(toWorld)
+    const cursor = path.cursor ? toWorld(path.cursor) : null
+    this.meshPath.visible = true
+
+    if (points.length >= 2) {
+      this.meshPath.moveTo(points[0].x, points[0].y)
+      for (let i = 1; i < points.length; i++) this.meshPath.lineTo(points[i].x, points[i].y)
+      this.meshPath.stroke({ width: unitPerPixel * 1.6, color: MESH_PATH_COLOR, alpha: 0.95 })
+    }
+    if (cursor) {
+      const last = points[points.length - 1]
+      this.meshPath.moveTo(last.x, last.y).lineTo(cursor.x, cursor.y)
+      if (points.length >= 2) this.meshPath.moveTo(cursor.x, cursor.y).lineTo(points[0].x, points[0].y)
+      this.meshPath.stroke({ width: unitPerPixel * 1.2, color: MESH_PATH_COLOR, alpha: 0.4 })
+    }
+    for (let i = 0; i < points.length; i++) {
+      this.meshPath
+        .poly(circlePolygon(points[i].x, points[i].y, unitPerPixel * (i === 0 ? 5 : 3.5)))
+        .fill({ color: MESH_PATH_COLOR, alpha: i === 0 ? 1 : 0.85 })
+    }
+  }
+
+  /**
+   * 「自己绘制边界」时画的**图片 region 框**：附件在文档里的原图框（没被裁剪就是内容框），
+   * 用虚线围一圈当范围提示 —— 用户据此知道笔尖该落在哪，点子工具也会把落点夹进这个框里
+   *（见 authoringTools 的 clampToFrame，两边用的是同一个 `attachmentFrameBox`）。
+   *
+   * 框存的是附件显示空间的四角，逐点乘附件世界矩阵画出来 —— 摆 POSE / 附件带旋转都贴得住。
+   * 虚线是手画的：pixi v8 的 stroke 不支持 dash 参数。深色垫底 + 浅色线各描一遍，
+   * 贴图深浅两头都看得清。
+   */
+  private drawBoundaryFrame(unitPerPixel: number): void {
+    const g = this.regionFrame
+    g.clear()
+    const target = this.viewState.boundaryTarget
+    const world = target ? this.attachmentWorldByName(target.slot) : null
+    const attachment = target ? this.documentAttachment(target.slot, target.attachment) : null
+    const box = attachment ? attachmentFrameBox(attachment) : null
+    if (!target || !world || !box || box.size.x <= 1e-6 || box.size.y <= 1e-6) {
+      g.visible = false
+      return
+    }
+    const halfWidth = box.size.x * 0.5
+    const halfHeight = box.size.y * 0.5
+    const corners = [
+      { x: box.center.x - halfWidth, y: box.center.y - halfHeight },
+      { x: box.center.x + halfWidth, y: box.center.y - halfHeight },
+      { x: box.center.x + halfWidth, y: box.center.y + halfHeight },
+      { x: box.center.x - halfWidth, y: box.center.y + halfHeight }
+    ].map((corner) => mulPoint(world, corner))
+    g.visible = true
+
+    const dash = unitPerPixel * 7
+    const gap = unitPerPixel * 5
+    const trace = (): void => {
+      for (let i = 0; i < corners.length; i++) {
+        const from = corners[i]
+        const to = corners[(i + 1) % corners.length]
+        const length = Math.hypot(to.x - from.x, to.y - from.y)
+        if (length <= 1e-6) continue
+        const stepX = (to.x - from.x) / length
+        const stepY = (to.y - from.y) / length
+        for (let offset = 0; offset < length; offset += dash + gap) {
+          const end = Math.min(length, offset + dash)
+          g.moveTo(from.x + stepX * offset, from.y + stepY * offset)
+          g.lineTo(from.x + stepX * end, from.y + stepY * end)
+        }
+      }
+    }
+    trace()
+    g.stroke({ width: unitPerPixel * 3, color: 0x0b1220, alpha: 0.5 })
+    trace()
+    g.stroke({ width: unitPerPixel * 1.4, color: REGION_FRAME_COLOR, alpha: 0.9 })
+  }
+
   private drawOverlays(): void {
     const bundle = this.bundle
     const state = this.viewState
     const unitPerPixel = this.viewport.pixelsToWorld(1)
-
     // 骨骼本体与约束是**两个独立开关**，但共用同一对绘制层：
     // 「骨骼」关掉、「约束」仍开时这一层还要留着画约束手柄，只是跳过骨骼本体。
     // 曾经用 `bones || constraints` 当作骨骼自身的可见条件，于是关掉「骨骼」后骨架仍在屏幕上。
@@ -1182,6 +1348,13 @@ export class EditorScene {
     }
 
     /*
+     * 「自己绘制边界」进行中：**旧网格的形状整个让开** —— 不画网格线框、不画顶点手柄、
+     * 也不画它的选中轮廓，改成画图片的 region 框（下面 drawBoundaryFrame）+ 正在画的折线。
+     * 理由：重画边界时旧网格的形状与顶点全是干扰，用户只需要知道「图片范围在哪、笔尖落在里面」。
+     */
+    const boundaryDraw = state.boundaryTarget !== null && bundle !== null
+
+    /*
      * display 轮廓线：选中（亮）与悬停（弱）**共用同一个 Graphics** —— 两条路径可以同时存在，
      * 「选中 A、鼠标悬在 B 上」时两个圈都在，谁是选中的一眼可辨。
      *
@@ -1192,7 +1365,10 @@ export class EditorScene {
     const selectedDisplay = state.selectedDisplay
     const hoveredDisplay = state.hoveredDisplay
     const outlineVisible =
-      showBoneLayer && bundle !== null && (selectedDisplay !== null || hoveredDisplay !== null)
+      showBoneLayer &&
+      bundle !== null &&
+      !boundaryDraw &&
+      (selectedDisplay !== null || hoveredDisplay !== null)
     this.outlineStroke.visible = outlineVisible
     if (outlineVisible) {
       if (selectedDisplay) {
@@ -1269,6 +1445,11 @@ export class EditorScene {
       this.brushRing.poly(circlePolygon(ring.x, ring.y, unitPerPixel * 2)).fill({ color, alpha: 0.85 })
     }
 
+    // 网格子工具的折线（画边界 / 自定义布线）：同样是个「跟着鼠标走的光标」，画在最上层；
+    // 画边界时它下面垫着图片的 region 框（「笔尖要落在框里」的那个框）
+    this.drawBoundaryFrame(unitPerPixel)
+    this.drawPendingMeshPath(unitPerPixel)
+
     /*
      * 网格层什么时候画、画谁：
      *
@@ -1287,7 +1468,8 @@ export class EditorScene {
      * 「FFD」开关撑着的，那个开关已移除（与「网格」开关同一处理）：显示跟着工具走，不需要手动开。
      */
     const editingSlot = this.editingSlotIndex()
-    const showMesh = (editingSlot >= 0 || isolating) && bundle !== null
+    // 重画边界时网格线框与顶点整个让开（否则旧网格的形状压在 region 框上，看不出该往哪画）
+    const showMesh = (editingSlot >= 0 || isolating) && bundle !== null && !boundaryDraw
     this.meshStroke.visible = showMesh
     this.meshFill.visible = showMesh
     if (!showMesh || !bundle) {

@@ -13,6 +13,7 @@ import TimelinePanel from './timeline/TimelinePanel'
 import HierarchyTree from './tree/HierarchyTree'
 import ViewportCanvas from './viewport/ViewportCanvas'
 import ModeSwitch from './viewport/ModeSwitch'
+import MeshSubtoolBar from './viewport/MeshSubtoolBar'
 import ViewportOverlays from './viewport/ViewportOverlays'
 import ViewportTools from './viewport/ViewportTools'
 import PanelShell from './widgets/PanelShell'
@@ -102,6 +103,7 @@ import NewProjectDialog from '@ui/widgets/NewProjectDialog'
 import SettingsDialog from '@ui/widgets/SettingsDialog'
 import { deleteSelectedTrack, keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
 import { PPU, deleteMeshVertex } from '@editor/commands/authoringCommands'
+import { undoMeshBoundaryPoint } from '@editor/tools/authoringTools'
 import { copySelection, pasteSelection, duplicateSelection } from '@editor/commands/clipboardCommands'
 
 export default function App() {
@@ -436,10 +438,19 @@ export default function App() {
         case 'app:settings':
           setSettingsOpen(true)
           return
-        case 'edit:undo':
+        case 'edit:undo': {
+          /*
+           * 「自己绘制边界」画到一半：这一下撤销的是**上一个边界点**（不是文档命令）。
+           * 那几个点只是临时预览、不进历史，而此刻历史栈顶往往是「转为网格」这类把网格造出来的
+           * 命令 —— 真撤销掉，正在画的边界就没了依附的网格。所以这个状态下整条撤销都先问它
+           *（连点都没落下时也吃掉，只提示一句）。
+           */
+          const scene = getActiveScene()
+          if (scene && undoMeshBoundaryPoint(scene, flash)) return
           useProjectStore.getState().undo()
           flash('已撤销')
           return
+        }
         case 'edit:redo':
           useProjectStore.getState().redo()
           flash('已重做')
@@ -777,6 +788,8 @@ export default function App() {
                 onFitViewport={() => handleCommand('view:fitViewport')}
               />
               <ViewportTools onStatus={flash} />
+              {/* 左下角网格子工具条：只在「网格工具 + Pose 态」出现（见 MeshSubtoolBar 内部判断） */}
+              <MeshSubtoolBar onStatus={flash} />
               {/* 关键帧的值：贴在视口正下方中间，改值时光看画面即可（仅 Animate 态出现） */}
               {mode === 'animate' ? <KeyframeValueBar /> : null}
               {/* 空白工程提示：不再自带示例角色，首次启动给个上手指引 */}

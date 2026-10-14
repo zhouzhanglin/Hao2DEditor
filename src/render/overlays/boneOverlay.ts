@@ -30,13 +30,14 @@ export interface BoneOverlayOptions {
 }
 
 // 覆盖层配色统一取 macOS 系统色（暗色版），与主题令牌同源。
-// 骨骼的**填充与关节圈**始终用自己的颜色（见 drawBoneOverlay 里的 strength），
-// 这样「列表里哪一行」和「视口里哪根」永远同色；只有**选中时的描边**换成黑色，用来强调。
-const COLOR_BONE = 0xe0a45c
-const COLOR_JOINT = 0xffd60a
-const COLOR_ROOT = 0xbf5af2
-/** 选中骨骼的描边色（黑色硬描边，跟骨骼自己的颜色形成对比） */
-const COLOR_SELECTED = 0x000000
+// 骨骼样式与 **Spine 编辑器**一致：本体浅灰半透明、关节处白圈；
+// 选中骨骼整根（本体 + 关节圈）换成青色高亮；旋转工具时原点外再套一个红圈。
+const COLOR_BONE = 0xccd2d8
+const COLOR_JOINT = 0xf2f5f8
+/** 选中骨骼的高亮色（青）：本体与关节圈一起换成它，一眼锁定选中的是哪根 */
+const COLOR_SELECTED = 0x4fe3f7
+/** 旋转工具的圆环（红）：与 Spine 的旋转圈同义 —— 选中骨骼切到旋转时出现 */
+const COLOR_ROTATE_RING = 0xff453a
 /** 约束（连线 + 准星手柄）的红：与层级树里 IK 图标的颜色一致（HierarchyTree 的 IkConstraintIcon） */
 const COLOR_CONSTRAINT = 0xe4572e
 /** 目标骨被选中时准星提亮成白色：骨骼层关掉时这是「选中了它」的唯一视口反馈 */
@@ -108,8 +109,9 @@ export function drawGizmoFrame(
 
   if (mode === 'rotate') {
     const r = w * GIZMO_RING_RADIUS
+    // 旋转环用**红色**（与 Spine 的旋转圈同义：红圈 = 正在旋转），中心点仍用 centerColor
     // 自己画多边形：Pixi 的 circle 会按世界半径退化成多边形（放大后尤其明显）
-    stroke.poly(circlePolygon(ox, oy, r)).stroke({ width: w * 2.4, color: centerColor, alpha: 0.85 })
+    stroke.poly(circlePolygon(ox, oy, r)).stroke({ width: w * 2.4, color: COLOR_ROTATE_RING, alpha: 0.9 })
     // 四个刻度，强调「这是一个旋转环」
     for (const angle of [0, Math.PI / 2, Math.PI, (Math.PI * 3) / 2]) {
       const cx = ox + Math.cos(angle) * r
@@ -117,7 +119,7 @@ export function drawGizmoFrame(
       stroke
         .moveTo(ox + Math.cos(angle) * (r - w * 4), oy + Math.sin(angle) * (r - w * 4))
         .lineTo(ox + Math.cos(angle) * (r + w * 4), oy + Math.sin(angle) * (r + w * 4))
-        .stroke({ width: w * 1.4, color: centerColor, alpha: 0.7 })
+        .stroke({ width: w * 1.4, color: COLOR_ROTATE_RING, alpha: 0.75 })
     }
     return
   }
@@ -306,16 +308,13 @@ export function drawBoneOverlay(
     const length = skeleton.asset.bones[i].length
     const isSelected = options.selectedBones.has(i)
     const isHovered = i === options.hoveredBone
-    const isRoot = skeleton.asset.bones[i].parentIndex < 0
     /*
-     * 强调 = **只改透明度与线宽，不改颜色**：骨骼永远用自己的颜色
-     *（绑定了权重的骨骼用「权重骨骼列表」里的色，其余用默认橙），选中就压实到不透明。
-     * 以前选中 / 悬停会把整根换成蓝 / 青，颜色一换就看不出「这根是列表里的哪个颜色」。
+     * Spine 风格的状态色：普通 = 浅灰（绑定了权重的骨骼仍用「权重骨骼列表」的色，
+     * 与面板 / 饼图对上）；选中 = 整根换成青色高亮；悬停只压实透明度。
      */
-    const strength = isSelected ? 2 : isHovered ? 1 : 0
     const weightColor = options.weightBoneColors?.get(i)
     const isWeight = weightColor !== undefined
-    const color = weightColor ?? COLOR_BONE
+    const color = isSelected ? COLOR_SELECTED : (weightColor ?? COLOR_BONE)
 
     /*
      * 骨骼方向按**不含剪切的旋转角**画（长度乘世界缩放）：剪切只作用于蒙皮 / 附件，
@@ -351,31 +350,26 @@ export function drawBoneOverlay(
         sy - py * halfW // 右肩
       ]
       const hollow = options.hollowBones?.has(skeleton.asset.bones[i].name) ?? false
-      // 选中接近实心（0.9）、悬停次之（0.6）、普通 0.4 —— 三个档位只看透明度就知道谁被选中
-      if (!hollow) fills.poly(quad).fill({ color, alpha: strength === 2 ? 0.9 : strength === 1 ? 0.6 : 0.4 })
-      /*
-       * 选中：描边换成**黑色并加粗**（2.6 倍像素宽），本体颜色留在填充里。
-       *
-       * 原来选中只是「加粗一点点 + 透明度压实」，在浅色素材 / 一堆骨骼挨在一起时几乎看不出来；
-       * 黑描边跟骨骼自己的颜色（橙 / 权重色）形成硬对比，多选时也能一眼数清选了几根。
-       */
+      // 选中接近实心（0.95）、悬停次之（0.75）、普通 0.55 —— 三个档位只看透明度就知道谁被选中
+      if (!hollow) fills.poly(quad).fill({ color, alpha: isSelected ? 0.95 : isHovered ? 0.75 : 0.55 })
+      // 描边与填充同色：普通骨骼浅灰描边，选中整根青色（Spine 的选中高亮观感）
       strokes.poly(quad).stroke({
-        width: w * (isSelected ? 2.6 : isWeight ? 1.5 : 1.2),
-        color: isSelected ? COLOR_SELECTED : color,
-        alpha: hollow || strength > 0 ? 1 : 0.9
+        width: w * (isSelected ? 2.2 : isWeight ? 1.5 : 1.2),
+        color,
+        alpha: hollow || isSelected || isHovered ? 1 : 0.9
       })
 
     }
 
-    // 原点（骨骼头）画一个圈：空心环，颜色不变（根骨骼紫 / 绑定骨骼用列表色 / 其余黄），
-    // 选中只是画得更粗、更实。半径与拾取用的 BONE_ORIGIN_RADIUS 一致（拖这个圈 = 移动骨骼）
+    // 原点（骨骼头）画一个圈：空心白环（Spine 风格），选中换成青色并画粗一点。
+    // 半径与拾取用的 BONE_ORIGIN_RADIUS 一致（拖这个圈 = 移动骨骼）
     const r = (isSelected ? BONE_ORIGIN_RADIUS + 1.5 : BONE_ORIGIN_RADIUS - 0.5) * w
     strokes
       .poly(circlePolygon(x, y, r))
       .stroke({
-        width: w * (isSelected ? 2.0 : 1.8),
-        color: isRoot ? COLOR_ROOT : (weightColor ?? COLOR_JOINT),
-        alpha: isRoot || strength > 0 ? 1 : 0.9
+        width: w * (isSelected ? 2.2 : 1.8),
+        color: isSelected ? COLOR_SELECTED : (weightColor ?? COLOR_JOINT),
+        alpha: isSelected || isHovered ? 1 : 0.9
       })
   }
 

@@ -12,7 +12,7 @@ import { executeCommand } from '../commands'
 export function connectCommandBridge(): () => void {
   const bridge = window.hao
   if (!bridge) return () => {}
-  return bridge.onCommandRequest((request) => {
+  return bridge.onCommandRequest(async (request) => {
     const result = await executeCommand(request.name, request.args)
     bridge.sendCommandResult({ id: request.id, ...result })
   })

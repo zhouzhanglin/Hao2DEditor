@@ -268,49 +268,53 @@ function TreeRow({
       }
     >
       {active ? <span className="absolute left-0 top-0 h-full w-[2px] bg-accent" /> : null}
-      {/* 行首两列（固定宽度、不随层级缩进）：显示 / 锁定 */}
-      <span className="flex w-[18px] shrink-0 justify-center">
-        {visibleSwitch ? (
-          <button
-            type="button"
-            tabIndex={-1}
-            title={visibleSwitch.title}
-            className={[
-              'flex h-[16px] w-[16px] cursor-pointer items-center justify-center rounded hover:bg-ink-600',
-              // 显示中 = 常规色；已隐藏 = 警示色（一眼看出这行被关掉了）
-              visibleSwitch.on ? 'text-content-mid hover:text-content-hi' : 'text-warn/75 hover:text-warn'
-            ].join(' ')}
-            onClick={(event) => {
-              // 行首开关：拦掉冒泡，别连带选中整行
-              event.stopPropagation()
-              visibleSwitch.onToggle()
-            }}
-          >
-            {visibleSwitch.on ? <Eye size={11} /> : <EyeOff size={11} />}
-          </button>
-        ) : null}
-      </span>
-      <span className="flex w-[18px] shrink-0 justify-center">
-        {lockSwitch ? (
-          <button
-            type="button"
-            tabIndex={-1}
-            title={lockSwitch.title}
-            className={[
-              'flex h-[16px] w-[16px] cursor-pointer items-center justify-center rounded hover:bg-ink-600',
-              // 已锁 = 琥珀色**实心**锁（最醒目）；未锁 = 很淡的开口锁，悬停该行时才提亮
-              lockSwitch.on
-                ? 'text-warn hover:text-warn'
-                : 'text-content-lo/45 group-hover:text-content-mid'
-            ].join(' ')}
-            onClick={(event) => {
-              event.stopPropagation()
-              lockSwitch.onToggle()
-            }}
-          >
-            {lockSwitch.on ? <Lock size={11} fill="currentColor" /> : <Unlock size={11} />}
-          </button>
-        ) : null}
+      {/* 行首两列（固定宽度、不随层级缩进）：显示 / 锁定。
+          两列贴在一起（中间只留 2px）—— 与「slot 层级」面板的行首图标密度一致：
+          原来各占 18px + 列间 gap-1，两个图标之间空出 11px，看着发虚 */}
+      <span className="flex shrink-0 items-center gap-0.5">
+        <span className="flex w-[14px] justify-center">
+          {visibleSwitch ? (
+            <button
+              type="button"
+              tabIndex={-1}
+              title={visibleSwitch.title}
+              className={[
+                'flex h-[14px] w-[14px] cursor-pointer items-center justify-center rounded hover:bg-ink-600',
+                // 显示中 = 常规色；已隐藏 = 警示色（一眼看出这行被关掉了）
+                visibleSwitch.on ? 'text-content-mid hover:text-content-hi' : 'text-warn/75 hover:text-warn'
+              ].join(' ')}
+              onClick={(event) => {
+                // 行首开关：拦掉冒泡，别连带选中整行
+                event.stopPropagation()
+                visibleSwitch.onToggle()
+              }}
+            >
+              {visibleSwitch.on ? <Eye size={11} /> : <EyeOff size={11} />}
+            </button>
+          ) : null}
+        </span>
+        <span className="flex w-[14px] justify-center">
+          {lockSwitch ? (
+            <button
+              type="button"
+              tabIndex={-1}
+              title={lockSwitch.title}
+              className={[
+                'flex h-[14px] w-[14px] cursor-pointer items-center justify-center rounded hover:bg-ink-600',
+                // 已锁 = 琥珀色**实心**锁（最醒目）；未锁 = 很淡的开口锁，悬停该行时才提亮
+                lockSwitch.on
+                  ? 'text-warn hover:text-warn'
+                  : 'text-content-lo/45 group-hover:text-content-mid'
+              ].join(' ')}
+              onClick={(event) => {
+                event.stopPropagation()
+                lockSwitch.onToggle()
+              }}
+            >
+              {lockSwitch.on ? <Lock size={11} fill="currentColor" /> : <Unlock size={11} />}
+            </button>
+          ) : null}
+        </span>
       </span>
       {/* 内容：层级缩进只作用在这里，两列始终对齐在最左侧 */}
       <div className="flex min-w-0 flex-1 items-center gap-1" style={{ paddingLeft: depth * 12 }}>

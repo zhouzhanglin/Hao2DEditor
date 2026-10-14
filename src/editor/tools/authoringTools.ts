@@ -409,7 +409,28 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       host.status(`顶点 #${resolved.vertex}（${resolved.slot} / ${resolved.attachment}）`)
       return true
     }
-    // 没抓到顶点：顶点工具到此为止；Pose 工具继续，让骨骼 / 操作器接管
+    /*
+     * 没抓到顶点：看看是否点在了某个 display 上（含已转网格的 Mesh）。
+     * 点中就直接选中它，使其顶点可见可编辑 —— 否则在网格工具下点别的 Mesh 永远选不中，
+     * 只能去层级树里点，很别扭。命中骨骼手柄 / 约束准星时仍让骨骼优先（与选择工具一致）。
+     */
+    const hitBone = scene.pickBoneHandleAt(info.world.x, info.world.y)
+    const constraintHit = hitBone ? -1 : scene.constraintTargetIndexAt(info.world.x, info.world.y)
+    const effectiveHit = hitBone ?? (constraintHit >= 0 ? { boneIndex: constraintHit, zone: 'origin' as const, distance: 0 } : null)
+    const att = effectiveHit ? null : scene.pickAttachmentAt(info.world.x, info.world.y)
+    if (att && slotLocked(att.slot)) {
+      host.status(`插槽「${att.slot}」已锁定：在层级树里解锁后才能选中`)
+      return true
+    }
+    if (att) {
+      const sel = host.selection
+      if (att.slot !== sel.slot || att.attachment !== sel.attachment) {
+        useSelectionStore.getState().selectAttachment(att.slot, att.attachment)
+        host.status(`已选中附件「${att.attachment}」（${att.slot}）：可编辑其顶点`)
+      }
+      return true
+    }
+    // 没抓到顶点也没点中 display：顶点工具到此为止；Pose 工具继续，让骨骼 / 操作器接管
     if (tools.tool !== 'pose') return false
   }
 

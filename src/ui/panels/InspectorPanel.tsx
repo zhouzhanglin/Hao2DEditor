@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Brush, Crosshair, Grid3x3, Layers, RotateCcw, Trash2 } from 'lucide-react'
 import { BlendMode } from '@core/model/types'
 import { curvePercent } from '@core/anim/interpolation'
@@ -464,6 +465,12 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   const currentAnimation = useTimelineStore((s) => s.currentAnimation)
   /** Animate 态切显示附件 = 打 displayIndex 关键帧；Pose 态才是改绑定姿态 */
   const animating = mode === 'animate' && !!currentAnimation
+  /**
+   * 整体染色（场景级、不进文档）：用本地状态回显当前染色值。
+   * 否则受控的 `<input type="color">` 一直是写死的 `#FFFFFFFF`，拾色后会被拽回白色，
+   * 看上去"改了没反应"。染色是场景全局状态，切选中对象时保持即可。
+   */
+  const [tintColor, setTintColor] = useState('#FFFFFFFF')
   /** 「定位」：让层级树滚到某根骨骼并闪一下（只提示位置，不改选中 —— 见 locateBone） */
   const revealBone = useRevealStore((s) => s.revealBone)
 
@@ -601,13 +608,14 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
       <FieldGroup title="显示">
         <ColorField
           label="整体染色"
-          value="#FFFFFFFF"
+          value={tintColor}
           onChange={(value) => {
             const scene = getActiveScene()
             if (!scene) return
             const hex = value.replace('#', '')
             const at = (i: number): number => parseInt(hex.slice(i, i + 2), 16) / 255
             scene.setTint({ r: at(0), g: at(2), b: at(4), a: hex.length >= 8 ? at(6) : 1 })
+            setTintColor(value)
           }}
         />
         <p className="flex items-center gap-1 text-3xs text-content-lo">
@@ -791,6 +799,8 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
           <ColorField
             label="显示色"
             value={bone.color}
+            onDragStart={() => useProjectStore.getState().beginTransaction('修改骨骼颜色')}
+            onDragEnd={() => useProjectStore.getState().endTransaction()}
             onChange={(value) =>
               update('修改骨骼颜色', (draft) => {
                 const target = draft.bones.find((b) => b.name === bone.name)
@@ -891,6 +901,8 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
           <ColorField
             label="颜色"
             value={slot.color}
+            onDragStart={() => useProjectStore.getState().beginTransaction('修改插槽颜色')}
+            onDragEnd={() => useProjectStore.getState().endTransaction()}
             onChange={(value) =>
               update('修改插槽颜色', (draft) => {
                 const target = draft.slots.find((s) => s.name === slot.name)
@@ -1036,6 +1048,8 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             <ColorField
               label="颜色"
               value={attachment.color}
+              onDragStart={() => useProjectStore.getState().beginTransaction('修改附件颜色')}
+              onDragEnd={() => useProjectStore.getState().endTransaction()}
               onChange={(value) => update('修改附件颜色', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.color = value }))}
             />
             {/*

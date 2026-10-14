@@ -417,6 +417,17 @@ export interface ColorFieldProps {
   label: string
   value: string
   onChange: (value: string) => void
+  /**
+   * 连续拖拽（拾色器打开 → 关闭）的开始 / 结束回调。
+   *
+   * 传了就把这段拖拽包成**单条撤销记录**：拖动期间每帧都实时 `onChange`（实时预览），
+   * 但只在 `onDragStart` 记一次「修改前」快照、`onDragEnd` 收尾，避免每帧都往撤销栈
+   * 塞一条等价记录，也消掉每帧「整个项目快照深拷贝」的卡顿。
+   * 典型传 `useProjectStore.getState().beginTransaction(label)` / `endTransaction()`。
+   * 不传（如只改场景染色这类不进文档的值）就每帧直接提交。
+   */
+  onDragStart?: () => void
+  onDragEnd?: () => void
 }
 
 export interface CommitTextFieldProps {
@@ -515,16 +526,50 @@ function parseHexColor(raw: string): string | null {
   return `#${digits.toUpperCase()}`
 }
 
-export function ColorField({ label, value, onChange }: ColorFieldProps) {
+export function ColorField({ label, value, onChange, onDragStart, onDragEnd }: ColorFieldProps) {
+  /**
+   * 拾色器拖动期间实时预览：每帧都发 input 事件，直接 `onChange`（实时预览视口 / 色块）。
+   * 拖动开始（pointerdown / 首个 input）开事务，结束（拾色器关闭的 `change` / 失焦）收尾，
+   * 整段合并成一条撤销记录 —— 与骨骼、权重刷、关键帧的连续编辑是同一套路，既流畅又不污染撤销栈。
+   */
+  const dragging = useRef(false)
+  const latest = useRef({ onDragStart, onDragEnd })
+  latest.current = { onDragStart, onDragEnd }
+  const begin = (): void => {
+    if (dragging.current) return
+    dragging.current = true
+    latest.current.onDragStart?.()
+  }
+  const end = (): void => {
+    if (!dragging.current) return
+    dragging.current = false
+    latest.current.onDragEnd?.()
+  }
+  const inputRef = useRef<HTMLInputElement>(null)
+  // 原生 `change` 只在拾色器**关闭（确认）**时发一次，用它收尾事务最可靠；
+  // `onBlur` 作兜底（如点空白处关闭）；卸载时也收尾，避免事务一直挂着。
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.addEventListener('change', end)
+    return () => {
+      el.removeEventListener('change', end)
+      end()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const rgb = value.length === 9 ? value.slice(0, 7) : value
   return (
     <label className="flex items-center gap-1.5">
       <span className="hao-label w-[52px] shrink-0">{label}</span>
       <input
+        ref={inputRef}
         type="color"
         className="h-[22px] w-[30px] cursor-pointer rounded border border-line bg-ink-900 p-0"
         value={rgb.startsWith('#') ? rgb : '#ffffff'}
+        onBlur={end}
         onChange={(e) => {
+          begin()
           const alpha = value.length === 9 ? value.slice(7) : 'FF'
           onChange(`${e.target.value.toUpperCase()}${alpha}`)
         }}

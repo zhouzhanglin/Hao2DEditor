@@ -468,7 +468,7 @@ export function registerQueryCommands(): void {
       name: 'captureViewport',
       title: '截视口画面',
       description:
-        '把视口当前画面截成 PNG（含背景棋盘格、角色与叠加层），返回 base64 data URL。AI 想「亲眼看到」编辑器里显示的画面时用它',
+        '把视口当前画面截成 PNG（含背景棋盘格、角色与叠加层），返回 base64 data URL。AI 想「亲眼看到」编辑器里显示的画面时用它。窗口在后台 / 没激活也能截（命令执行前会自己刷新一帧），失败直接重试即可',
       args: {},
       returns: 'dataUrl（data:image/png;base64,…）/ width / height'
     },
@@ -476,7 +476,11 @@ export function registerQueryCommands(): void {
       const scene = getActiveScene()
       if (!scene) throw new Error('视口还没就绪（窗口未打开或正在初始化）')
       const dataUrl = scene.captureViewport()
-      if (!dataUrl) throw new Error('截图失败（渲染器未就绪）')
+      if (!dataUrl) {
+        throw new Error(
+          '截图失败：渲染器没就绪，或 WebGL 上下文丢了（编辑器长时间在后台、系统休眠 / GPU 重置后会出现）。先直接重试一次；仍失败就把编辑器窗口切到前台再试，最后手段是重启编辑器'
+        )
+      }
       return { dataUrl, width: scene.viewport.width, height: scene.viewport.height }
     }
   )

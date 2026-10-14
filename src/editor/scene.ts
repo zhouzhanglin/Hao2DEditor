@@ -543,16 +543,47 @@ export class EditorScene {
   /**
    * 截取视口当前画面为 PNG data URL（含背景棋盘格、角色与叠加层）。
    *
-   * 供外部 AI 工具「看」编辑器里显示的画面用。基于 pixi 的 `extract`：它把 stage
-   * 离屏渲染到临时纹理再绘到一张 2D canvas（不依赖屏幕当前帧，也不依赖
-   * WebGL 的 preserveDrawingBuffer），所以随时调用都能拿到完整画面。
+   * 供外部 AI 工具「看」编辑器里显示的画面用。**与窗口是否激活无关**：
+   * 窗口失焦 / 被别的应用挡住 / 最小化时浏览器会暂停 rAF，渲染循环停摆、dirty 留在原地，
+   * 直接读画布只会拿到「命令跑完之前」的旧帧（甚至空白）。所以这里先自己同步跑一帧
+   * （`update(0)`，dt 为 0 不推进播放），再离屏读取。
+   *
+   * 读取顺序：
+   * 1. pixi `extract`：把 stage 离屏渲染到临时纹理再 readPixels —— 不读屏幕帧、不依赖
+   *    `preserveDrawingBuffer`、也不需要窗口在前台（后台调用时的主路径）；
+   * 2. 兜底：自己 `render()` 一帧后**同帧内**直接读画布 —— 合成前 drawing buffer 还完整，
+   *    没有 `preserveDrawingBuffer` 也能拿到像素。extract 在某些驱动上抛错时走这条。
+   *
+   * WebGL 上下文丢失（系统休眠 / GPU 重置后会出现）时返回 null：宁可失败也不要交出
+   * 一张空白图让 AI 以为「画面就是这样」。
    */
   captureViewport(): string | null {
-    const renderer = this.viewport.app.renderer
-    if (!renderer || !renderer.extract) return null
+    // 后台时 rAF 停摆：先把这一帧该算的算完（蒙皮重建、尺寸/相机兜底、叠加层重画）
     try {
-      const canvas = renderer.extract.canvas(this.viewport.app.stage) as HTMLCanvasElement
-      return canvas.toDataURL('image/png')
+      this.update(0)
+    } catch (error) {
+      console.warn('[hao2d] 截图前刷新场景失败（改用当前帧继续）', error)
+    }
+
+    const renderer = this.viewport.app.renderer
+    if (!renderer) return null
+    const gl = (renderer as unknown as { gl?: WebGLRenderingContext }).gl
+    if (gl && gl.isContextLost()) return null
+
+    if (renderer.extract) {
+      try {
+        const canvas = renderer.extract.canvas(this.viewport.app.stage) as HTMLCanvasElement
+        const url = canvas.toDataURL('image/png')
+        if (url.startsWith('data:image/png')) return url
+      } catch {
+        // extract 失败（驱动 / 极端状态）→ 落到下面的兜底
+      }
+    }
+
+    try {
+      this.viewport.render()
+      const url = (this.viewport.app.canvas as HTMLCanvasElement).toDataURL('image/png')
+      return url.startsWith('data:image/png') ? url : null
     } catch {
       return null
     }

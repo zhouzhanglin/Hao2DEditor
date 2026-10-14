@@ -417,6 +417,51 @@ function IkConstraintIcon({ size = 13 }: { size?: number }): React.ReactNode {
   )
 }
 
+/**
+ * 插槽图标：**◉**（圆环 + 中心实心点）。骨骼行用骨形图标，插槽用圆点一眼区分开；
+ * 行首图标会带上插槽自己的颜色（见插槽行的 `icon`），与视口里插槽手柄同色。
+ */
+function SlotIcon({ size = 12, color }: { size?: number; color?: string }): React.ReactNode {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="1 1 20 20"
+      fill="none"
+      stroke="currentColor"
+      style={color ? { color } : undefined}
+    >
+      <circle cx="12" cy="12" r="7.4" strokeWidth={2.8} />
+      <circle cx="12" cy="12" r="2.6" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+/**
+ * 根骨骼图标：**✛**（四臂端点带凸点的十字）。层级根骨骼 root 与普通骨骼同是骨骼，
+ * 但它不能拖动 / 删除，是整棵树的根 —— 用一个不一样的记号让它一眼能认出来。
+ */
+function RootBoneIcon({ size = 11, style }: { size?: number; style?: React.CSSProperties }): React.ReactNode {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.6}
+      strokeLinecap="round"
+      style={style}
+    >
+      <path d="M12 7v10M7 12h10" />
+      <circle cx="12" cy="3.4" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="20.6" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="3.4" cy="12" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="20.6" cy="12" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
 const CONSTRAINT_ICON: Record<AuthoringConstraint['type'], React.ReactNode> = {
   ik: <IkConstraintIcon />,
   transform: <Maximize2 size={13} className="text-ok/80" />,
@@ -1441,6 +1486,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             <span title={hosted.map((c) => `${CONSTRAINT_KIND[c.type]}约束「${c.name}」`).join('\n')}>
               {CONSTRAINT_ICON[hosted[0].type]}
             </span>
+          ) : bone.name === rootName ? (
+            <RootBoneIcon size={11} style={{ color: bone.color }} />
           ) : (
             <Bone size={11} style={{ color: bone.color }} />
           )
@@ -1597,12 +1644,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         title={slotRowTitle(slot, displays.length, showing)}
         flashKey={flash?.kind === 'slot' && flash.name === slot.name ? flash.nonce : 0}
         active={selection.kind === 'slot' && selection.slot === slot.name}
-        icon={
-          <span
-            className="h-[10px] w-[10px] rounded-sm border border-line"
-            style={{ background: toCss(slot.color) }}
-          />
-        }
+        icon={<SlotIcon color={toCss(slot.color)} />}
         // 行尾显示当前显示的 display 名，不用展开也知道显示的是哪一个。
         // Animate 态按关键帧采样（与 display 行的「显示中」标记同一数据源），不能直接看 setup
         meta={showing || (displays.length > 0 ? `${displays.length} 个 display` : undefined)}
@@ -1687,8 +1729,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           <Bone size={11} />
           <span>骨骼</span>
         </button>
-        <button type="button" title="新建插槽（挂到当前选中骨骼；未选中时挂到第一根骨骼）" className="hao-btn h-[18px] px-1.5 text-3xs" onClick={poseOnly(() => addSlot())}>
-          <Plus size={11} />
+        <button type="button"           title="新建插槽（挂到当前选中骨骼；未选中时挂到第一根骨骼）" className="hao-btn h-[18px] px-1.5 text-3xs" onClick={poseOnly(() => addSlot())}>
+          <SlotIcon size={11} />
           <span>插槽</span>
         </button>
         <button

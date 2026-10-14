@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react'
-import { ImagePlus, Layers, Package, Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { ImagePlus, Layers, Loader2, Package, Plus, RefreshCw, Scissors, Trash2 } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { getPlatform } from '@editor/platform'
+import { splitAtlasImage } from '@editor/services/atlasSplit'
 import { importDroppedPaths } from '@editor/services/projectIo'
 import { PanelEmpty } from '@ui/widgets/PanelShell'
 import { countImageReferences, createRegionFromImage } from '@editor/commands/authoringCommands'
@@ -35,6 +36,8 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
   const anchorRef = useRef<string | null>(null)
   /** 右键菜单：位置 + 目标图片名 */
   const [rowMenu, setRowMenu] = useState<{ x: number; y: number; name: string } | null>(null)
+  /** 正在拆的图集名（拆图 + 写盘要点时间，按钮上转个圈） */
+  const [splitting, setSplitting] = useState<string | null>(null)
 
   // 图片可能被删除 / 改名，选中列表里失效的名字直接忽略
   const selected = picked.filter((name) => document.images.some((item) => item.name === name))
@@ -100,6 +103,20 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
     }
     replaceImage(name, { path: info.path, width: info.width, height: info.height })
     onStatus?.(`已用「${info.path}」替换「${name}」（${info.width}×${info.height}）`)
+  }
+
+  /** 图集拆碎图：图集里的每块子图各写一张 png，引用它的附件改用碎图，图集条目从工程移除 */
+  const handleSplitAtlas = async (name: string): Promise<void> => {
+    if (splitting) return
+    setSplitting(name)
+    try {
+      const result = await splitAtlasImage(name)
+      onStatus?.(result.message)
+    } catch (error) {
+      onStatus?.(`拆分「${name}」失败：${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setSplitting(null)
+    }
   }
 
   /** 右键菜单项 */
@@ -287,7 +304,33 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
                 {image.loose ? (
                   <span className="shrink-0 rounded bg-warn/20 px-1 text-3xs text-warn">碎图</span>
                 ) : (
-                  <span className="shrink-0 rounded bg-ink-600 px-1 text-3xs text-content-lo">图集</span>
+                  <>
+                    <span className="shrink-0 rounded bg-ink-600 px-1 text-3xs text-content-lo">图集</span>
+                    <button
+                      type="button"
+                      title="拆成碎图：图集里的每块子图各写出一张 png（被旋转存放的会转正），引用它的附件自动改用碎图，图集从工程移除（磁盘上的原 png 保留，可 ⌘/Ctrl+Z 撤销）"
+                      disabled={splitting !== null}
+                      className={[
+                        'flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded',
+                        splitting === image.name
+                          ? 'text-accent'
+                          : splitting !== null
+                            ? 'cursor-not-allowed text-content-lo/40'
+                            : 'cursor-pointer text-content-lo hover:bg-accent/15 hover:text-accent'
+                      ].join(' ')}
+                      onClick={(event) => {
+                        // 别冒泡到行上改选中（这个按钮只对当前这张生效）
+                        event.stopPropagation()
+                        void handleSplitAtlas(image.name)
+                      }}
+                    >
+                      {splitting === image.name ? (
+                        <Loader2 size={11} className="animate-spin" />
+                      ) : (
+                        <Scissors size={11} />
+                      )}
+                    </button>
+                  </>
                 )}
                 <button
                   type="button"

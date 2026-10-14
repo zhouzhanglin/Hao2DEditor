@@ -1,9 +1,10 @@
 import { create } from 'zustand'
-import type { EditorDocument } from '@core/model/authoring'
+import type { AuthoringImage, EditorDocument } from '@core/model/authoring'
 import { ROOT_BONE_NAME, createAuthoringBone, createEmptyDocument } from '@core/model/authoring'
 import { History } from '../history'
 import type { ProjectSnapshot } from '../history'
-import { deleteImage, replaceImage } from '../commands/authoringCommands'
+import { applyAtlasSplit, deleteImage, replaceImage } from '../commands/authoringCommands'
+import type { AtlasSplitPlan } from '../commands/authoringCommands'
 import { repairAnimationDurations, repairDisplayNames } from '../timeline/model'
 
 export interface ProjectState {
@@ -56,6 +57,14 @@ export interface ProjectState {
   removeImage: (name: string) => void
   /** 替换图片：保持 name 不变，更新 path / width / height */
   replaceImage: (name: string, info: { path: string; width: number; height: number }) => void
+  /**
+   * 图集拆碎图：图片池里用碎图顶掉图集页，并把**所有骨架**里引用它的附件改指到碎图
+   * （UV 从整页坐标换算到碎图坐标），一次撤销。
+   *
+   * 只动文档：剪裁 / 编码 / 写盘在 `services/atlasSplit.ts`，磁盘上的原图集文件不删
+   * （只是从工程里移除，用户想删自己删）。
+   */
+  splitAtlas: (plan: AtlasSplitPlan, images: readonly AuthoringImage[]) => void
   /** 切换当前编辑的骨架 */
   setActiveSkeleton: (index: number) => void
   /** 设置项目名 / 保存路径（新建项目弹窗、打开工程后调用） */
@@ -328,6 +337,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const list = state.skeletons.map((skeleton) => {
       const draft = cloneDocument(skeleton)
       replaceImage(draft, name, info)
+      return draft
+    })
+    const withPool = shareImages(list, state.activeSkeleton)
+    set({
+      document: withPool[state.activeSkeleton],
+      skeletons: withPool,
+      dirty: true,
+      ...syncFlags(state)
+    })
+  },
+
+  splitAtlas: (plan, images) => {
+    const state = get()
+    if (!state.document.images.some((image) => image.name === plan.atlas)) return
+    history.push('图集转碎图', snapshotOf(state))
+    // 与 removeImage / replaceImage 同一套路：附件在各骨架里各有一份，逐个深拷贝后改写
+    const list = state.skeletons.map((skeleton) => {
+      const draft = cloneDocument(skeleton)
+      applyAtlasSplit(draft, plan, images)
       return draft
     })
     const withPool = shareImages(list, state.activeSkeleton)

@@ -2,6 +2,7 @@ import { createAuthoringAttachment, createAuthoringSlot, rootBoneName } from '@c
 import type {
   AuthoringAttachment,
   AuthoringConstraint,
+  AuthoringImage,
   AuthoringSkin,
   AuthoringSkinSlot,
   AuthoringVertex,
@@ -9,6 +10,8 @@ import type {
   EditorDocument
 } from '@core/model/authoring'
 import type { Vec2 } from '@core/math/matrix'
+import { pageUvsToRegionRelative } from '@importers/uv'
+import type { AtlasRegion, PageSizes } from '@importers/uv'
 import { createGridMesh, refineAroundVertex, triangulatePolygon } from '@core/mesh/triangulate'
 import type { MeshGeometry } from '@core/mesh/triangulate'
 import { buildAutoMesh } from '@core/mesh/autoMesh'
@@ -256,6 +259,105 @@ export function countImageReferences(doc: EditorDocument, name: string): number 
     }
   }
   return count
+}
+
+/** 图集拆碎图：一条「图集区域 → 碎图」的对应关系 */
+export interface AtlasSplitEntry {
+  /** 原图集里的区域名；「整页」兜底那一条用图集页名 */
+  region: string
+  /** 拆出来的碎图名（会替掉图片池里的图集条目） */
+  image: string
+  /** 区域在图集页里的矩形（像素，左上角为原点） */
+  x: number
+  y: number
+  width: number
+  height: number
+  /** 区域在图集页里的旋转角度（0/90/180/270） */
+  rotate: number
+}
+
+export interface AtlasSplitPlan {
+  /** 被拆掉的原图集页名（`doc.images` 里那条记录的名字） */
+  atlas: string
+  /** 图集页尺寸（整页 UV 归一化的分母，取实际像素） */
+  pageWidth: number
+  pageHeight: number
+  entries: AtlasSplitEntry[]
+}
+
+/**
+ * 图集拆碎图的**文档侧**改动：把引用原图集的附件改指到碎图（UV 从整页坐标换算成碎图坐标），
+ * 再用碎图替换图片池里的图集条目。剪裁 / 编码 / 写盘由 `services/atlasSplit.ts` 负责，
+ * 这里只碰数据，方便单测。
+ *
+ * 区域名对不上的附件（老数据、或是当初按「整页」建的附件）落到「整页」那条兜底上：
+ * 那张碎图是整页的拷贝，UV 换算之后与原样完全一致，画面不变。
+ *
+ * 返回被改写的附件数。
+ */
+export function applyAtlasSplit(
+  doc: EditorDocument,
+  plan: AtlasSplitPlan,
+  images: readonly AuthoringImage[]
+): number {
+  const byRegion = new Map(plan.entries.map((entry) => [entry.region, entry]))
+  const fallback = byRegion.get(plan.atlas)
+  const pageSizes: PageSizes = { [plan.atlas]: { width: plan.pageWidth, height: plan.pageHeight } }
+  let repointed = 0
+  for (const skin of doc.skins) {
+    for (const skinSlot of skin.slots) {
+      for (const attachment of skinSlot.attachments) {
+        if (attachment.image !== plan.atlas) continue
+        const entry = (attachment.regionName ? byRegion.get(attachment.regionName) : undefined) ?? fallback
+        if (!entry) continue
+        attachment.image = entry.image
+        attachment.uvs = splitAtlasUvs(attachment.uvs, plan, entry, pageSizes)
+        /*
+         * 区域名跟着换：碎图导出时会被重新打包，图集里的 sprite 名就是图名
+         * （导出侧也会按图名重写一次，这里同步是为了编辑器内部数据自洽）。
+         */
+        attachment.regionName = entry.image
+        repointed++
+      }
+    }
+  }
+  doc.images = [
+    ...doc.images.filter((image) => image.name !== plan.atlas),
+    ...images.map((image) => ({ ...image }))
+  ]
+  return repointed
+}
+
+/**
+ * 整页 UV → 碎图 UV：先按原区域矩形解出「区域相对 UV」（右 / 下为正，见 `pageUvsToRegionRelative`），
+ * 再按碎图归一化（碎图就是这块区域本身，v 是左下原点所以翻一次）。
+ */
+function splitAtlasUvs(
+  uvs: readonly number[],
+  plan: AtlasSplitPlan,
+  entry: AtlasSplitEntry,
+  pageSizes: PageSizes
+): number[] {
+  const region: AtlasRegion = {
+    name: entry.region,
+    page: plan.atlas,
+    x: entry.x,
+    y: entry.y,
+    width: entry.width,
+    height: entry.height,
+    rotate: entry.rotate,
+    // 裁剪信息不影响 UV 换算（只解「页里的哪一块」），给中性值即可
+    origWidth: entry.width,
+    origHeight: entry.height,
+    offsetX: 0,
+    offsetY: 0
+  }
+  const relative = pageUvsToRegionRelative(uvs, region, pageSizes)
+  const out: number[] = []
+  for (let i = 0; i + 1 < relative.length; i += 2) {
+    out.push(relative[i], 1 - relative[i + 1])
+  }
+  return out
 }
 
 /**

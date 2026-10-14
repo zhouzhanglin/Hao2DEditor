@@ -56,6 +56,89 @@ export async function encodeAtlasPages(
   return out
 }
 
+/** 要从一张图里裁出来的一块区域：坐标是源图像素，`rotate` = 这块区域在源图里被转过的角度 */
+export interface RegionCrop {
+  x: number
+  y: number
+  /** 区域**自身**的宽高（旋转前，也就是拆出来那张图的尺寸） */
+  width: number
+  height: number
+  /** 0 / 90 / 180 / 270（缺省 0） */
+  rotate?: number
+}
+
+/**
+ * 把源图里若干块各自裁出来（旋转打包的转回原朝向）并编码为 PNG。
+ *
+ * 用在「图集拆碎图」上：图集页里的子图可能被转 90° 存放，碎图必须转正 ——
+ * 附件的 UV 会按这块区域的**自身**坐标重新归一化（见 `applyAtlasSplit`）。
+ *
+ * 坐标口径与 `importers/uv.ts` 的 `mapRegionRelativeUvs` 一致：90°/270° 时区域在源图里
+ * 占位的宽高是互换的，`x / y` 仍是这块占位矩形的左上角。
+ */
+export async function cropRegionPngs(
+  bitmap: ImageBitmap,
+  crops: readonly RegionCrop[]
+): Promise<Uint8Array[]> {
+  const out: Uint8Array[] = []
+  for (const crop of crops) {
+    const width = Math.max(1, Math.round(crop.width))
+    const height = Math.max(1, Math.round(crop.height))
+    const canvas = createCanvas(width, height)
+    const ctx = canvas?.getContext('2d') as
+      | CanvasRenderingContext2D
+      | OffscreenCanvasRenderingContext2D
+      | null
+    if (!canvas || !ctx) {
+      out.push(new Uint8Array())
+      continue
+    }
+    const rotate = ((Math.round(crop.rotate ?? 0) % 360) + 360) % 360
+    const [a, b, c, d, e, f] = cropMatrix(rotate, width, height)
+    // 源图里的占位矩形：90°/270° 宽高互换
+    const blockWidth = rotate % 180 === 0 ? width : height
+    const blockHeight = rotate % 180 === 0 ? height : width
+    ctx.setTransform(a, b, c, d, e, f)
+    ctx.drawImage(
+      bitmap as CanvasImageSource,
+      crop.x,
+      crop.y,
+      blockWidth,
+      blockHeight,
+      0,
+      0,
+      blockWidth,
+      blockHeight
+    )
+    out.push(await encodeCanvas(canvas))
+  }
+  return out
+}
+
+/**
+ * 「源图里那块像素 (X, Y)」→「转正后碎图里那块像素 (U, V)」的变换矩阵（canvas setTransform 口径）。
+ *
+ * 与 `mapRegionRelativeUvs` 的四个分支互为逆运算（那边是区域坐标 → 页坐标），改一处必须改另一处：
+ *   90°：(X, Y) → (width - Y, X)      270°：(X, Y) → (Y, height - X)
+ *   180°：(X, Y) → (width - X, height - Y)
+ */
+function cropMatrix(
+  rotate: number,
+  width: number,
+  height: number
+): [number, number, number, number, number, number] {
+  switch (rotate) {
+    case 90:
+      return [0, 1, -1, 0, width, 0]
+    case 180:
+      return [-1, 0, 0, -1, width, height]
+    case 270:
+      return [0, -1, 1, 0, 0, height]
+    default:
+      return [1, 0, 0, 1, 0, 0]
+  }
+}
+
 function createCanvas(width: number, height: number): HTMLCanvasElement | OffscreenCanvas | null {
   const w = Math.max(1, Math.ceil(width))
   const h = Math.max(1, Math.ceil(height))

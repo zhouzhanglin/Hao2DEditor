@@ -13,7 +13,7 @@ export function connectCommandBridge(): () => void {
   const bridge = window.hao
   if (!bridge) return () => {}
   return bridge.onCommandRequest((request) => {
-    const result = executeCommand(request.name, request.args)
+    const result = await executeCommand(request.name, request.args)
     bridge.sendCommandResult({ id: request.id, ...result })
   })
 }

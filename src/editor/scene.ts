@@ -541,6 +541,24 @@ export class EditorScene {
   }
 
   /**
+   * 截取视口当前画面为 PNG data URL（含背景棋盘格、角色与叠加层）。
+   *
+   * 供外部 AI 工具「看」编辑器里显示的画面用。基于 pixi 的 `extract`：它把 stage
+   * 离屏渲染到临时纹理再绘到一张 2D canvas（不依赖屏幕当前帧，也不依赖
+   * WebGL 的 preserveDrawingBuffer），所以随时调用都能拿到完整画面。
+   */
+  captureViewport(): string | null {
+    const renderer = this.viewport.app.renderer
+    if (!renderer || !renderer.extract) return null
+    try {
+      const canvas = renderer.extract.canvas(this.viewport.app.stage) as HTMLCanvasElement
+      return canvas.toDataURL('image/png')
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * 场景首次出现有效内容后，挂载时的自动适配只做一次（ViewportCanvas 的渲染循环检查此标志）。
    * 拖图创建内容前把它置 true，避免刚建好的内容又被自动 fit 拉走视角。
    */

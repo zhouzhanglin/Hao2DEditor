@@ -96,17 +96,25 @@ POST /batch
 ## 5. 建议的工作流
 
 1. `GET /commands` 读一遍命令目录（含每条命令的参数说明）
-2. `getProjectState` / `listBones` / `listSlots` / `listAnimations` 摸清现状
+2. `getProjectState` / `listBones` / `listSlots` / `listAnimations` 摸清现状；要看**整个层级结构**用 `getHierarchy`、看**视口与画面**用 `getViewport` / `captureViewport`、看**素材清单**用 `listImages`
 3. 用**名字**引用对象（`parent: "root"`、`bone: "forearm"`）——命令和查询都用名字，不用下标
 4. 改动走 `POST /command` 或 `POST /batch`
-5. 需要 AI 生成的东西：骨骼/插槽/约束 → `addBone` `addSlot` `addConstraint`；关键帧 → `keyBoneFrame` `keySlotDisplayFrame` …（时间单位是**秒**）；蒙皮 → `convertToMesh` / `convertToOutlineMesh` / `autoWeightMesh`；网格拓扑编辑 → `redrawMeshBoundary`（按点重绘外边界）/ `connectMeshVertices`（两顶点间自定义布线），坐标用附件局部坐标、顶点用 `getAttachmentVertices` 读到的下标
+5. 需要 AI 生成的东西：
+   - 外部素材入库：`importImage`（外部图片 base64/dataURL 或本地绝对路径 → 写进工程 `images/` 并登记到图片池）、`splitAtlas`（整页图集拆成碎图）；之后用 `addDisplay` 把图片做成附件
+   - 骨骼/插槽/约束 → `addBone` `addSlot` `addConstraint`，附件装配 → `addDisplay`
+   - 关键帧 → `keyBoneFrame` `keySlotDisplayFrame` `keyDeformFrame`（网格变形帧）…（时间单位是**秒**）
+   - 生成网格：**优先** `autoMeshFromImage`（按图片不透明轮廓自动贴合，省顶点）；规则栅格用 `convertToMesh`；蒙皮 → `autoWeightMesh`（按顶点到骨骼距离自动分权重，AI 蒙皮主力）；手工微调 → `setVertexWeight` `bindWeightBone`
+   - 网格拓扑编辑 → `redrawMeshBoundary`（按点重绘外边界）/ `connectMeshVertices`（两顶点间自定义布线），坐标用附件局部坐标、顶点用 `getAttachmentVertices` 读到的下标
 
 预览效果：让用户点编辑器的「预览」，或先 `saveProject` 再配合预览服务。
 
 ## 6. 边界（有意不做的事）
 
 - **画笔式刷权重**不开放：那是需要人眼看着画的交互，给 `setVertexWeight` / `autoWeightMesh` 就够了
-- **导入图片**（`importImagesFlow`）会弹系统文件选择框，属于 UI 流程，不在命令通道里；用已有图片工作：`addDisplay`、`replaceImage`
+- **导入外部素材**现在进了命令通道：
+  - `importImage`：把外部图片（base64/dataURL 或本地绝对路径）写入工程目录 `images/` 并登记到图片池，AI 不必依赖弹窗；之后用 `addDisplay` 把它做成附件
+  - `splitAtlas`：把整页图集（Spine/DragonBones 导入带来的 `loose=false` 图片）按区域拆成独立碎图，让引用它的附件改指碎图
+  - 直接改图（换图）仍用 `replaceImage`
 - 场景未就绪时（窗口还没画第一帧）依赖像素的命令（`autoWeightMesh`、`convertToOutlineMesh`）会明确报错，稍后重试即可
 - 服务停止（关编辑器）后 `command-server.json` 会被删除，探活失败即表示编辑器没开
 
@@ -127,6 +135,7 @@ POST /batch
   4) 一次搭多个东西用 POST {url}/batch，带 "transaction": true 合并成一条撤销记录
   5) 每条命令都会回 {ok, changed, data, message, error}：ok=false 时按 error 里的提示修正参数再试
 - 引用对象一律用名字（不用下标）；时间单位是秒
+- 引入外部素材：`importImage`（把外部图片写入工程图片池）、`splitAtlas`（整页图集拆碎图）；之后用 `addDisplay` 把图片做成附件，用 `autoMeshFromImage` 按轮廓生成网格、用 `autoWeightMesh` 蒙皮
 - 不要做：批量里塞超过 ~30 条命令、重复执行副作用未知的写命令、期待画笔式刷权重
 - 做完一件事用 getProjectState 或对应 list* 复述结果，确认真的落地了
 ```

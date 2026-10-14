@@ -3,6 +3,8 @@ import { lastKeyTime, rootBoneName } from '@core/model/authoring'
 import { getActiveScene } from '../activeScene'
 import { currentSelection } from '../store/selectionStore'
 import { useProjectStore } from '../store/projectStore'
+import { useModeStore } from '../store/modeStore'
+import { useTimelineStore } from '../store/timelineStore'
 import { defineRead } from './registry'
 import type { Args } from './registry'
 
@@ -419,10 +421,140 @@ export function registerQueryCommands(): void {
       }
     }
   )
+
+  defineRead(
+    {
+      name: 'getViewport',
+      title: '查视口',
+      description:
+        '视口相机与可见范围：像素尺寸、缩放、平移量、当前可见的世界矩形、角色包围盒，以及当前模式 / 皮肤 / 动画 / 播放状态。AI 想「看屏幕」或做屏幕↔世界坐标换算时用它',
+      args: {},
+      returns:
+        'width / height / zoom / offset{x,y} / unitsPerPixel / worldView{minX,minY,maxX,maxY} / contentBounds / mode / activeSkin / animation / playing / time'
+    },
+    () => {
+      const scene = getActiveScene()
+      const vp = scene?.viewport
+      const document = doc()
+      if (!scene || !vp) throw new Error('视口还没就绪（窗口未打开或正在初始化）')
+      const w = vp.width
+      const h = vp.height
+      const corners = [vp.screenToWorld(0, 0), vp.screenToWorld(w, 0), vp.screenToWorld(0, h), vp.screenToWorld(w, h)]
+      const xs = corners.map((corner) => corner.x)
+      const ys = corners.map((corner) => corner.y)
+      const bounds = scene.meshResult?.bounds ?? null
+      return {
+        width: w,
+        height: h,
+        zoom: vp.zoom,
+        offset: vp.offset,
+        unitsPerPixel: 1 / vp.zoom,
+        worldView: { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) },
+        contentBounds: bounds
+          ? { minX: bounds.minX, minY: bounds.minY, maxX: bounds.maxX, maxY: bounds.maxY }
+          : null,
+        mode: useModeStore.getState().mode,
+        activeSkeleton: useProjectStore.getState().activeSkeleton,
+        activeSkin: document.editorMeta.activeSkin,
+        animation: document.editorMeta.activeAnimation,
+        playing: Boolean(useTimelineStore.getState().playing),
+        time: useTimelineStore.getState().time
+      }
+    }
+  )
+
+  defineRead(
+    {
+      name: 'captureViewport',
+      title: '截视口画面',
+      description:
+        '把视口当前画面截成 PNG（含背景棋盘格、角色与叠加层），返回 base64 data URL。AI 想「亲眼看到」编辑器里显示的画面时用它',
+      args: {},
+      returns: 'dataUrl（data:image/png;base64,…）/ width / height'
+    },
+    () => {
+      const scene = getActiveScene()
+      if (!scene) throw new Error('视口还没就绪（窗口未打开或正在初始化）')
+      const dataUrl = scene.captureViewport()
+      if (!dataUrl) throw new Error('截图失败（渲染器未就绪）')
+      return { dataUrl, width: scene.viewport.width, height: scene.viewport.height }
+    }
+  )
+
+  defineRead(
+    {
+      name: 'getHierarchy',
+      title: '查完整层级结构',
+      description:
+        '一次性拿出当前骨架全貌：骨骼父子树（嵌套）+ 插槽与附件 + 约束 + 动画。等价于「读整个编辑器结构」，AI 先读它掌握全局，不必逐个 list*',
+      args: {},
+      returns: 'armatureName / skeletonCount / boneTree[…] / slots[…] / constraints[…] / animations[…]'
+    },
+    () => {
+      const document = doc()
+      const roots = document.bones.filter((bone) => !bone.parent).map((bone) => bone.name)
+      const skin = document.skins.find((item) => item.name === document.editorMeta.activeSkin) ?? document.skins[0]
+      const slots = document.slots.map((slot) => ({
+        name: slot.name,
+        bone: slot.bone,
+        zOrder: slot.zOrder,
+        attachment: slot.attachment,
+        visible: slot.visible,
+        displays:
+          skin?.slots
+            .find((item) => item.slot === slot.name)
+            ?.attachments.map((attachment) => ({
+              name: attachment.name,
+              type: attachment.type,
+              image: attachment.image
+            })) ?? []
+      }))
+      return {
+        armatureName: document.armatureName,
+        skeletonCount: useProjectStore.getState().skeletons.length,
+        boneTree: buildBoneTree(document, roots),
+        slots,
+        constraints: document.constraints.map((constraint) => ({
+          name: constraint.name,
+          type: constraint.type,
+          bones: [...constraint.bones],
+          target: constraint.target,
+          enabled: constraint.enabled
+        })),
+        animations: document.animations.map((animation) => ({ name: animation.name, duration: animation.duration }))
+      }
+    }
+  )
 }
 
 function childCount(document: EditorDocument, parent: string): number {
   return document.bones.filter((bone) => bone.parent === parent).length
+}
+
+/** 骨骼层级节点：递归嵌套，让 AI 一次拿到「整个骨架的树状结构」 */
+interface BoneNode {
+  name: string
+  parent: string
+  length: number
+  rotation: number
+  localPosition: { x: number; y: number }
+  children: BoneNode[]
+}
+
+/** 从一组根骨递归展开成树（按 parent 字段找子节点） */
+function buildBoneTree(document: EditorDocument, roots: string[]): BoneNode[] {
+  return roots.map((name) => {
+    const bone = document.bones.find((item) => item.name === name)
+    const children = document.bones.filter((item) => item.parent === name).map((item) => item.name)
+    return {
+      name,
+      parent: bone?.parent ?? '',
+      length: bone?.length ?? 0,
+      rotation: bone?.rotation ?? 0,
+      localPosition: bone ? { x: bone.localPosition.x, y: bone.localPosition.y } : { x: 0, y: 0 },
+      children: buildBoneTree(document, children)
+    }
+  })
 }
 
 function frames<T extends { time: number; value: unknown; easing: number }>(list: readonly T[]) {

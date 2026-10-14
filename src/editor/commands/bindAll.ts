@@ -16,6 +16,9 @@ import { applySlotOrder, moveDisplay, moveSlot, moveBone } from './hierarchyComm
 import type { DropZone } from './hierarchyCommands'
 import { changed, defineAction, defineRead, defineWrite } from './registry'
 import { need, needNum, needOneOf, optBool, optNum, optText, optTextList } from './args'
+import { getPlatform, joinPath, dirName, baseName, stripExtension } from '../platform'
+import { ASSET_DIR } from '../services/projectAssets'
+import { splitAtlasImage } from '../services/atlasSplit'
 
 /**
  * 把编辑器已有的成熟操作再包一层命令：层级移动、重命名、绘制顺序、图片池、选择。
@@ -30,6 +33,53 @@ import { need, needNum, needOneOf, optBool, optNum, optText, optTextList } from 
 /** 视口里的骨骼世界矩阵；视口没就绪时返回 null（移动命令会降级：只换父级，不保持全局位姿） */
 function worldMatrixOfBone(name: string): Float32Array | null {
   return getActiveScene()?.worldMatrixOf(name) ?? null
+}
+
+// ---------------- 图片 / 图集（供 AI 从外部导入资源） ----------------
+
+/** dataURL / 裸 base64 → 字节；若带 dataURL mime 则顺手推断扩展名 */
+function decodeImageData(data: string): { bytes: Uint8Array; ext?: string } {
+  let raw = data.trim()
+  let ext: string | undefined
+  const match = raw.match(/^data:image\/([a-zA-Z0-9.+-]+);base64,/i)
+  if (match) {
+    ext = match[1].toLowerCase()
+    raw = raw.slice(match[0].length)
+  }
+  let binary: string
+  try {
+    binary = atob(raw)
+  } catch {
+    throw new Error('data 不是合法 base64')
+  }
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return { bytes, ext }
+}
+
+function extOf(p: string): string {
+  const m = p.toLowerCase().match(/\.([a-z0-9]+)$/)
+  return m ? m[1] : 'png'
+}
+
+/** 文件名去文件系统非法字符（前后空白 / 点也清掉），空了兜底成 image */
+function sanitizeName(name: string): string {
+  return (
+    name
+      .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+      .replace(/^[.\s]+/, '')
+      .replace(/[.\s]+$/, '') || 'image'
+  )
+}
+
+/** 图片名去重（带扩展名），重名自动加序号 */
+async function uniqueImageName(base: string, ext: string, images: readonly { name: string }[]): Promise<string> {
+  const taken = new Set(images.map((image) => image.name))
+  const candidate = `${base}.${ext}`
+  if (!taken.has(candidate)) return candidate
+  let index = 2
+  while (taken.has(`${base}_${index}.${ext}`)) index++
+  return `${base}_${index}.${ext}`
 }
 
 export function registerBindAllCommands(): void {
@@ -502,6 +552,78 @@ export function registerBindAllCommands(): void {
       const rolledBack = useProjectStore.getState().rollbackTransaction()
       if (!rolledBack) throw new Error('没有正在进行的事务（rollbackTransaction 要跟在 beginTransaction 之后）')
       return changed({ rolledBack }, '已回滚到批量操作前的状态')
+    }
+  )
+
+  defineAction(
+    {
+      name: 'importImage',
+      title: '导入图片到工程',
+      description:
+        '把一张图片写进工程目录的 images/ 并登记到图片池，供 addDisplay 做成附件。图片来源二选一：data（base64 或 dataURL）/ path（本地绝对路径）。工程需先保存或创建（确定 images/ 目录）。name 不传用原文件名自动命名，重名自动加序号',
+      args: {
+        data: { type: 'string', description: '图片字节：base64 或 dataURL（与 path 二选一）' },
+        path: { type: 'string', description: '本地图片绝对路径（与 data 二选一）' },
+        name: { type: 'string', description: '图片名（不含目录与扩展名）；不传用原文件名' },
+        ext: { type: 'string', description: 'data 模式下的格式（png/jpg/jpeg/webp/gif），不传从 dataURL 推断或默认 png' }
+      },
+      returns: '{ name, width, height, path }'
+    },
+    async (args) => {
+      const platform = getPlatform()
+      const store = useProjectStore.getState()
+      const projectPath = store.projectPath
+      if (!projectPath) {
+        throw new Error('请先保存或创建工程：导入的图片要落到工程目录的 images/ 下（可先调用 createProjectAt 或 saveProject）')
+      }
+      const data = optText(args, 'data')
+      const sourcePath = optText(args, 'path')
+      if (!data && !sourcePath) {
+        throw new Error('必须给 data（base64 / dataURL）或 path（本地图片绝对路径）其中一个')
+      }
+      let bytes: Uint8Array
+      let ext: string
+      if (data) {
+        const decoded = decodeImageData(data)
+        bytes = decoded.bytes
+        ext = (decoded.ext ?? optText(args, 'ext') ?? 'png').toLowerCase()
+        if (ext === 'jpeg') ext = 'jpg'
+      } else {
+        bytes = await platform.readBinary(sourcePath as string)
+        ext = extOf(sourcePath as string)
+      }
+      if (!bytes || bytes.length === 0) throw new Error('读不到图片字节（data 解码失败或 path 文件不存在）')
+
+      const dir = joinPath(dirName(projectPath), ASSET_DIR)
+      const given = optText(args, 'name') ?? (sourcePath ? stripExtension(baseName(sourcePath)) : 'image')
+      const base = sanitizeName(given)
+      const fileName = await uniqueImageName(base, ext, store.document.images)
+      const target = joinPath(dir, fileName)
+      await platform.writeBinary(target, bytes)
+      const info = await platform.imageInfo([target])
+      const width = info[0]?.width ?? 0
+      const height = info[0]?.height ?? 0
+      store.update('导入图片', (draft) => {
+        draft.images.push({ name: fileName, path: target, width, height, loose: true })
+      })
+      return changed({ name: fileName, width, height, path: target }, `已导入图片 ${fileName}（${width}×${height}）`)
+    }
+  )
+
+  defineAction(
+    {
+      name: 'splitAtlas',
+      title: '拆分图集为碎图',
+      description:
+        '把图集页（loose=false，即用 Spine / DragonBones 导入带来的整页图集）按记录的区域拆成独立碎图，写到 <图集名>_split/，并让所有引用它的附件改指碎图。图集图片名用 listImages 查',
+      args: { name: { type: 'string', description: '图集图片名', required: true } },
+      returns: '{ message }'
+    },
+    async (args) => {
+      const name = need(args, 'name')
+      const result = await splitAtlasImage(name)
+      if (!result.ok) throw new Error(result.message)
+      return changed({ message: result.message }, result.message)
     }
   )
 }

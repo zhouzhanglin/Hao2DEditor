@@ -37,7 +37,8 @@ export function unchanged<T = never>(message?: string): CommandOutcome<T> {
 
 /** 命令实参：按名字传（`{"name":"arm"}`），不是位置参数 */
 export type Args = Record<string, unknown>
-type Runner = (args: Args) => CommandOutcome
+// runner 可以是同步或 async：导入图片 / 自动网格 / 拆图集都要先写盘或解码像素，必须能 await
+type Runner = (args: Args) => CommandOutcome | Promise<CommandOutcome>
 
 interface Entry {
   spec: CommandSpec
@@ -64,7 +65,7 @@ export function defineRead(spec: Omit<CommandSpec, 'kind'>, run: (args: Args) =>
  */
 export function defineWrite(
   spec: Omit<CommandSpec, 'kind'>,
-  run: (draft: EditorDocument, args: Args) => CommandOutcome
+  run: (draft: EditorDocument, args: Args) => CommandOutcome | Promise<CommandOutcome>
 ): void {
   registerCommand({ ...spec, kind: 'write' }, (args) => {
     let outcome: CommandOutcome = {}
@@ -100,7 +101,7 @@ export function clearRegistry(): void {
  * 执行一条命令。**不抛异常** —— 任何失败都折成 `{ ok: false, error }`，
  * 调用方（IPC / HTTP）只管转发。
  */
-export function executeCommand(name: string, args?: unknown): Omit<CommandResponse, 'id'> {
+export async function executeCommand(name: string, args?: unknown): Promise<Omit<CommandResponse, 'id'>> {
   const entry = table.get(name)
   if (!entry) {
     const guess = nearestName(name)
@@ -112,7 +113,8 @@ export function executeCommand(name: string, args?: unknown): Omit<CommandRespon
     }
   }
   try {
-    const outcome = entry.run(asArgs(args)) ?? {}
+    // runner 可以是同步或 async（导入图片 / 自动网格 / 拆图集都要先写盘或解码像素，必须 await）
+    const outcome = (await entry.run(asArgs(args))) ?? {}
     const didChange = outcome.changed === true
     return {
       ok: true,

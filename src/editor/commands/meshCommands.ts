@@ -3,6 +3,7 @@ import { getActiveScene } from '../activeScene'
 import { useProjectStore } from '../store/projectStore'
 import {
   addWeightBone,
+  autoGenerateRegionMesh,
   autoWeights,
   convertMeshToRegion,
   convertRegionToMesh,
@@ -10,6 +11,7 @@ import {
   insertMeshVertex,
   meshVertexSamples,
   removeWeightBone,
+  resolveAttachment,
   setVertexWeight
 } from './authoringCommands'
 import type { VertexSample } from './authoringCommands'
@@ -18,6 +20,9 @@ import type { Args } from './registry'
 import { need, needNum, optNum, optTextList, optVec } from './args'
 import { connectMeshVertices, rebuildMeshBoundary } from '../tools/authoringTools'
 import type { Vec2 } from '@core/math/matrix'
+import type { AlphaMask } from '@core/mesh/autoMesh'
+import { getPlatform } from '../platform'
+import { loadImageBitmap } from '../services/pngEncoder'
 
 /**
  * 网格与蒙皮命令：转网格、编辑顶点、绑骨骼、刷权重。
@@ -72,6 +77,30 @@ function boneSegments(names: readonly string[]): Array<{ name: string; ax: numbe
   return segments
 }
 
+/**
+ * 把一张图片解码成逐像素 alpha 遮罩（行优先，y=0 在顶部），供 autoMeshFromImage 生成轮廓。
+ * 复用与拾取缓存同一套解码（loadImageBitmap + canvas），只在渲染进程可用（需要 document/canvas）。
+ */
+async function imageAlphaMask(imagePath: string): Promise<AlphaMask | null> {
+  const platform = getPlatform()
+  const url = await platform.imageUrl(imagePath)
+  const bitmap = await loadImageBitmap(url)
+  if (!bitmap) return null
+  const width = bitmap.width
+  const height = bitmap.height
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  if (!context) return null
+  context.drawImage(bitmap, 0, 0)
+  const pixels = context.getImageData(0, 0, width, height).data
+  const alpha = new Uint8Array(width * height)
+  for (let i = 0; i < alpha.length; i++) alpha[i] = pixels[i * 4 + 3]
+  if ('close' in bitmap) (bitmap as ImageBitmap).close()
+  return { width, height, alpha }
+}
+
 export function registerMeshCommands(): void {
   defineWrite(
     {
@@ -95,6 +124,54 @@ export function registerMeshCommands(): void {
         throw new Error(`转不了：${slot} / ${attachment} 不是图片（Region）附件（已经转过网格，或用 listDisplays 看它的 type）`)
       }
       return changed({ slot, attachment, ...result }, `已转为网格：${result.vertices} 顶点 / ${result.triangles} 三角形`)
+    }
+  )
+
+  defineAction(
+    {
+      name: 'autoMeshFromImage',
+      title: '按图片轮廓自动生成网格',
+      description:
+        '把 Region 附件（碎图）按不透明像素轮廓自动生成贴合的多边形网格，透明区不占三角形，比 convertToMesh 更省顶点、更贴合图形。需要视口已就绪（取图片像素）。divisions 控制顶点数量级，默认 8',
+      args: {
+        slot: { type: 'string', description: '插槽名', required: true },
+        attachment: { type: 'string', description: '附件名（Region）', required: true },
+        divisions: { type: 'number', description: '细分数（顶点数量级），默认 8', default: 8 }
+      },
+      returns: '{ slot, attachment, vertices, triangles, coverage }'
+    },
+    async (args) => {
+      const slot = need(args, 'slot')
+      const attachment = need(args, 'attachment')
+      const document = useProjectStore.getState().document
+      const att = resolveAttachment(document, slot, attachment)
+      if (!att) throw new Error(`找不到附件 ${slot} / ${attachment}（用 listDisplays 查）`)
+      if (att.type !== 'region' && !(att.type === 'mesh' && att.regionSnapshot)) {
+        throw new Error('只能对 Region 附件（或带快照的网格）用：先用 addDisplay 加碎图，或 convertToRegion 还原')
+      }
+      const image = document.images.find((item) => item.name === att.image)
+      if (!image) throw new Error(`附件引用的图片「${att.image}」不在图片池（先用 importImage 导入）`)
+      const mask = await imageAlphaMask(image.path)
+      if (!mask) throw new Error(`读不到图片「${image.name}」的像素，无法生成轮廓`)
+      const divisions = Math.max(1, Math.min(64, Math.round(optNum(args, 'divisions') ?? 8)))
+      let result: { vertices: number; triangles: number; coverage: number } | null = null
+      const committed = useProjectStore.getState().runCommand('AI：按轮廓生成网格', (draft) => {
+        result = autoGenerateRegionMesh(draft, slot, attachment, mask, divisions)
+        return result !== null
+      })
+      if (!committed || !result) {
+        throw new Error('生成网格失败：附件不是有效的 Region / 网格，或图片没有不透明像素')
+      }
+      const scene = getActiveScene()
+      if (scene) {
+        const next = useProjectStore.getState().document
+        scene.setDocument(next, next.editorMeta.activeSkin)
+        scene.refresh()
+      }
+      return changed(
+        { slot, attachment, ...result },
+        `已生成轮廓网格：${result.vertices} 顶点 / ${result.triangles} 三角形（覆盖率 ${Math.round(result.coverage * 100)}%）`
+      )
     }
   )
 

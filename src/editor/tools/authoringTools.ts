@@ -2188,7 +2188,7 @@ export function undoMeshBoundaryPoint(scene: EditorScene, status?: (message: str
  * 用画好的多边形重画网格外边界（见 `closeMeshBoundary` 的说明）。
  * 返回 null 表示没改（点太少 / 共线 / 已不是网格），此时**不碰文档**。
  */
-function rebuildMeshBoundary(
+export function rebuildMeshBoundary(
   doc: EditorDocument,
   slotName: string,
   attachmentName: string,
@@ -2314,7 +2314,7 @@ function cross2(ax: number, ay: number, bx: number, by: number): number {
  *
  * 返回 false = 这条线已经有 / 走不通（线段正好擦过某个顶点等退化情况），此时**不动文档**。
  */
-function connectMeshVertices(
+export function connectMeshVertices(
   doc: EditorDocument,
   slotName: string,
   attachmentName: string,

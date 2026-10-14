@@ -9,7 +9,8 @@ import type { BrowserWindow } from 'electron'
 import { WebSocketServer } from 'ws'
 import type { WebSocket } from 'ws'
 import { COMMAND_CHANNEL } from '@shared/commandTypes'
-import type { CommandResponse, CommandServerInfo } from '@shared/commandTypes'
+import type { CommandResponse, CommandServerInfo, CommandSpec } from '@shared/commandTypes'
+import { commandSpecToMcpTool } from '@shared/mcpSchema'
 import { createLogger } from './logger'
 
 const log = createLogger('命令服务')
@@ -225,6 +226,11 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     return
   }
   const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+  // 本地 MCP 发现：只暴露端点 URL（不含 token），不鉴权，供 AI 客户端扫描
+  if (method === 'GET' && url.pathname === '/.well-known/mcp.json') {
+    sendJson(res, 200, { servers: { 'hao2d-editor': { url: info ? `${info.url}/mcp` : '' } } })
+    return
+  }
   if (!authorized(req)) {
     sendJson(res, 401, {
       ok: false,
@@ -263,13 +269,18 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       sendJson(res, 200, outcome)
       return
     }
+    if (method === 'POST' && url.pathname === '/mcp') {
+      const body = (await readBody(req)) as McpMessage
+      await handleMcpMessage(req, res, body)
+      return
+    }
     if (method === 'GET' && url.pathname === '/events') {
       sendJson(res, 200, { ok: false, error: '事件流暂未提供：请用 POST /command 轮询，或连 WebSocket /ws' })
       return
     }
     sendJson(res, 404, {
       ok: false,
-      error: `没有这个端点：${method} ${url.pathname}（可用：GET /health、GET /commands、POST /command、POST /batch、WS /ws）`
+      error: `没有这个端点：${method} ${url.pathname}（可用：GET /health、GET /commands、POST /command、POST /batch、POST /mcp、WS /ws、GET /.well-known/mcp.json）`
     })
   } catch (err) {
     sendJson(res, 200, { ok: false, changed: false, error: err instanceof Error ? err.message : String(err) })
@@ -308,6 +319,111 @@ async function handleSocketMessage(socket: WebSocket, raw: string): Promise<void
   } catch (err) {
     socket.send(JSON.stringify({ id, ok: false, error: err instanceof Error ? err.message : String(err) }))
   }
+}
+
+// ---------------- MCP（Streamable HTTP） ----------------
+//
+// 让 AI 客户端把 Hao2DEditor 当成一个「MCP Server」自动加载：它在现有本地服务上
+// 多接一个 `/mcp` 端点，协议走 MCP 的 JSON-RPC。`tools/list` 复用渲染进程的
+// `__catalog`（命令自描述），`tools/call` 复用 `POST /command` 的执行链路 ——
+// 所以 MCP 只是个薄翻译层，命令注册表一行都不用改。
+//
+// 传输选 Streamable HTTP（不是 stdio）：Electron 不会把 `node` 暴露到 PATH，
+// stdio 要额外打包可执行文件，麻烦；HTTP 让客户端只填一个 URL，mac/win 打包零新增依赖。
+
+const MCP_PROTOCOL_VERSION = '2025-03-26'
+let mcpSessionId = ''
+
+interface McpMessage {
+  jsonrpc?: string
+  id?: number | string | null
+  method?: string
+  params?: { name?: string; arguments?: unknown }
+}
+
+/** 按客户端 Accept 决定回 SSE 还是纯 JSON（MCP Streamable HTTP 两种都认） */
+function sendMcp(res: ServerResponse, req: IncomingMessage, payload: object): void {
+  const accept = req.headers['accept']
+  const useSse = typeof accept === 'string' && accept.includes('text/event-stream')
+  const json = JSON.stringify(payload)
+  if (useSse) {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-store',
+      Connection: 'close'
+    })
+    res.end(`event: message\ndata: ${json}\n\n`)
+    return
+  }
+  sendJson(res, 200, payload)
+}
+
+/** 处理一条 MCP JSON-RPC 消息；返回 void，响应已在内部写出 */
+async function handleMcpMessage(req: IncomingMessage, res: ServerResponse, body: McpMessage): Promise<void> {
+  const method = typeof body.method === 'string' ? body.method : ''
+  const id = (body.id ?? null) as number | string | null
+
+  if (method === 'initialize') {
+    mcpSessionId = randomBytes(16).toString('hex')
+    res.setHeader('Mcp-Session-Id', mcpSessionId)
+    sendMcp(res, req, {
+      jsonrpc: '2.0',
+      id,
+      result: {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        capabilities: { tools: {} },
+        serverInfo: { name: 'hao2d-editor', version: '0.1.0' }
+      }
+    })
+    return
+  }
+  if (method === 'ping') {
+    sendMcp(res, req, { jsonrpc: '2.0', id, result: {} })
+    return
+  }
+  if (method === 'tools/list') {
+    const catalogResult = (await callRenderer('__catalog', {})) as { data?: { commands: CommandSpec[] } }
+    const commands = catalogResult.data?.commands ?? []
+    sendMcp(res, req, {
+      jsonrpc: '2.0',
+      id,
+      result: { tools: commands.map(commandSpecToMcpTool) }
+    })
+    return
+  }
+  if (method === 'tools/call') {
+    const name = typeof body.params?.name === 'string' ? body.params.name.trim() : ''
+    const args = body.params?.arguments ?? {}
+    const result = await callRenderer(name, args)
+    if (result.ok) {
+      const text = [result.message, result.data !== undefined ? JSON.stringify(result.data, null, 2) : '']
+        .filter(Boolean)
+        .join('\n')
+      sendMcp(res, req, {
+        jsonrpc: '2.0',
+        id,
+        result: { content: [{ type: 'text', text }], isError: false }
+      })
+    } else {
+      sendMcp(res, req, {
+        jsonrpc: '2.0',
+        id,
+        result: { content: [{ type: 'text', text: result.error ?? '命令执行失败' }], isError: true }
+      })
+    }
+    return
+  }
+  // 没有 id 的是「通知」（如 notifications/initialized）：回 202，不回体
+  if (id === null || id === undefined) {
+    res.writeHead(202, { 'Content-Type': 'text/plain' })
+    res.end()
+    return
+  }
+  sendMcp(res, req, {
+    jsonrpc: '2.0',
+    id,
+    error: { code: -32601, message: `未知方法：${method}` }
+  })
 }
 
 // ---------------- 生命周期 ----------------
@@ -374,6 +490,11 @@ export async function startCommandServer(getWindow: () => BrowserWindow | null):
   info = payload
   log.info(`命令服务已启动：${payload.url}（地址与 token 见 ${file}）`)
   return payload
+}
+
+/** 给其它模块（IPC、AI 客户端配置）拿当前服务信息；没启动返回 null */
+export function commandServerInfo(): CommandServerInfo | null {
+  return info
 }
 
 /** 停服务：断长连接、清 pending、删发现文件 */

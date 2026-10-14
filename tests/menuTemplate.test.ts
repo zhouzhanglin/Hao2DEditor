@@ -78,4 +78,37 @@ describe('应用菜单模板', () => {
     expect(winEntries.some((entry) => entry.role === 'quit')).toBe(true)
     expect(winEntries.some((entry) => entry.role === 'about')).toBe(false)
   })
+
+  it('macOS：设置 / AI 接入挂在 app 菜单下；其它平台留在文件菜单', () => {
+    const labelsOf = (isMac: boolean): string[] => {
+      const root = buildMenuTemplate({
+        appName: 'Hao2D Editor',
+        isMac,
+        dispatch: () => undefined
+      })
+      return root.flatMap((entry) =>
+        (entry.submenu as MenuItemConstructorOptions[]).map((sub) => String(sub.label))
+      )
+    }
+
+    // macOS：app 菜单（第一项）里应能看到设置 / AI 接入
+    const macRoot = buildMenuTemplate({
+      appName: 'Hao2D Editor',
+      isMac: true,
+      dispatch: () => undefined
+    })
+    const appSubmenu = (macRoot[0].submenu as MenuItemConstructorOptions[]).map((entry) =>
+      String(entry.label)
+    )
+    expect(appSubmenu).toEqual(expect.arrayContaining(['设置…', 'AI 接入…']))
+    // 文件菜单里不再重复出现
+    const fileSubmenu = (macRoot[1].submenu as MenuItemConstructorOptions[]).map((entry) =>
+      String(entry.label)
+    )
+    expect(fileSubmenu).not.toContain('设置…')
+    expect(fileSubmenu).not.toContain('AI 接入…')
+
+    // 非 macOS 没有 app 菜单，两个入口不能丢，仍在文件菜单里
+    expect(labelsOf(false)).toEqual(expect.arrayContaining(['设置…', 'AI 接入…']))
+  })
 })

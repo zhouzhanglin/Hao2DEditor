@@ -99,7 +99,7 @@ POST /batch
 2. `getProjectState` / `listBones` / `listSlots` / `listAnimations` 摸清现状
 3. 用**名字**引用对象（`parent: "root"`、`bone: "forearm"`）——命令和查询都用名字，不用下标
 4. 改动走 `POST /command` 或 `POST /batch`
-5. 需要 AI 生成的东西：骨骼/插槽/约束 → `addBone` `addSlot` `addConstraint`；关键帧 → `keyBoneFrame` `keySlotDisplayFrame` …（时间单位是**秒**）；蒙皮 → `convertToMesh` / `convertToOutlineMesh` / `autoWeightMesh`
+5. 需要 AI 生成的东西：骨骼/插槽/约束 → `addBone` `addSlot` `addConstraint`；关键帧 → `keyBoneFrame` `keySlotDisplayFrame` …（时间单位是**秒**）；蒙皮 → `convertToMesh` / `convertToOutlineMesh` / `autoWeightMesh`；网格拓扑编辑 → `redrawMeshBoundary`（按点重绘外边界）/ `connectMeshVertices`（两顶点间自定义布线），坐标用附件局部坐标、顶点用 `getAttachmentVertices` 读到的下标
 
 预览效果：让用户点编辑器的「预览」，或先 `saveProject` 再配合预览服务。
 
@@ -115,10 +115,11 @@ POST /batch
 ```text
 你在操作一个叫 Hao2DEditor 的 2D 骨骼动画编辑器。它在本机跑了一个命令服务：
 
-- 先读 ~/Library/Application Support/hao2d-editor/command-server.json
-  （Windows: %APPDATA%\hao2d-editor\，Linux: ~/.config/hao2d-editor\，macOS 如上；
-   找不到就去编辑器日志里搜「命令服务已启动」）
-- 里面 url 是本机地址，token 是凭证；请求都带上 token（?token= 或 x-hao2d-token 头）
+- 先读本工程目录下的 `hao2d-ai-server.json`（和工程文件 *.hao2d.proj 放在一起，由编辑器在保存/创建工程时自动写出）
+  - 里面 url 是本机地址，token 是凭证；请求都带上 token（?token= 或 x-hao2d-token 头）
+  - 找不到该文件时，才回退去用户目录读 command-server.json：
+    macOS ~/Library/Application Support/hao2d-editor/、Windows %APPDATA%\hao2d-editor\、Linux ~/.config/hao2d-editor\；
+    或去编辑器启动日志搜「命令服务已启动」
 - 工作方式：
   1) POST {url}/command  {"name":"getProjectState"} 了解当前工程
   2) 需要知道有哪些能力时，先 GET {url}/commands 读命令目录（含参数说明），不要凭记忆猜命令名
@@ -129,3 +130,50 @@ POST /batch
 - 不要做：批量里塞超过 ~30 条命令、重复执行副作用未知的写命令、期待画笔式刷权重
 - 做完一件事用 getProjectState 或对应 list* 复述结果，确认真的落地了
 ```
+
+## 8. MCP 接入（AI 自动发现）
+
+除了上面这套自定义 HTTP / WebSocket 接口，编辑器还**原生实现了 MCP（Model Context Protocol）**，
+让支持 MCP 的 AI 工具（Claude Desktop、Cursor、VSCode Copilot、Codex、WorkBuddy 等）把它当成
+一个 **MCP Server 自动加载** —— 不用手粘提示词，客户端重启后直接出现「Hao2DEditor 的全部命令」。
+
+### 8.1 端点
+
+命令服务在现有本地服务上多开了一个 MCP 端点（Streamable HTTP 传输）：
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| GET | `/.well-known/mcp.json` | 本地发现：只暴露端点 URL（不含 token），供客户端扫描 |
+| POST | `/mcp` | MCP JSON-RPC：`initialize` / `tools/list` / `tools/call` |
+
+- `tools/list` 复用第 2 节的命令自描述（`GET /commands`），把每条 `CommandSpec` 翻译成 MCP tool；
+- `tools/call` 复用 `POST /command` 的执行链路，`ok:false` 时把 `error` 作为 `isError` 回给 AI 自纠。
+- `/mcp` 同样走 token 鉴权（三种带法都认）。token 直接拼进下面的 URL 即可，客户端只填地址。
+
+### 8.2 在编辑器里「一键接入」
+
+菜单「文件 → AI 接入…」打开面板：
+
+1. 显示当前 **MCP 地址**（形如 `http://127.0.0.1:<端口>/mcp?token=…`），可一键复制；
+2. 「**一键安装到 AI 客户端**」会把该地址写进已识别的客户端配置：
+   - **自动写入**（schema 已知、安全）：Claude Desktop、Cursor、VSCode / Copilot；
+   - **仅探测、需手动填**：Codex / WorkBuddy / CodeBuddy / DeepSeek Harness / Trae / ZCode
+     （这些客户端的 MCP 配置格式未公开或各异，不冒然改写其配置，面板会给出地址让用户填）。
+
+客户端重启后就会自动加载 Hao2DEditor 的全部命令，无需任何提示词。
+
+### 8.3 手动接入（任意支持 HTTP MCP 的客户端）
+
+把面板里的 MCP 地址填进客户端的 MCP 设置即可。例如 Claude Desktop 的
+`claude_desktop_config.json`：
+
+```json
+{
+  "mcpServers": {
+    "hao2d-editor": { "url": "http://127.0.0.1:52741/mcp?token=8Yk…" }
+  }
+}
+```
+
+> 端口随机、token 每次启动重新生成；以面板显示的地址为准（或读 `command-server.json`）。
+> 关掉编辑器后服务停止、发现文件被删，客户端会提示连接失败 —— 重新打开编辑器即可。

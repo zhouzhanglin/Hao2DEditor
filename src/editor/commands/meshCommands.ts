@@ -14,7 +14,10 @@ import {
 } from './authoringCommands'
 import type { VertexSample } from './authoringCommands'
 import { changed, defineAction, defineWrite } from './registry'
+import type { Args } from './registry'
 import { need, needNum, optNum, optTextList, optVec } from './args'
+import { connectMeshVertices, rebuildMeshBoundary } from '../tools/authoringTools'
+import type { Vec2 } from '@core/math/matrix'
 
 /**
  * 网格与蒙皮命令：转网格、编辑顶点、绑骨骼、刷权重。
@@ -297,4 +300,83 @@ export function registerMeshCommands(): void {
       )
     }
   )
+
+  defineWrite(
+    {
+      name: 'redrawMeshBoundary',
+      title: '重绘网格边界',
+      description:
+        '用一串依次点击的轮廓点（附件局部坐标）整块重画网格外边界：丢弃旧顶点、清空绑定权重与该附件的 FFD 关键帧，并重新三角化。首尾会自动闭合，至少需要 3 个点',
+      args: {
+        slot: { type: 'string', description: '插槽名', required: true },
+        attachment: { type: 'string', description: '网格附件名', required: true },
+        points: {
+          type: 'array',
+          description: '依次点击的轮廓点 [{x,y}…]（附件局部坐标，与 getAttachmentVertices 一致）',
+          required: true
+        }
+      },
+      returns: '{ slot, attachment, vertices, triangles }'
+    },
+    (draft, args) => {
+      const slot = need(args, 'slot')
+      const attachment = need(args, 'attachment')
+      const points = parsePoints(args, 'points')
+      if (points.length < 3) throw new Error('points 至少需要 3 个点才能围成一圈边界')
+      const result = rebuildMeshBoundary(draft, slot, attachment, points)
+      if (!result) {
+        throw new Error(`重绘不了：${slot} / ${attachment} 不是网格（用 listDisplays 看它的 type），或 points 不足以围成闭合多边形`)
+      }
+      return changed(
+        { slot, attachment, ...result },
+        `已按 ${points.length} 个点重绘边界：${result.vertices} 顶点 / ${result.triangles} 三角形（旧权重与 FFD 已清空）`
+      )
+    }
+  )
+
+  defineWrite(
+    {
+      name: 'connectMeshVertices',
+      title: '连线重布网格',
+      description:
+        '在网格的两个顶点之间连一条线（自定义布线）：沿这条线段把横穿的三角形重新三角化，其余区域不变。from / to 是顶点下标（用 getAttachmentVertices 取）',
+      args: {
+        slot: { type: 'string', description: '插槽名', required: true },
+        attachment: { type: 'string', description: '网格附件名', required: true },
+        from: { type: 'number', description: '起点顶点下标', required: true },
+        to: { type: 'number', description: '终点顶点下标', required: true }
+      },
+      returns: '{ slot, attachment, from, to }'
+    },
+    (draft, args) => {
+      const slot = need(args, 'slot')
+      const attachment = need(args, 'attachment')
+      const from = needNum(args, 'from')
+      const to = needNum(args, 'to')
+      if (!connectMeshVertices(draft, slot, attachment, from, to)) {
+        throw new Error(
+          `连不上：两点相同 / 下标越界 / 目标不是网格，或这条线段没有横穿网格内部（已经连着线、或正好擦过顶点都会连不通）。用 getAttachmentVertices 核对下标`
+        )
+      }
+      return changed({ slot, attachment, from, to }, `已在顶点 #${from} 与 #${to} 之间连上线`)
+    }
+  )
+}
+
+/** 解析一组 {x,y} 点：来自 AI 的 JSON 数组，形状不对就给出能看懂的报错 */
+function parsePoints(args: Args, key: string): Vec2[] {
+  const value = args[key]
+  if (!Array.isArray(value)) throw new Error(`参数 ${key} 必须是点数组 [{x,y}…]`)
+  const points: Vec2[] = []
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
+      throw new Error(`参数 ${key} 里每项必须是 {x,y}`)
+    }
+    const { x, y } = item as { x?: unknown; y?: unknown }
+    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) {
+      throw new Error(`参数 ${key} 里的点 x / y 必须是数字`)
+    }
+    points.push({ x, y })
+  }
+  return points
 }

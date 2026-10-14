@@ -54,6 +54,10 @@ function createWindow(): void {
 
 registerSchemes()
 
+// 菜单栏 / 「关于」显示的应用名。dev 下 Electron 默认叫 "Electron"，
+// 必须在 ready 之前显式改名，否则 macOS app 菜单标题会一直是 "Electron"。
+app.setName('Hao2D')
+
 app.whenReady().then(() => {
   registerProtocolHandlers()
   registerIpcHandlers()

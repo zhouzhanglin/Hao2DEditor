@@ -49,6 +49,10 @@ const bridge: HaoBridge = {
   stopHao2dPreview: () => invoke<void>(IPC.hao2dPreviewStop),
   openExternal: (url: string) => invoke<void>(IPC.openExternal, url),
 
+  aiMcpInfo: () => invoke(IPC.aiMcpInfo),
+  aiInstallMcp: () => invoke(IPC.aiInstallMcp),
+  aiCommandApiDoc: () => invoke(IPC.aiCommandApiDoc),
+
   fileUrl: (absPath: string): string => {
     const encoded = xorEncode(absPath)
     return `${FILE_SCHEME}://local/${encoded}`

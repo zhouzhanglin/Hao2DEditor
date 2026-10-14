@@ -84,7 +84,10 @@ export const IPC = {
   spinePreviewStop: 'preview:spineStop',
   hao2dPreviewStart: 'preview:hao2dStart',
   hao2dPreviewStop: 'preview:hao2dStop',
-  openExternal: 'shell:openExternal'
+  openExternal: 'shell:openExternal',
+  aiMcpInfo: 'ai:mcpInfo',
+  aiInstallMcp: 'ai:installMcp',
+  aiCommandApiDoc: 'ai:commandApiDoc'
 } as const
 
 export type MenuCommand =
@@ -108,6 +111,7 @@ export type MenuCommand =
   | 'view:fitViewport'
   | 'view:resetLayout'
   | 'app:settings'
+  | 'app:aiIntegration'
   | 'anim:playPause'
   | 'anim:nextFrame'
   | 'anim:prevFrame'
@@ -161,6 +165,34 @@ export interface SpinePreviewInfo {
 
 export type PreviewInfo = SpinePreviewInfo
 
+/**
+ * 「一键安装 AI 集成」的结果：每个目标客户端一项。
+ * - auto 客户端（Claude / Cursor / VSCode）会真的把 MCP URL 写进配置；
+ * - 其它 agent（Codex / WorkBuddy / CodeBuddy / DeepSeek / Trae / ZCode）schema 未公开，
+ *   不自动写，只报告「是否已检测到安装目录」，由用户手动把 URL 填进对应设置。
+ */
+export type McpClientStatus = 'written' | 'error' | 'manual'
+
+export interface McpClientResult {
+  id: string
+  label: string
+  status: McpClientStatus
+  /** auto 客户端：写入的配置文件路径 */
+  path?: string
+  /** error：失败原因 */
+  error?: string
+  /** manual：是否检测到该客户端的目录（仅作提示） */
+  installed?: boolean
+}
+
+export interface McpInstallReport {
+  /** 命令服务是否在跑（没跑就没有可用的 URL） */
+  running: boolean
+  /** 可直接填进 AI 客户端的完整 MCP URL（含 token） */
+  mcpUrl: string
+  items: McpClientResult[]
+}
+
 /** preload 暴露到 window.hao 的 API。 */
 export interface HaoBridge {
   readonly isElectron: true
@@ -194,6 +226,12 @@ export interface HaoBridge {
   stopHao2dPreview(): Promise<IpcResult<void>>
   /** 用系统默认程序打开 http(s) 链接（在线预览面板的「在浏览器打开」） */
   openExternal(url: string): Promise<IpcResult<void>>
+  /** AI 接入：当前命令服务的 MCP 信息（是否在跑、带 token 的 MCP URL） */
+  aiMcpInfo(): Promise<IpcResult<{ running: boolean; mcpUrl: string; url: string; token: string }>>
+  /** AI 接入：把 MCP URL 写进已识别的 AI 客户端配置（一键安装） */
+  aiInstallMcp(): Promise<IpcResult<McpInstallReport>>
+  /** AI 接入：返回内置命令接口文档（随包发布的 docs/ai-command-api.md 内容），供写出到工程目录让 AI 免配置上手 */
+  aiCommandApiDoc(): Promise<IpcResult<{ text: string }>>
   /**
    * 本地命令服务（AI / 脚本用）：监听主进程转来的命令请求。
    * 执行完用 `sendCommandResult` 送回结果；返回值是取消监听的函数。

@@ -145,6 +145,38 @@ export async function openProject(): Promise<IoResult> {
  * 失败时**不会**动当前文档：先完整读取 + 解析成功，再替换 store，
  * 因此不需要回滚逻辑，也不会出现「打开失败但工程已被清空」的情况。
  */
+/**
+ * 把 AI 接入所需的「说明书 + 连接信息」写出到工程目录：
+ * - hao2d-ai-command-api.md：命令接口文档（让 AI 工具开箱即用地知道怎么调，免配置、免 MCP）
+ * - hao2d-ai-server.json：当前命令服务的 url + token（每次保存/打开刷新，因为 token 每次启动重新生成）
+ *
+ * 这样 Codex / CodeBuddy 这类在本工程目录里干活的 AI 工具，打开文件夹就能直接上手，
+ * 不用配 MCP、也不用手粘提示词。文档本身已说明「优先读工程目录下的 hao2d-ai-server.json」。
+ */
+const AI_API_DOC_NAME = 'hao2d-ai-command-api.md'
+const AI_SERVER_INFO_NAME = 'hao2d-ai-server.json'
+
+async function exportAiCompanionFiles(projectDir: string): Promise<void> {
+  if (!projectDir) return
+  const platform = getPlatform()
+  // 文档：原样拷贝（文档第 7 节已说明优先读工程目录下的 hao2d-ai-server.json）
+  const doc = await platform.aiCommandApiDoc()
+  if (doc.ok && doc.data.text.length > 0) {
+    await platform.writeText(joinPath(projectDir, AI_API_DOC_NAME), doc.data.text)
+  }
+  // 连接信息：命令服务在跑才写（拿得到当前有效、没过期的 url + token）
+  const mcp = await platform.aiMcpInfo()
+  if (mcp.ok && mcp.data.running) {
+    const payload = {
+      url: mcp.data.url,
+      token: mcp.data.token,
+      updatedAt: new Date().toISOString(),
+      note: '由 Hao2DEditor 在保存/打开工程时自动生成。编辑器关闭后命令服务停止、token 失效；重新打开编辑器并保存/打开工程即可刷新本文件。'
+    }
+    await platform.writeText(joinPath(projectDir, AI_SERVER_INFO_NAME), `${JSON.stringify(payload, null, 2)}\n`)
+  }
+}
+
 export async function openProjectAt(path: string): Promise<IoResult> {
   const platform = getPlatform()
   const text = await platform.readText(path)
@@ -190,6 +222,8 @@ export async function openProjectAt(path: string): Promise<IoResult> {
   })
   await platform.recentAdd(path)
   const suffix = parsed.skeletons.length > 1 ? `（${parsed.skeletons.length} 个骨架）` : ''
+  // 命令服务的 token 可能已变：刷新工程目录里的连接信息，让 AI 工具拿到有效凭证
+  await exportAiCompanionFiles(projectDir)
   return { ok: true, message: `已打开 ${baseName(path)}${suffix}`, warnings: parsed.warnings }
 }
 
@@ -241,6 +275,8 @@ export async function saveProject(saveAs: boolean): Promise<IoResult> {
   if (parts.length > 0) message += `（${parts.join('，')}）`
   if (copied.warnings.length > 0) message += `；${copied.warnings[0]}`
   if (copied.warnings.length > 0) console.warn('[hao2d] 图片复制告警：', copied.warnings)
+  // 把 AI 接入的说明书 + 连接信息写到工程目录（免配置、免 MCP 让 AI 工具上手）
+  await exportAiCompanionFiles(dirName(path))
   return { ok: true, message, warnings: copied.warnings.length > 0 ? copied.warnings : undefined }
 }
 

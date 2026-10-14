@@ -47,6 +47,16 @@ export function buildMenuTemplate(options: MenuTemplateOptions): MenuItemConstru
     }
   }
 
+  /**
+   * 「设置 / AI 接入」菜单项。
+   * macOS 放进 app 菜单（符合系统习惯，偏好设置紧跟「关于」）；
+   * 其它平台没有 app 菜单，仍留在文件菜单末尾，避免功能入口丢失。
+   */
+  const settingsItems: MenuItemConstructorOptions[] = [
+    item('设置…', 'app:settings', 'CmdOrCtrl+,'),
+    item('AI 接入…', 'app:aiIntegration')
+  ]
+
   const fileMenu: MenuItemConstructorOptions = {
     label: '文件',
     submenu: [
@@ -64,8 +74,7 @@ export function buildMenuTemplate(options: MenuTemplateOptions): MenuItemConstru
       item('导出 Unity…', 'project:exportHao2d', 'CmdOrCtrl+Shift+E'),
       item('导出 Spine…', 'project:exportSpine', 'CmdOrCtrl+Alt+E'),
       { type: 'separator' },
-      item('设置…', 'app:settings'),
-      { type: 'separator' },
+      ...(isMac ? [] : ([...settingsItems, { type: 'separator' }] as MenuItemConstructorOptions[])),
       isMac ? { role: 'close', label: '关闭窗口' } : { role: 'quit', label: '退出' }
     ]
   }
@@ -122,6 +131,8 @@ export function buildMenuTemplate(options: MenuTemplateOptions): MenuItemConstru
       label: appName,
       submenu: [
         { role: 'about', label: `关于 ${appName}` },
+        { type: 'separator' },
+        ...settingsItems,
         { type: 'separator' },
         { role: 'hide', label: '隐藏' },
         { role: 'hideOthers', label: '隐藏其他' },

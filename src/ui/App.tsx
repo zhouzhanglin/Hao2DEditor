@@ -101,6 +101,7 @@ import ExportDialog from '@ui/widgets/ExportDialog'
 import type { ExportMode } from '@ui/widgets/ExportDialog'
 import NewProjectDialog from '@ui/widgets/NewProjectDialog'
 import SettingsDialog from '@ui/widgets/SettingsDialog'
+import AiIntegrationDialog from '@ui/widgets/AiIntegrationDialog'
 import { deleteSelectedTrack, keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
 import { PPU, deleteMeshVertex } from '@editor/commands/authoringCommands'
 import { undoMeshBoundaryPoint } from '@editor/tools/authoringTools'
@@ -148,6 +149,8 @@ export default function App() {
   const [exportMode, setExportMode] = useState<ExportMode | null>(null)
   /** 全局设置弹窗（与工程无关、跨工程保留）：false = 未打开 */
   const [settingsOpen, setSettingsOpen] = useState(false)
+  /** AI 接入弹窗：false = 未打开 */
+  const [aiOpen, setAiOpen] = useState(false)
   const booted = useRef(false)
 
   const flash = useCallback((message: string) => {
@@ -437,6 +440,9 @@ export default function App() {
           return
         case 'app:settings':
           setSettingsOpen(true)
+          return
+        case 'app:aiIntegration':
+          setAiOpen(true)
           return
         case 'edit:undo': {
           /*
@@ -843,6 +849,8 @@ export default function App() {
       ) : null}
 
       {settingsOpen ? <SettingsDialog onClose={() => setSettingsOpen(false)} /> : null}
+
+      {aiOpen ? <AiIntegrationDialog onClose={() => setAiOpen(false)} /> : null}
     </div>
   )
 }

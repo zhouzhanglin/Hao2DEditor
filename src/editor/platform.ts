@@ -5,6 +5,7 @@ import type {
   Hao2dPreviewSession,
   ImageInfo,
   IpcResult,
+  McpInstallReport,
   SpinePreviewInfo,
   SpinePreviewSession
 } from '@shared/ipcTypes'
@@ -70,6 +71,12 @@ export interface Platform {
   /** 用系统默认浏览器打开链接（在线预览面板的「在浏览器打开」） */
   openExternal(url: string): Promise<void>
   onMenuCommand(cb: (command: string) => void): () => void
+  /** AI 接入：当前命令服务的 MCP 信息（是否在跑、带 token 的 MCP URL） */
+  aiMcpInfo(): Promise<IpcResult<{ running: boolean; mcpUrl: string; url: string; token: string }>>
+  /** AI 接入：把 MCP URL 写进已识别的 AI 客户端配置（一键安装） */
+  aiInstallMcp(): Promise<IpcResult<McpInstallReport>>
+  /** AI 接入：返回内置命令接口文档（docs/ai-command-api.md 内容），供写出到工程目录 */
+  aiCommandApiDoc(): Promise<IpcResult<{ text: string }>>
 }
 
 function unwrap<T>(result: IpcResult<T>, fallback: T): T {
@@ -212,6 +219,30 @@ class ElectronPlatform implements Platform {
 
   onMenuCommand(cb: (command: string) => void): () => void {
     return this.bridge.onMenuCommand(cb as never)
+  }
+
+  async aiMcpInfo(): Promise<IpcResult<{ running: boolean; mcpUrl: string; url: string; token: string }>> {
+    const call = this.bridge.aiMcpInfo
+    if (typeof call !== 'function') {
+      return { ok: false, error: '命令服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）' }
+    }
+    return call.call(this.bridge)
+  }
+
+  async aiInstallMcp(): Promise<IpcResult<McpInstallReport>> {
+    const call = this.bridge.aiInstallMcp
+    if (typeof call !== 'function') {
+      return { ok: false, error: '命令服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）' }
+    }
+    return call.call(this.bridge)
+  }
+
+  async aiCommandApiDoc(): Promise<IpcResult<{ text: string }>> {
+    const call = this.bridge.aiCommandApiDoc
+    if (typeof call !== 'function') {
+      return { ok: false, error: '命令服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）' }
+    }
+    return call.call(this.bridge)
   }
 }
 
@@ -385,6 +416,18 @@ class MemoryPlatform implements Platform {
 
   onMenuCommand(): () => void {
     return () => undefined
+  }
+
+  async aiMcpInfo(): Promise<IpcResult<{ running: boolean; mcpUrl: string; url: string; token: string }>> {
+    return { ok: false, error: '浏览器模式没有命令服务，请在桌面版里使用' }
+  }
+
+  async aiInstallMcp(): Promise<IpcResult<McpInstallReport>> {
+    return { ok: false, error: '浏览器模式没有命令服务，请在桌面版里使用' }
+  }
+
+  async aiCommandApiDoc(): Promise<IpcResult<{ text: string }>> {
+    return { ok: false, error: '浏览器模式没有命令服务，请在桌面版里使用' }
   }
 
   private async storeFile(file: File): Promise<string> {

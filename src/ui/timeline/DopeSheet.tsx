@@ -5,6 +5,18 @@ import type { KeySelector, TimelineTrack } from '@editor/timeline/model'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
+import { useModeStore } from '@editor/store/modeStore'
+
+/**
+ * 标记「本次选中来自时间轴内的点击」（点轨道行 / 点关键帧）。
+ * reveal 效果读到这个标记就**跳过**滚动 + 高亮 —— 否则点时间轴里的轨道，
+ * 列表会自己滚回顶 + 闪一下，既没必要也晃眼。
+ * 由 TimelinePanel 的 `selectTrack` 在改 selection 之前设置，reveal effect 消费一次后清掉。
+ */
+let skipReveal = false
+export function markTimelineSelection(): void {
+  skipReveal = true
+}
 import { playheadTime, usePlayheadStore } from '@editor/store/playheadStore'
 
 export interface DopeSheetProps {
@@ -280,6 +292,9 @@ export default function DopeSheet(props: DopeSheetProps) {
   const trackListRef = useRef<HTMLDivElement | null>(null)
   /** 刚打帧的轨道 id（短暂高亮） */
   const [flashTrackId, setFlashTrackId] = useState<string | null>(null)
+
+  /** 选中对象（骨骼 / 插槽）时短暂高亮的轨道组 id（整组：分组行 + 子通道行） */
+  const [revealId, setRevealId] = useState<string | null>(null)
   /**
    * 打帧（含右键菜单 / K / 时间轴右键选 display）后把该轨道滚进视野并闪一下。
    * 轨道多的时候新帧落在列表下方，不这么做会像「点了打关键帧但时间轴没反应」。
@@ -355,6 +370,43 @@ export default function DopeSheet(props: DopeSheetProps) {
     const scoped = smartFilter && filterTarget ? tracks.filter((track) => track.target === filterTarget) : tracks
     return scoped.filter((track) => !track.parentId || !collapsed.has(track.parentId))
   }, [tracks, collapsed, smartFilter, filterTarget])
+
+  /**
+   * 选中对象（骨骼 / 插槽）→ 把它的轨道组**滚到顶部**并**高亮一下背景**：
+   * 与层级树「定位」、打帧后的高亮同款体验。
+   *
+   * 只在 Animate 态有意义（轨道才有意义）；Pose 态整块右栏是收起的。
+   * 触发条件只认「选中对象的名字」—— 同对象内再点它的子通道不会改变名字，
+   * 也就不会反复把列表滚来滚去（点轨道行选对象也不会触发二次滚动）。
+   */
+  const mode = useModeStore((s) => s.mode)
+  const revealName =
+    mode === 'animate'
+      ? selection.kind === 'bone'
+        ? selection.bone
+        : selection.kind === 'slot' || selection.kind === 'attachment'
+          ? selection.slot
+          : ''
+      : ''
+  useEffect(() => {
+    // 消费「时间轴内点击」标记：点了时间轴里的轨道就不滚动 / 不闪（见 markTimelineSelection）
+    const fromTimeline = skipReveal
+    skipReveal = false
+    if (!revealName || fromTimeline) return
+    const group = visibleTracks.find((track) => track.isGroup && track.target === revealName)
+    if (!group) return
+    const row = trackListRef.current?.querySelector(`[data-track-id="${CSS.escape(group.id)}"]`)
+    // block: 'start' = 滚到滚动容器顶部可见（相当于显示在 timeline 最上面）
+    row?.scrollIntoView({ block: 'start' })
+    setRevealId(group.id)
+    const timer = window.setTimeout(() => setRevealId(null), 900)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealName, visibleTracks])
+
+  /** 某行是否处于「选中对象高亮」状态（分组行 / 它的子通道行都算） */
+  const isRevealed = (track: TimelineTrack): boolean =>
+    revealId !== null && (revealId === track.id || revealId === track.parentId)
 
   /** 同一轨道同一时间点的多通道关键帧合并成一个标记 */
   const markersByTrack = useMemo(
@@ -854,14 +906,16 @@ export default function DopeSheet(props: DopeSheetProps) {
                 type="button"
                 data-track-id={track.id}
                 className={[
-                  'relative flex w-full items-center gap-1 border-b border-line/40 pr-1.5 text-left text-3xs cursor-pointer',
+                  'relative flex w-full items-center gap-1 border-b border-line/40 pr-1.5 text-left text-3xs cursor-pointer transition-colors duration-200',
                   track.isGroup
                     ? 'bg-ink-900/50 font-semibold text-content-hi hover:bg-ink-700'
                     : trackActive
                       ? 'bg-accent-deep font-semibold text-white'
                       : 'text-content-mid hover:bg-ink-700',
                   // 刚打帧的行短暂高亮：帧大概率埋在列表下方，光靠滚动还不够醒目
-                  flashTrackId === track.id ? 'bg-accent/30' : ''
+                  flashTrackId === track.id ? 'bg-accent/30' : '',
+                  // 选中对象时整组短暂高亮（与打帧高亮同色系，但更淡，避免和通道选中撞色）
+                  isRevealed(track) ? 'bg-accent/25' : ''
                 ].join(' ')}
                 style={{ height: ROW_HEIGHT, paddingLeft: 5 + track.depth * 12 }}
                 title={
@@ -999,12 +1053,14 @@ export default function DopeSheet(props: DopeSheetProps) {
               <div
                 key={track.id}
                 className={[
-                  'relative border-b border-line/40',
+                  'relative border-b border-line/40 transition-colors duration-200',
                   track.isGroup
                     ? 'bg-ink-900/30'
                     : isTrackActive(track)
                       ? 'bg-accent/10'
-                      : ''
+                      : '',
+                  // 选中对象时整组短暂高亮：左列行首 + 右列关键帧行一起亮，一眼锁定
+                  isRevealed(track) ? 'bg-accent/25' : ''
                 ].join(' ')}
                 style={{ height: ROW_HEIGHT }}
                 onPointerDown={(event) => {

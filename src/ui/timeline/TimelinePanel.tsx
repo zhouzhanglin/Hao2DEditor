@@ -12,7 +12,7 @@ import { buildTimeline, lastKeyTime, setKeysTimes } from '@editor/timeline/model
 import { uniqueName } from '@editor/commands/authoringCommands'
 import { keyEventNow, keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
 import type { KeyKind, KeySelector, TimelineTrack } from '@editor/timeline/model'
-import DopeSheet from './DopeSheet'
+import DopeSheet, { markTimelineSelection } from './DopeSheet'
 import { CommitTextField } from '@ui/widgets/fields'
 
 export interface TimelinePanelProps {
@@ -532,6 +532,8 @@ function selectTrack(
   status: (text: string) => void,
   setTrack: (track: { kind: string; target: string; attachment: string; channel: string } | null) => void
 ): void {
+  // 来自时间轴内的点击：reveal 效果应当跳过滚动 + 高亮（避免列表自己滚回顶 + 闪）
+  markTimelineSelection()
   const suffix = track.isGroup || !track.channel ? '' : `（按 K 只给「${track.label}」打帧）`
 
   if (track.kind === 'bone') {

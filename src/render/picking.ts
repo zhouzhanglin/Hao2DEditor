@@ -3,12 +3,6 @@ import type { MeshBuildResult } from '@core/skin/meshBuilder'
 import type { AttachmentData } from '@core/model/types'
 
 /**
- * 骨骼原点圈在屏幕上的半径（px）。渲染（boneOverlay）与拾取（pickBoneHandle）
- * 共用同一数值，改一处即可保持一致。
- */
-export const BONE_ORIGIN_RADIUS = 6
-
-/**
  * 距离「打平」的判定容差（世界单位）：小于它就视为「一样近」。
  * 打平时统一让**索引更大**（= 更深）的骨骼胜出 —— 骨骼数组是父在前、子在后。
  */

@@ -18,6 +18,8 @@ import {
   GHOST_NEXT_COLOR,
   GHOST_PREV_COLOR
 } from '@render/overlays/boneOverlay'
+import { DEFAULT_BONE_STYLE } from '@render/overlays/boneStyle'
+import type { BoneOverlayStyle } from '@render/overlays/boneStyle'
 import { circlePolygon } from '@render/overlays/shapes'
 import type { GizmoDrawMode } from '@render/overlays/boneOverlay'
 import { drawMeshOverlay } from '@render/overlays/meshOverlay'
@@ -25,7 +27,6 @@ import { BRUSH_MODE_COLORS, brushModeColorValue, weightBoneColorMap } from '@cor
 import { BRUSH_FALLOFF_STOPS } from '@editor/commands/authoringCommands'
 import type { BrushMode } from '@editor/commands/authoringCommands'
 import {
-  BONE_ORIGIN_RADIUS,
   attachmentGizmoFrame,
   gizmoGeometry,
   pickAttachmentPixel,
@@ -189,6 +190,8 @@ export class EditorScene {
   /** 图片 alpha 缓存：附件像素级拾取用（纹理在 GPU 上读不出来，这里解码一份） */
   readonly imageAlpha = new ImageAlphaCache()
   readonly overlay = new Container()
+  /** 骨骼叠加层样式（「全局设置 → 骨骼样式」）：拾取容差与绘制共用同一份 */
+  private boneStyle: BoneOverlayStyle = { ...DEFAULT_BONE_STYLE }
 
   // 描边与填充必须分开（pixi v8 中 stroke 后的路径仍会被后续 fill 填充）
   private readonly meshStroke = new Graphics()
@@ -293,6 +296,16 @@ export class EditorScene {
     // 旧贴图是我们自己 new 出来的，换掉就没人引用了，销毁掉避免 GPU 资源泄漏
     if (prev && prev !== Texture.EMPTY && prev !== texture) prev.destroy(true)
     this.dirty = true
+  }
+
+  /**
+   * 骨骼叠加层样式（「全局设置 → 骨骼样式」，见 `boneStyle.ts`）。
+   * 与视口状态无关、也不进文档：改的只是视口里骨骼的长相，导出数据不受影响。
+   */
+  setBoneStyle(style: BoneOverlayStyle): void {
+    this.boneStyle = { ...DEFAULT_BONE_STYLE, ...style }
+    // 叠加层每帧都会重画，这里只保证画面真的刷新出来
+    this.markDirty()
   }
 
   /**
@@ -752,6 +765,7 @@ export class EditorScene {
   /**
    * 骨骼拾取：原点圈（移动）/ 骨骼体（旋转）。
    * 原点圈是屏幕恒定大小，按 zoom 换算成世界半径再判定；缩放走小坐标轴。
+   * 半径取设置里的「原点圈大小」（见 `boneStyle`）—— 画出来的圈和点得到的圈是同一个。
    *
    * 骨骼层关掉时**一律不命中**：看不见的操作区不该有反应（拖拽起点、悬停高亮同此），
    * 此时骨架里唯一可点的是「约束」准星（见 pickBoneAt 的兜底），选中后走 gizmo 拖拽
@@ -763,7 +777,7 @@ export class EditorScene {
       worldX,
       worldY,
       this.viewport.pixelsToWorld(8),
-      this.viewport.pixelsToWorld(BONE_ORIGIN_RADIUS),
+      this.viewport.pixelsToWorld(this.boneStyle.jointRadius),
       this.bundle.boneIndex[this.viewState.selectedBone] ?? -1
     )
   }
@@ -1475,7 +1489,9 @@ export class EditorScene {
         showSlots: false,
         hollowBones: this.hollowBones,
         // 正在拖拽新建骨骼：把待生成的骨骼画成虚线预览
-        pendingBone: state.pendingBone
+        pendingBone: state.pendingBone,
+        // 骨骼本体 / 原点圈的长相（「全局设置 → 骨骼样式」）
+        style: this.boneStyle
       })
     } else {
       this.boneStroke.clear()

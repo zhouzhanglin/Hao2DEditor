@@ -14,6 +14,7 @@ import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { usePlayheadStore } from '@editor/store/playheadStore'
 import { usePreviewStore } from '@editor/store/previewStore'
+import { useSettingsStore } from '@editor/store/settingsStore'
 import {
   baseBrushMode,
   brushModeFor,
@@ -194,6 +195,9 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       if (document === syncedDocument && selection.skin === syncedSkin && scene.runtime) return
       syncedDocument = document
       syncedSkin = selection.skin
+      // 骨骼样式也在这里补一次：视口重挂载会新建场景（样式回到默认），
+      // 而设置可能早于它改完 —— 这里保证新场景拿到的就是当前设置
+      scene.setBoneStyle(useSettingsStore.getState().boneStyle)
       scene.setDocument(document, selection.skin)
       void loadTextures(texturesRef.current, document, scene.imageAlpha)
     }
@@ -206,6 +210,20 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       unsubscribe()
       unsubscribeSelection()
     }
+  }, [])
+
+  /**
+   * 全局设置（骨骼样式）→ 场景。
+   *
+   * 与预览通道同一个套路：设置写在 settings store（高频、不进工程），
+   * 视口订阅它按需重画；不经过主 store，改动不会顺带触发文档同步那一套。
+   */
+  useEffect(() => {
+    const apply = (): void => {
+      sceneRef.current?.setBoneStyle(useSettingsStore.getState().boneStyle)
+    }
+    apply()
+    return useSettingsStore.subscribe(apply)
   }, [])
 
   /**

@@ -1,9 +1,11 @@
 import { Graphics } from 'pixi.js'
 import type { Skeleton } from '@core/model/skeleton'
 import type { Constraint } from '@core/model/constraints'
-import { BONE_ORIGIN_RADIUS, attachmentGizmoFrame, gizmoGeometry, unshearedWorldRot } from '@render/picking'
+import { attachmentGizmoFrame, gizmoGeometry, unshearedWorldRot } from '@render/picking'
 import type { GizmoGeometry } from '@render/picking'
 import { circlePolygon, DOT_SEGMENTS } from './shapes'
+import { boneStyleAlpha, boneStyleColor, DEFAULT_BONE_STYLE } from './boneStyle'
+import type { BoneOverlayStyle } from './boneStyle'
 
 export interface BoneOverlayOptions {
   /** 1 世界单位对应的屏幕像素的倒数（= 1 / zoom），用于保持描边视觉宽度恒定 */
@@ -27,15 +29,18 @@ export interface BoneOverlayOptions {
   pendingBone?: { x1: number; y1: number; x2: number; y2: number } | null
   /** 选中的附件操作器（Pose 态）：中心 = 附件 position，轴 = 附件旋转叠加宿主骨骼 */
   attachmentGizmo?: { boneIndex: number; position: { x: number; y: number }; rotation: number } | null
+  /**
+   * 骨骼本体 / 原点圈的外观（「全局设置 → 骨骼样式」，见 `boneStyle.ts`）。
+   * 不传 = 用默认值，也就是加设置之前的那一档。
+   */
+  style?: BoneOverlayStyle
 }
 
 // 覆盖层配色统一取 macOS 系统色（暗色版），与主题令牌同源。
 // 骨骼样式与 **Spine 编辑器**一致：本体浅灰半透明、关节处白圈；
 // 选中骨骼整根（本体 + 关节圈）换成青色高亮；旋转工具时原点外再套一个红圈。
-const COLOR_BONE = 0xccd2d8
-const COLOR_JOINT = 0xf2f5f8
-/** 选中骨骼的高亮色（青）：本体与关节圈一起换成它，一眼锁定选中的是哪根 */
-const COLOR_SELECTED = 0x4fe3f7
+// 其中本体 / 关节圈 / 选中这三档颜色与粗细、原点圈大小都能在「全局设置 → 骨骼样式」里改，
+// 默认值就是上面这一档（见 `boneStyle.ts` 的 `DEFAULT_BONE_STYLE`）。
 /** 旋转工具的圆环（红）：与 Spine 的旋转圈同义 —— 选中骨骼切到旋转时出现 */
 const COLOR_ROTATE_RING = 0xff453a
 /** 约束（连线 + 准星手柄）的红：与层级树里 IK 图标的颜色一致（HierarchyTree 的 IkConstraintIcon） */
@@ -346,6 +351,16 @@ export function drawBoneOverlay(
   const g = strokes
   const w = options.unitsPerPixel
   const boneCount = skeleton.boneCount
+  const style = options.style ?? DEFAULT_BONE_STYLE
+  // 颜色只解析一次（每根骨骼每帧都解析一遍纯属浪费）；透明度夹到 0..1
+  const fillColor = boneStyleColor(style.fillColor)
+  const strokeColor = boneStyleColor(style.strokeColor)
+  const selectedColor = boneStyleColor(style.selectedColor)
+  const fillAlpha = boneStyleAlpha(style.fillAlpha)
+  const strokeAlpha = boneStyleAlpha(style.strokeAlpha)
+  const jointRadius = Number.isFinite(style.jointRadius) ? Math.max(1, style.jointRadius) : DEFAULT_BONE_STYLE.jointRadius
+  // 骨骼本体半宽：占长度的百分比（原来写死 5%），下限 2.2px 保证极短骨骼也看得见
+  const widthRatio = Number.isFinite(style.widthPercent) ? Math.max(0.1, style.widthPercent) / 100 : 0.05
 
   // 骨骼体（四边形）+ 原点圈：「骨骼」开关关掉时整段跳过（约束手柄与骨骼是两个独立开关）
   for (let i = 0; options.showBones && i < boneCount; i++) {
@@ -357,11 +372,11 @@ export function drawBoneOverlay(
     const isHovered = i === options.hoveredBone
     /*
      * Spine 风格的状态色：普通 = 浅灰（绑定了权重的骨骼仍用「权重骨骼列表」的色，
-     * 与面板 / 饼图对上）；选中 = 整根换成青色高亮；悬停只压实透明度。
+     * 与面板 / 饼图对上）；选中 = 整根换成高亮色；悬停只压实透明度。
      */
     const weightColor = options.weightBoneColors?.get(i)
     const isWeight = weightColor !== undefined
-    const color = isSelected ? COLOR_SELECTED : (weightColor ?? COLOR_BONE)
+    const color = isSelected ? selectedColor : (weightColor ?? fillColor)
 
     /*
      * 骨骼方向按**不含剪切的旋转角**画（长度乘世界缩放）：剪切只作用于蒙皮 / 附件，
@@ -383,7 +398,7 @@ export function drawBoneOverlay(
       const py = dirX
       // Spine 风格风筝形：原点收成顶点 → 沿骨骼方向张开到两个肩点 → 收成末端尖端
       const shoulder = length * 0.09
-      const halfW = Math.min(Math.max(length * 0.05, w * 2.2), length * 0.4)
+      const halfW = Math.min(Math.max(length * widthRatio, w * 2.2), length * 0.4)
       const sx = x + dirX * shoulder
       const sy = y + dirY * shoulder
       const quad = [
@@ -397,26 +412,26 @@ export function drawBoneOverlay(
         sy - py * halfW // 右肩
       ]
       const hollow = options.hollowBones?.has(skeleton.asset.bones[i].name) ?? false
-      // 选中接近实心（0.95）、悬停次之（0.75）、普通 0.55 —— 三个档位只看透明度就知道谁被选中
-      if (!hollow) fills.poly(quad).fill({ color, alpha: isSelected ? 0.95 : isHovered ? 0.75 : 0.55 })
-      // 描边与填充同色：普通骨骼浅灰描边，选中整根青色（Spine 的选中高亮观感）
+      // 选中接近实心（0.95）、悬停次之（0.75）、普通用设置里的默认透明度 —— 三个档位只看透明度就知道谁被选中
+      if (!hollow) fills.poly(quad).fill({ color, alpha: isSelected ? 0.95 : isHovered ? 0.75 : fillAlpha })
+      // 描边色与填充色分开设（默认同色）：普通骨骼浅灰描边，选中整根高亮色
       strokes.poly(quad).stroke({
         width: w * (isSelected ? 2.2 : isWeight ? 1.5 : 1.2),
-        color,
-        alpha: hollow || isSelected || isHovered ? 1 : 0.9
+        color: isSelected ? selectedColor : (weightColor ?? strokeColor),
+        alpha: hollow || isSelected || isHovered ? 1 : strokeAlpha
       })
 
     }
 
-    // 原点（骨骼头）画一个圈：空心白环（Spine 风格），选中换成青色并画粗一点。
-    // 半径与拾取用的 BONE_ORIGIN_RADIUS 一致（拖这个圈 = 移动骨骼）
-    const r = (isSelected ? BONE_ORIGIN_RADIUS + 1.5 : BONE_ORIGIN_RADIUS - 0.5) * w
+    // 原点（骨骼头）画一个圈：空心环（Spine 风格），选中换成高亮色并画粗一点。
+    // 半径取设置里的「原点圈大小」（屏幕像素），与拾取容差同一个值（拖这个圈 = 移动骨骼）
+    const r = (isSelected ? jointRadius + 1.5 : jointRadius - 0.5) * w
     strokes
       .poly(circlePolygon(x, y, r))
       .stroke({
         width: w * (isSelected ? 2.2 : 1.8),
-        color: isSelected ? COLOR_SELECTED : (weightColor ?? COLOR_JOINT),
-        alpha: isSelected || isHovered ? 1 : 0.9
+        color: isSelected ? selectedColor : (weightColor ?? strokeColor),
+        alpha: isSelected || isHovered ? 1 : strokeAlpha
       })
   }
 

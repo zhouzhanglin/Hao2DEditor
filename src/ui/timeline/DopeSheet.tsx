@@ -372,6 +372,9 @@ export default function DopeSheet(props: DopeSheetProps) {
    * 只在 Animate 态有意义（轨道才有意义）；Pose 态整块右栏是收起的。
    * 触发条件只认「选中对象的名字」—— 同对象内再点它的子通道不会改变名字，
    * 也就不会反复把列表滚来滚去（点轨道行选对象也不会触发二次滚动）。
+   *
+   * **智能过滤开着时整个跳过**：那时列表里只剩选中对象自己的轨道，本来就在最上面，
+   * 滚动与高亮都是白做，且会和用户当下的滚动打架。
    */
   const mode = useModeStore((s) => s.mode)
   const revealName =
@@ -401,6 +404,14 @@ export default function DopeSheet(props: DopeSheetProps) {
     // 点了时间轴里的轨道：这次不滚 / 不闪，但记成「已处理」——
     // 否则紧接着的轨道列表变动（例如打帧新建颜色轨）会把同一次选中又滚一遍
     if (fromTimeline) {
+      revealedRef.current = revealName
+      return
+    }
+    // 智能过滤开着时，列表里只剩选中对象自己的轨道，它本来就在最上面 ——
+    // 再「滚到顶部 + 闪一下」纯属白做，还会和用户当下的滚动打架。
+    // 同样记成「已处理」：不记的话关掉过滤恢复完整列表时 `revealedRef` 里还是旧名字，
+    // 会当场跳一下，看起来像「关过滤」这个按钮顺带干了别的事
+    if (smartFilter) {
       revealedRef.current = revealName
       return
     }

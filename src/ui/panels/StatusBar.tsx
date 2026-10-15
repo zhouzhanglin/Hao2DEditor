@@ -1,4 +1,5 @@
 import { usePlayheadStore } from '@editor/store/playheadStore'
+import { t } from '@i18n'
 
 export interface StatusBarProps {
   stats: {
@@ -38,22 +39,22 @@ export default function StatusBar({
   return (
     <footer className="flex h-[22px] items-center gap-3 border-t border-line bg-ink-800 px-2 text-2xs text-content-lo">
       <span className="flex items-center gap-2 font-mono">
-        <Stat label="骨骼" value={stats.bones} />
-        <Stat label="插槽" value={stats.slots} />
-        <Stat label="约束" value={stats.constraints} />
-        <Stat label="顶点" value={stats.vertices} />
-        <Stat label="三角面" value={stats.triangles} />
+        <Stat label={t('骨骼')} value={stats.bones} />
+        <Stat label={t('插槽')} value={stats.slots} />
+        <Stat label={t('约束')} value={stats.constraints} />
+        <Stat label={t('顶点')} value={stats.vertices} />
+        <Stat label={t('三角面')} value={stats.triangles} />
         {stats.texturesTotal > 0 ? (
           // 只在缺图时标红：一眼看出「模型画成白块」是纹理没加载，而不是几何有问题
           <span
             className={stats.texturesLoaded < stats.texturesTotal ? 'flex items-baseline gap-1 text-warn' : 'flex items-baseline gap-1'}
             title={
               stats.texturesLoaded < stats.texturesTotal
-                ? `有 ${stats.texturesTotal - stats.texturesLoaded} 张图片没加载出纹理，视口里会显示为白块`
-                : '图片纹理全部就绪'
+                ? t('有 {0} 张图片没加载出纹理，视口里会显示为白块', stats.texturesTotal - stats.texturesLoaded)
+                : t('图片纹理全部就绪')
             }
           >
-            <span className="text-content-lo">纹理</span>
+            <span className="text-content-lo">{t('纹理')}</span>
             <span className="text-content-mid">
               {stats.texturesLoaded}/{stats.texturesTotal}
             </span>
@@ -80,7 +81,7 @@ export default function StatusBar({
             </span>
           </>
         ) : (
-          <span className="text-content-lo">未选择动画</span>
+          <span className="text-content-lo">{t('未选择动画')}</span>
         )}
       </span>
     </footer>

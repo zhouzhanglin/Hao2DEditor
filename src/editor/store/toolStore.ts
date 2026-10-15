@@ -1,5 +1,6 @@
 
 import { create } from 'zustand'
+import { t } from '@i18n'
 
 /**
  * 编辑工具。**顶点编辑只有一个工具**（`ffd`）：Pose 态它就是「网格工具(M)」，
@@ -74,18 +75,23 @@ export interface BrushState {
  */
 export type GizmoMode = 'move' | 'rotate' | 'scale' | 'shear'
 
-/** 小坐标轴工具顺序（快捷键与工具栏共用，改一处即可） */
-export const GIZMO_ORDER: ReadonlyArray<{ mode: GizmoMode; key: string; label: string; hint: string }> = [
-  { mode: 'move', key: 'W', label: '移动', hint: '移动骨骼：拖 X/Y 轴只走单轴，拖中间方块自由移动；Shift 拖动改位移（Pose 改 setup / Animate 写关键帧）' },
-  { mode: 'rotate', key: 'E', label: '旋转', hint: '旋转骨骼：拖圆环或骨骼本体都行' },
-  { mode: 'scale', key: 'R', label: '缩放', hint: '缩放骨骼：X 轴改长度、Y 轴改粗细，拖中间方块等比缩放' },
-  {
-    mode: 'shear',
-    key: 'T',
-    label: '斜切',
-    hint: '斜切骨骼：选中骨骼会被包围盒框住，拖动包围盒的边即可斜切（上下边横向拖改 shearY，左右边纵向拖改 shearX）'
-  }
-]
+/**
+ * 小坐标轴工具顺序（快捷键与工具栏共用，改一处即可）。
+ * 文案随语言切换，所以是函数不是常量。
+ */
+export function gizmoOrder(): Array<{ mode: GizmoMode; key: string; label: string; hint: string }> {
+  return [
+    { mode: 'move', key: 'W', label: t('移动'), hint: t('移动骨骼：拖 X/Y 轴只走单轴，拖中间方块自由移动；Shift 拖动改位移（Pose 改 setup / Animate 写关键帧）') },
+    { mode: 'rotate', key: 'E', label: t('旋转'), hint: t('旋转骨骼：拖圆环或骨骼本体都行') },
+    { mode: 'scale', key: 'R', label: t('缩放'), hint: t('缩放骨骼：X 轴改长度、Y 轴改粗细，拖中间方块等比缩放') },
+    {
+      mode: 'shear',
+      key: 'T',
+      label: t('斜切'),
+      hint: t('斜切骨骼：选中骨骼会被包围盒框住，拖动包围盒的边即可斜切（上下边横向拖改 shearY，左右边纵向拖改 shearX）')
+    }
+  ]
+}
 
 /**
  * 网格工具（Pose 态的「网格工具 M」）的**子工具**：决定鼠标在网格上做什么。
@@ -105,40 +111,43 @@ export type MeshSubtool = 'edit' | 'add' | 'remove' | 'boundary' | 'rewire'
 /**
  * 子工具图标条的顺序与文案（工具条、状态提示共用一处，改一处即可）。
  * `divider` 标记「与上一项之间画一条分隔线」—— 前三个是顶点级操作，后两个是拓扑级。
+ * 文案随语言切换，所以是函数不是常量。
  */
-export const MESH_SUBTOOLS: ReadonlyArray<{
+export function meshSubtools(): Array<{
   id: MeshSubtool
   label: string
   hint: string
   divider?: boolean
-}> = [
-  {
-    id: 'edit',
-    label: '编辑顶点',
-    hint: '编辑顶点（默认）：拖动顶点改网格几何；Pose 态改的是绑定网格，贴图留在原地'
-  },
-  {
-    id: 'add',
-    label: '添加顶点',
-    hint: '添加顶点：点网格的边或三角形内部插入一个顶点（UV / 权重按位置插值，等同按住 Alt 点击）'
-  },
-  {
-    id: 'remove',
-    label: '删除顶点',
-    hint: '删除顶点：点一个顶点把它删掉，引用它的三角形会就地重新三角化补上'
-  },
-  {
-    id: 'boundary',
-    label: '自己绘制边界',
-    hint: '自己绘制边界：沿着轮廓依次点击（点不能超出图片的 region 框，画的时候只显示 region 框与轮廓，网格与顶点临时隐藏）；点回起点（第一个大圆点）或按右键即收尾闭合（闭合会丢弃原网格点、绑定权重与 FFD 关键帧），闭合后回到「编辑顶点」；点错了按 Ctrl+Z 撤回上一个点（此时 Ctrl+Z 只撤点，不动文档）',
-    divider: true
-  },
-  {
-    id: 'rewire',
-    label: '自定义布线',
-    hint: '自定义布线：从一个顶点按住拖到另一个顶点松手，即可在这两点之间连一条线（沿这条线重新三角化）'
-  }
-]
+}> {
+  return [
+    {
+      id: 'edit',
+      label: t('编辑顶点'),
+      hint: t('编辑顶点（默认）：拖动顶点改网格几何；Pose 态改的是绑定网格，贴图留在原地')
+    },
+    {
+      id: 'add',
+      label: t('添加顶点'),
+      hint: t('添加顶点：点网格的边或三角形内部插入一个顶点（UV / 权重按位置插值，等同按住 Alt 点击）')
+    },
+    {
+      id: 'remove',
+      label: t('删除顶点'),
+      hint: t('删除顶点：点一个顶点把它删掉，引用它的三角形会就地重新三角化补上')
+    },
+    {
+      id: 'boundary',
+      label: t('自己绘制边界'),
+      hint: t('自己绘制边界：沿着轮廓依次点击（点不能超出图片的 region 框，画的时候只显示 region 框与轮廓，网格与顶点临时隐藏）；点回起点（第一个大圆点）或按右键即收尾闭合（闭合会丢弃原网格点、绑定权重与 FFD 关键帧），闭合后回到「编辑顶点」；点错了按 Ctrl+Z 撤回上一个点（此时 Ctrl+Z 只撤点，不动文档）'),
+      divider: true
+    },
+    {
+      id: 'rewire',
+      label: t('自定义布线'),
+      hint: t('自定义布线：从一个顶点按住拖到另一个顶点松手，即可在这两点之间连一条线（沿这条线重新三角化）')
+    }
+  ]
+}
 
 /**
  * 点「自己绘制边界」时那个确认弹窗的**正文**：这个子工具是整块重画，进去之前必须把
@@ -152,8 +161,9 @@ export const MESH_SUBTOOLS: ReadonlyArray<{
  * 2. 所有绑定权重清空（`vertices[].weights` 与 `bones` 一起清），网格回到刚性；
  * 3. 该附件在各动画里的 FFD 关键帧（时间轴上的那些帧）全部删除。
  */
-export const BOUNDARY_REDRAW_WARNING =
-  '重绘网格边线会删除当前选中图片上所有已添加的网格点，删除所有绑定的骨骼权重，并删除相对应的时间轴关键帧。\n\n您确定要手动重绘网格边线吗？'
+export function boundaryRedrawWarning(): string {
+  return t('重绘网格边线会删除当前选中图片上所有已添加的网格点，删除所有绑定的骨骼权重，并删除相对应的时间轴关键帧。\n\n您确定要手动重绘网格边线吗？')
+}
 
 /**
  * 视口叠加层开关。

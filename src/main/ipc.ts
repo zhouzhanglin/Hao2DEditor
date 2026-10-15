@@ -11,6 +11,8 @@ import {
 } from './previewServer'
 import { commandServerInfo } from './commandServer'
 import { installMcpIntoClients } from './aiClientConfig'
+import { normalizeLocale, setLocale } from './i18n'
+import { buildAppMenu } from './menu'
 import { IPC } from '@shared/ipcTypes'
 import type {
   BatchFile,
@@ -114,6 +116,17 @@ export function registerIpcHandlers(): void {
     fs.safe(async () => {
       const text = await readCommandApiDoc()
       return { text }
+    })
+  )
+
+  // 语言：把系统语言标签交给渲染进程（首启判定界面语言用）
+  ipcMain.handle(IPC.i18nSystemLocale, () => fs.safe(() => app.getLocale()))
+
+  // 语言：渲染进程切语言后同步过来，主进程据此重建应用菜单
+  ipcMain.handle(IPC.i18nSetLocale, (_e, locale: string) =>
+    fs.safe(() => {
+      setLocale(normalizeLocale(locale))
+      buildAppMenu()
     })
   )
 }

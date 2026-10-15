@@ -8,6 +8,7 @@ const alias = {
   '@render': resolve(__dirname, 'src/render'),
   '@editor': resolve(__dirname, 'src/editor'),
   '@ui': resolve(__dirname, 'src/ui'),
+  '@i18n': resolve(__dirname, 'src/i18n'),
   '@shared': resolve(__dirname, 'src/shared')
 }
 

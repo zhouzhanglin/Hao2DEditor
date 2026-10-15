@@ -1,15 +1,19 @@
 import { Bone, Clapperboard } from 'lucide-react'
 import type { EditorMode } from '@editor/store/modeStore'
+import { t } from '@i18n'
 
 export interface ModeSwitchProps {
   mode: EditorMode
   onChange: (mode: EditorMode) => void
 }
 
-const ITEMS: Array<{ mode: EditorMode; label: string; hint: string; icon: typeof Bone }> = [
-  { mode: 'pose', label: 'Pose', hint: '绑定状态：编辑 setup 姿态、网格与权重（Tab 切换）', icon: Bone },
-  { mode: 'animate', label: 'Animate', hint: '动画编辑状态：时间轴与关键帧（Tab 切换）', icon: Clapperboard }
-]
+/** 两段式开关的文案随语言切换，故做成函数 */
+function items(): Array<{ mode: EditorMode; label: string; hint: string; icon: typeof Bone }> {
+  return [
+    { mode: 'pose', label: t('准备'), hint: t('绑定状态：编辑 setup 姿态、网格与权重（Tab 切换）'), icon: Bone },
+    { mode: 'animate', label: t('动画'), hint: t('动画编辑状态：时间轴与关键帧（Tab 切换）'), icon: Clapperboard }
+  ]
+}
 
 /**
  * 视口左上角的 Pose / Animate 二段式开关。
@@ -19,7 +23,7 @@ const ITEMS: Array<{ mode: EditorMode; label: string; hint: string; icon: typeof
 export default function ModeSwitch({ mode, onChange }: ModeSwitchProps) {
   return (
     <div className="pointer-events-auto absolute left-3 top-3 z-20 flex items-center gap-0.5 rounded-[7px] border border-white/10 bg-ink-900/70 p-0.5 shadow-lg shadow-black/30 backdrop-blur-md">
-      {ITEMS.map(({ mode: item, label, hint, icon: Icon }) => {
+      {items().map(({ mode: item, label, hint, icon: Icon }) => {
         const active = mode === item
         return (
           <button

@@ -15,6 +15,7 @@ import type { SpinePreviewInfo } from '@shared/ipcTypes'
 import { collectHao2dWarnings } from '@core/codec/hao2dWriter'
 import { loadImageElement } from '@render/imageLoader'
 import { useDialogDrag } from './dialogDrag'
+import { t } from '@i18n'
 
 /** 三套导出目标：自定义运行时数据 / 给 Unity 的 .hao2d / Spine 4.3 骨骼数据 */
 export type ExportMode = 'runtime' | 'unity' | 'spine'
@@ -33,11 +34,9 @@ const MAX_PREVIEW_HEIGHT = 320
 const SCALE_PRESETS = [0.25, 0.5, 0.75, 1]
 const SIZE_PRESETS = [1024, 2048, 4096]
 
-/** 三种导出模式的标题 */
-const MODE_TITLE: Record<ExportMode, string> = {
-  runtime: '导出运行时数据',
-  unity: '导出 Unity',
-  spine: '导出 Spine'
+/** 三种导出模式的标题；文案随语言切换，故是函数 */
+function modeTitle(mode: ExportMode): string {
+  return t({ runtime: '导出运行时数据', unity: '导出 Unity', spine: '导出 Spine' }[mode])
 }
 
 /** 二维码的显示边长（按整数格 + 设备像素绘制，缩放后依然锐利） */
@@ -163,7 +162,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     setPicked((prev) => {
       if (!prev.includes(index)) return [...prev, index].sort((a, b) => a - b)
       if (prev.length <= 1) {
-        onStatus?.('至少要勾选一个骨架')
+        onStatus?.(t('至少要勾选一个骨架'))
         return prev
       }
       return prev.filter((item) => item !== index)
@@ -290,7 +289,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
       })
       const first = bundles[0]
       if (!first) {
-        setPreviewError('没有可预览的骨架')
+        setPreviewError(t('没有可预览的骨架'))
         return
       }
       const result = await getPlatform().startSpinePreview(
@@ -312,7 +311,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
       )
       if (!result.ok) {
         setPreviewError(result.error)
-        onStatus?.(`预览失败：${result.error}`)
+        onStatus?.(t('预览失败：{0}', result.error))
         return
       }
       setPreview(result.data)
@@ -321,8 +320,8 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
       setQrUrl(result.data.lanUrls[0] ?? result.data.url)
       onStatus?.(
         result.data.lanUrls.length > 0
-          ? `预览已启动：手机扫码，或访问 ${result.data.lanUrls[0]}`
-          : '预览已启动，但没找到局域网地址（手机可能连不上）'
+          ? t('预览已启动：手机扫码，或访问 {0}', result.data.lanUrls[0])
+          : t('预览已启动，但没找到局域网地址（手机可能连不上）')
       )
     } catch (err) {
       /*
@@ -331,7 +330,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
        */
       const message = err instanceof Error ? err.message : String(err)
       setPreviewError(message)
-      onStatus?.(`预览失败：${message}`)
+      onStatus?.(t('预览失败：{0}', message))
     } finally {
       setPreviewBusy(false)
     }
@@ -346,7 +345,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     })
     const pack = await buildHao2dPreviewBundles(previewPlan)
     if (pack.skeletons.length === 0) {
-      setPreviewError('没有可预览的骨架')
+      setPreviewError(t('没有可预览的骨架'))
       return
     }
     const result = await getPlatform().startHao2dPreview(
@@ -369,7 +368,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     )
     if (!result.ok) {
       setPreviewError(result.error)
-      onStatus?.(`预览失败：${result.error}`)
+      onStatus?.(t('预览失败：{0}', result.error))
       return
     }
     setPreview(result.data)
@@ -378,8 +377,8 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     setQrUrl(result.data.lanUrls[0] ?? result.data.url)
     onStatus?.(
       result.data.lanUrls.length > 0
-        ? `预览已启动（hao2d 运行时）：手机扫码，或访问 ${result.data.lanUrls[0]}`
-        : '预览已启动，但没找到局域网地址（手机可能连不上）'
+        ? t('预览已启动（hao2d 运行时）：手机扫码，或访问 {0}', result.data.lanUrls[0])
+        : t('预览已启动，但没找到局域网地址（手机可能连不上）')
     )
   }
 
@@ -393,24 +392,24 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     setPreviewWarnings([])
     setPreviewError('')
     setPreviewKind('spine')
-    onStatus?.(result.ok ? '已停止在线预览' : `停止预览失败：${result.error}`)
+    onStatus?.(result.ok ? t('已停止在线预览') : t('停止预览失败：{0}', result.error))
   }
 
   const copyLocalUrl = async (): Promise<void> => {
     try {
       await navigator.clipboard.writeText(preview?.url ?? '')
-      onStatus?.('本机链接已复制')
+      onStatus?.(t('本机链接已复制'))
     } catch {
-      onStatus?.('复制失败，请手动选中上面的地址复制')
+      onStatus?.(t('复制失败，请手动选中上面的地址复制'))
     }
   }
 
   const copyQrUrl = async (): Promise<void> => {
     try {
       await navigator.clipboard.writeText(qrUrl)
-      onStatus?.('手机扫码链接已复制')
+      onStatus?.(t('手机扫码链接已复制'))
     } catch {
-      onStatus?.('复制失败，请手动选中上面的地址复制')
+      onStatus?.(t('复制失败，请手动选中上面的地址复制'))
     }
   }
 
@@ -418,7 +417,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     const picked = await getPlatform().pickFiles({
       directory: true,
       multi: false,
-      title: '选择导出目录（会在里面新建工程文件夹）'
+      title: t('选择导出目录（会在里面新建工程文件夹）')
     })
     const next = picked[0]
     if (!next) return
@@ -428,7 +427,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
 
   const exportNow = async (): Promise<void> => {
     if (!dir) {
-      onStatus?.('请先选择导出目录')
+      onStatus?.(t('请先选择导出目录'))
       return
     }
     setBusy(true)
@@ -476,38 +475,49 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
         {/* 标题栏 */}
         <div className="flex h-[30px] shrink-0 items-center gap-2 border-b border-line bg-ink-700 px-2.5" {...handleProps}>
           <Package size={13} className="text-accent" />
-          <span className="text-panel font-semibold text-content-hi">{MODE_TITLE[mode]}</span>
+          <span className="text-panel font-semibold text-content-hi">{modeTitle(mode)}</span>
           <span className="hao-label ml-1">
-            {pages.length > 0 ? `共 ${pages.length} 页 · ${totalBlocks} 张图片` : '没有可导出的图片'}
+            {pages.length > 0
+              ? t('共 {0} 页 · {1} 张图片', [pages.length, totalBlocks])
+              : t('没有可导出的图片')}
           </span>
-          <button type="button" title="关闭（Esc）" className="hao-tool-button ml-auto" onClick={onClose}>
+          <button
+            type="button"
+            title={t('关闭（Esc）')}
+            className="hao-tool-button ml-auto"
+            onClick={onClose}
+          >
             <X size={13} />
           </button>
         </div>
 
         {/* 导出目录 */}
         <div className="flex shrink-0 items-center gap-2 border-b border-line/60 px-2.5 py-2">
-          <span className="hao-label w-[54px] shrink-0">导出目录</span>
+          <span className="hao-label w-[54px] shrink-0">{t('导出目录')}</span>
           <div
             className="hao-field flex min-w-0 flex-1 items-center truncate text-content-mid"
-            title={dir || '尚未选择'}
+            title={dir || t('尚未选择')}
           >
-            {dir || '尚未选择（点右侧按钮选一个目录）'}
+            {dir || t('尚未选择（点右侧按钮选一个目录）')}
           </div>
           <button type="button" className="hao-btn shrink-0" onClick={() => void pickDir()}>
-            <FolderOpen size={12} /> 选择…
+            <FolderOpen size={12} /> {t('选择…')}
           </button>
         </div>
 
         {/* 导出骨架：一个项目可以有多个骨架，这里勾选要导出的（默认全选） */}
         <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-line/60 px-2.5 py-2">
-          <span className="hao-label w-[54px] shrink-0">导出骨架</span>
+          <span className="hao-label w-[54px] shrink-0">{t('导出骨架')}</span>
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
             {skeletons.map((skeleton, index) => (
               <label
                 key={`${skeleton.armatureName}-${index}`}
                 className="flex cursor-pointer items-center gap-1 rounded-[4px] border border-line/60 px-1.5 py-[2px] text-3xs text-content-mid hover:bg-ink-700"
-                title={`${skeleton.armatureName}（${skeleton.bones.length} 骨骼 / ${skeleton.animations.length} 动画）`}
+                title={t('{0}（{1} 骨骼 / {2} 动画）', [
+                  skeleton.armatureName,
+                  skeleton.bones.length,
+                  skeleton.animations.length
+                ])}
               >
                 <input
                   type="checkbox"
@@ -523,19 +533,19 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
             <button
               type="button"
               className="hao-btn h-[18px] px-1.5 text-3xs"
-              title="勾选全部骨架"
+              title={t('勾选全部骨架')}
               onClick={() => setPicked(skeletons.map((_, index) => index))}
             >
-              全选
+              {t('全选')}
             </button>
             <button
               type="button"
               className="hao-btn h-[18px] px-1.5 text-3xs"
-              title="只勾选当前编辑的骨架"
+              title={t('只勾选当前编辑的骨架')}
               disabled={picked.length === 1 && picked[0] === activeSkeleton}
               onClick={() => setPicked([activeSkeleton])}
             >
-              仅当前
+              {t('仅当前')}
             </button>
           </div>
         </div>
@@ -544,26 +554,41 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
         <div className="shrink-0 border-b border-line/60 px-2.5 py-1.5">
           {mode === 'spine' ? (
             <span className="hao-label">
-              导出时会在所选目录内新建 <span className="text-accent">{spineBase}/</span> 文件夹（目录、图集名与图集页名都用骨架名
-              「<span className="text-accent">{plan.skeletons[0]?.name ?? spineBase}</span>」），产物都放在里面：
-              {spineBase}.json / {spineBase}.atlas{atlasTxt ? '.txt' : ''} / {pages.length} 张图集页
+              {t('导出时会在所选目录内新建')} <span className="text-accent">{spineBase}/</span>{' '}
+              {t('文件夹（目录、图集名与图集页名都用骨架名「')}
+              <span className="text-accent">{plan.skeletons[0]?.name ?? spineBase}</span>
+              {t('」），产物都放在里面：')}
+              {spineBase}.json / {spineBase}.atlas{atlasTxt ? '.txt' : ''} / {t('{0} 张图集页', pages.length)}
               {copyPages > 0
-                ? `；其中 ${copyPages} 张本来就是图集（原图整页复制，逐字节照搬）`
+                ? t('；其中 {0} 张本来就是图集（原图整页复制，逐字节照搬）', copyPages)
                 : ''}
             </span>
           ) : mode === 'unity' ? (
             <span className="hao-label">
-              导出时会在所选目录内新建 <span className="text-accent">{plan.stem}/</span> 文件夹（目录、图集页名与材质名都用项目名
-              「<span className="text-accent">{projectName}</span>」；每个 .hao2d 用各自骨架名），产物都放在里面：
-              {plan.skeletons.length} 个骨架各自一个 .hao2d / 共用 {pages.length} 张图集页与 {pages.length} 个材质（Hao2D/Sprite）
-              {copyPages > 0 ? `；其中 ${copyPages} 张本来就是图集（原图整页复制，不重打包、不重编码）` : ''}
+              {t('导出时会在所选目录内新建')} <span className="text-accent">{plan.stem}/</span>{' '}
+              {t('文件夹（目录、图集页名与材质名都用项目名「')}
+              <span className="text-accent">{projectName}</span>
+              {t('」；每个 .hao2d 用各自骨架名），产物都放在里面：')}
+              {t('{0} 个骨架各自一个 .hao2d / 共用 {1} 张图集页与 {2} 个材质（Hao2D/Sprite）', [
+                plan.skeletons.length,
+                pages.length,
+                pages.length
+              ])}
+              {copyPages > 0
+                ? t('；其中 {0} 张本来就是图集（原图整页复制，不重打包、不重编码）', copyPages)
+                : ''}
             </span>
           ) : (
             <span className="hao-label">
-              导出时会在所选目录内新建 <span className="text-accent">{plan.stem}/</span> 文件夹（目录、图集名与图集页名都用项目名
-              「<span className="text-accent">{projectName}</span>」），产物都放在里面：
-              {listFiles(plan.skeletons.map((entry) => entry.fileName))} / 共用 {plan.atlasName} / {pages.length} 张图集页
-              {copyPages > 0 ? `；其中 ${copyPages} 张本来就是图集（原图整页复制，不重打包、不重编码）` : ''}
+              {t('导出时会在所选目录内新建')} <span className="text-accent">{plan.stem}/</span>{' '}
+              {t('文件夹（目录、图集名与图集页名都用项目名「')}
+              <span className="text-accent">{projectName}</span>
+              {t('」），产物都放在里面：')}
+              {listFiles(plan.skeletons.map((entry) => entry.fileName))} /{' '}
+              {t('共用 {0}', plan.atlasName)} / {t('{0} 张图集页', pages.length)}
+              {copyPages > 0
+                ? t('；其中 {0} 张本来就是图集（原图整页复制，不重打包、不重编码）', copyPages)
+                : ''}
             </span>
           )}
         </div>
@@ -571,33 +596,33 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
         {/* 参数区 */}
         <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-2.5 py-2">
           <div className="flex items-center gap-2">
-            <span className="hao-label shrink-0">图集范围</span>
+            <span className="hao-label shrink-0">{t('图集范围')}</span>
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                title="图集里装上项目里所有骨架用到的图（默认）"
+                title={t('图集里装上项目里所有骨架用到的图（默认）')}
                 className={['hao-btn h-[18px] px-1.5 text-3xs', atlasScope === 'all' ? 'hao-btn-accent' : ''].join(' ')}
                 onClick={() => setAtlasScope('all')}
               >
-                所有骨架用到的图
+                {t('所有骨架用到的图')}
               </button>
               <button
                 type="button"
-                title="图集里只装这次要导出的骨架用到的图"
+                title={t('图集里只装这次要导出的骨架用到的图')}
                 className={[
                   'hao-btn h-[18px] px-1.5 text-3xs',
                   atlasScope === 'selected' ? 'hao-btn-accent' : ''
                 ].join(' ')}
                 onClick={() => setAtlasScope('selected')}
               >
-                只含选中骨架用到的图
+                {t('只含选中骨架用到的图')}
               </button>
             </div>
           </div>
 
           {!allAtlas && (
             <div className="flex items-center gap-2">
-              <span className="hao-label w-[54px] shrink-0">图集缩放</span>
+              <span className="hao-label w-[54px] shrink-0">{t('图集缩放')}</span>
               <input
                 type="range"
                 min={0.1}
@@ -627,12 +652,12 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
           )}
           {allAtlas ? (
             <div className="hao-label text-content-lo">
-              源图已是图集（整页复制，不重打包），图集缩放不生效，已隐藏。
+              {t('源图已是图集（整页复制，不重打包），图集缩放不生效，已隐藏。')}
             </div>
           ) : null}
 
           <div className="flex items-center gap-2">
-            <span className="hao-label shrink-0">单页最大</span>
+            <span className="hao-label shrink-0">{t('单页最大')}</span>
             <div className="flex items-center gap-1">
               {SIZE_PRESETS.map((preset) => (
                 <button
@@ -652,7 +677,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
             {mode === 'spine' && (
               <label
                 className="ml-1 flex cursor-pointer items-center gap-1 rounded-[4px] border border-line/60 px-1.5 py-[2px] text-3xs text-content-mid hover:bg-ink-700"
-                title="在 atlas 文件名后追加 .txt，写成 xxx.atlas.txt（Spine 编辑器默认导出的形态，spine-unity 也认）"
+                title={t('在 atlas 文件名后追加 .txt，写成 xxx.atlas.txt（Spine 编辑器默认导出的形态，spine-unity 也认）')}
               >
                 <input
                   type="checkbox"
@@ -660,7 +685,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
                   checked={atlasTxt}
                   onChange={(event) => setAtlasTxt(event.target.checked)}
                 />
-                <span className="text-content-hi">atlas名追加.txt</span>
+                <span className="text-content-hi">{t('atlas名追加.txt')}</span>
               </label>
             )}
           </div>
@@ -669,20 +694,21 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
         {/* 图集预览 */}
         <div className="mx-2.5 mb-2 flex min-h-0 flex-col rounded border border-line/60 bg-ink-900/40">
           <div className="flex h-[24px] shrink-0 items-center gap-2 border-b border-line/50 px-2">
-            <span className="hao-label">图集预览</span>
+            <span className="hao-label">{t('图集预览')}</span>
             {pageInfo ? (
               <span className="text-3xs text-content-lo">
-                第 {current + 1} / {pages.length} 页 · {pageInfo.width}×{pageInfo.height} ·{' '}
+                {t('第 {0} / {1} 页', [current + 1, pages.length])} · {pageInfo.width}×
+                {pageInfo.height} ·{' '}
                 {pageSource?.kind === 'copy'
-                  ? `原图整页复制（${pageSource.sourceName}）`
-                  : `${pagePlan?.blits.length ?? 0} 张碎图`}
+                  ? t('原图整页复制（{0}）', pageSource.sourceName)
+                  : t('{0} 张碎图', pagePlan?.blits.length ?? 0)}
               </span>
             ) : null}
             {pages.length > 1 ? (
               <div className="ml-auto flex items-center gap-1">
                 <button
                   type="button"
-                  title="上一页"
+                  title={t('上一页')}
                   className="hao-btn h-[18px] w-[18px] justify-center p-0"
                   disabled={current <= 0}
                   onClick={() => setPage(Math.max(0, current - 1))}
@@ -691,7 +717,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
                 </button>
                 <button
                   type="button"
-                  title="下一页"
+                  title={t('下一页')}
                   className="hao-btn h-[18px] w-[18px] justify-center p-0"
                   disabled={current >= pages.length - 1}
                   onClick={() => setPage(Math.min(pages.length - 1, current + 1))}
@@ -704,7 +730,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
           <div className="flex min-h-[180px] items-center justify-center p-2">
             {pages.length === 0 ? (
               <span className="text-panel text-content-lo">
-                当前工程没有使用任何图片，图集为空（导出后角色以纯色块渲染）
+                {t('当前工程没有使用任何图片，图集为空（导出后角色以纯色块渲染）')}
               </span>
             ) : (
               <div className="hao-checkerboard-sm rounded border border-line/70 p-px">
@@ -718,7 +744,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
                 <button
                   key={item.image}
                   type="button"
-                  title={`${item.image}（${item.width}×${item.height}）`}
+                  title={t('{0}（{1}×{2}）', [item.image, item.width, item.height])}
                   className={[
                     'hao-btn h-[16px] min-w-[16px] justify-center px-1 text-3xs',
                     index === current ? 'hao-btn-accent' : ''
@@ -753,12 +779,12 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
             <div className="flex min-w-0 flex-1 flex-col gap-1">
               <div className="flex items-center gap-1.5 text-panel font-semibold text-content-hi">
                 <QrCode size={12} className="text-accent" />
-                手机扫码看角色
-                <span className="hao-label">（页面里能切换骨架 / 皮肤 / 动画）</span>
+                {t('手机扫码看角色')}
+                <span className="hao-label">{t('（页面里能切换骨架 / 皮肤 / 动画）')}</span>
               </div>
               <div className="hao-label">
-                手机与电脑连同一个 Wi-Fi，用相机扫码即可；页面已适配手机（拖拽平移、双指缩放）。
-                这里再点「更新预览」＝ 换一版资源，已开着的页面会自动重载，不用重新扫码。
+                {t('手机与电脑连同一个 Wi-Fi，用相机扫码即可；页面已适配手机（拖拽平移、双指缩放）。')}
+                {t('这里再点「更新预览」＝ 换一版资源，已开着的页面会自动重载，不用重新扫码。')}
               </div>
               <div
                 className="hao-field h-auto min-h-[22px] w-full select-text break-all py-[3px] text-3xs"
@@ -770,25 +796,25 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
                 <button
                   type="button"
                   className="hao-btn h-[18px] px-1.5 text-3xs"
-                  title="用系统默认浏览器打开本机预览地址"
+                  title={t('用系统默认浏览器打开本机预览地址')}
                   onClick={() => void getPlatform().openExternal(preview.url)}
                 >
-                  <ExternalLink size={11} /> 在浏览器打开
+                  <ExternalLink size={11} /> {t('在浏览器打开')}
                 </button>
                 <button
                   type="button"
                   className="hao-btn h-[18px] px-1.5 text-3xs"
                   onClick={() => void copyLocalUrl()}
                 >
-                  <Copy size={11} /> 复制本机链接
+                  <Copy size={11} /> {t('复制本机链接')}
                 </button>
                 <button
                   type="button"
                   className="hao-btn h-[18px] px-1.5 text-3xs"
-                  title="停掉本地服务并释放内存里的图集"
+                  title={t('停掉本地服务并释放内存里的图集')}
                   onClick={() => void stopPreview()}
                 >
-                  <Square size={10} /> 停止预览
+                  <Square size={10} /> {t('停止预览')}
                 </button>
                 {preview.lanUrls.length > 0 ? (
                   <button
@@ -796,19 +822,19 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
                     className="hao-btn h-[18px] px-1.5 text-3xs"
                     onClick={() => void copyQrUrl()}
                   >
-                    <Copy size={11} /> 复制手机链接（{hostOf(qrUrl)}）
+                    <Copy size={11} /> {t('复制手机链接（{0}）', hostOf(qrUrl))}
                   </button>
                 ) : null}
               </div>
               {otherLanUrls.length > 0 ? (
                 <div className="flex flex-wrap items-center gap-1">
-                  <span className="hao-label ml-1">切换扫码地址：</span>
+                  <span className="hao-label ml-1">{t('切换扫码地址：')}</span>
                   {preview.lanUrls.map((url) => (
                     <button
                       key={url}
                       type="button"
                       className={`hao-btn h-[18px] px-1.5 text-3xs ${url === qrUrl ? 'bg-accent/20' : ''}`}
-                      title={`二维码改成扫这个地址：${url}`}
+                      title={t('二维码改成扫这个地址：{0}', url)}
                       onClick={() => setQrUrl(url)}
                     >
                       {hostOf(url)}
@@ -837,20 +863,20 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
           {canPreview ? (
             <button
               type="button"
-              title="在浏览器里用 spine 官方运行时播放这个角色（可切换骨架 / 皮肤 / 动画，手机扫码也能看）"
+              title={t('在浏览器里用 spine 官方运行时播放这个角色（可切换骨架 / 皮肤 / 动画，手机扫码也能看）')}
               className="hao-btn hao-btn-accent h-[24px] shrink-0 gap-1.5 px-3 font-semibold"
               disabled={previewBusy}
               onClick={() => void startPreview()}
             >
               {previewBusy ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
-              {previewBusy ? '正在生成…' : preview ? '更新预览' : '预览'}
+              {previewBusy ? t('正在生成…') : preview ? t('更新预览') : t('预览')}
             </button>
           ) : null}
           <span className="hao-label mr-auto">
-            缩放不影响角色大小，只改变纹理分辨率：调小可以把更多碎图塞进更少的页
+            {t('缩放不影响角色大小，只改变纹理分辨率：调小可以把更多碎图塞进更少的页')}
           </span>
           <button type="button" className="hao-btn" onClick={onClose} disabled={busy}>
-            取消
+            {t('取消')}
           </button>
           <button
             type="button"
@@ -859,7 +885,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
             onClick={() => void exportNow()}
           >
             {busy ? <Loader2 size={12} className="animate-spin" /> : null}
-            {busy ? '正在导出…' : '导出'}
+            {busy ? t('正在导出…') : t('导出')}
           </button>
         </div>
       </div>

@@ -4,6 +4,7 @@ import { Check, Copy, X } from 'lucide-react'
 import { getPlatform } from '@editor/platform'
 import type { McpClientResult } from '@shared/ipcTypes'
 import { useDialogDrag } from './dialogDrag'
+import { t } from '@i18n'
 
 export interface AiIntegrationDialogProps {
   onClose: () => void
@@ -71,7 +72,7 @@ export default function AiIntegrationDialog({ onClose }: AiIntegrationDialogProp
           setReport(result.data.items)
           if (result.data.mcpUrl) setInfo((prev) => ({ ...(prev as McpInfo), mcpUrl: result.data.mcpUrl }))
         } else {
-          setReport([{ id: 'err', label: '安装失败', status: 'error', error: result.error }])
+          setReport([{ id: 'err', label: t('安装失败'), status: 'error', error: result.error }])
         }
       })
       .finally(() => setInstalling(false))
@@ -85,12 +86,12 @@ export default function AiIntegrationDialog({ onClose }: AiIntegrationDialogProp
         style={panelStyle}
       >
         <div className="flex h-[28px] shrink-0 items-center justify-between border-b border-line px-3" {...handleProps}>
-          <span className="hao-panel-title">AI 接入</span>
+          <span className="hao-panel-title">{t('AI 接入')}</span>
           <button
             type="button"
             // 标题栏的 `cursor: grab` 会被继承下来，按钮自己声明 pointer 盖掉它
             className="cursor-pointer text-content-lo hover:text-content-hi"
-            title="关闭"
+            title={t('关闭')}
             onClick={onClose}
           >
             <X size={14} />
@@ -99,40 +100,44 @@ export default function AiIntegrationDialog({ onClose }: AiIntegrationDialogProp
 
         <div className="flex flex-col gap-4 px-4 py-4">
           <p className="text-3xs leading-[16px] text-content-lo">
-            让 AI 工具把 Hao2DEditor 当成一个 MCP Server 自动加载：它启动后会在本机开一个
-            只监听 127.0.0.1 的命令服务，AI 客户端填下面的地址即可读写当前工程。
+            {t('让 AI 工具把 Hao2DEditor 当成一个 MCP Server 自动加载：它启动后会在本机开一个只监听 127.0.0.1 的命令服务，AI 客户端填下面的地址即可读写当前工程。')}
           </p>
 
           <div className="flex flex-col gap-1">
             <span className="text-3xs text-content-mid">
-              命令服务：{info?.running ? <span className="text-emerald-400">运行中</span> : <span className="text-amber-400">未启动</span>}
+              {t('命令服务：')}
+              {info?.running ? (
+                <span className="text-emerald-400">{t('运行中')}</span>
+              ) : (
+                <span className="text-amber-400">{t('未启动')}</span>
+              )}
             </span>
             <span className="text-3xs text-content-lo">
               {info?.running
-                ? '把下面的 MCP 地址填进 AI 客户端，或点「一键安装」。'
-                : '请保持编辑器处于打开状态，命令服务随窗口启动。'}
+                ? t('把下面的 MCP 地址填进 AI 客户端，或点「一键安装」。')
+                : t('请保持编辑器处于打开状态，命令服务随窗口启动。')}
             </span>
           </div>
 
           <div className="flex flex-col gap-1">
-            <span className="text-3xs text-content-mid">MCP 地址（含访问 token）</span>
+            <span className="text-3xs text-content-mid">{t('MCP 地址（含访问 token）')}</span>
             <div className="flex gap-2">
               <input
                 type="text"
                 readOnly
                 value={info?.mcpUrl ?? ''}
                 className="hao-field min-w-0 flex-1 truncate font-mono text-3xs"
-                placeholder="命令服务未启动"
+                placeholder={t('命令服务未启动')}
               />
               <button
                 type="button"
                 className="hao-btn h-[24px] shrink-0 px-2 text-3xs"
                 onClick={copy}
                 disabled={!info?.mcpUrl}
-                title="复制 MCP 地址"
+                title={t('复制 MCP 地址')}
               >
                 {copied ? <Check size={12} /> : <Copy size={12} />}
-                {copied ? '已复制' : '复制'}
+                {copied ? t('已复制') : t('复制')}
               </button>
             </div>
           </div>
@@ -143,23 +148,23 @@ export default function AiIntegrationDialog({ onClose }: AiIntegrationDialogProp
             onClick={install}
             disabled={installing || !info?.running}
           >
-            {installing ? '安装中…' : '一键安装到 AI 客户端'}
+            {installing ? t('安装中…') : t('一键安装到 AI 客户端')}
           </button>
 
           {report ? (
             <div className="flex flex-col gap-1 rounded-[4px] border border-line/60 px-2.5 py-2">
-              <span className="text-3xs text-content-mid">安装结果</span>
+              <span className="text-3xs text-content-mid">{t('安装结果')}</span>
               {report.map((item) => (
                 <div key={item.id} className="flex items-start gap-2 text-3xs leading-[15px]">
                   <span className="shrink-0 text-content-hi">{item.label}</span>
                   <span className="min-w-0 flex-1 text-content-lo">
                     {item.status === 'written' ? (
-                      <span className="text-emerald-400">已写入配置</span>
+                      <span className="text-emerald-400">{t('已写入配置')}</span>
                     ) : item.status === 'error' ? (
-                      <span className="text-danger/90">失败：{item.error}</span>
+                      <span className="text-danger/90">{t('失败：{0}', item.error ?? '')}</span>
                     ) : (
                       <span className="text-amber-400">
-                        需手动配置（{item.installed ? '已检测到安装目录' : '未检测到安装目录'}）
+                        {t('需手动配置（{0}）', item.installed ? t('已检测到安装目录') : t('未检测到安装目录'))}
                       </span>
                     )}
                     {item.path ? <span className="block truncate font-mono text-content-lo/70">{item.path}</span> : null}
@@ -167,8 +172,7 @@ export default function AiIntegrationDialog({ onClose }: AiIntegrationDialogProp
                 </div>
               ))}
               <span className="text-3xs leading-[15px] text-content-lo/70">
-                标「需手动配置」的客户端（Codex / WorkBuddy / CodeBuddy / DeepSeek / Trae / ZCode）
-                请把上面的 MCP 地址填进它们各自的 MCP 设置。
+                {t('标「需手动配置」的客户端（Codex / WorkBuddy / CodeBuddy / DeepSeek / Trae / ZCode）请把上面的 MCP 地址填进它们各自的 MCP 设置。')}
               </span>
             </div>
           ) : null}
@@ -176,7 +180,7 @@ export default function AiIntegrationDialog({ onClose }: AiIntegrationDialogProp
 
         <div className="flex h-[40px] shrink-0 items-center justify-end border-t border-line px-4">
           <button type="button" className="hao-btn h-[24px] px-3 text-3xs" onClick={onClose}>
-            完成
+            {t('完成')}
           </button>
         </div>
       </div>

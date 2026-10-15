@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Brush, Crosshair, Grid3x3, Layers, RotateCcw, Trash2 } from 'lucide-react'
+import { t } from '@i18n'
 import { BlendMode } from '@core/model/types'
 import { curvePercent } from '@core/anim/interpolation'
 import { usePreviewStore } from '@editor/store/previewStore'
@@ -48,7 +49,7 @@ import {
   Vector2Field
 } from '@ui/widgets/fields'
 import { PanelEmpty } from '@ui/widgets/PanelShell'
-import { BLEND_OPTIONS, CONSTRAINT_LABEL } from '@ui/widgets/constants'
+import { blendOptions, constraintLabel } from '@ui/widgets/constants'
 
 export interface InspectorPanelProps {
   onStatus?: (text: string) => void
@@ -122,7 +123,7 @@ function removeConstraint(
   update: (label: string, mutate: (draft: EditorDocument) => void) => void,
   name: string
 ): void {
-  update('删除约束', (draft) => {
+  update(t('删除约束'), (draft) => {
     draft.constraints = draft.constraints.filter((c) => c.name !== name)
     for (const animation of draft.animations) {
       animation.constraints = animation.constraints.filter((t) => t.constraint !== name)
@@ -166,7 +167,7 @@ function ConstraintEditor({
   /** 「目标」的写入口：下拉选择与「从层级树拖骨骼进来」共用（拖进来的骨骼一定存在） */
   const setTargetBone = (name: string): void => {
     if (name === constraint.target) return
-    update('修改约束目标', (draft) => {
+    update(t('修改约束目标'), (draft) => {
       const item = draft.constraints.find((c) => c.name === constraint.name)
       if (item) item.target = name
     })
@@ -192,16 +193,16 @@ function ConstraintEditor({
    */
   const editIkMix = (value: number, silent: boolean): void => {
     const mutate = (draft: EditorDocument): void => {
-      const t = draft.constraints.find((c) => c.name === constraint.name)
-      if (t && t.type === 'ik') t.mix = value
+      const item = draft.constraints.find((c) => c.name === constraint.name)
+      if (item && item.type === 'ik') item.mix = value
     }
     if (silent) useProjectStore.getState().updateSilent(mutate)
-    else update('修改IK权重', mutate)
+    else update(t('修改IK权重'), mutate)
   }
 
   /** 链内换位：越靠前越接近链根，越靠后越接近链尾 */
   const moveChainBone = (from: number, to: number) => (): void => {
-    editChain('调整受约束骨骼顺序', (bones) => {
+    editChain(t('调整受约束骨骼顺序'), (bones) => {
       if (from < 0 || from >= bones.length || to < 0 || to >= bones.length) return
       const [moved] = bones.splice(from, 1)
       bones.splice(to, 0, moved)
@@ -213,16 +214,16 @@ function ConstraintEditor({
       <FieldGroup
         title={
           embedded
-            ? `${CONSTRAINT_LABEL[constraint.type]}约束 · ${constraint.name}`
-            : `${CONSTRAINT_LABEL[constraint.type]}约束`
+            ? t('{0}约束 · {1}', [constraintLabel(constraint.type), constraint.name])
+            : t('{0}约束', constraintLabel(constraint.type))
         }
       >
         {nameField}
         {orderField}
         <ToggleField
-          label="启用"
+          label={t('启用')}
           value={constraint.enabled}
-          onChange={(value) => update('启停约束', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t) t.enabled = value })}
+          onChange={(value) => update(t('启停约束'), (draft) => { const item = draft.constraints.find((c) => c.name === constraint.name); if (item) item.enabled = value })}
         />
         {/*
           内嵌的 IK 不显示「目标」：目标就是宿主骨骼本身（「目标骨即 IK 节点」）。
@@ -230,9 +231,9 @@ function ConstraintEditor({
         */}
         {(!embedded || constraint.type !== 'ik') ? (
           <SelectField
-            label="目标"
+            label={t('目标')}
             value={constraint.target}
-            options={[{ value: '', label: '（无）' }, ...document.bones.map((b) => ({ value: b.name, label: b.name }))]}
+            options={[{ value: '', label: t('（无）') }, ...document.bones.map((b) => ({ value: b.name, label: b.name }))]}
             onChange={setTargetBone}
             onDropBone={setTargetBone}
             trailing={
@@ -241,8 +242,8 @@ function ConstraintEditor({
                 disabled={!targetBoneExists}
                 title={
                   targetBoneExists
-                    ? `在层级树里定位「${constraint.target}」`
-                    : '还没有可定位的目标骨骼'
+                    ? t('在层级树里定位「{0}」', constraint.target)
+                    : t('还没有可定位的目标骨骼')
                 }
                 className="flex h-[22px] w-[22px] shrink-0 cursor-pointer items-center justify-center rounded-[5px] text-content-lo transition-colors duration-panel hover:bg-white/[0.14] hover:text-content-hi disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-content-lo"
                 onClick={locateTargetBone}
@@ -258,24 +259,24 @@ function ConstraintEditor({
         */}
         {constraint.type === 'ik' && !targetBoneExists ? (
           <span className="text-3xs text-warn">
-            {constraint.target ? `目标骨骼「${constraint.target}」不存在，IK 不会生效` : '没有目标骨骼，IK 不会生效'}
+            {constraint.target ? t('目标骨骼「{0}」不存在，IK 不会生效', constraint.target) : t('没有目标骨骼，IK 不会生效')}
           </span>
         ) : null}
         {constraint.type === 'ik' && chainBones.length === 0 ? (
-          <span className="text-3xs text-warn">受约束骨骼链是空的，IK 不会生效</span>
+          <span className="text-3xs text-warn">{t('受约束骨骼链是空的，IK 不会生效')}</span>
         ) : null}
         <div className="flex flex-col gap-1">
           <span className="text-3xs text-content-lo">
-            受约束骨骼链（
+            {t('受约束骨骼链（')}
             {/*
               求解器对任何非空链都生效：单骨 = 让链尾指向目标（CCD），两骨走解析解，
               更长的链走 CCD 迭代。原来写「至少要两根」与实现不符（单骨也能求解）。
             */}
-            {constraint.type === 'ik' ? '链根 → 链尾，IK 按这个顺序驱动（单骨 = 让链尾指向目标，两骨及以上逐节弯曲）' : '按顺序排布'}
-            ）
-            {constraint.type === 'physics' ? ' · 物理约束仅保留数据，不参与求解' : ''}
+            {constraint.type === 'ik' ? t('链根 → 链尾，IK 按这个顺序驱动（单骨 = 让链尾指向目标，两骨及以上逐节弯曲）') : t('按顺序排布')}
+            {t('）')}
+            {constraint.type === 'physics' ? t(' · 物理约束仅保留数据，不参与求解') : ''}
           </span>
-          {chainBones.length === 0 ? <span className="text-3xs text-content-lo">（未设置）</span> : null}
+          {chainBones.length === 0 ? <span className="text-3xs text-content-lo">{t('（未设置）')}</span> : null}
           {chainBones.map((name, index) => (
             <div key={`${index}:${name}`} className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-ink-700/60">
               <span className="w-[10px] shrink-0 text-right font-mono text-3xs text-content-lo">{index + 1}</span>
@@ -286,7 +287,7 @@ function ConstraintEditor({
               <button
                 type="button"
                 className="shrink-0 text-content-lo hover:text-content-hi"
-                title={`在层级树里定位「${name}」`}
+                title={t('在层级树里定位「{0}」', name)}
                 onClick={() => revealBone(name)}
               >
                 <Crosshair size={11} />
@@ -295,7 +296,7 @@ function ConstraintEditor({
                 type="button"
                 className="shrink-0 text-3xs text-content-lo hover:text-content-hi disabled:opacity-30 disabled:hover:text-content-lo"
                 disabled={index === 0}
-                title="上移（越靠前越接近链根）"
+                title={t('上移（越靠前越接近链根）')}
                 onClick={moveChainBone(index, index - 1)}
               >
                 ↑
@@ -304,7 +305,7 @@ function ConstraintEditor({
                 type="button"
                 className="shrink-0 text-3xs text-content-lo hover:text-content-hi disabled:opacity-30 disabled:hover:text-content-lo"
                 disabled={index === chainBones.length - 1}
-                title="下移（越靠后越接近链尾）"
+                title={t('下移（越靠后越接近链尾）')}
                 onClick={moveChainBone(index, index + 1)}
               >
                 ↓
@@ -312,8 +313,8 @@ function ConstraintEditor({
               <button
                 type="button"
                 className="shrink-0 text-3xs text-content-lo hover:text-danger"
-                title="从受约束骨骼链里移除（约束本身不受影响）"
-                onClick={() => editChain('移除受约束骨骼', (bones) => {
+                title={t('从受约束骨骼链里移除（约束本身不受影响）')}
+                onClick={() => editChain(t('移除受约束骨骼'), (bones) => {
                   const at = bones.indexOf(name)
                   if (at >= 0) bones.splice(at, 1)
                 })}
@@ -323,54 +324,54 @@ function ConstraintEditor({
             </div>
           ))}
           <SelectField
-            label="添加骨骼"
+            label={t('添加骨骼')}
             value=""
             disabled={chainCandidates.length === 0}
             options={[
-              { value: '', label: chainCandidates.length > 0 ? '（选择骨骼加到链尾）' : '（没有可添加的骨骼）' },
+              { value: '', label: chainCandidates.length > 0 ? t('（选择骨骼加到链尾）') : t('（没有可添加的骨骼）') },
               ...chainCandidates.map((bone) => ({ value: bone.name, label: bone.name }))
             ]}
             onChange={(value) => {
               if (!value) return
-              editChain('添加受约束骨骼', (bones) => bones.push(value))
+              editChain(t('添加受约束骨骼'), (bones) => bones.push(value))
             }}
             // 从层级树直接拖骨骼过来 = 加到链尾，省得在下拉里翻
             onDropBone={(name) => {
               if (chainBones.includes(name)) return
-              editChain('添加受约束骨骼', (bones) => bones.push(name))
+              editChain(t('添加受约束骨骼'), (bones) => bones.push(name))
             }}
           />
-          <span className="text-3xs text-content-lo">「目标」和「添加骨骼」都能从层级树拖骨骼进来</span>
+          <span className="text-3xs text-content-lo">{t('「目标」和「添加骨骼」都能从层级树拖骨骼进来')}</span>
         </div>
       </FieldGroup>
 
       {constraint.type === 'ik' ? (
-        <FieldGroup title="IK 参数">
+        <FieldGroup title={t('IK 参数')}>
           <SliderField
-            label="权重"
+            label={t('权重')}
             value={constraint.mix}
             step={0.05}
             min={0}
             max={1}
-            transaction="修改IK权重"
+            transaction={t('修改IK权重')}
             onChange={editIkMix}
           />
           <SelectField
-            label="弯曲"
+            label={t('弯曲')}
             value={String(constraint.bendSign)}
-            options={[{ value: '1', label: '正向 (+1)' }, { value: '-1', label: '反向 (-1)' }]}
-            onChange={(value) => update('修改IK弯曲方向', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'ik') t.bendSign = Number(value) })}
+            options={[{ value: '1', label: t('正向 (+1)') }, { value: '-1', label: t('反向 (-1)') }]}
+            onChange={(value) => update(t('修改IK弯曲方向'), (draft) => { const item = draft.constraints.find((c) => c.name === constraint.name); if (item && item.type === 'ik') item.bendSign = Number(value) })}
           />
           <ToggleField
-            label="用骨长"
+            label={t('用骨长')}
             value={constraint.useBoneLength}
-            onChange={(value) => update('修改IK长度取法', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'ik') t.useBoneLength = value })}
+            onChange={(value) => update(t('修改IK长度取法'), (draft) => { const item = draft.constraints.find((c) => c.name === constraint.name); if (item && item.type === 'ik') item.useBoneLength = value })}
           />
         </FieldGroup>
       ) : null}
 
       {constraint.type === 'transform' ? (
-        <FieldGroup title="变换混合">
+        <FieldGroup title={t('变换混合')}>
           {(
             [
               ['mixRotate', '旋转'],
@@ -383,15 +384,15 @@ function ConstraintEditor({
           ).map(([key, label]) => (
             <NumberField
               key={key}
-              label={label}
+              label={t(label)}
               value={constraint[key]}
               step={0.05}
               min={0}
               max={1}
               onChange={(value) =>
-                update('修改变换约束', (draft) => {
-                  const t = draft.constraints.find((c) => c.name === constraint.name)
-                  if (t && t.type === 'transform') t[key] = value
+                update(t('修改变换约束'), (draft) => {
+                  const item = draft.constraints.find((c) => c.name === constraint.name)
+                  if (item && item.type === 'transform') item[key] = value
                 })
               }
             />
@@ -400,35 +401,35 @@ function ConstraintEditor({
       ) : null}
 
       {constraint.type === 'path' ? (
-        <FieldGroup title="路径参数">
+        <FieldGroup title={t('路径参数')}>
           {/* position / spacing 的量纲随 spacingMode 变化（percent 模式是 0..1 比例），不做像素显示换算 */}
           <NumberField
-            label="位置"
+            label={t('位置')}
             value={constraint.position}
             step={0.02}
-            onChange={(value) => update('修改路径位置', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'path') t.position = value })}
+            onChange={(value) => update(t('修改路径位置'), (draft) => { const item = draft.constraints.find((c) => c.name === constraint.name); if (item && item.type === 'path') item.position = value })}
           />
           <NumberField
-            label="间距"
+            label={t('间距')}
             value={constraint.spacing}
             step={0.02}
-            onChange={(value) => update('修改路径间距', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'path') t.spacing = value })}
+            onChange={(value) => update(t('修改路径间距'), (draft) => { const item = draft.constraints.find((c) => c.name === constraint.name); if (item && item.type === 'path') item.spacing = value })}
           />
           <NumberField
-            label="旋转混合"
+            label={t('旋转混合')}
             value={constraint.rotateMix}
             step={0.05}
             min={0}
             max={1}
-            onChange={(value) => update('修改路径旋转混合', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'path') t.rotateMix = value })}
+            onChange={(value) => update(t('修改路径旋转混合'), (draft) => { const item = draft.constraints.find((c) => c.name === constraint.name); if (item && item.type === 'path') item.rotateMix = value })}
           />
           <NumberField
-            label="位移混合"
+            label={t('位移混合')}
             value={constraint.translateMix}
             step={0.05}
             min={0}
             max={1}
-            onChange={(value) => update('修改路径位移混合', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t && t.type === 'path') t.translateMix = value })}
+            onChange={(value) => update(t('修改路径位移混合'), (draft) => { const item = draft.constraints.find((c) => c.name === constraint.name); if (item && item.type === 'path') item.translateMix = value })}
           />
         </FieldGroup>
       ) : null}
@@ -441,12 +442,12 @@ function ConstraintEditor({
         <div className="px-2 py-2">
           <button
             type="button"
-            title="移除这条约束：本骨骼还原为普通骨骼；它在时间轴上的关键帧轨道一并删除"
+            title={t('移除这条约束：本骨骼还原为普通骨骼；它在时间轴上的关键帧轨道一并删除')}
             className="hao-btn flex h-[22px] w-full items-center justify-center gap-1 border-danger/40 text-danger/90 hover:border-danger hover:bg-danger/10"
             onClick={onDelete}
           >
             <Trash2 size={11} />
-            <span>移除{CONSTRAINT_LABEL[constraint.type]}约束</span>
+            <span>{t('移除{0}约束', constraintLabel(constraint.type))}</span>
           </button>
         </div>
       ) : null}
@@ -481,11 +482,11 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
    */
   const deleteHostedConstraint = (name: string): void => {
     if (mode !== 'pose') {
-      onStatus('切到 Pose 状态才能改绑定数据（骨骼 / 插槽 / display / 约束）')
+      onStatus(t('切到 Pose 状态才能改绑定数据（骨骼 / 插槽 / display / 约束）'))
       return
     }
     removeConstraint(update, name)
-    onStatus(`已删除约束「${name}」`)
+    onStatus(t('已删除约束「{0}」', name))
   }
 
   /**
@@ -507,11 +508,11 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
       onStatus(error)
       return
     }
-    update(`重命名${label}`, (draft) => {
+    update(t('重命名{0}', label), (draft) => {
       applyRename(draft, { kind, slot: options?.slot }, oldName, next)
     })
     options?.reselect?.()
-    onStatus(`「${oldName}」已重命名为「${next}」`)
+    onStatus(t('「{0}」已重命名为「{1}」', [oldName, next]))
   }
 
   /**
@@ -521,16 +522,16 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   const resetAttachmentSize = (slotName: string, attachmentName: string, imageName: string): void => {
     const image = document.images.find((item) => item.name === imageName)
     if (!image) {
-      onStatus(`找不到图片「${imageName}」：它可能已被删除，先在「图片」下拉里换一张`)
+      onStatus(t('找不到图片「{0}」：它可能已被删除，先在「图片」下拉里换一张', imageName))
       return
     }
     const size = { x: Math.max(1, image.width) / PPU, y: Math.max(1, image.height) / PPU }
-    update('恢复附件尺寸', (draft) => {
+    update(t('恢复附件尺寸'), (draft) => {
       patchAttachment(draft, slotName, attachmentName, (a) => {
         a.size = size
       })
     })
-    onStatus(`已把「${attachmentName}」的尺寸恢复到图片大小（${image.width} × ${image.height} px）`)
+    onStatus(t('已把「{0}」的尺寸恢复到图片大小（{1} × {2} px）', [attachmentName, image.width, image.height]))
   }
 
   /**
@@ -555,15 +556,15 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   const toolSections = (
     <>
       {tools.tool === 'weight' && mode === 'pose' ? (
-        <FieldGroup title="权重刷">
+        <FieldGroup title={t('权重刷')}>
           {/* 参数与 Unity 2D Animation 的 Weight Brush 面板同名：Mode / Bone / Normalize / Size / Hardness */}
           <SelectField
             label="Mode"
             value={tools.brush.mode}
             options={[
-              { value: 'addSubtract', label: 'Add and Subtract（增加 / Alt 减少）' },
-              { value: 'growShrink', label: 'Grow and Shrink（只动已受影响的顶点）' },
-              { value: 'smooth', label: 'Smooth（朝邻居平均）' }
+              { value: 'addSubtract', label: t('Add and Subtract（增加 / Alt 减少）') },
+              { value: 'growShrink', label: t('Grow and Shrink（只动已受影响的顶点）') },
+              { value: 'smooth', label: t('Smooth（朝邻居平均）') }
             ]}
             onChange={(value) => tools.setBrush({ mode: value as BrushModeSetting })}
           />
@@ -572,7 +573,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             label="Bone"
             value={brushBone}
             options={[
-              { value: '', label: '（未选）' },
+              { value: '', label: t('（未选）') },
               ...document.bones.map((bone) => ({ value: bone.name, label: bone.name }))
             ]}
             onChange={(value) => useSelectionStore.getState().select({ bone: value })}
@@ -581,7 +582,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             label="Normalize"
             value={tools.brush.normalize}
             onChange={(value) => tools.setBrush({ normalize: value })}
-            hint="刷过的顶点权重归一到 1；关掉就只改目标骨骼，权重和可能不等于 1"
+            hint={t('刷过的顶点权重归一到 1；关掉就只改目标骨骼，权重和可能不等于 1')}
           />
           <NumberField
             label="Size"
@@ -602,13 +603,13 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
           />
           <p className="flex items-center gap-1 text-3xs text-content-lo">
             <Brush size={10} />
-            Hardness 100 = 一次刷满；按住修饰键临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长
+            {t('Hardness 100 = 一次刷满；按住修饰键临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长')}
           </p>
         </FieldGroup>
       ) : null}
-      <FieldGroup title="显示">
+      <FieldGroup title={t('显示')}>
         <ColorField
-          label="整体染色"
+          label={t('整体染色')}
           value={tintColor}
           onChange={(value) => {
             const scene = getActiveScene()
@@ -621,7 +622,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
         />
         <p className="flex items-center gap-1 text-3xs text-content-lo">
           <Layers size={10} />
-          染色与插槽色、附件色相乘，用于快速检查叠加效果
+          {t('染色与插槽色、附件色相乘，用于快速检查叠加效果')}
         </p>
       </FieldGroup>
     </>
@@ -630,15 +631,15 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   if (selection.kind === 'none') {
     return (
       <PanelEmpty
-        title="未选中对象"
-        description="在层级树或视口中选中骨骼、插槽、附件或约束后，可在此编辑其属性。"
+        title={t('未选中对象')}
+        description={t('在层级树或视口中选中骨骼、插槽、附件或约束后，可在此编辑其属性。')}
       />
     )
   }
 
   if (selection.kind === 'bone') {
     const bone = document.bones.find((b) => b.name === selection.bone)
-    if (!bone) return <PanelEmpty title="骨骼不存在" description="该骨骼可能已被删除，请重新选择。" />
+    if (!bone) return <PanelEmpty title={t('骨骼不存在')} description={t('该骨骼可能已被删除，请重新选择。')} />
     /** 层级根骨骼：整棵树的根，没有父级可选（面板也不能把它挂到别的骨骼下） */
     const isRootBone = bone.name === rootBoneName(document.bones)
 
@@ -669,13 +670,13 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
       label: string
     ): void => {
       if (animating) {
-        update(`${label}（${time.toFixed(2)}s 打关键帧）`, (draft) => {
+        update(t('{0}（{1}s 打关键帧）', [label, time.toFixed(2)]), (draft) => {
           const target = draft.animations.find((item) => item.name === currentAnimation)
           if (target) keyBoneChannel(target, bone.name, channel, time, value as never)
         })
         return
       }
-      update(`修改骨骼${label}`, (draft) => {
+      update(t('修改骨骼{0}', label), (draft) => {
         const target = draft.bones.find((b) => b.name === bone.name)
         if (!target) return
         if (channel === 'translate') target.localPosition = value as { x: number; y: number }
@@ -687,44 +688,44 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
 
     return (
       <div className="flex flex-col">
-        <FieldGroup title="骨骼">
+        <FieldGroup title={t('骨骼')}>
           <TextField
-            label="名称"
+            label={t('名称')}
             value={bone.name}
             commitOnBlur
-            onChange={(next) => rename('bone', bone.name, next, { label: '骨骼', reselect: () => selection.selectBone(next.trim()) })}
+            onChange={(next) => rename('bone', bone.name, next, { label: t('骨骼'), reselect: () => selection.selectBone(next.trim()) })}
           />
           {/*
             父级下拉只列**层级树里能拖成的那些组合**：层级根骨骼不可选父级（其他骨骼都在它之下），
             其余骨骼也只列「不是自己、也不在自己子树里」的目标 —— 拖进自己的后代会把层级绕成环。
           */}
           <SelectField
-            label="父级"
+            label={t('父级')}
             value={bone.parent}
             disabled={animating || isRootBone}
             options={[
               ...(isRootBone
-                ? [{ value: '', label: '（层级根骨骼）' }]
+                ? [{ value: '', label: t('（层级根骨骼）') }]
                 : bone.parent
                   ? []
-                  : [{ value: '', label: '（未挂载）' }]),
+                  : [{ value: '', label: t('（未挂载）') }]),
               ...document.bones
                 .filter((b) => b.name !== bone.name && !isDescendantOf(document.bones, b.name, bone.name))
                 .map((b) => ({ value: b.name, label: b.name }))
             ]}
             onChange={(value) =>
-              update('修改骨骼父级', (draft) => {
+              update(t('修改骨骼父级'), (draft) => {
                 const target = draft.bones.find((b) => b.name === bone.name)
                 if (target) target.parent = value
               })
             }
           />
           {isRootBone ? (
-            <p className="text-3xs text-content-lo">层级根骨骼：其他骨骼都在它之下，它没有父级</p>
+            <p className="text-3xs text-content-lo">{t('层级根骨骼：其他骨骼都在它之下，它没有父级')}</p>
           ) : null}
           {/* 长度按像素显示 / 输入（step 5px）；写回仍是世界单位，换算在字段内做 */}
           <NumberField
-            label="长度"
+            label={t('长度')}
             value={bone.length}
             unitScale={PX_PER_UNIT}
             step={5}
@@ -733,88 +734,88 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             suffix="px"
             disabled={animating}
             onChange={(value) =>
-              update('修改骨骼长度', (draft) => {
+              update(t('修改骨骼长度'), (draft) => {
                 const target = draft.bones.find((b) => b.name === bone.name)
                 if (target) target.length = value
               })
             }
           />
           {animating ? (
-            <p className="text-3xs text-content-lo">父级 / 长度属于绑定数据，切到 Pose 状态再改</p>
+            <p className="text-3xs text-content-lo">{t('父级 / 长度属于绑定数据，切到 Pose 状态再改')}</p>
           ) : null}
         </FieldGroup>
 
         <FieldGroup
-          title={animating ? `动画变换 · ${time.toFixed(2)}s（改动即打关键帧）` : '局部变换（Setup）'}
+          title={animating ? t('动画变换 · {0}s（改动即打关键帧）', time.toFixed(2)) : t('局部变换（Setup）')}
         >
           {/* 位置按像素显示 / 输入（中键拖动 / 上下键按 10px 走）；写回仍是世界单位 */}
           <Vector2Field
-            label="位置"
+            label={t('位置')}
             value={shown.position}
             unitScale={PX_PER_UNIT}
             step={10}
-            onChange={(value) => writeTransform('translate', value, '位置')}
+            onChange={(value) => writeTransform('translate', value, t('位置'))}
           />
           <NumberField
-            label="旋转"
+            label={t('旋转')}
             value={shown.rotation}
             step={1}
             suffix="°"
-            onChange={(value) => writeTransform('rotate', value, '旋转')}
+            onChange={(value) => writeTransform('rotate', value, t('旋转'))}
           />
           <Vector2Field
-            label="缩放"
+            label={t('缩放')}
             value={shown.scale}
             step={0.1}
-            onChange={(value) => writeTransform('scale', value, '缩放')}
+            onChange={(value) => writeTransform('scale', value, t('缩放'))}
           />
           <Vector2Field
-            label="斜切"
+            label={t('斜切')}
             value={shown.shear}
             step={0.1}
-            onChange={(value) => writeTransform('shear', value, '斜切')}
+            onChange={(value) => writeTransform('shear', value, t('斜切'))}
           />
         </FieldGroup>
 
-        <FieldGroup title="继承">
+        <FieldGroup title={t('继承')}>
           <ToggleField
-            label="继承旋转"
+            label={t('继承旋转')}
             value={bone.inheritRotation}
             onChange={(value) =>
-              update('修改继承旋转', (draft) => {
+              update(t('修改继承旋转'), (draft) => {
                 const target = draft.bones.find((b) => b.name === bone.name)
                 if (target) target.inheritRotation = value
               })
             }
           />
           <ToggleField
-            label="继承缩放"
+            label={t('继承缩放')}
             value={bone.inheritScale}
             onChange={(value) =>
-              update('修改继承缩放', (draft) => {
+              update(t('修改继承缩放'), (draft) => {
                 const target = draft.bones.find((b) => b.name === bone.name)
                 if (target) target.inheritScale = value
               })
             }
           />
           <ColorField
-            label="显示色"
+            label={t('显示色')}
             value={bone.color}
-            onDragStart={() => useProjectStore.getState().beginTransaction('修改骨骼颜色')}
+            onDragStart={() => useProjectStore.getState().beginTransaction(t('修改骨骼颜色'))}
             onDragEnd={() => useProjectStore.getState().endTransaction()}
             onChange={(value) =>
-              update('修改骨骼颜色', (draft) => {
+              update(t('修改骨骼颜色'), (draft) => {
                 const target = draft.bones.find((b) => b.name === bone.name)
                 if (target) target.color = value
               })
             }
           />
           <CheckboxField
-            label="画法"
+            label={t('画法')}
             value={bone.hollow === true}
-            hint="空心（默认实心）"
+            hint={t('空心（默认实心）')}
             onChange={(value) =>
-              update('修改骨骼画法', (draft) => {
+              update(t('修改骨骼画法'), (draft) => {
                 const target = draft.bones.find((b) => b.name === bone.name)
                 if (target) target.hollow = value
               })
@@ -844,7 +845,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
 
   if (selection.kind === 'slot' || selection.kind === 'attachment') {
     const slot = document.slots.find((s) => s.name === selection.slot)
-    if (!slot) return <PanelEmpty title="插槽不存在" description="该插槽可能已被删除，请重新选择。" />
+    if (!slot) return <PanelEmpty title={t('插槽不存在')} description={t('该插槽可能已被删除，请重新选择。')} />
     const skinSlot = document.skins.find((s) => s.name === selection.skin)?.slots.find((s) => s.slot === slot.name)
       ?? document.skins[0]?.slots.find((s) => s.slot === slot.name)
     // 附件解析走「皮肤优先、跨皮肤兜底」：切过皮肤后不该让检查器整段空掉（与视口同一套规则）
@@ -858,51 +859,51 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
 
     return (
       <div className="flex flex-col">
-        <FieldGroup title="插槽">
+        <FieldGroup title={t('插槽')}>
           <TextField
-            label="名称"
+            label={t('名称')}
             value={slot.name}
             commitOnBlur
-            onChange={(next) => rename('slot', slot.name, next, { label: '插槽', reselect: () => selection.selectSlot(next.trim()) })}
+            onChange={(next) => rename('slot', slot.name, next, { label: t('插槽'), reselect: () => selection.selectSlot(next.trim()) })}
           />
           <SelectField
-            label="骨骼"
+            label={t('骨骼')}
             value={slot.bone}
             options={document.bones.map((b) => ({ value: b.name, label: b.name }))}
             onChange={(value) =>
-              update('修改插槽骨骼', (draft) => {
+              update(t('修改插槽骨骼'), (draft) => {
                 const target = draft.slots.find((s) => s.name === slot.name)
                 if (target) target.bone = value
               })
             }
           />
           <SelectField
-            label="混合"
+            label={t('混合')}
             value={String(slot.blendMode)}
-            options={BLEND_OPTIONS}
+            options={blendOptions()}
             onChange={(value) =>
-              update('修改混合模式', (draft) => {
+              update(t('修改混合模式'), (draft) => {
                 const target = draft.slots.find((s) => s.name === slot.name)
                 if (target) target.blendMode = Number(value) as BlendMode
               })
             }
           />
           <NumberField
-            label="层序"
+            label={t('层序')}
             value={slot.zOrder}
             step={1}
             precision={0}
             onChange={(value) =>
-              update('修改插槽层序', (draft) => {
+              update(t('修改插槽层序'), (draft) => {
                 const target = draft.slots.find((s) => s.name === slot.name)
                 if (target) target.zOrder = value
               })
             }
           />
           <ColorField
-            label="颜色"
+            label={t('颜色')}
             value={slot.color}
-            onDragStart={() => useProjectStore.getState().beginTransaction('修改插槽颜色')}
+            onDragStart={() => useProjectStore.getState().beginTransaction(t('修改插槽颜色'))}
             onDragEnd={() => {
               useProjectStore.getState().endTransaction()
               usePreviewStore.getState().clearSlotColors()
@@ -910,33 +911,33 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             // 拖动中只写预览通道：视口按帧热更新颜色，文档 / 历史 / 面板一动不动（松手才提交一次）
             onPreview={(value) => usePreviewStore.getState().setSlotColor(slot.name, value)}
             onChange={(value) =>
-              update('修改插槽颜色', (draft) => {
+              update(t('修改插槽颜色'), (draft) => {
                 const target = draft.slots.find((s) => s.name === slot.name)
                 if (target) target.color = value
               })
             }
           />
           <SelectField
-            label={animating ? '显示（关键帧）' : '显示'}
+            label={animating ? t('显示（关键帧）') : t('显示')}
             value={slot.attachment}
-            options={[{ value: '', label: '（不显示）' }, ...(skinSlot?.attachments ?? []).map((a) => ({ value: a.name, label: a.name }))]}
+            options={[{ value: '', label: t('（不显示）') }, ...(skinSlot?.attachments ?? []).map((a) => ({ value: a.name, label: a.name }))]}
             onChange={(value) => {
               const attachments = skinSlot?.attachments ?? []
               const index = attachments.findIndex((item) => item.name === value)
               if (animating) {
                 // 换装动画：Animate 态只写关键帧，不动绑定姿态
-                update('关键帧：切换显示', (draft) => {
+                update(t('关键帧：切换显示'), (draft) => {
                   const animation = draft.animations.find((item) => item.name === currentAnimation)
                   if (animation) keySlotDisplay(animation, slot.name, time, value ? index : -1, value)
                 })
                 onStatus(
                   value
-                    ? `已在 ${time.toFixed(3)}s 打关键帧：插槽「${slot.name}」显示「${value}」`
-                    : `已在 ${time.toFixed(3)}s 打关键帧：插槽「${slot.name}」不显示`
+                    ? t('已在 {0}s 打关键帧：插槽「{1}」显示「{2}」', [time.toFixed(3), slot.name, value])
+                    : t('已在 {0}s 打关键帧：插槽「{1}」不显示', [time.toFixed(3), slot.name])
                 )
                 return
               }
-              update('修改 setup 附件', (draft) => {
+              update(t('修改 setup 附件'), (draft) => {
                 const target = draft.slots.find((s) => s.name === slot.name)
                 if (target) target.attachment = value
               })
@@ -944,15 +945,15 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
           />
           <div className="flex items-center gap-1">
             <ToggleField
-              label={animating ? '可见（关键帧）' : '可见'}
+              label={animating ? t('可见（关键帧）') : t('可见')}
               value={slot.visible}
               onChange={(value) =>
                 animating
-                  ? update('关键帧：切换可见性', (draft) => {
+                  ? update(t('关键帧：切换可见性'), (draft) => {
                       const animation = draft.animations.find((item) => item.name === currentAnimation)
                       if (animation) keySlotVisible(animation, slot.name, time, value)
                     })
-                  : update('修改插槽可见性', (draft) => {
+                  : update(t('修改插槽可见性'), (draft) => {
                       const target = draft.slots.find((s) => s.name === slot.name)
                       if (target) target.visible = value
                     })
@@ -962,28 +963,28 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
         </FieldGroup>
 
         {attachment ? (
-          <FieldGroup title={`附件 · ${attachment.type}`}>
+          <FieldGroup title={t('附件 · {0}', attachment.type)}>
             <TextField
-              label="名称"
+              label={t('名称')}
               value={attachment.name}
               commitOnBlur
               onChange={(next) =>
                 rename('attachment', attachment.name, next, {
                   slot: slot.name,
-                  label: '附件',
+                  label: t('附件'),
                   reselect: () => selection.selectAttachment(slot.name, next.trim())
                 })
               }
             />
             <SelectField
-              label="图片"
+              label={t('图片')}
               value={attachment.image}
               options={[
-                { value: '', label: '（纯色）' },
+                { value: '', label: t('（纯色）') },
                 ...document.images.map((image) => ({ value: image.name, label: image.name }))
               ]}
               onChange={(value) =>
-                update('修改附件图片', (draft) => {
+                update(t('修改附件图片'), (draft) => {
                   patchAttachment(draft, slot.name, attachment.name, (a) => {
                     a.image = value
                   })
@@ -992,23 +993,23 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             />
             {/* 同骨骼位置：按像素显示 / 输入（中键拖动 / 上下键按 10px 走），写回仍是世界单位 */}
             <Vector2Field
-              label="位置"
+              label={t('位置')}
               value={attachment.position}
               unitScale={PX_PER_UNIT}
               step={10}
-              onChange={(value) => update('修改附件位置', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.position = value }))}
+              onChange={(value) => update(t('修改附件位置'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.position = value }))}
             />
             <NumberField
-              label="旋转"
+              label={t('旋转')}
               value={attachment.rotation}
               suffix="°"
-              onChange={(value) => update('修改附件旋转', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.rotation = value }))}
+              onChange={(value) => update(t('修改附件旋转'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.rotation = value }))}
             />
             <Vector2Field
-              label="缩放"
+              label={t('缩放')}
               value={attachment.scale}
               step={0.1}
-              onChange={(value) => update('修改附件缩放', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.scale = value }))}
+              onChange={(value) => update(t('修改附件缩放'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.scale = value }))}
             />
             {/*
               尺寸：**Region 的内容矩形**（图集里那块有像素的区域）—— 渲染的四边形与栅格网格按它走。
@@ -1020,18 +1021,18 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             */}
             {attachment.type !== 'mesh' ? (
               <Vector2Field
-                label="尺寸"
+                label={t('尺寸')}
                 value={attachment.size}
                 unitScale={PX_PER_UNIT}
                 step={5}
-                onChange={(value) => update('修改附件尺寸', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.size = value }))}
+                onChange={(value) => update(t('修改附件尺寸'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.size = value }))}
                 // 行尾小图标：一键恢复到图片大小（仅 Region；纯色附件没有图可恢复，不显示）
                 action={
                   attachment.type === 'region' && attachment.image ? (
                     <button
                       type="button"
                       tabIndex={-1}
-                      title="恢复到图片大小（按图片像素 ÷ PPU 折算，与拖图创建时一致）"
+                      title={t('恢复到图片大小（按图片像素 ÷ PPU 折算，与拖图创建时一致）')}
                       className="shrink-0 text-content-lo hover:text-content-hi"
                       onClick={() => resetAttachmentSize(slot.name, attachment.name, attachment.image)}
                     >
@@ -1046,17 +1047,18 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             (Math.abs(attachment.frameSize.x - attachment.size.x) > 1e-4 ||
               Math.abs(attachment.frameSize.y - attachment.size.y) > 1e-4) ? (
               <p className="text-3xs text-content-lo">
-                原图（含裁剪留白）：{unitsToPx(attachment.frameSize.x).toFixed(1)} ×{' '}
-                {unitsToPx(attachment.frameSize.y).toFixed(1)} px ——
-                选中轮廓/手柄按它走，渲染仍只有上面「尺寸」那块
+                {t('原图（含裁剪留白）：{0} × {1} px —— 选中轮廓/手柄按它走，渲染仍只有上面「尺寸」那块', [
+                  unitsToPx(attachment.frameSize.x).toFixed(1),
+                  unitsToPx(attachment.frameSize.y).toFixed(1)
+                ])}
               </p>
             ) : null}
             <ColorField
-              label="颜色"
+              label={t('颜色')}
               value={attachment.color}
-              onDragStart={() => useProjectStore.getState().beginTransaction('修改附件颜色')}
+              onDragStart={() => useProjectStore.getState().beginTransaction(t('修改附件颜色'))}
               onDragEnd={() => useProjectStore.getState().endTransaction()}
-              onChange={(value) => update('修改附件颜色', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.color = value }))}
+              onChange={(value) => update(t('修改附件颜色'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.color = value }))}
             />
             {/*
               骨内FFD：**只在已经标成骨内空间时才出现**（正常流程不会产生 true）。
@@ -1066,23 +1068,26 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             */}
             {attachment.type === 'mesh' && attachment.ffdInBoneSpace ? (
               <ToggleField
-                label="骨内FFD"
+                label={t('骨内FFD')}
                 value={attachment.ffdInBoneSpace}
-                hint="偏移已按骨骼 bindpose 换算过；正常保持关闭"
-                onChange={(value) => update('修改FFD空间', (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.ffdInBoneSpace = value }))}
+                hint={t('偏移已按骨骼 bindpose 换算过；正常保持关闭')}
+                onChange={(value) => update(t('修改FFD空间'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.ffdInBoneSpace = value }))}
               />
             ) : null}
             {attachment.type === 'mesh' ? (
               <p className="text-3xs leading-relaxed text-content-lo">
-                顶点 {attachment.vertices.length} · 三角面 {Math.floor(attachment.triangles.length / 3)} ·
-                加权 {attachment.vertices.filter((v) => v.weights.length > 0).length}
+                {t('顶点 {0} · 三角面 {1} · 加权 {2}', [
+                  attachment.vertices.length,
+                  Math.floor(attachment.triangles.length / 3),
+                  attachment.vertices.filter((v) => v.weights.length > 0).length
+                ])}
                 <br />
-                用网格 / FFD 工具在网格内 Alt+点击插入顶点，选中顶点后可在下面删除
+                {t('用网格 / FFD 工具在网格内 Alt+点击插入顶点，选中顶点后可在下面删除')}
               </p>
             ) : null}
 
             {attachment.type === 'mesh' ? (
-              <FieldGroup title="权重骨骼列表">
+              <FieldGroup title={t('权重骨骼列表')}>
                 {/* 两个入口并排一行，都放在列表**上方**：绑定骨骼与按列表重算权重是这块的常用动作 */}
                 <div className="flex gap-1">
                   <button
@@ -1090,31 +1095,31 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                     className="hao-btn h-[20px] flex-1 px-2 text-3xs"
                     title={
                       pickingWeightBone
-                        ? '结束绑定：已点选的骨骼会保留在列表里'
-                        : '进入绑定骨骼状态后，在视口里点选骨骼加入列表（可以连续点选多根），右键或再点这个按钮结束'
+                        ? t('结束绑定：已点选的骨骼会保留在列表里')
+                        : t('进入绑定骨骼状态后，在视口里点选骨骼加入列表（可以连续点选多根），右键或再点这个按钮结束')
                     }
                     onClick={() => {
                       if (pickingWeightBone) {
                         tools.setPendingWeightBone(null)
-                        onStatus('已结束绑定骨骼')
+                        onStatus(t('已结束绑定骨骼'))
                         return
                       }
                       tools.setPendingWeightBone({ slot: slot.name, attachment: attachment.name })
-                      onStatus('绑定骨骼：在视口里点选骨骼加入列表（可连续多根），完成后右键或再点这个按钮')
+                      onStatus(t('绑定骨骼：在视口里点选骨骼加入列表（可连续多根），完成后右键或再点这个按钮'))
                     }}
                   >
-                    {pickingWeightBone ? '完成绑定骨骼' : '添加绑定骨骼'}
+                    {pickingWeightBone ? t('完成绑定骨骼') : t('添加绑定骨骼')}
                   </button>
                   <button
                     type="button"
                     className="hao-btn h-[20px] flex-1 px-2 text-3xs"
                     disabled={weightBones.length === 0}
-                    title="按列表里的骨骼重算所有顶点权重：顶点离哪根骨骼近，它在那根骨骼上的权重就高（列表外的骨骼不参与）"
+                    title={t('按列表里的骨骼重算所有顶点权重：顶点离哪根骨骼近，它在那根骨骼上的权重就高（列表外的骨骼不参与）')}
                     onClick={() => {
                       const scene = getActiveScene()
                       if (!scene) return
                       if (mode !== 'pose') {
-                        onStatus('自动计算权重写的是绑定姿态：请切到 Pose 状态')
+                        onStatus(t('自动计算权重写的是绑定姿态：请切到 Pose 状态'))
                         return
                       }
                       const touched = runAutoWeightsForBones(
@@ -1126,14 +1131,14 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                       )
                       onStatus(
                         touched > 0
-                          ? `已按绑定骨骼重算 ${touched} 个顶点的权重`
+                          ? t('已按绑定骨骼重算 {0} 个顶点的权重', touched)
                           : weightBones.length < 2
-                            ? `权重没有变化：列表里只有 ${weightBones.length} 根骨骼，结果就是全部 100%。先点「添加绑定骨骼」把相关骨骼加进来再算`
-                            : '权重没有变化：当前权重已是最新结果'
+                            ? t('权重没有变化：列表里只有 {0} 根骨骼，结果就是全部 100%。先点「添加绑定骨骼」把相关骨骼加进来再算', weightBones.length)
+                            : t('权重没有变化：当前权重已是最新结果')
                       )
                     }}
                   >
-                    自动计算权重
+                    {t('自动计算权重')}
                   </button>
                 </div>
                 {/*
@@ -1144,7 +1149,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                 <div className="flex flex-col gap-0.5 rounded border border-line bg-ink-900/60 p-1">
                   {weightBones.length === 0 ? (
                     <span className="px-1 py-0.5 text-3xs leading-relaxed text-content-lo">
-                      还没有绑定骨骼：点上面的按钮进入绑定状态，再在视口里点选骨骼（可连续点选多根）
+                      {t('还没有绑定骨骼：点上面的按钮进入绑定状态，再在视口里点选骨骼（可连续点选多根）')}
                     </span>
                   ) : (
                     weightBones.map((name, index) => {
@@ -1190,11 +1195,11 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                                 className="h-[14px] w-[72px] shrink-0 cursor-pointer accent-accent disabled:cursor-not-allowed disabled:opacity-40"
                                 title={
                                   locked
-                                    ? '这个网格只绑了一根骨骼：它在每个顶点上必然是 100%'
-                                    : `「${name}」在顶点 #${selection.vertex} 上的权重（其余骨骼按比例分享剩余部分）`
+                                    ? t('这个网格只绑了一根骨骼：它在每个顶点上必然是 100%')
+                                    : t('「{0}」在顶点 #{1} 上的权重（其余骨骼按比例分享剩余部分）', [name, selection.vertex])
                                 }
                                 // 一次拖动 = 一条撤销记录：按下开事务，松开收尾，中途只 updateSilent
-                                onPointerDown={() => useProjectStore.getState().beginTransaction('修改顶点权重')}
+                                onPointerDown={() => useProjectStore.getState().beginTransaction(t('修改顶点权重'))}
                                 onPointerUp={() => useProjectStore.getState().endTransaction()}
                                 onChange={(event) =>
                                   useProjectStore.getState().updateSilent((draft) => {
@@ -1215,7 +1220,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                                 disabled={locked}
                                 inputMode="numeric"
                                 scrub
-                                title="权重百分比：失焦 / 回车生效；中键左右拖动可调"
+                                title={t('权重百分比：失焦 / 回车生效；中键左右拖动可调')}
                                 sanitize={(raw) => {
                                   const next = Math.round(Number(raw))
                                   return Number.isFinite(next)
@@ -1223,7 +1228,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                                     : null
                                 }}
                                 onCommit={(next) =>
-                                  update('修改顶点权重', (draft) => {
+                                  update(t('修改顶点权重'), (draft) => {
                                     setVertexWeight(
                                       draft,
                                       slot.name,
@@ -1241,13 +1246,13 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                             <button
                               type="button"
                               className="shrink-0 text-3xs text-content-lo hover:text-danger"
-                              title="从列表移除，并清掉该骨骼在所有顶点上的权重"
+                              title={t('从列表移除，并清掉该骨骼在所有顶点上的权重')}
                               onClick={() => {
                                 let removed = false
-                                update('移除权重骨骼', (draft) => {
+                                update(t('移除权重骨骼'), (draft) => {
                                   removed = removeWeightBone(draft, slot.name, attachment.name, name)
                                 })
-                                onStatus(removed ? `已移除权重骨骼「${name}」` : `「${name}」不在权重列表里`)
+                                onStatus(removed ? t('已移除权重骨骼「{0}」', name) : t('「{0}」不在权重列表里', name))
                               }}
                             >
                               ×
@@ -1279,8 +1284,8 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                       disabled={selection.vertices.length === 0}
                       title={
                         selection.vertices.length === 0
-                          ? '先在视口里点选一个顶点（网格 / FFD 工具）'
-                          : '删除选中的顶点，并用它的邻居重新三角化补洞'
+                          ? t('先在视口里点选一个顶点（网格 / FFD 工具）')
+                          : t('删除选中的顶点，并用它的邻居重新三角化补洞')
                       }
                       onClick={() => {
                         const vertex = selection.vertices[0]
@@ -1289,41 +1294,41 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                         // 并以它为准确定附件（点选顶点不会改「选中的附件」，可能还停在上一个）
                         const ref = getActiveScene()?.vertexRefAt(vertex) ?? null
                         if (!ref) {
-                          onStatus('顶点信息已过期：请在视口里重新点选顶点')
+                          onStatus(t('顶点信息已过期：请在视口里重新点选顶点'))
                           return
                         }
                         let removed = false
-                        update('删除网格顶点', (draft) => {
+                        update(t('删除网格顶点'), (draft) => {
                           removed = deleteMeshVertex(draft, ref.slot, ref.attachment, ref.vertex)
                         })
                         if (removed) selection.selectVertices([])
                         onStatus(
                           removed
-                            ? `已删除「${ref.attachment}」的顶点 #${ref.vertex}`
-                            : '删除失败：顶点不存在或网格至少需要保留 3 个顶点'
+                            ? t('已删除「{0}」的顶点 #{1}', [ref.attachment, ref.vertex])
+                            : t('删除失败：顶点不存在或网格至少需要保留 3 个顶点')
                         )
                       }}
                     >
-                      删除选中顶点
+                      {t('删除选中顶点')}
                     </button>
                   ) : null}
                   <button
                     type="button"
                     className="hao-btn h-[20px] px-2 text-3xs"
-                    title="清空网格顶点，退回成一张图片显示（由 Region 转来的会精确还原原尺寸与 UV）"
+                    title={t('清空网格顶点，退回成一张图片显示（由 Region 转来的会精确还原原尺寸与 UV）')}
                     onClick={() => {
                       let restored = false
-                      update('还原为 Region', (draft) => {
+                      update(t('还原为 Region'), (draft) => {
                         restored = convertMeshToRegion(draft, slot.name, attachment.name)
                       })
                       onStatus(
                         restored
-                          ? `已把「${attachment.name}」还原为 Region（顶点与 FFD 帧已一并清空）`
-                          : '还原失败（附件类型不是网格）'
+                          ? t('已把「{0}」还原为 Region（顶点与 FFD 帧已一并清空）', attachment.name)
+                          : t('还原失败（附件类型不是网格）')
                       )
                     }}
                   >
-                    还原为 Region
+                    {t('还原为 Region')}
                   </button>
                 </>
               ) : null}
@@ -1331,14 +1336,14 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                 type="button"
                 className="hao-btn h-[20px] px-2 text-3xs hover:border-danger/50 hover:text-danger"
                 onClick={() => {
-                  update('删除附件', (draft) => {
+                  update(t('删除附件'), (draft) => {
                     deleteAttachment(draft, slot.name, attachment.name)
                   })
                   selection.selectSlot(slot.name)
-                  onStatus(`已删除附件「${attachment.name}」`)
+                  onStatus(t('已删除附件「{0}」', attachment.name))
                 }}
               >
-                删除附件
+                {t('删除附件')}
               </button>
             </div>
           </FieldGroup>
@@ -1354,9 +1359,9 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
           Animate 态整个右栏是收起的（见 App），所以不必再写「请切到 Pose 态」的提示。
         */}
         {attachment && attachment.type !== 'mesh' ? (
-          <FieldGroup title="网格 / FFD">
+          <FieldGroup title={t('网格 / FFD')}>
             <NumberField
-              label="密度"
+              label={t('密度')}
               value={tools.gridDivisions}
               step={1}
               min={1}
@@ -1366,24 +1371,24 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             />
             <p className="flex items-center gap-1 text-3xs text-content-lo">
               <Grid3x3 size={10} />
-              生成 / 重设网格时的栅格细分（{tools.gridDivisions}×{tools.gridDivisions}）：越大顶点越密、越贴合形状
+              {t('生成 / 重设网格时的栅格细分（{0}×{1}）：越大顶点越密、越贴合形状', [tools.gridDivisions, tools.gridDivisions])}
             </p>
             <div className="flex flex-wrap gap-1 pt-0.5">
               <button
                 type="button"
                 className="hao-btn h-[20px] px-2 text-3xs"
-                title="把选中的图片（Region）按密度切分成规则栅格网格并三角化，之后可用权重刷 / 顶点工具编辑"
+                title={t('把选中的图片（Region）按密度切分成规则栅格网格并三角化，之后可用权重刷 / 顶点工具编辑')}
                 onClick={() => onStatus(buildGridMesh(tools.gridDivisions).message)}
               >
-                转为网格（{tools.gridDivisions}×{tools.gridDivisions}）
+                {t('转为网格（{0}×{1}）', [tools.gridDivisions, tools.gridDivisions])}
               </button>
               <button
                 type="button"
                 className="hao-btn h-[20px] px-2 text-3xs"
-                title="沿图片不透明像素的轮廓生成贴合网格（透明区域不占三角形）；密度控制顶点数量级，也可用来重设手动编辑过的网格"
+                title={t('沿图片不透明像素的轮廓生成贴合网格（透明区域不占三角形）；密度控制顶点数量级，也可用来重设手动编辑过的网格')}
                 onClick={() => onStatus(buildOutlineMesh(tools.gridDivisions).message)}
               >
-                自动生成网格
+                {t('自动生成网格')}
               </button>
             </div>
           </FieldGroup>
@@ -1394,7 +1399,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   }
 
   const constraint = document.constraints.find((c) => c.name === selection.constraint)
-  if (!constraint) return <PanelEmpty title="约束不存在" description="该约束可能已被删除，请重新选择。" />
+  if (!constraint) return <PanelEmpty title={t('约束不存在')} description={t('该约束可能已被删除，请重新选择。')} />
 
   return (
     <div className="flex flex-col">
@@ -1409,12 +1414,12 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
         revealBone={revealBone}
         nameField={
           <TextField
-            label="名称"
+            label={t('名称')}
             value={constraint.name}
             commitOnBlur
             onChange={(next) =>
               rename('constraint', constraint.name, next, {
-                label: '约束',
+                label: t('约束'),
                 reselect: () => selection.selectConstraint(next.trim())
               })
             }
@@ -1422,10 +1427,10 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
         }
         orderField={
           <NumberField
-            label="顺序"
+            label={t('顺序')}
             value={constraint.order}
             precision={0}
-            onChange={(value) => update('修改约束顺序', (draft) => { const t = draft.constraints.find((c) => c.name === constraint.name); if (t) t.order = value })}
+            onChange={(value) => update(t('修改约束顺序'), (draft) => { const item = draft.constraints.find((c) => c.name === constraint.name); if (item) item.order = value })}
           />
         }
       />

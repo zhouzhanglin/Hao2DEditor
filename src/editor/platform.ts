@@ -79,6 +79,10 @@ export interface Platform {
   aiInstallMcp(): Promise<IpcResult<McpInstallReport>>
   /** AI 接入：返回内置命令接口文档（docs/ai-command-api.md 内容），供写出到工程目录 */
   aiCommandApiDoc(): Promise<IpcResult<{ text: string }>>
+  /** 语言：系统语言标签（Electron 走主进程 `app.getLocale()`，浏览器读 `navigator.language`） */
+  systemLocale(): Promise<string>
+  /** 语言：把当前界面语言同步给主进程（重建菜单）；浏览器模式为空实现 */
+  setAppLocale(locale: string): Promise<void>
 }
 
 function unwrap<T>(result: IpcResult<T>, fallback: T): T {
@@ -249,6 +253,20 @@ class ElectronPlatform implements Platform {
       return { ok: false, error: '命令服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）' }
     }
     return call.call(this.bridge)
+  }
+
+  /** 系统语言：优先问主进程 `app.getLocale()`；通道缺失（旧主进程）时退回 navigator */
+  async systemLocale(): Promise<string> {
+    const call = this.bridge.systemLocale
+    if (typeof call !== 'function') return typeof navigator !== 'undefined' ? navigator.language : ''
+    const result = await call.call(this.bridge)
+    return result.ok ? result.data : ''
+  }
+
+  async setAppLocale(locale: string): Promise<void> {
+    const call = this.bridge.setAppLocale
+    if (typeof call !== 'function') return
+    await call.call(this.bridge, locale)
   }
 }
 
@@ -445,6 +463,16 @@ class MemoryPlatform implements Platform {
 
   async aiCommandApiDoc(): Promise<IpcResult<{ text: string }>> {
     return { ok: false, error: '浏览器模式没有命令服务，请在桌面版里使用' }
+  }
+
+  /** 浏览器模式：直接读 navigator.language */
+  async systemLocale(): Promise<string> {
+    return typeof navigator !== 'undefined' ? navigator.language : ''
+  }
+
+  /** 浏览器模式没有主进程菜单，空实现 */
+  async setAppLocale(): Promise<void> {
+    // no-op
   }
 
   private async storeFile(file: File): Promise<string> {

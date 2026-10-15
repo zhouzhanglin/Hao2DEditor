@@ -16,6 +16,7 @@ import type { GizmoMode } from '../store/toolStore'
 import { useProjectStore } from '../store/projectStore'
 import { useSelectionStore } from '../store/selectionStore'
 import { keyBoneChannel, keyDeform } from '../commands/animationCommands'
+import { t } from '@i18n'
 // 「画骨骼时把鼠标下的插槽带过来」复用层级树拖放插槽的同一套命令（会换算附件位置，画面不跳）
 import { moveSlot, validateSlotMove } from '../commands/hierarchyCommands'
 import type { MoveResult } from '../commands/hierarchyCommands'
@@ -32,7 +33,7 @@ import {
 } from '../commands/authoringCommands'
 import type { BrushMode, VertexSample } from '../commands/authoringCommands'
 import type { BrushModeSetting, MeshSubtool } from '../store/toolStore'
-import { MESH_SUBTOOLS, useToolStore } from '../store/toolStore'
+import { meshSubtools, useToolStore } from '../store/toolStore'
 import { fitUvField, isInteriorVertex, polygonUvs, triangulatePolygon } from '@core/mesh/triangulate'
 
 export interface PointerInfo {
@@ -1869,9 +1870,9 @@ interface MeshTarget {
   data: NonNullable<ReturnType<typeof findAttachment>>
 }
 
-/** 子工具的显示名（状态提示用，文案与图标条共用 `MESH_SUBTOOLS`） */
+/** 子工具的显示名（状态提示用，文案与图标条共用 `meshSubtools`） */
 function meshSubtoolLabel(subtool: MeshSubtool): string {
-  return MESH_SUBTOOLS.find((item) => item.id === subtool)?.label ?? '网格子工具'
+  return meshSubtools().find((item) => item.id === subtool)?.label ?? t('网格子工具')
 }
 
 /** 当前选中的网格附件；没选中 / 不是网格 → null */

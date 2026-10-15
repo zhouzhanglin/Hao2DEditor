@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { PPU } from '@editor/commands/authoringCommands'
 import { useProjectStore } from '@editor/store/projectStore'
 import { hasTreeDrag, readTreeDrag } from './dragDrop'
+import { t } from '@i18n'
 
 /**
  * 世界单位 → 像素的显示换算系数。
@@ -200,7 +201,7 @@ function useScrubDrag(
           dragging = true
           target.blur()
           document.body.style.userSelect = 'none'
-          useProjectStore.getState().beginTransaction('调整数值')
+          useProjectStore.getState().beginTransaction(t('调整数值'))
         }
         const next = clamp(Number((start + (ev.clientX - startX) * step).toFixed(digits)))
         if (next === last) return
@@ -373,7 +374,7 @@ export function SliderField({
   step = 0.05,
   precision = 3,
   disabled,
-  transaction = '调整数值',
+  transaction = t('调整数值'),
   hint,
   showValue = true
 }: SliderFieldProps) {
@@ -419,7 +420,7 @@ export function SliderField({
           disabled={disabled}
           inputMode="decimal"
           scrub
-          title="失焦 / 回车生效；中键左右拖动可调"
+          title={t('失焦 / 回车生效；中键左右拖动可调')}
           sanitize={(raw) => {
             const next = Number(raw)
             return Number.isFinite(next) ? format(quantize(next), precision) : null
@@ -767,7 +768,7 @@ export function ColorField({ label, value, onChange, onDragStart, onDragEnd, onP
         max={1}
         step={0.01}
         className="h-[14px] w-[64px] shrink-0 cursor-pointer accent-accent"
-        title="透明度（alpha）"
+        title={t('透明度（alpha）')}
         value={shownAlpha}
         onPointerDown={begin}
         onPointerUp={() => {
@@ -791,7 +792,7 @@ export function ColorField({ label, value, onChange, onDragStart, onDragEnd, onP
           className="hao-field w-[46px] pr-4 text-right font-mono text-3xs"
           value={String(Math.round(shownAlpha * 100))}
           inputMode="decimal"
-          title="透明度百分比（0–100）；失焦 / 回车生效，中键左右拖动可调"
+          title={t('透明度百分比（0–100）；失焦 / 回车生效，中键左右拖动可调')}
           scrub
           sanitize={(raw) => {
             const next = Number(raw)

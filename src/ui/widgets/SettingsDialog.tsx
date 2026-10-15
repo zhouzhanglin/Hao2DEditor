@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useSettingsStore } from '@editor/store/settingsStore'
+import { getPlatform } from '@editor/platform'
 import { CommitTextField, format, parseHexColor } from '@ui/widgets/fields'
 import { DEFAULT_BONE_STYLE, normalizeBoneHex } from '@render/overlays/boneStyle'
+import { LOCALES, setLocale, t, useLocale } from '@i18n'
+import type { Locale } from '@i18n'
 import { useDialogDrag } from './dialogDrag'
 
 export interface SettingsDialogProps {
@@ -28,6 +31,13 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   /** 标题栏拖动弹窗（见 dialogDrag） */
   const { panelStyle, handleProps } = useDialogDrag()
+  const locale = useLocale()
+
+  /** 切语言：写本地存档 + 立即重渲染 + 同步给主进程重建菜单 */
+  const changeLocale = (next: Locale): void => {
+    setLocale(next)
+    void getPlatform().setAppLocale(next)
+  }
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -50,12 +60,12 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
         style={panelStyle}
       >
         <div className="flex h-[28px] shrink-0 items-center justify-between border-b border-line px-3" {...handleProps}>
-          <span className="hao-panel-title">全局设置</span>
+          <span className="hao-panel-title">{t('全局设置')}</span>
           <button
             type="button"
             // 标题栏的 `cursor: grab` 会被继承下来，按钮自己声明 pointer 盖掉它
             className="cursor-pointer text-content-lo hover:text-content-hi"
-            title="关闭"
+            title={t('关闭')}
             onClick={onClose}
           >
             <X size={14} />
@@ -63,10 +73,29 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
         </div>
 
         <div className="flex flex-col gap-3 overflow-y-auto px-4 py-4">
+          {/* 界面语言：全局生效、跨工程保留；首次启动按系统语言自动选 */}
+          <label
+            className="flex items-center gap-2 rounded-[4px] border border-line/60 px-2.5 py-2 hover:bg-ink-700"
+            title={t('切换界面语言；首次启动会按系统语言自动选择')}
+          >
+            <span className="hao-label w-[52px] shrink-0">{t('语言')}</span>
+            <select
+              className="hao-field min-w-0 flex-1"
+              value={locale}
+              onChange={(event) => changeLocale(event.target.value as Locale)}
+            >
+              {LOCALES.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
           {/* Spine 导出：图集名追加 .txt */}
           <label
             className="flex cursor-pointer items-start gap-2 rounded-[4px] border border-line/60 px-2.5 py-2 hover:bg-ink-700"
-            title="在 atlas 文件名后追加 .txt，写成 xxx.atlas.txt（Spine 编辑器默认导出的形态，spine-unity 也认）"
+            title={t('在 atlas 文件名后追加 .txt，写成 xxx.atlas.txt（Spine 编辑器默认导出的形态，spine-unity 也认）')}
           >
             <input
               type="checkbox"
@@ -75,9 +104,10 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
               onChange={(event) => setSpineAtlasTxt(event.target.checked)}
             />
             <span className="flex flex-col gap-0.5">
-              <span className="text-xs text-content-hi">Spine 导出：atlas 名追加 .txt</span>
+              <span className="text-xs text-content-hi">{t('Spine 导出：atlas 名追加 .txt')}</span>
               <span className="text-3xs leading-[15px] text-content-lo">
-                勾选后所有 Spine 导出都写成 <span className="text-content-mid">xxx.atlas.txt</span>（全局生效，跨工程保留）
+                {t('勾选后所有 Spine 导出都写成')} <span className="text-content-mid">xxx.atlas.txt</span>
+                {t('（全局生效，跨工程保留）')}
               </span>
             </span>
           </label>
@@ -85,25 +115,25 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
           {/* 骨骼样式：只改视口里骨骼的长相，不写进工程、不影响导出 */}
           <section className="flex flex-col gap-2 rounded-[4px] border border-line/60 px-2.5 py-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs text-content-hi">骨骼样式</span>
+              <span className="text-xs text-content-hi">{t('骨骼样式')}</span>
               <button
                 type="button"
                 className="text-3xs text-content-lo hover:text-content-hi"
-                title="恢复成默认长相（改之前项目里用的那一档）"
+                title={t('恢复成默认长相（改之前项目里用的那一档）')}
                 onClick={resetBoneStyle}
               >
-                恢复默认
+                {t('恢复默认')}
               </button>
             </div>
             <span className="text-3xs leading-[15px] text-content-lo">
-              只影响视口里骨骼叠加层的长相（不写进工程、不影响导出）；改完立刻生效。
+              {t('只影响视口里骨骼叠加层的长相（不写进工程、不影响导出）；改完立刻生效。')}
             </span>
 
             <div className="flex flex-col gap-1.5">
               <NumberRow
-                label="宽"
-                suffix="% 长度"
-                hint="骨骼本体的半宽占骨骼长度的比例（原来固定 5%）"
+                label={t('宽')}
+                suffix={t('% 长度')}
+                hint={t('骨骼本体的半宽占骨骼长度的比例（原来固定 5%）')}
                 value={boneStyle.widthPercent}
                 min={0.5}
                 max={60}
@@ -111,9 +141,9 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
                 onChange={(widthPercent) => setBoneStyle({ widthPercent })}
               />
               <NumberRow
-                label="原点圈"
+                label={t('原点圈')}
                 suffix="px"
-                hint="骨骼原点那个圆圈的大小（屏幕像素）；拾取它靠的也是这个大小"
+                hint={t('骨骼原点那个圆圈的大小（屏幕像素）；拾取它靠的也是这个大小')}
                 value={boneStyle.jointRadius}
                 min={2}
                 max={40}
@@ -121,24 +151,24 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
                 onChange={(jointRadius) => setBoneStyle({ jointRadius })}
               />
               <ColorRow
-                label="骨骼颜色"
-                hint="骨骼本体的填充色（默认 #CCD2D8）"
+                label={t('骨骼颜色')}
+                hint={t('骨骼本体的填充色（默认 #CCD2D8）')}
                 hex={boneStyle.fillColor}
                 alpha={boneStyle.fillAlpha}
                 onHex={(fillColor) => setBoneStyle({ fillColor })}
                 onAlpha={(fillAlpha) => setBoneStyle({ fillAlpha })}
               />
               <ColorRow
-                label="描边颜色"
-                hint="骨骼轮廓与原点圆圈的描边色"
+                label={t('描边颜色')}
+                hint={t('骨骼轮廓与原点圆圈的描边色')}
                 hex={boneStyle.strokeColor}
                 alpha={boneStyle.strokeAlpha}
                 onHex={(strokeColor) => setBoneStyle({ strokeColor })}
                 onAlpha={(strokeAlpha) => setBoneStyle({ strokeAlpha })}
               />
               <ColorRow
-                label="选中颜色"
-                hint="选中骨骼后整根（本体 + 原点圈）换成这个色"
+                label={t('选中颜色')}
+                hint={t('选中骨骼后整根（本体 + 原点圈）换成这个色')}
                 hex={boneStyle.selectedColor}
                 onHex={(selectedColor) => setBoneStyle({ selectedColor })}
               />
@@ -148,7 +178,7 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
 
         <div className="flex h-[40px] shrink-0 items-center justify-end border-t border-line px-4">
           <button type="button" className="hao-btn h-[24px] px-3 text-3xs" onClick={onClose}>
-            完成
+            {t('完成')}
           </button>
         </div>
       </div>
@@ -274,7 +304,7 @@ function ColorRow({
           <input
             type="range"
             className="h-[14px] w-[64px] shrink-0 cursor-pointer accent-accent"
-            title="透明度（alpha）"
+            title={t('透明度（alpha）')}
             min={0}
             max={1}
             step={0.01}
@@ -286,7 +316,7 @@ function ColorRow({
               className="hao-field w-[46px] pr-4 text-right font-mono text-3xs"
               value={String(Math.round(alpha * 100))}
               inputMode="decimal"
-              title="透明度百分比（0–100）；失焦 / 回车生效"
+              title={t('透明度百分比（0–100）；失焦 / 回车生效')}
               sanitize={parsePercent}
               onCommit={(raw) => onAlpha(Number(raw) / 100)}
             />

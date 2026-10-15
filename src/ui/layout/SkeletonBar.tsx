@@ -3,6 +3,7 @@ import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import ContextMenu from '@ui/widgets/ContextMenu'
 import type { ContextMenuItem } from '@ui/widgets/ContextMenu'
+import { t } from '@i18n'
 
 interface SkeletonBarProps {
   /** 切换骨架：清选中 / 停播 / 重置视口这些收尾由外面做（这里只点一下） */
@@ -52,7 +53,7 @@ export default function SkeletonBar({ onSwitch, onAdd, onRename, onRemove, onSta
 
   return (
     <div className="flex h-[28px] shrink-0 items-center gap-1 overflow-x-auto border-b border-line bg-ink-900/70 px-2">
-      <span className="shrink-0 pr-1 text-3xs text-content-lo">骨架</span>
+      <span className="shrink-0 pr-1 text-3xs text-content-lo">{t('骨架')}</span>
       {names.map((name, index) => {
         if (index === editing) {
           return (
@@ -75,7 +76,7 @@ export default function SkeletonBar({ onSwitch, onAdd, onRename, onRemove, onSta
           <button
             key={`skeleton-${index}`}
             type="button"
-            title={`${name}（双击重命名；右键重命名 / 删除）`}
+            title={t('{0}（双击重命名；右键重命名 / 删除）', name)}
             onClick={() => onSwitch(index)}
             onDoubleClick={() => beginRename(index)}
             onContextMenu={(event) => {
@@ -93,12 +94,12 @@ export default function SkeletonBar({ onSwitch, onAdd, onRename, onRemove, onSta
       })}
       <button
         type="button"
-        title="新建骨架：一套图片可以做多个骨骼（骨骼 / 插槽 / 皮肤 / 图层 / 动画各自独立，图片池共享）"
+        title={t('新建骨架：一套图片可以做多个骨骼（骨骼 / 插槽 / 皮肤 / 图层 / 动画各自独立，图片池共享）')}
         onClick={onAdd}
         className="hao-btn h-[20px] shrink-0 border border-dashed border-line/70 bg-transparent px-2 text-3xs text-content-mid hover:bg-ink-700 hover:text-content-hi"
       >
         <Plus size={11} />
-        <span>新建骨架</span>
+        <span>{t('新建骨架')}</span>
       </button>
       {menu ? (
         <ContextMenu
@@ -109,20 +110,20 @@ export default function SkeletonBar({ onSwitch, onAdd, onRename, onRemove, onSta
             [
               {
                 key: 'rename',
-                label: '重命名',
+                label: t('重命名'),
                 icon: <Pencil size={11} />,
                 onSelect: () => beginRename(menu.index)
               },
               {
                 key: 'remove',
-                label: '删除',
+                label: t('删除'),
                 icon: <Trash2 size={11} />,
                 danger: true,
                 disabled: names.length <= 1,
-                hint: names.length <= 1 ? '项目里至少保留一个骨架' : '删除这个骨架（图片池不受影响）',
+                hint: names.length <= 1 ? t('项目里至少保留一个骨架') : t('删除这个骨架（图片池不受影响）'),
                 onSelect: () => {
                   if (names.length <= 1) {
-                    onStatus('项目里至少保留一个骨架')
+                    onStatus(t('项目里至少保留一个骨架'))
                     return
                   }
                   onRemove(menu.index)

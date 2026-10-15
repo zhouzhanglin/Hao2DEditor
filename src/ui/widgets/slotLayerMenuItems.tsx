@@ -2,6 +2,7 @@ import { ArrowDown, ArrowUp, ChevronsDown, ChevronsUp, Trash2 } from 'lucide-rea
 import { deleteSlotNamed, moveSlotLayer } from '@editor/slotOrderOps'
 import type { LayerDirection } from '@editor/slotOrderOps'
 import type { ContextMenuItem } from '@ui/widgets/ContextMenu'
+import { t } from '@i18n'
 
 export interface SlotLayerMenuOptions {
   /** true = Pose 态（菜单里有「删除插槽」）；Animate 态没有删除项，移动操作打层级关键帧 */
@@ -30,23 +31,23 @@ export function slotLayerMenuItems(slot: string, options: SlotLayerMenuOptions):
     }
   })
   const items: ContextMenuItem[] = [
-    moveItem('top', '移到顶层', <ChevronsUp size={12} />, `把「${slot}」移到所有插槽的最前面（最后绘制）`),
-    moveItem('up', '上移一层', <ArrowUp size={12} />, `「${slot}」往前画一层（盖住下面的）`),
-    moveItem('down', '下移一层', <ArrowDown size={12} />, `「${slot}」往后画一层（被上面的盖住）`),
-    moveItem('bottom', '移到底层', <ChevronsDown size={12} />, `把「${slot}」移到所有插槽的最后面（最先绘制）`)
+    moveItem('top', t('移到顶层'), <ChevronsUp size={12} />, t('把「{0}」移到所有插槽的最前面（最后绘制）', slot)),
+    moveItem('up', t('上移一层'), <ArrowUp size={12} />, t('「{0}」往前画一层（盖住下面的）', slot)),
+    moveItem('down', t('下移一层'), <ArrowDown size={12} />, t('「{0}」往后画一层（被上面的盖住）', slot)),
+    moveItem('bottom', t('移到底层'), <ChevronsDown size={12} />, t('把「{0}」移到所有插槽的最后面（最先绘制）', slot))
   ]
   if (pose) {
     items.push(
       { key: 'sep', label: '', separator: true },
       {
         key: 'delete-slot',
-        label: '删除插槽',
+        label: t('删除插槽'),
         danger: true,
         icon: <Trash2 size={12} />,
-        hint: `删除插槽「${slot}」及其附件、动画轨道（不可撤销时 Ctrl+Z 也能回）`,
+        hint: t('删除插槽「{0}」及其附件、动画轨道（不可撤销时 Ctrl+Z 也能回）', slot),
         onSelect: () => {
           deleteSlotNamed(slot)
-          onStatus(`已删除插槽「${slot}」`)
+          onStatus(t('已删除插槽「{0}」', slot))
         }
       }
     )

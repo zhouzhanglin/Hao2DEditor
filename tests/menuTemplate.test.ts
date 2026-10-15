@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { MenuItemConstructorOptions } from 'electron'
 import { buildMenuTemplate } from '../src/main/menuTemplate'
+import { labelsFor } from '../src/main/menuLabels'
+
+/** 菜单文案按语言取；断言用的是简中标签，这里固定用中文 */
+const zhLabels = labelsFor('zh-CN')
 
 /** 把菜单模板摊平（含子菜单），方便逐项断言 */
 function flatten(items: MenuItemConstructorOptions[]): MenuItemConstructorOptions[] {
@@ -13,7 +17,7 @@ function flatten(items: MenuItemConstructorOptions[]): MenuItemConstructorOption
 }
 
 const template = (isMac: boolean): MenuItemConstructorOptions[] =>
-  buildMenuTemplate({ appName: 'Hao2D Editor', isMac, dispatch: () => undefined })
+  buildMenuTemplate({ appName: 'Hao2D Editor', isMac, labels: zhLabels, dispatch: () => undefined })
 
 describe('应用菜单模板', () => {
   it('编辑菜单：剪切/全选保留原生角色，拷贝/粘贴改为自定义命令（输入框文本复制仍由渲染进程转发原生）', () => {
@@ -58,6 +62,7 @@ describe('应用菜单模板', () => {
     const items = buildMenuTemplate({
       appName: 'Hao2D Editor',
       isMac: false,
+      labels: zhLabels,
       dispatch: (command) => commands.push(command)
     })
     for (const entry of flatten(items)) if (entry.click) (entry.click as () => void)()
@@ -84,6 +89,7 @@ describe('应用菜单模板', () => {
       const root = buildMenuTemplate({
         appName: 'Hao2D Editor',
         isMac,
+        labels: zhLabels,
         dispatch: () => undefined
       })
       return root.flatMap((entry) =>
@@ -95,6 +101,7 @@ describe('应用菜单模板', () => {
     const macRoot = buildMenuTemplate({
       appName: 'Hao2D Editor',
       isMac: true,
+      labels: zhLabels,
       dispatch: () => undefined
     })
     const appSubmenu = (macRoot[0].submenu as MenuItemConstructorOptions[]).map((entry) =>

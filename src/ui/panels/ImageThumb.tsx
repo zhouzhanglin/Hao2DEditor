@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { ImageOff } from 'lucide-react'
 import { getPlatform } from '@editor/platform'
 import type { AuthoringImage } from '@core/model/authoring'
+import { t } from '@i18n'
 
 /** 悬停大图的最大边长（px）；图片按原始宽高比缩放，不拉伸 */
 const PREVIEW_MAX = 240
@@ -25,7 +26,7 @@ export function ImageThumb({ path, size = 26 }: { path: string; size?: number })
     <span
       className="hao-checkerboard-sm flex shrink-0 items-center justify-center overflow-hidden rounded border border-line/70"
       style={{ width: size, height: size }}
-      title={broken ? '无法读取图片文件' : undefined}
+      title={broken ? t('无法读取图片文件') : undefined}
     >
       {broken ? (
         <ImageOff size={12} className="text-content-lo" />
@@ -109,7 +110,7 @@ export function ImageHoverPreview({ image, anchor }: { image: AuthoringImage; an
         {!url || failed ? (
           <span className="flex flex-col items-center gap-1 text-3xs text-content-lo">
             <ImageOff size={18} />
-            无法读取
+            {t('无法读取')}
           </span>
         ) : (
           <img
@@ -135,7 +136,7 @@ export function ImageHoverPreview({ image, anchor }: { image: AuthoringImage; an
             image.loose ? 'bg-warn/20 text-warn' : 'bg-ink-600 text-content-lo'
           ].join(' ')}
         >
-          {image.loose ? '碎图' : '图集'}
+          {image.loose ? t('碎图') : t('图集')}
         </span>
       </div>
       <span className="truncate px-0.5 text-3xs text-content-lo/70" title={image.path}>

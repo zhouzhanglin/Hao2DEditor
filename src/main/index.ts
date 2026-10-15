@@ -4,6 +4,7 @@ import { createLogger } from './logger'
 import { registerSchemes, registerProtocolHandlers } from './protocol'
 import { registerIpcHandlers } from './ipc'
 import { buildAppMenu } from './menu'
+import { setLocale, systemLocale } from './i18n'
 import { startCommandServer, stopCommandServer } from './commandServer'
 
 const log = createLogger('main')
@@ -61,6 +62,8 @@ app.setName('Hao2D')
 app.whenReady().then(() => {
   registerProtocolHandlers()
   registerIpcHandlers()
+  // 首次构建菜单先按系统语言（渲染进程读到存档后会再同步一次，见 ipc.ts 的 i18n:setLocale）
+  setLocale(systemLocale())
   buildAppMenu()
   createWindow()
 

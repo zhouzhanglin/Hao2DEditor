@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import type { LucideIcon } from 'lucide-react'
 import { X } from 'lucide-react'
 import { useDialogDrag } from './dialogDrag'
+import { t } from '@i18n'
 
 export interface ConfirmDialogProps {
   title: string
@@ -36,8 +37,8 @@ export default function ConfirmDialog({
   icon: Icon,
   message,
   details,
-  confirmLabel = '确定',
-  cancelLabel = '取消',
+  confirmLabel = t('确定'),
+  cancelLabel = t('取消'),
   hint,
   danger = false,
   onConfirm,
@@ -76,7 +77,7 @@ export default function ConfirmDialog({
         <div className="flex h-[30px] shrink-0 items-center gap-2 border-b border-line bg-ink-700 px-2.5" {...handleProps}>
           {Icon ? <Icon size={13} className="text-accent" /> : null}
           <span className="text-panel font-semibold text-content-hi">{title}</span>
-          <button type="button" title="关闭（Esc）" className="hao-tool-button ml-auto" onClick={onClose}>
+          <button type="button" title={t('关闭（Esc）')} className="hao-tool-button ml-auto" onClick={onClose}>
             <X size={13} />
           </button>
         </div>

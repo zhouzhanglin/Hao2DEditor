@@ -24,6 +24,8 @@
       "@render/*": ["src/render/*"],
       "@editor/*": ["src/editor/*"],
       "@ui/*": ["src/ui/*"],
+      "@i18n": ["src/i18n/index.ts"],
+      "@i18n/*": ["src/i18n/*"],
       "@shared/*": ["src/shared/*"]
     }
   },

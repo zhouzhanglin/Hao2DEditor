@@ -67,6 +67,7 @@ import {
 } from '@ui/widgets/dragDrop'
 import type { TreeDragPayload, TreeDropPosition } from '@ui/widgets/dragDrop'
 import { unitsToPx } from '@ui/widgets/fields'
+import { t } from '@i18n'
 
 /** 右键菜单的目标：root = 空白处 */
 interface MenuTarget {
@@ -356,7 +357,7 @@ function TreeRow({
         {onDelete ? (
           <button
             type="button"
-            title="删除"
+            title={t('删除')}
             className="hidden h-[16px] w-[16px] items-center justify-center rounded text-danger/80 group-hover:flex hover:bg-danger/15"
             onClick={(e) => {
               e.stopPropagation()
@@ -470,11 +471,16 @@ const CONSTRAINT_ICON: Record<AuthoringConstraint['type'], React.ReactNode> = {
   physics: <Activity size={13} className="text-content-lo" />
 }
 
-const CONSTRAINT_KIND: Record<AuthoringConstraint['type'], string> = {
-  ik: 'IK',
-  transform: '变换',
-  path: '路径',
-  physics: '物理'
+/** 约束类型的短名（IK 保持原文，其余走词典）；文案随语言切换，故是函数 */
+function constraintKind(type: AuthoringConstraint['type']): string {
+  return t({ ik: 'IK', transform: '变换', path: '路径', physics: '物理' }[type])
+}
+
+/** 右键目标的中文名（骨骼 / 插槽 / 约束），用在菜单标题里；root 没有名字 */
+function targetKind(kind: MenuTarget['kind']): string {
+  if (kind === 'bone') return t('骨骼')
+  if (kind === 'slot') return t('插槽')
+  return t('约束')
 }
 
 /**
@@ -500,12 +506,9 @@ function isMeshType(type: AuthoringAttachmentType): boolean {
   return type === 'mesh' || type === 'linkedmesh'
 }
 
-/** display 行的类型名（与行内图标同一口径：贴图 / 网格） */
-const ATTACHMENT_KIND: Record<AuthoringAttachmentType, string> = {
-  region: '贴图',
-  mesh: '网格',
-  linkedmesh: '网格（链接）',
-  boundingbox: '包围盒'
+/** display 行的类型名（与行内图标同一口径：贴图 / 网格）；文案随语言切换，故是函数 */
+function attachmentKind(type: AuthoringAttachmentType): string {
+  return t({ region: '贴图', mesh: '网格', linkedmesh: '网格（链接）', boundingbox: '包围盒' }[type])
 }
 
 type TreeSlot = EditorDocument['slots'][number]
@@ -523,74 +526,92 @@ function boneRowTitle(
   hosted: readonly AuthoringConstraint[] = []
 ): string {
   const attached: string[] = []
-  if (counts.bones > 0) attached.push(`${counts.bones} 根子骨骼`)
-  if (counts.slots > 0) attached.push(`${counts.slots} 个插槽`)
-  if (counts.constraints > 0) attached.push(`${counts.constraints} 个约束`)
+  if (counts.bones > 0) attached.push(t('{0} 根子骨骼', counts.bones))
+  if (counts.slots > 0) attached.push(t('{0} 个插槽', counts.slots))
+  if (counts.constraints > 0) attached.push(t('{0} 个约束', counts.constraints))
   const lines = [
-    `骨骼「${bone.name}」`,
-    `父级：${bone.parent || '（根骨骼）'}`,
-    `挂载：${attached.length > 0 ? attached.join(' · ') : '（空）'}`,
+    t('骨骼「{0}」', bone.name),
+    t('父级：{0}', bone.parent || t('（根骨骼）')),
+    t('挂载：{0}', attached.length > 0 ? attached.join(' · ') : t('（空）')),
     // 与行尾 meta 同一口径（length 存世界单位，树里按 px 显示，换算走 unitsToPx）；
     // rotation 存的是**局部**值，有父级时写明基准，免得跟视口里看到的世界角度对不上
-    `长度 ${unitsToPx(bone.length).toFixed(0)}px · ${
-      bone.parent ? `相对父级旋转 ${bone.rotation.toFixed(1)}°` : `旋转 ${bone.rotation.toFixed(1)}°`
-    }`
+    t('长度 {0}px · {1}', [
+      unitsToPx(bone.length).toFixed(0),
+      bone.parent
+        ? t('相对父级旋转 {0}°', bone.rotation.toFixed(1))
+        : t('旋转 {0}°', bone.rotation.toFixed(1))
+    ])
   ]
   // 寄宿的约束（IK = 目标骨，变换 / 路径 = 第一根被驱动骨）：树里不再单独成行，靠徽标 + 这里说明
   for (const constraint of hosted) {
     lines.push(
-      `${CONSTRAINT_KIND[constraint.type]}约束「${constraint.name}」寄宿在本骨骼 · ` +
-        `骨链 ${constraint.bones.length > 0 ? constraint.bones.join(' → ') : '（未设置）'} · 参数在属性面板`
+      t('{0}约束「{1}」寄宿在本骨骼 · 骨链 {2} · 参数在属性面板', [
+        constraintKind(constraint.type),
+        constraint.name,
+        constraint.bones.length > 0 ? constraint.bones.join(' → ') : t('（未设置）')
+      ])
     )
   }
-  if (bone.locked) lines.push('已锁定：视口里点不中它（层级树里照常可操作）')
+  if (bone.locked) lines.push(t('已锁定：视口里点不中它（层级树里照常可操作）'))
   return lines.join('\n')
 }
 
 function slotRowTitle(slot: TreeSlot, displayCount: number, showing: string): string {
   const lines = [
-    `插槽「${slot.name}」`,
-    `挂载于：${slot.bone || '根层'}`,
-    `绘制层序 ${slot.zOrder}（越小越先绘制）· display ${displayCount} 个`
+    t('插槽「{0}」', slot.name),
+    t('挂载于：{0}', slot.bone || t('根层')),
+    t('绘制层序 {0}（越小越先绘制）· display {1} 个', [slot.zOrder, displayCount])
   ]
-  if (!slot.visible) lines.push('已隐藏：视口与导出都不绘制它（点行首眼睛恢复）')
-  else if (showing) lines.push(`当前显示：${showing}`)
-  else if (displayCount > 0) lines.push('当前一个 display 都不显示（点 display 行的小图标显示它）')
-  if (slot.locked) lines.push('已锁定：视口里点不中它（层级树里照常可操作）')
+  if (!slot.visible) lines.push(t('已隐藏：视口与导出都不绘制它（点行首眼睛恢复）'))
+  else if (showing) lines.push(t('当前显示：{0}', showing))
+  else if (displayCount > 0) lines.push(t('当前一个 display 都不显示（点 display 行的小图标显示它）'))
+  if (slot.locked) lines.push(t('已锁定：视口里点不中它（层级树里照常可操作）'))
   return lines.join('\n')
 }
 
 function displayRowTitle(slot: TreeSlot, display: TreeDisplay, showing: boolean): string {
-  const lines = [`display「${display.name}」 · ${ATTACHMENT_KIND[display.type]}`, `宿主插槽：${slot.name}`]
-  if (display.image) lines.push(`图片：${display.image}`)
+  const lines = [
+    t('display「{0}」 · {1}', [display.name, attachmentKind(display.type)]),
+    t('宿主插槽：{0}', slot.name)
+  ]
+  if (display.image) lines.push(t('图片：{0}', display.image))
   lines.push(
     showing
-      ? '显示中：点前面的小图标可隐藏它（该插槽将不显示任何 display）'
-      : '未显示：点前面的小图标切换到它（点文字只选中，不改显示）'
+      ? t('显示中：点前面的小图标可隐藏它（该插槽将不显示任何 display）')
+      : t('未显示：点前面的小图标切换到它（点文字只选中，不改显示）')
   )
   return lines.join('\n')
 }
 
 function constraintRowTitle(constraint: AuthoringConstraint): string {
   const lines = [
-    `${CONSTRAINT_KIND[constraint.type]}约束「${constraint.name}」`,
-    `骨骼链：${constraint.bones.length > 0 ? constraint.bones.join(' → ') : '（没有骨骼）'}`
+    t('{0}约束「{1}」', [constraintKind(constraint.type), constraint.name]),
+    t('骨骼链：{0}', constraint.bones.length > 0 ? constraint.bones.join(' → ') : t('（没有骨骼）'))
   ]
-  if (constraint.target) lines.push(`目标：${constraint.target}`)
+  if (constraint.target) lines.push(t('目标：{0}', constraint.target))
   if (constraint.type === 'ik') {
-    lines.push(`权重 ${constraint.mix.toFixed(2)} · 弯曲方向 ${constraint.bendSign > 0 ? '+1' : '-1'}`)
+    lines.push(
+      t('权重 {0} · 弯曲方向 {1}', [
+        constraint.mix.toFixed(2),
+        constraint.bendSign > 0 ? '+1' : '-1'
+      ])
+    )
   }
   if (constraint.type === 'transform') {
     // inherit 没有中文名（工程文件里也是这几个英文枚举），原样显示成「字段：取值」
     lines.push(
-      `继承模式：${constraint.inherit}${constraint.relative ? ' · 相对叠加' : ''}${constraint.local ? ' · 取局部变换' : ''}`
+      t('继承模式：{0}{1}{2}', [
+        constraint.inherit,
+        constraint.relative ? t(' · 相对叠加') : '',
+        constraint.local ? t(' · 取局部变换') : ''
+      ])
     )
   }
   if (constraint.type === 'path') {
-    lines.push(`位置 ${constraint.position.toFixed(2)} · 间距 ${constraint.spacing.toFixed(2)}`)
+    lines.push(t('位置 {0} · 间距 {1}', [constraint.position.toFixed(2), constraint.spacing.toFixed(2)]))
   }
-  if (constraint.type === 'physics') lines.push('仅保留数据：不参与求解，导出直通')
-  if (!constraint.enabled) lines.push('已停用（enabled = false）')
+  if (constraint.type === 'physics') lines.push(t('仅保留数据：不参与求解，导出直通'))
+  if (!constraint.enabled) lines.push(t('已停用（enabled = false）'))
   return lines.join('\n')
 }
 
@@ -842,11 +863,13 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     if (animate) {
       onStatus?.(keySlotDisplayNow(slotName, showing ? '' : attachmentName).message)
     } else {
-      update(showing ? '隐藏 display' : '切换显示的 display', (draft) => {
+      update(showing ? t('隐藏 display') : t('切换显示的 display'), (draft) => {
         toggleSlotDisplay(draft, slotName, attachmentName)
       })
       onStatus?.(
-        showing ? `插槽「${slotName}」不再显示任何 display` : `插槽「${slotName}」显示「${attachmentName}」`
+        showing
+          ? t('插槽「{0}」不再显示任何 display', slotName)
+          : t('插槽「{0}」显示「{1}」', [slotName, attachmentName])
       )
     }
     // 隐藏后仍选中这一行：还能在检查器里编辑它，或再点一次重新显示
@@ -857,7 +880,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   const canEditBinding = (): boolean => {
     if (useModeStore.getState().mode === 'pose') return true
     // 这句话服务于所有入口：拖行改层级、拖图片建插槽 / 加 display、工具栏新建、行尾删除
-    onStatus?.('切到 Pose 状态才能改绑定数据（骨骼 / 插槽 / display / 约束）')
+    onStatus?.(t('切到 Pose 状态才能改绑定数据（骨骼 / 插槽 / display / 约束）'))
     return false
   }
 
@@ -878,7 +901,9 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     if (images.length === 0) return
     const created: { slot: string; attachment: string }[] = []
     update(
-      images.length > 1 ? `拖入 ${images.length} 张图片添加 display` : '拖入图片添加 display',
+      images.length > 1
+        ? t('拖入 {0} 张图片添加 display', images.length)
+        : t('拖入图片添加 display'),
       (draft) => {
         for (const image of images) {
           const result = addImageDisplay(draft, {
@@ -910,7 +935,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
 
     if (payload.kind === 'bone') {
       if (target.kind !== 'bone') {
-        onStatus?.('骨骼只能放到骨骼下面（拖到列表空白处 = 挂到根骨骼下）')
+        onStatus?.(t('骨骼只能放到骨骼下面（拖到列表空白处 = 挂到根骨骼下）'))
         return
       }
       const check = validateBoneMove(document, payload.name, target.name)
@@ -919,7 +944,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         return
       }
       let result: MoveResult = check
-      update('调整骨骼层级', (draft) => {
+      update(t('调整骨骼层级'), (draft) => {
         // 传世界矩阵：换父级后保持骨骼的全局位置 / 旋转 / 缩放
         result = moveBone(draft, payload.name, target.name, position, { worldMatrixOf: worldMatrixOfBone })
       })
@@ -929,7 +954,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
 
     if (payload.kind === 'slot') {
       if (target.kind !== 'bone') {
-        onStatus?.('插槽只能放到骨骼下面（不能挂到插槽或 display 之下）')
+        onStatus?.(t('插槽只能放到骨骼下面（不能挂到插槽或 display 之下）'))
         return
       }
       const check = validateSlotMove(document, payload.name, target.name)
@@ -938,7 +963,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         return
       }
       let result: MoveResult = check
-      update('调整插槽层级', (draft) => {
+      update(t('调整插槽层级'), (draft) => {
         const anchor = position === 'inside' ? null : boneSlotAnchor(document, target.name, position)
         // 传世界矩阵：换宿主骨骼后保持插槽内容的全局位置 / 旋转 / 缩放
         result = moveSlot(draft, payload.name, target.name, anchor, { worldMatrixOf: worldMatrixOfBone })
@@ -957,7 +982,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       runDisplayMove(payload, target.slot, { name: target.name, side: before })
       return
     }
-    onStatus?.('display 只能放到插槽下面')
+    onStatus?.(t('display 只能放到插槽下面'))
   }
 
   /** display 的移动/排序统一走这里：先校验再落历史，落点提示交给命令层的返回消息 */
@@ -970,7 +995,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       return
     }
     let result: MoveResult = check
-    update('移动 display', (draft) => {
+    update(t('移动 display'), (draft) => {
       // 传世界矩阵：换到别的插槽（宿主骨骼不同）时保持附件的全局位置 / 旋转 / 缩放
       result = moveDisplay(draft, payload.slot, payload.name, toSlot, anchor, skinName, {
         worldMatrixOf: worldMatrixOfBone
@@ -991,7 +1016,9 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     if (images.length === 0) return
     const created: { slot: string; attachment: string }[] = []
     update(
-      images.length > 1 ? `拖入 ${images.length} 张图片新建插槽` : '拖入图片新建插槽',
+      images.length > 1
+        ? t('拖入 {0} 张图片新建插槽', images.length)
+        : t('拖入图片新建插槽'),
       (draft) => {
         for (const image of images) {
           const result = createRegionFromImage(draft, {
@@ -1007,7 +1034,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     )
     const first = created[0]
     if (!first) {
-      onStatus?.(`无法用「${images[0].name}」新建插槽`)
+      onStatus?.(t('无法用「{0}」新建插槽', images[0].name))
       return
     }
     selection.selectAttachment(first.slot, first.attachment)
@@ -1015,8 +1042,16 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     // 报出宿主骨骼：空白处落点挂到 root，不提示的话很难看出这一笔挂到了哪里
     onStatus?.(
       created.length === 1
-        ? `已新建插槽「${first.slot}」挂到骨骼「${boneName}」下（图片「${images[0].name}」是它的 display）`
-        : `已新建 ${created.length} 个插槽挂到骨骼「${boneName}」下（${created.map((item) => item.slot).join('、')}）`
+        ? t('已新建插槽「{0}」挂到骨骼「{1}」下（图片「{2}」是它的 display）', [
+            first.slot,
+            boneName,
+            images[0].name
+          ])
+        : t('已新建 {0} 个插槽挂到骨骼「{1}」下（{2}）', [
+            created.length,
+            boneName,
+            created.map((item) => item.slot).join(t('、'))
+          ])
     )
   }
 
@@ -1036,7 +1071,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   const addBone = (parent = selectedBone()): void => {
     // 未选中（含从空白处右键）时挂到层级根骨骼 root 下：其他骨骼都必须待在它之下
     const host = parent || rootName
-    update('新建骨骼', (draft) => {
+    update(t('新建骨骼'), (draft) => {
       const baseName = parent ? `${parent}_child` : 'bone'
       draft.bones.push(
         createAuthoringBone({
@@ -1050,7 +1085,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   }
 
   const addSlot = (bone = selectedBone()): void => {
-    update('新建插槽', (draft) => {
+    update(t('新建插槽'), (draft) => {
       // 宿主兜底到层级根骨骼：插槽必须挂在骨骼上，挂在 root 下总能看见内容
       const host = bone || rootBoneName(draft.bones)
       const name = uniqueName(draft.slots.map((s) => s.name), 'slot')
@@ -1072,8 +1107,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         : host
           ? [host]
           : []
-    if (chain.length === 0) return '未指定驱动骨骼：先选中骨骼再点'
-    return `新建 IK 节点骨驱动：${chain.join(' → ')}（节点骨挂在 root 下，可拖动 / 可打帧）`
+    if (chain.length === 0) return t('未指定驱动骨骼：先选中骨骼再点')
+    return t('新建 IK 节点骨驱动：{0}（节点骨挂在 root 下，可拖动 / 可打帧）', chain.join(' → '))
   }
 
   const addConstraint = (kind: AuthoringConstraint['type'], bone = selectedBone()): void => {
@@ -1096,7 +1131,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     const tip = tail ? boneTipWorld(tail, tailBone?.length ?? 0) : null
     // 名字在进 draft 前定好：创建完要选中新节点（名字与约束名是两个命名空间，互不冲突）
     const nodeName = uniqueName(document.bones.map((item) => item.name), tail ? `${tail}_ik` : 'ik')
-    update('新建约束', (draft) => {
+    update(t('新建约束'), (draft) => {
       const name = uniqueName(draft.constraints.map((c) => c.name), kind)
       const base = { name, order: draft.constraints.length, enabled: true, bones: [] as string[], target: '' }
       if (kind === 'ik') {
@@ -1176,7 +1211,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     return {
       key,
       label,
-      hint: noAnimation ? '工程里还没有动画：先在时间轴点「+ 动画」' : hint,
+      hint: noAnimation ? t('工程里还没有动画：先在时间轴点「+ 动画」') : hint,
       icon: <KeyRound size={12} />,
       disabled: noAnimation,
       onSelect: () => {
@@ -1198,14 +1233,18 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     const lastBone = target.kind === 'bone' && document.bones.length <= 1
     return {
       key: 'delete',
-      label: `删除「${target.name}」`,
+      label: t('删除「{0}」', target.name),
       danger: true,
       disabled: isRoot || lastBone,
-      hint: isRoot ? `「${rootName}」是层级根骨骼，不能删除` : lastBone ? '至少保留一根骨骼' : undefined,
+      hint: isRoot
+        ? t('「{0}」是层级根骨骼，不能删除', rootName)
+        : lastBone
+          ? t('至少保留一根骨骼')
+          : undefined,
       icon: <Trash2 size={12} />,
       onSelect: poseOnly(() => {
         if (target.kind === 'slot') {
-          update('删除插槽', (draft) => {
+          update(t('删除插槽'), (draft) => {
             deleteSlot(draft, target.name)
           })
           return
@@ -1214,7 +1253,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           removeConstraint(update, target.name)
           return
         }
-        update('删除骨骼', (draft) => {
+        update(t('删除骨骼'), (draft) => {
           deleteBone(draft, target.name)
         })
       })
@@ -1230,19 +1269,31 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     const channels = constraint ? CONSTRAINT_CHANNELS[constraint.type] ?? [] : []
     const deleteEntry = deleteItem({ kind: 'constraint', name, bone: constraint?.bones[0] ?? '' })
     if (channels.length === 0) return withDelete ? [deleteEntry] : []
-    const labelOf = (channel: string): string => CONSTRAINT_CHANNEL_LABEL[channel] ?? channel
+    const labelOf = (channel: string): string => t(CONSTRAINT_CHANNEL_LABEL[channel] ?? channel)
     const keyAll: KeyframeTarget[] = [{ kind: 'constraint', target: name, attachment: '' }]
     const keyOne = (channel: string): KeyframeTarget[] => [
       { kind: 'constraint', target: name, attachment: '', channel }
     ]
     const items: ContextMenuItem[] =
       channels.length === 1
-        ? [keyframeItem('k-constraint-0', `${labelOf(channels[0])}关键帧`, `${name} · ${labelOf(channels[0])}`, keyAll)]
+        ? [
+            keyframeItem(
+              'k-constraint-0',
+              t('{0}关键帧', labelOf(channels[0])),
+              `${name} · ${labelOf(channels[0])}`,
+              keyAll
+            )
+          ]
         : [
-            keyframeItem('k-constraint-all', '全部参数关键帧', `${name} · 全部参数`, keyAll),
+            keyframeItem('k-constraint-all', t('全部参数关键帧'), `${name} · ${t('全部参数')}`, keyAll),
             { key: 'sep-kc', label: '', separator: true },
             ...channels.map((channel) =>
-              keyframeItem(`k-constraint-${channel}`, `${labelOf(channel)}关键帧`, `${name} · ${labelOf(channel)}`, keyOne(channel))
+              keyframeItem(
+                `k-constraint-${channel}`,
+                t('{0}关键帧', labelOf(channel)),
+                `${name} · ${labelOf(channel)}`,
+                keyOne(channel)
+              )
             )
           ]
     if (withDelete) items.push({ key: 'sep-kc2', label: '', separator: true }, deleteEntry)
@@ -1261,12 +1312,12 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         { kind: 'bone', target: bone, attachment: '', channel: name }
       ]
       const items: ContextMenuItem[] = [
-        keyframeItem('k-translate', '位置关键帧', `${bone} · 位置`, channel('translate')),
-        keyframeItem('k-rotate', '旋转关键帧', `${bone} · 旋转`, channel('rotate')),
-        keyframeItem('k-scale', '缩放关键帧', `${bone} · 缩放`, channel('scale')),
-        keyframeItem('k-shear', '斜切关键帧', `${bone} · 斜切`, channel('shear')),
+        keyframeItem('k-translate', t('位置关键帧'), `${bone} · ${t('位置')}`, channel('translate')),
+        keyframeItem('k-rotate', t('旋转关键帧'), `${bone} · ${t('旋转')}`, channel('rotate')),
+        keyframeItem('k-scale', t('缩放关键帧'), `${bone} · ${t('缩放')}`, channel('scale')),
+        keyframeItem('k-shear', t('斜切关键帧'), `${bone} · ${t('斜切')}`, channel('shear')),
         { key: 'sep-k', label: '', separator: true },
-        keyframeItem('k-all', '全部通道关键帧', bone, [
+        keyframeItem('k-all', t('全部通道关键帧'), bone, [
           ...channel('rotate'),
           ...channel('translate'),
           ...channel('scale'),
@@ -1291,11 +1342,11 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         { kind: 'slot', target: slot, attachment: '', channel: name }
       ]
       return [
-        keyframeItem('k-display', '显示关键帧', `${slot} · 显示`, channel('display')),
-        keyframeItem('k-color', '颜色关键帧', `${slot} · 颜色`, channel('color')),
-        keyframeItem('k-visible', '可见性关键帧', `${slot} · 可见性`, channel('visible')),
+        keyframeItem('k-display', t('显示关键帧'), `${slot} · ${t('显示')}`, channel('display')),
+        keyframeItem('k-color', t('颜色关键帧'), `${slot} · ${t('颜色')}`, channel('color')),
+        keyframeItem('k-visible', t('可见性关键帧'), `${slot} · ${t('可见性')}`, channel('visible')),
         { key: 'sep-k', label: '', separator: true },
-        keyframeItem('k-all', '全部通道关键帧', slot, [
+        keyframeItem('k-all', t('全部通道关键帧'), slot, [
           ...channel('display'),
           ...channel('color'),
           ...channel('visible')
@@ -1323,24 +1374,24 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     const host = target.kind === 'bone' ? target.name : target.bone
     const where =
       target.kind === 'bone'
-        ? `挂在「${target.name}」下`
+        ? t('挂在「{0}」下', target.name)
         : host
-          ? `挂在「${host}」下`
+          ? t('挂在「{0}」下', host)
           : rootName
-            ? `挂在根骨骼「${rootName}」下`
-            : '挂在根骨骼下'
+            ? t('挂在根骨骼「{0}」下', rootName)
+            : t('挂在根骨骼下')
     const items: ContextMenuItem[] = [
       {
         key: 'bone',
-        label: '添加骨骼',
+        label: t('添加骨骼'),
         hint: where,
         icon: <Bone size={12} />,
         onSelect: () => addBone(host)
       },
       {
         key: 'slot',
-        label: '添加插槽',
-        hint: host ? `挂在骨骼「${host}」上` : '挂到第一根骨骼',
+        label: t('添加插槽'),
+        hint: host ? t('挂在骨骼「{0}」上', host) : t('挂到第一根骨骼'),
         icon: <Plus size={12} />,
         onSelect: () => addSlot(host)
       },
@@ -1350,7 +1401,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             { key: 'sep1', label: '', separator: true },
             {
               key: 'ik',
-              label: '添加 IK 约束',
+              label: t('添加 IK 约束'),
               // 新建一根 IK 节点骨当目标；多选链根→链尾后再点，链会一次配好
               hint: ikCreateHint(host),
               icon: <IkConstraintIcon size={12} />,
@@ -1358,15 +1409,15 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             },
             {
               key: 'transform',
-              label: '添加变换约束',
-              hint: '继承位移 / 旋转 / 缩放 / 斜切',
+              label: t('添加变换约束'),
+              hint: t('继承位移 / 旋转 / 缩放 / 斜切'),
               icon: <Maximize2 size={12} />,
               onSelect: () => addConstraint('transform', host)
             },
             {
               key: 'path',
-              label: '添加路径约束',
-              hint: '骨骼沿路径曲线排布',
+              label: t('添加路径约束'),
+              hint: t('骨骼沿路径曲线排布'),
               icon: <Route size={12} />,
               onSelect: () => addConstraint('path', host)
             }
@@ -1483,7 +1534,11 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         // 寄宿多条约束时取第一条，其余在悬浮描述与属性面板里
         icon={
           hosted.length > 0 ? (
-            <span title={hosted.map((c) => `${CONSTRAINT_KIND[c.type]}约束「${c.name}」`).join('\n')}>
+            <span
+              title={hosted
+                .map((c) => t('{0}约束「{1}」', [constraintKind(c.type), c.name]))
+                .join('\n')}
+            >
               {CONSTRAINT_ICON[hosted[0].type]}
             </span>
           ) : bone.name === rootName ? (
@@ -1527,9 +1582,9 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         // 锁定列（行首第二列）：骨骼可锁 / 解锁
         lockSwitch={{
           on: bone.locked,
-          title: bone.locked ? '解锁' : '锁定',
+          title: bone.locked ? t('解锁') : t('锁定'),
           onToggle: () =>
-            update('切换骨骼锁定', (draft) => {
+            update(t('切换骨骼锁定'), (draft) => {
               const target = draft.bones.find((b) => b.name === bone.name)
               if (target) target.locked = !target.locked
             })
@@ -1538,7 +1593,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         onDelete={
           document.bones.length > 1 && bone.name !== rootName
             ? poseOnly(() =>
-                update('删除骨骼', (draft) => {
+                update(t('删除骨骼'), (draft) => {
                   deleteBone(draft, bone.name)
                 })
               )
@@ -1591,7 +1646,15 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             <ImageIcon size={11} className={showing ? 'text-accent' : 'text-content-lo/60'} />
           )
         }
-        meta={showing ? (isMeshType(attachment.type) ? '显示中 · 网格' : '显示中') : isMeshType(attachment.type) ? '网格' : undefined}
+        meta={
+          showing
+            ? isMeshType(attachment.type)
+              ? t('显示中 · 网格')
+              : t('显示中')
+            : isMeshType(attachment.type)
+              ? t('网格')
+              : undefined
+        }
         // display 行也算宿主插槽的地盘：拖到插槽下面（含子行）都是「给这个插槽加 display」
         dataSlot={slot.name}
         // 选中附件（视口 / 检查器）时按「插槽 + 附件」定位到这一行（同名附件可能出现在多个插槽）
@@ -1602,7 +1665,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         onDropImage={(imageNames) => addDisplay(slot.name, imageNames)}
         // 点**前面的小图标** = 切换显示 / 隐藏（图标就是这个开关），点文字只选中不改显示
         onIconClick={() => selectDisplay(slot.name, attachment.name)}
-        iconTitle={showing ? '点击隐藏（该插槽不显示任何 display）' : '点击显示它'}
+        iconTitle={showing ? t('点击隐藏（该插槽不显示任何 display）') : t('点击显示它')}
         onSelect={() => selection.selectAttachment(slot.name, attachment.name)}
         // Animate 态：右键 display = 从当前时间点开始显示它（打显示关键帧）
         onContextMenu={(event) => {
@@ -1617,7 +1680,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           })
         }}
         onDelete={poseOnly(() =>
-          update('删除 display', (draft) => deleteAttachment(draft, slot.name, attachment.name))
+          update(t('删除 display'), (draft) => deleteAttachment(draft, slot.name, attachment.name))
         )}
       />
     )
@@ -1647,7 +1710,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         icon={<SlotIcon color={toCss(slot.color)} />}
         // 行尾显示当前显示的 display 名，不用展开也知道显示的是哪一个。
         // Animate 态按关键帧采样（与 display 行的「显示中」标记同一数据源），不能直接看 setup
-        meta={showing || (displays.length > 0 ? `${displays.length} 个 display` : undefined)}
+        meta={showing || (displays.length > 0 ? t('{0} 个 display', displays.length) : undefined)}
         // 关掉 display 行时没有子行可展开，箭头一并收掉（行尾的「N 个 display」仍留着看数量）
         expandable={showDisplays && displays.length > 0}
         expanded={expanded}
@@ -1659,9 +1722,9 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         // 显示列（行首第一列）：插槽可显示 / 隐藏
         visibleSwitch={{
           on: slot.visible,
-          title: slot.visible ? '隐藏插槽' : '显示插槽',
+          title: slot.visible ? t('隐藏插槽') : t('显示插槽'),
           onToggle: () =>
-            update('切换插槽可见性', (draft) => {
+            update(t('切换插槽可见性'), (draft) => {
               const target = draft.slots.find((s) => s.name === slot.name)
               if (target) target.visible = !target.visible
             })
@@ -1669,15 +1732,15 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         // 锁定列（行首第二列）：与骨骼一致 —— 锁上后视口里点不中它，层级树里照常可操作
         lockSwitch={{
           on: slot.locked,
-          title: slot.locked ? '解锁（视口中可再次选中）' : '锁定（视口中不可选中）',
+          title: slot.locked ? t('解锁（视口中可再次选中）') : t('锁定（视口中不可选中）'),
           onToggle: () =>
-            update('切换插槽锁定', (draft) => {
+            update(t('切换插槽锁定'), (draft) => {
               const target = draft.slots.find((s) => s.name === slot.name)
               if (target) target.locked = !target.locked
             })
         }}
         onDelete={poseOnly(() =>
-          update('删除插槽', (draft) => {
+          update(t('删除插槽'), (draft) => {
             deleteSlot(draft, slot.name)
           })
         )}
@@ -1701,7 +1764,11 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       // 约束没有拖动负载，双击聚焦的目标只能显式给（骨骼 / 插槽 / display 都由负载推导）
       focusTarget={{ kind: 'constraint', name: constraint.name }}
       icon={CONSTRAINT_ICON[constraint.type] ?? <Link2 size={11} />}
-      meta={constraint.type === 'ik' ? `${CONSTRAINT_KIND.ik} ${constraint.bones.length}骨` : CONSTRAINT_KIND[constraint.type]}
+      meta={
+        constraint.type === 'ik'
+          ? t('IK {0} 骨', constraint.bones.length)
+          : constraintKind(constraint.type)
+      }
       onSelect={() => selection.selectConstraint(constraint.name)}
       onContextMenu={(event) =>
         openMenu(event, { kind: 'constraint', name: constraint.name, bone: constraint.bones[0] ?? '' })
@@ -1725,17 +1792,17 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-[24px] shrink-0 items-center gap-1 border-b border-line/60 bg-ink-800/80 px-1">
-        <button type="button" title="新建骨骼（挂在当前选中骨骼下；未选中时挂在根骨骼 root 下）" className="hao-btn h-[18px] px-1.5 text-3xs" onClick={poseOnly(() => addBone())}>
+        <button type="button" title={t('新建骨骼（挂在当前选中骨骼下；未选中时挂在根骨骼 root 下）')} className="hao-btn h-[18px] px-1.5 text-3xs" onClick={poseOnly(() => addBone())}>
           <Bone size={11} />
-          <span>骨骼</span>
+          <span>{t('骨骼')}</span>
         </button>
-        <button type="button"           title="新建插槽（挂到当前选中骨骼；未选中时挂到第一根骨骼）" className="hao-btn h-[18px] px-1.5 text-3xs" onClick={poseOnly(() => addSlot())}>
+        <button type="button"           title={t('新建插槽（挂到当前选中骨骼；未选中时挂到第一根骨骼）')} className="hao-btn h-[18px] px-1.5 text-3xs" onClick={poseOnly(() => addSlot())}>
           <SlotIcon size={11} />
-          <span>插槽</span>
+          <span>{t('插槽')}</span>
         </button>
         <button
           type="button"
-          title="新建 IK 约束（自动新建一根 IK 节点骨挂在根骨骼 root 下、摆在链尾末端；先多选链根 → 链尾再点，可一次配好骨链）"
+          title={t('新建 IK 约束（自动新建一根 IK 节点骨挂在根骨骼 root 下、摆在链尾末端；先多选链根 → 链尾再点，可一次配好骨链）')}
           className="hao-btn h-[18px] px-1.5 text-3xs"
           onClick={poseOnly(() => addConstraint('ik'))}
         >
@@ -1743,7 +1810,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         </button>
         <button
           type="button"
-          title="新建变换约束"
+          title={t('新建变换约束')}
           className="hao-btn h-[18px] px-1.5 text-3xs"
           onClick={poseOnly(() => addConstraint('transform'))}
         >
@@ -1751,7 +1818,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         </button>
         <button
           type="button"
-          title="新建路径约束"
+          title={t('新建路径约束')}
           className="hao-btn h-[18px] px-1.5 text-3xs"
           onClick={poseOnly(() => addConstraint('path'))}
         >
@@ -1764,8 +1831,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           tabIndex={-1}
           title={
             collapsed.size > 0
-              ? '全部展开（骨骼 / 插槽 / display）'
-              : '全部折叠（只留顶层骨骼，再点一次全部展开）'
+              ? t('全部展开（骨骼 / 插槽 / display）')
+              : t('全部折叠（只留顶层骨骼，再点一次全部展开）')
           }
           className="hao-btn ml-auto h-[18px] px-1.5 text-3xs"
           onClick={toggleCollapseAll}
@@ -1775,7 +1842,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         <button
           type="button"
           tabIndex={-1}
-          title={showDisplays ? '隐藏 display 行（树里只留骨骼 / 插槽）' : '显示 display 行'}
+          title={showDisplays ? t('隐藏 display 行（树里只留骨骼 / 插槽）') : t('显示 display 行')}
           className={[
             'hao-btn h-[18px] px-1.5 text-3xs',
             // 关掉时压暗：一眼看出树是被这个开关过滤过的，而不是工程里没有附件
@@ -1795,13 +1862,13 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             // Esc 清空：与检查器里的输入框一致，打错了不用先全选再删
             if (event.key === 'Escape') setQuery('')
           }}
-          placeholder="搜索骨骼 / 插槽 / 约束…"
+          placeholder={t('搜索骨骼 / 插槽 / 约束…')}
           className="hao-field h-[22px] w-full pr-6 text-panel"
         />
         {query ? (
           <button
             type="button"
-            title="清空搜索"
+            title={t('清空搜索')}
             onClick={() => setQuery('')}
             className="absolute right-2 top-1/2 -translate-y-1/2 text-content-lo hover:text-content-hi"
           >
@@ -1817,14 +1884,14 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       <div
         ref={listRef}
         className="min-h-0 flex-1 overflow-auto hao-scroll pb-1"
-        title={
+        title={t(
           '右键骨骼行 / 空白处：添加骨骼、插槽、约束（IK 寄宿在目标骨、变换 / 路径寄宿在第一根驱动骨，参数在属性面板；物理约束单独成行）\n' +
-          '拖动行调整层级：骨骼 → 骨骼下（拖到空白处挂到根骨骼 root 下）、插槽 → 骨骼下（拖到空白处挂到根骨骼 root 下）、display → 插槽下\n' +
-          '根骨骼 root 是层级结构的根：它自己不能拖动 / 删除，其他骨骼也不能被拖到它旁边与它平级\n' +
-          '拖到行的上 / 下沿 = 排到那一行的前 / 后（骨骼会一起换到它所在的父级下）\n' +
-          '资源面板的图片：拖到插槽行（含它下面的 display 行）= 给该插槽加一个 display；拖到骨骼行 = 在该骨骼下新建插槽；拖到空白处 = 在根骨骼 root 下新建插槽\n' +
-          '改绑定数据（拖动行 / 拖图片 / 新建 / 删除）只在 Pose 态可用'
-        }
+            '拖动行调整层级：骨骼 → 骨骼下（拖到空白处挂到根骨骼 root 下）、插槽 → 骨骼下（拖到空白处挂到根骨骼 root 下）、display → 插槽下\n' +
+            '根骨骼 root 是层级结构的根：它自己不能拖动 / 删除，其他骨骼也不能被拖到它旁边与它平级\n' +
+            '拖到行的上 / 下沿 = 排到那一行的前 / 后（骨骼会一起换到它所在的父级下）\n' +
+            '资源面板的图片：拖到插槽行（含它下面的 display 行）= 给该插槽加一个 display；拖到骨骼行 = 在该骨骼下新建插槽；拖到空白处 = 在根骨骼 root 下新建插槽\n' +
+            '改绑定数据（拖动行 / 拖图片 / 新建 / 删除）只在 Pose 态可用'
+        )}
         onContextMenu={(event) => openMenu(event, { kind: 'root', name: '', bone: '' })}
         onDragOver={(event) => {
           const tree = hasTreeDrag(event.dataTransfer)
@@ -1845,7 +1912,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             if (!payload) return
             if (payload.kind === 'bone') {
               let result: MoveResult = { ok: false, message: '' }
-              update('调整骨骼层级', (draft) => {
+              update(t('调整骨骼层级'), (draft) => {
                 result = moveBone(draft, payload.name, '', 'inside', { worldMatrixOf: worldMatrixOfBone })
               })
               if (result.message) onStatus?.(result.message)
@@ -1855,13 +1922,13 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
               const root = rootBoneName(document.bones)
               if (!root) return
               let result: MoveResult = { ok: false, message: '' }
-              update('调整插槽层级', (draft) => {
+              update(t('调整插槽层级'), (draft) => {
                 result = moveSlot(draft, payload.name, root, null, { worldMatrixOf: worldMatrixOfBone })
               })
               if (result.message) onStatus?.(result.message)
               return
             }
-            onStatus?.('display 只能放到插槽下面')
+            onStatus?.(t('display 只能放到插槽下面'))
             return
           }
           /*
@@ -1873,7 +1940,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           const imageNames = readImageDrag(event.dataTransfer)
           if (imageNames.length === 0) return
           if (!rootName) {
-            onStatus?.('场景里还没有骨骼：先用工具栏的「骨骼」新建一根骨骼，再把图片拖进来')
+            onStatus?.(t('场景里还没有骨骼：先用工具栏的「骨骼」新建一根骨骼，再把图片拖进来'))
             return
           }
           addSlotFromImage(rootName, imageNames)
@@ -1888,13 +1955,15 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           y={menu.y}
           title={
             useModeStore.getState().mode === 'animate'
-              ? `${menu.target.kind === 'bone' ? '骨骼' : menu.target.kind === 'slot' ? '插槽' : '约束'}「${menu.target.name}」· 打关键帧${
+              ? t('{0}「{1}」· 打关键帧{2}', [
+                  targetKind(menu.target.kind),
+                  menu.target.name,
                   // 置灰项的 hover 提示看不到，把原因写在标题里
-                  document.animations.length === 0 ? '（工程里还没有动画：先在时间轴点「+ 动画」）' : ''
-                }`
+                  document.animations.length === 0 ? t('（工程里还没有动画：先在时间轴点「+ 动画」）') : ''
+                ])
               : menu.target.kind === 'root'
-                ? '新建对象'
-                : `${menu.target.kind === 'bone' ? '骨骼' : menu.target.kind === 'slot' ? '插槽' : '约束'}「${menu.target.name}」`
+                ? t('新建对象')
+                : t('{0}「{1}」', [targetKind(menu.target.kind), menu.target.name])
           }
           items={menuItems(menu.target)}
           onClose={() => setMenu(null)}
@@ -1905,12 +1974,12 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         <ContextMenu
           x={displayMenu.x}
           y={displayMenu.y}
-          title={`「${displayMenu.slot}」· display「${displayMenu.attachment}」`}
+          title={t('「{0}」· display「{1}」', [displayMenu.slot, displayMenu.attachment])}
           items={[
             {
               key: 'display-key',
-              label: '显示关键帧（从这里开始显示）',
-              hint: `在当前时间切到「${displayMenu.attachment}」`,
+              label: t('显示关键帧（从这里开始显示）'),
+              hint: t('在当前时间切到「{0}」', displayMenu.attachment),
               icon: <KeyRound size={12} />,
               onSelect: () => {
                 const result = keySlotDisplayNow(displayMenu.slot, displayMenu.attachment)
@@ -1919,8 +1988,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             },
             {
               key: 'display-hide-key',
-              label: '隐藏关键帧（从这里开始不显示）',
-              hint: '在当前时间把该插槽切成「不显示」',
+              label: t('隐藏关键帧（从这里开始不显示）'),
+              hint: t('在当前时间把该插槽切成「不显示」'),
               icon: <EyeOff size={12} />,
               onSelect: () => {
                 const result = keySlotDisplayNow(displayMenu.slot, '')
@@ -1936,7 +2005,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
 }
 
 function removeConstraint(update: (label: string, mutate: (draft: EditorDocument) => void) => void, name: string): void {
-  update('删除约束', (draft) => {
+  update(t('删除约束'), (draft) => {
     draft.constraints = draft.constraints.filter((c) => c.name !== name)
     for (const animation of draft.animations) {
       animation.constraints = animation.constraints.filter((t) => t.constraint !== name)

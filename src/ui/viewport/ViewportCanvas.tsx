@@ -45,6 +45,7 @@ import { rootBoneName } from '@core/model/authoring'
 import { stageFilePath } from '@editor/services/projectAssets'
 import { ImageSource, Texture } from 'pixi.js'
 import { loadImageElement } from '@render/imageLoader'
+import { t } from '@i18n'
 
 /**
  * 权重刷的鼠标光标：**形状本身就是提示** —— 加号=增加、减号=减少、圆点=覆盖（直接替换）。
@@ -502,7 +503,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     const selection = useSelectionStore.getState()
     if (useToolStore.getState().tool !== 'ffd' || selection.kind !== 'attachment') return false
     if (useModeStore.getState().mode !== 'pose') {
-      onStatus('插入顶点改的是绑定网格：请切到 Pose 状态')
+      onStatus(t('插入顶点改的是绑定网格：请切到 Pose 状态'))
       return false
     }
     return true
@@ -516,20 +517,20 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     const world = scene.viewport.screenToWorld(clientX - rect.left, clientY - rect.top)
     const local = scene.worldToAttachmentLocal(selection.slot, selection.attachment, world.x, world.y)
     if (!local) {
-      onStatus('插入位置不在附件上')
+      onStatus(t('插入位置不在附件上'))
       return false
     }
     let created: number | null = null
-    useProjectStore.getState().update('插入网格顶点', (draft) => {
+    useProjectStore.getState().update(t('插入网格顶点'), (draft) => {
       created = insertMeshVertex(draft, selection.slot, selection.attachment, local as { x: number; y: number })
     })
     const index = created as number | null
     if (index === null) {
-      onStatus('该位置不在网格内部：点在网格覆盖的区域内才能插入顶点')
+      onStatus(t('该位置不在网格内部：点在网格覆盖的区域内才能插入顶点'))
       return false
     }
     useSelectionStore.getState().selectVertices([index])
-    onStatus(`已插入顶点 #${index}（UV 与权重按位置插值，落在网格线上时会把那条边一分为二）`)
+    onStatus(t('已插入顶点 #{0}（UV 与权重按位置插值，落在网格线上时会把那条边一分为二）', index))
     return true
   }
 
@@ -598,7 +599,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       if (event.button === 2) {
         event.preventDefault()
         useToolStore.getState().setPendingWeightBone(null)
-        onStatus('已结束绑定骨骼')
+        onStatus(t('已结束绑定骨骼'))
         return
       }
       // 中键仍然平移视口：绑骨骼时经常要挪一下视角，去找被网格 / 其它骨骼挡住的骨骼
@@ -612,20 +613,20 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       if (!target) return
       const hitBone = scene.pickBoneAt(target.x, target.y)
       if (!hitBone || !scene.runtime) {
-        onStatus('请点在骨骼上（可连续点选多根；右键或再点按钮结束绑定）')
+        onStatus(t('请点在骨骼上（可连续点选多根；右键或再点按钮结束绑定）'))
         return
       }
       const boneName = scene.runtime.asset.bones[hitBone.boneIndex]?.name ?? ''
       let added = false
-      useProjectStore.getState().update('绑定权重骨骼', (draft) => {
+      useProjectStore.getState().update(t('绑定权重骨骼'), (draft) => {
         added = addWeightBone(draft, pending.slot, pending.attachment, boneName)
       })
       scene.setDocument(useProjectStore.getState().document, useSelectionStore.getState().skin)
       scene.refresh()
       onStatus(
         added
-          ? `已绑定「${boneName}」；可继续点选其它骨骼，完成后右键或再点按钮结束`
-          : `「${boneName}」已在列表里；继续点选，或右键结束绑定`
+          ? t('已绑定「{0}」；可继续点选其它骨骼，完成后右键或再点按钮结束', boneName)
+          : t('「{0}」已在列表里；继续点选，或右键结束绑定', boneName)
       )
       return
     }
@@ -641,7 +642,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       // 正在画边界：右键 = 收尾闭合，成功与否它自己报（那条提示比这句笼统的更具体）
       const boundaryDraw = meshTools.meshSubtool === 'boundary' && Boolean(meshHost?.scene.state.pendingMeshPath)
       if (meshHost) meshSubtoolCancel(meshHost)
-      if (!boundaryDraw) onStatus('网格工具：已回到「编辑顶点」')
+      if (!boundaryDraw) onStatus(t('网格工具：已回到「编辑顶点」'))
       meshTools.setMeshSubtool('edit')
       return
     }
@@ -720,8 +721,11 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         const after = useSelectionStore.getState()
         onStatus(
           after.bones.length > 0
-            ? `已选中 ${after.bones.length} 根骨骼（主选中「${after.bone}」；Shift / Cmd 点击可加选 / 减选）`
-            : '已取消骨骼选择'
+            ? t('已选中 {0} 根骨骼（主选中「{1}」；Shift / Cmd 点击可加选 / 减选）', [
+                after.bones.length,
+                after.bone
+              ])
+            : t('已取消骨骼选择')
         )
         return
       }
@@ -743,15 +747,17 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         const vertex = scene.pickVertexAt(world.x, world.y)
         if (vertex) {
           selection.selectVertices([vertex.vertexIndex])
-          onStatus(`顶点 #${vertex.vertexIndex}（${scene.meshResult?.vertexCount ?? 0} 个顶点）`)
+          onStatus(
+            t('顶点 #{0}（{1} 个顶点）', [vertex.vertexIndex, scene.meshResult?.vertexCount ?? 0])
+          )
           return
         }
       }
       selection.selectBone(name)
-      onStatus(`选中骨骼「${name}」（骨骼体=旋转 / 原点圈=移动 / 末端方块=缩放）`)
+      onStatus(t('选中骨骼「{0}」（骨骼体=旋转 / 原点圈=移动 / 末端方块=缩放）', name))
     } else {
       selection.clear()
-      onStatus('已取消选择')
+      onStatus(t('已取消选择'))
     }
   }
 
@@ -941,11 +947,11 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       const selection = useSelectionStore.getState()
       const tool = useToolStore.getState().tool
       if (tool !== 'ffd') {
-        onStatus('Alt+点击插入顶点：先切到网格工具（Pose 按 M / Animate 按 D）')
+        onStatus(t('Alt+点击插入顶点：先切到网格工具（Pose 按 M / Animate 按 D）'))
       } else if (selection.kind !== 'attachment') {
-        onStatus('Alt+点击插入顶点：先在层级树里选中要编辑的网格附件')
+        onStatus(t('Alt+点击插入顶点：先在层级树里选中要编辑的网格附件'))
       } else if (useModeStore.getState().mode !== 'pose') {
-        onStatus('插入顶点改的是绑定网格：请切到 Pose 状态')
+        onStatus(t('插入顶点改的是绑定网格：请切到 Pose 状态'))
       } else {
         insertMeshVertexAt(pending.clientX, pending.clientY, pending.rect)
       }
@@ -961,7 +967,9 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     pointer.current.boneClick = null
     if (boneClick && useToolStore.getState().tool === 'weight') {
       useSelectionStore.getState().selectBone(boneClick.bone)
-      onStatus(`权重刷目标骨骼：「${boneClick.bone}」——按住拖动刷权重（Alt=减少 / Shift=覆盖）`)
+      onStatus(
+        t('权重刷目标骨骼：「{0}」——按住拖动刷权重（Alt=减少 / Shift=覆盖）', boneClick.bone)
+      )
     }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
@@ -994,7 +1002,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     if (!scene || droppedNames.length === 0) return
 
     if (useModeStore.getState().mode !== 'pose') {
-      onStatus('切到 Pose 状态才能把图片放进场景：插槽 / 附件属于绑定数据')
+      onStatus(t('切到 Pose 状态才能把图片放进场景：插槽 / 附件属于绑定数据'))
       return
     }
 
@@ -1005,7 +1013,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       .filter((item): item is AuthoringImage => Boolean(item))
     const missing = droppedNames.length - images.length
     if (images.length === 0) {
-      onStatus(`找不到图片「${droppedNames[0]}」（可能已被移除）`)
+      onStatus(t('找不到图片「{0}」（可能已被移除）', droppedNames[0]))
       return
     }
 
@@ -1019,7 +1027,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     // 没压在骨骼上就挂到层级根骨骼 root 下：插槽 / 附件与其他节点一样，都必须在 root 之下
     if (!host) host = rootBoneName(store.document.bones)
     if (!host) {
-      onStatus('场景里还没有骨骼：先用「绑骨骼 (B)」画一根骨骼，再把图片拖进来')
+      onStatus(t('场景里还没有骨骼：先用「绑骨骼 (B)」画一根骨骼，再把图片拖进来'))
       return
     }
 
@@ -1030,7 +1038,11 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     )
 
     const created: { slot: string; attachment: string }[] = []
-    store.update(images.length > 1 ? `拖入 ${images.length} 张图片创建插槽` : '拖入图片创建插槽', (draft) => {
+    store.update(
+      images.length > 1
+        ? t('拖入 {0} 张图片创建插槽', images.length)
+        : t('拖入图片创建插槽'),
+      (draft) => {
       images.forEach((image, index) => {
         const target = { x: world.x + layout.offsets[index].x, y: world.y + layout.offsets[index].y }
         // 落点 → 骨骼局部坐标（宿主骨骼当前姿态下的显示空间）
@@ -1048,7 +1060,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     })
 
     if (created.length === 0) {
-      onStatus(`无法用「${images[0].name}」创建插槽`)
+      onStatus(t('无法用「{0}」创建插槽', images[0].name))
       return
     }
     // 插槽是单选模型：选中这一批里的第一个，多选拖拽时也只能单选
@@ -1058,12 +1070,21 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       scene.autoFitDone = true
       scene.focusOnContent(world.x, world.y, layout.width, layout.height)
     }
-    const skipped = missing > 0 ? `；另有 ${missing} 张图片已不存在，未创建` : ''
+    const skipped = missing > 0 ? t('；另有 {0} 张图片已不存在，未创建', missing) : ''
     if (created.length === 1) {
-      onStatus(`已创建插槽「${first.slot}」：图片「${images[0].name}」作为 display 挂到骨骼「${host}」下${skipped}`)
+      onStatus(
+        t('已创建插槽「{0}」：图片「{1}」作为 display 挂到骨骼「{2}」下', [
+          first.slot,
+          images[0].name,
+          host
+        ]) + skipped
+      )
     } else {
-      const names = images.slice(0, created.length).map((image) => image.name).join('、')
-      onStatus(`已创建 ${created.length} 个插槽（${names}）挂到骨骼「${host}」下${skipped}`)
+      const names = images
+        .slice(0, created.length)
+        .map((image) => image.name)
+        .join(t('、'))
+      onStatus(t('已创建 {0} 个插槽（{1}）挂到骨骼「{2}」下', [created.length, names, host]) + skipped)
     }
   }
 
@@ -1093,7 +1114,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
           return
         }
         sceneRef.current?.fit()
-        onStatus('已适配视野')
+        onStatus(t('已适配视野'))
       }}
       onDragOver={(event) => {
         if (!isOwnEvent(event)) return
@@ -1160,7 +1181,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         <ContextMenu
           x={slotMenu.x}
           y={slotMenu.y}
-          title={`插槽「${slotMenu.slot}」`}
+          title={t('插槽「{0}」', slotMenu.slot)}
           items={[...slotLayerMenuItems(slotMenu.slot, { pose: slotMenu.pose, onStatus })]}
           onClose={() => setSlotMenu(null)}
         />

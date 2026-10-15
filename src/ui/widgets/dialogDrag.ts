@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
+import { t } from '@i18n'
 
 /**
  * 拖动后至少要留在视口里的像素数。
@@ -145,7 +146,7 @@ export function useDialogDrag(): {
       onLostPointerCapture: endDrag,
       // 拖歪了双击标题栏回到屏幕中央：位移清零，遮罩的居中布局立刻把它摆回正中间
       onDoubleClick: () => setOffset({ x: 0, y: 0 }),
-      title: '按住标题栏可拖动窗口（双击回到屏幕中央）',
+      title: t('按住标题栏可拖动窗口（双击回到屏幕中央）'),
       style: {
         // 光标比类名可靠：`cursor-grab` 与 `cursor-grabbing` 谁赢取决于 CSS 里的先后，不取决于 class 的顺序
         cursor: dragging ? 'grabbing' : 'grab',

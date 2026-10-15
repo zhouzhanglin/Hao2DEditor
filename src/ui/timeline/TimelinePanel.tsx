@@ -14,6 +14,7 @@ import { keyEventNow, keyframeNow, removeSelectedKeys } from '@editor/timeline/a
 import type { KeyKind, KeySelector, TimelineTrack } from '@editor/timeline/model'
 import DopeSheet, { markTimelineSelection } from './DopeSheet'
 import { CommitTextField } from '@ui/widgets/fields'
+import { t } from '@i18n'
 
 export interface TimelinePanelProps {
   onStatus?: (text: string) => void
@@ -113,7 +114,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
       const readout = timeReadoutRef.current
       if (readout) {
         const elapsed = Math.round(value * document.frameRate)
-        readout.textContent = `${elapsed} / ${totalFrames} 帧 · ${value.toFixed(3)}s`
+        readout.textContent = `${elapsed} / ${t('{0} 帧', totalFrames)} · ${value.toFixed(3)}s`
       }
       const slider = timeSliderRef.current
       // 正在拖滑块时不回写：否则会和用户的手抢值（拖动过程中 input 是聚焦的）
@@ -139,22 +140,22 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
     setRenaming(null)
     if (!next || !current || next === current) return
     if (document.animations.some((item) => item.name === next)) {
-      onStatus(`已经有一个叫「${next}」的动画了`)
+      onStatus(t('已经有一个叫「{0}」的动画了', next))
       return
     }
-    update('重命名动画', (draft) => {
+    update(t('重命名动画'), (draft) => {
       const target = draft.animations.find((item) => item.name === current)
       if (target) target.name = next
     })
     timeline.setAnimation(next)
-    onStatus(`动画「${current}」已重命名为「${next}」`)
+    onStatus(t('动画「{0}」已重命名为「{1}」', [current, next]))
   }
 
   const duplicateAnimation = (): void => {
     if (!animation) return
     const source = animation
     let created = ''
-    update('复制动画', (draft) => {
+    update(t('复制动画'), (draft) => {
       const origin = draft.animations.find((item) => item.name === source.name)
       if (!origin) return
       created = uniqueName(
@@ -168,19 +169,21 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
     })
     if (created) {
       timeline.setAnimation(created)
-      onStatus(`已复制出动画「${created}」`)
+      onStatus(t('已复制出动画「{0}」', created))
     }
   }
 
   const removeAnimation = (): void => {
     if (!animation) return
     const name = animation.name
-    update('删除动画', (draft) => {
+    update(t('删除动画'), (draft) => {
       draft.animations = draft.animations.filter((item) => item.name !== name)
     })
     const next = document.animations.find((item) => item.name !== name)?.name ?? null
     timeline.setAnimation(next)
-    onStatus(`已删除动画「${name}」${next ? `，已切到「${next}」` : ''}（可撤销）`)
+    onStatus(
+      t('已删除动画「{0}」', name) + (next ? t('，已切到「{0}」', next) : '') + t('（可撤销）')
+    )
   }
 
   const stepFrame = (delta: number): void => {
@@ -192,7 +195,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
   }
 
   const keyCurrent = (): void => {
-    const result = animation ? keyframeNow() : { message: '请先在时间轴选择动画' }
+    const result = animation ? keyframeNow() : { message: t('请先在时间轴选择动画') }
     onStatus(result.message)
   }
 
@@ -217,7 +220,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
             selection.select({ kind: 'none' })
           }}
         >
-          <option value="">（未选择动画）</option>
+          <option value="">{t('（未选择动画）')}</option>
           {document.animations.map((item) => (
             <option key={item.name} value={item.name}>
               {item.name} · {item.duration.toFixed(2)}s
@@ -228,10 +231,10 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         <button
           type="button"
           className="hao-btn h-[20px] px-1.5 text-3xs"
-          title="新建动画（建好自动切过去）"
+          title={t('新建动画（建好自动切过去）')}
           onClick={() => {
             let created = ''
-            update('新建动画', (draft) => {
+            update(t('新建动画'), (draft) => {
               let name = 'animation'
               let index = 2
               while (draft.animations.some((a) => a.name === name)) name = `animation_${index++}`
@@ -250,14 +253,14 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
             if (created) timeline.setAnimation(created)
           }}
         >
-          + 动画
+          {t('+ 动画')}
         </button>
 
         {renaming !== null ? (
           <input
             autoFocus
             value={renaming}
-            title="输入新名字，回车确认 / Esc 取消"
+            title={t('输入新名字，回车确认 / Esc 取消')}
             className="hao-field h-[20px] w-[110px]"
             onChange={(event) => setRenaming(event.target.value)}
             onBlur={commitRename}
@@ -271,38 +274,38 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
             <button
               type="button"
               className="hao-btn h-[20px] px-1.5 text-3xs"
-              title="重命名当前动画"
+              title={t('重命名当前动画')}
               disabled={!animation}
               onClick={() => setRenaming(animation?.name ?? null)}
             >
-              重命名
+              {t('重命名')}
             </button>
             <button
               type="button"
               className="hao-btn h-[20px] px-1.5 text-3xs"
-              title="复制当前动画（连同全部关键帧）"
+              title={t('复制当前动画（连同全部关键帧）')}
               disabled={!animation}
               onClick={duplicateAnimation}
             >
-              复制
+              {t('复制')}
             </button>
             <button
               type="button"
               className="hao-btn h-[20px] px-1.5 text-3xs hover:border-danger/50 hover:text-danger"
-              title="删除当前动画（可撤销）"
+              title={t('删除当前动画（可撤销）')}
               disabled={!animation}
               onClick={removeAnimation}
             >
-              删除
+              {t('删除')}
             </button>
           </>
         )}
 
         <label
           className="flex shrink-0 items-center gap-1 text-3xs text-content-lo"
-          title="动画时长（帧）。这是可编辑范围（改大就能在后面继续加帧）；播放与导出按最后一个关键帧算"
+          title={t('动画时长（帧）。这是可编辑范围（改大就能在后面继续加帧）；播放与导出按最后一个关键帧算')}
         >
-          时长
+          {t('时长')}
           {/* 提交式输入：打字期间只改本地文本。逐字符提交会让时长在打字中途被写成中间态
               （输入 90 时先变 9 帧），撤销也会退回中间态而不是改之前的值 */}
           <CommitTextField
@@ -310,7 +313,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
             disabled={!animation}
             inputMode="numeric"
             scrub
-            title="动画时长（帧）。失焦 / 回车生效；中键左右拖动可调；播放按最后一个关键帧算"
+            title={t('动画时长（帧）。失焦 / 回车生效；中键左右拖动可调；播放按最后一个关键帧算')}
             value={String(totalFrames)}
             sanitize={(raw) => {
               const frames = Math.round(Number(raw))
@@ -323,18 +326,21 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
               // 而不是静默弹回，避免「我设的时长没生效」的困惑
               const minFrames = Math.ceil(lastKeyTime(animation) * document.frameRate - 1e-6)
               const finalFrames = Math.max(frames, minFrames)
-              update('修改动画时长', (draft) => {
+              update(t('修改动画时长'), (draft) => {
                 const target = draft.animations.find((item) => item.name === timeline.currentAnimation)
                 if (target) target.duration = finalFrames / document.frameRate
               })
               if (finalFrames !== frames) {
                 onStatus(
-                  `时长不能短于最后一个关键帧（${minFrames} 帧 / ${(minFrames / document.frameRate).toFixed(2)}s），已按 ${minFrames} 帧设置`
+                  t('时长不能短于最后一个关键帧（{0} 帧 / {1}s），已按 {0} 帧设置', [
+                    minFrames,
+                    (minFrames / document.frameRate).toFixed(2)
+                  ])
                 )
               }
             }}
           />
-          帧
+          {t('帧')}
         </label>
 
         {/* 这两个按钮 shrink-0：窗口窄时该由右侧的进度滑块（flex-1）让位，
@@ -342,25 +348,25 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         <button
           type="button"
           className="hao-btn h-[20px] shrink-0 px-1.5 text-3xs"
-          title="把当前姿态写成关键帧（K）"
+          title={t('把当前姿态写成关键帧（K）')}
           onClick={keyCurrent}
         >
           <KeyRound size={11} className="mr-1 inline" />
-          关键帧
+          {t('关键帧')}
         </button>
         <button
           type="button"
           className="hao-btn h-[20px] shrink-0 px-1.5 text-3xs"
-          title="在当前时间插入事件帧（事件名 / 字符串 / 整数 / 浮点在视口下方的值栏里改）"
+          title={t('在当前时间插入事件帧（事件名 / 字符串 / 整数 / 浮点在视口下方的值栏里改）')}
           onClick={keyEvent}
         >
           <Flag size={11} className="mr-1 inline" />
-          事件帧
+          {t('事件帧')}
         </button>
         <button
           type="button"
           className="hao-btn h-[20px] px-1.5 text-3xs"
-          title="删除选中的关键帧（Delete）"
+          title={t('删除选中的关键帧（Delete）')}
           onClick={removeSelected}
         >
           <Trash2 size={11} />
@@ -368,24 +374,24 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
 
         <div className="mx-1 h-[18px] w-px bg-line" />
 
-        <button type="button" className="hao-tool-button" title="上一帧 (←)" onClick={() => stepFrame(-1)}>
+        <button type="button" className="hao-tool-button" title={t('上一帧 (←)')} onClick={() => stepFrame(-1)}>
           <SkipBack size={13} />
         </button>
         <button
           type="button"
           className={['hao-tool-button', timeline.playing ? 'hao-tool-button-active' : ''].join(' ')}
-          title="播放 / 暂停 (空格)"
+          title={t('播放 / 暂停 (空格)')}
           onClick={timeline.togglePlaying}
         >
           {timeline.playing ? <Pause size={13} /> : <Play size={13} />}
         </button>
-        <button type="button" className="hao-tool-button" title="下一帧 (→)" onClick={() => stepFrame(1)}>
+        <button type="button" className="hao-tool-button" title={t('下一帧 (→)')} onClick={() => stepFrame(1)}>
           <SkipForward size={13} />
         </button>
         <button
           type="button"
           className={['hao-tool-button', timeline.loop ? 'hao-tool-button-active' : ''].join(' ')}
-          title="循环播放"
+          title={t('循环播放')}
           onClick={timeline.toggleLoop}
         >
           {timeline.loop ? <Repeat size={13} /> : <Square size={12} />}
@@ -395,7 +401,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
           className="hao-field h-[20px] w-[62px] cursor-pointer bg-ink-900 font-mono text-3xs"
           value={String(timeline.speed)}
           onChange={(e) => timeline.setSpeed(Number(e.target.value))}
-          title="播放倍速"
+          title={t('播放倍速')}
         >
           {[0.25, 0.5, 1, 2].map((speed) => (
             <option key={speed} value={speed}>
@@ -407,7 +413,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         <button
           type="button"
           className={['hao-tool-button', timeline.snapToFrame ? 'hao-tool-button-active' : ''].join(' ')}
-          title="关键帧吸附到帧"
+          title={t('关键帧吸附到帧')}
           onClick={() => timeline.setSnapToFrame(!timeline.snapToFrame)}
         >
           <Timer size={13} />
@@ -430,7 +436,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         />
 
         <span ref={timeReadoutRef} className="shrink-0 font-mono text-3xs text-content-lo">
-          {frame} / {totalFrames} 帧 · {time.toFixed(3)}s
+          {frame} / {t('{0} 帧', totalFrames)} · {time.toFixed(3)}s
         </span>
       </div>
 
@@ -473,11 +479,11 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         onBeginDrag={() => {
           // 拖动关键帧时先停播：否则播放头一边被推进一边被拖拽跟随，画面会来回跳
           timeline.setPlaying(false)
-          useProjectStore.getState().beginTransaction('移动关键帧')
+          useProjectStore.getState().beginTransaction(t('移动关键帧'))
         }}
         onEndDrag={() => {
           useProjectStore.getState().endTransaction()
-          onStatus('关键帧时间已更新')
+          onStatus(t('关键帧时间已更新'))
         }}
         onStatus={onStatus}
       />
@@ -524,22 +530,22 @@ function selectTrack(
 ): void {
   // 来自时间轴内的点击：reveal 效果应当跳过滚动 + 高亮（避免列表自己滚回顶 + 闪）
   markTimelineSelection()
-  const suffix = track.isGroup || !track.channel ? '' : `（按 K 只给「${track.label}」打帧）`
+  const suffix = track.isGroup || !track.channel ? '' : t('（按 K 只给「{0}」打帧）', track.label)
 
   if (track.kind === 'bone') {
     selection.selectBone(track.target)
-    status(`选中骨骼「${track.target}」${suffix}`)
+    status(t('选中骨骼「{0}」', track.target) + suffix)
   } else if (track.kind === 'slot') {
     selection.selectSlot(track.target)
-    status(`选中插槽「${track.target}」${suffix}`)
+    status(t('选中插槽「{0}」', track.target) + suffix)
   } else if (track.kind === 'deform') {
     selection.selectAttachment(track.target, track.attachment)
-    status(`选中附件「${track.target} / ${track.attachment}」${suffix}`)
+    status(t('选中附件「{0} / {1}」', [track.target, track.attachment]) + suffix)
   } else if (track.kind === 'constraint') {
     selection.selectConstraint(track.target)
-    status(`选中约束「${track.target}」${suffix}`)
+    status(t('选中约束「{0}」', track.target) + suffix)
   } else {
-    status('事件轨道：在检查器里编辑事件参数')
+    status(t('事件轨道：在检查器里编辑事件参数'))
   }
 
   // 记住点中的子轨道：按 K 打关键帧时只打它（分组行只作折叠标题，不参与）

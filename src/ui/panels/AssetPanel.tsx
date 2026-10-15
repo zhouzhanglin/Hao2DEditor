@@ -12,6 +12,7 @@ import { ImageHoverPreview, ImageThumb } from './ImageThumb'
 import ContextMenu from '@ui/widgets/ContextMenu'
 import type { ContextMenuItem } from '@ui/widgets/ContextMenu'
 import type { AuthoringImage } from '@core/model/authoring'
+import { t } from '@i18n'
 
 export interface AssetPanelProps {
   /** 点面板里的「导入」：交给 App 走统一导入命令（带忙碌提示 / 结果反馈） */
@@ -85,32 +86,39 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
     const refs = countImageReferences(document, name)
     if (refs > 0) {
       const ok = window.confirm(
-        `图片「${name}」正被 ${refs} 个附件引用。\n删除后这些附件会丢失贴图、退化为纯色块（附件本身保留）。\n确定删除？`
+        t('图片「{0}」正被 {1} 个附件引用。\n删除后这些附件会丢失贴图、退化为纯色块（附件本身保留）。\n确定删除？', [
+          name,
+          refs
+        ])
       )
       if (!ok) return
     }
     removeImage(name)
     // 读 store 的现值而不是渲染闭包里的 `picked`：删除是右键菜单触发的，用最新值更稳
     setPicked(useSelectionStore.getState().pickedImages.filter((item) => item !== name))
-    onStatus?.(refs > 0 ? `已删除「${name}」（${refs} 个附件的贴图已清空）` : `已删除「${name}」`)
+    onStatus?.(
+      refs > 0
+        ? t('已删除「{0}」（{1} 个附件的贴图已清空）', [name, refs])
+        : t('已删除「{0}」', name)
+    )
   }
 
   /** 替换图片：选一张新图，保持原名（附件引用自动跟随），更新来源与尺寸 */
   const handleReplaceImage = async (name: string): Promise<void> => {
     const platform = getPlatform()
     const pickedFiles = await platform.pickFiles({
-      title: `替换图片「${name}」`,
-      filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }]
+      title: t('替换图片「{0}」', name),
+      filters: [{ name: t('图片'), extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'] }]
     })
     if (pickedFiles.length === 0) return
     const infos = await platform.imageInfo(pickedFiles.slice(0, 1))
     const info = infos[0]
     if (!info || !info.path) {
-      onStatus?.(`读取「${pickedFiles[0] ?? ''}」失败，替换取消`)
+      onStatus?.(t('读取「{0}」失败，替换取消', pickedFiles[0] ?? ''))
       return
     }
     replaceImage(name, { path: info.path, width: info.width, height: info.height })
-    onStatus?.(`已用「${info.path}」替换「${name}」（${info.width}×${info.height}）`)
+    onStatus?.(t('已用「{0}」替换「{1}」（{2}×{3}）', [info.path, name, info.width, info.height]))
   }
 
   /** 图集拆碎图：图集里的每块子图各写一张 png，引用它的附件改用碎图，图集条目从工程移除 */
@@ -121,7 +129,7 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
       const result = await splitAtlasImage(name)
       onStatus?.(result.message)
     } catch (error) {
-      onStatus?.(`拆分「${name}」失败：${error instanceof Error ? error.message : String(error)}`)
+      onStatus?.(t('拆分「{0}」失败：{1}', [name, error instanceof Error ? error.message : String(error)]))
     } finally {
       setSplitting(null)
     }
@@ -131,18 +139,18 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
   const imageMenuItems = (name: string): ContextMenuItem[] => [
     {
       key: 'replace',
-      label: '替换图片…',
+      label: t('替换图片…'),
       icon: <RefreshCw size={12} />,
-      hint: '选一张新图，保持原名（引用它的附件自动跟随）',
+      hint: t('选一张新图，保持原名（引用它的附件自动跟随）'),
       onSelect: () => void handleReplaceImage(name)
     },
     { key: 'sep', separator: true },
     {
       key: 'delete',
-      label: '删除图片',
+      label: t('删除图片'),
       icon: <Trash2 size={12} />,
       danger: true,
-      hint: '从工程移除该图片（被引用的附件退化为纯色）',
+      hint: t('从工程移除该图片（被引用的附件退化为纯色）'),
       onSelect: () => handleDeleteImage(name)
     }
   ]
@@ -186,12 +194,12 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
     >
       {fileDragging ? (
         <div className="pointer-events-none absolute inset-x-0 top-0 z-10 py-1 text-center text-3xs text-accent">
-          松开导入到「资源与皮肤」
+          {t('松开导入到「资源与皮肤」')}
         </div>
       ) : null}
       <div className="border-b border-line/60 px-2 py-1.5">
         <h3 className="hao-panel-title mb-1 flex items-center gap-1">
-          <Layers size={11} /> 皮肤
+          <Layers size={11} /> {t('皮肤')}
         </h3>
         <div className="flex flex-wrap gap-1">
           {document.skins.map((skin) => {
@@ -208,7 +216,7 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
                     ? 'border-transparent bg-accent-deep text-white'
                     : 'border-line bg-ink-900/60 text-content-mid hover:text-content-hi'
                 ].join(' ')}
-                title={`${attachments} 个附件`}
+                title={t('{0} 个附件', attachments)}
               >
                 {skin.name}
                 <span className={active ? 'ml-1 text-white/70' : 'ml-1 text-content-lo'}>{attachments}</span>
@@ -219,7 +227,7 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
             type="button"
             className="hao-btn h-[20px] px-1.5 text-3xs"
             onClick={() =>
-              update('新建皮肤', (draft) => {
+              update(t('新建皮肤'), (draft) => {
                 const name = `skin${draft.skins.length}`
                 draft.skins.push({ name, slots: draft.slots.map((slot) => ({ slot: slot.name, attachments: [] })) })
               })
@@ -238,19 +246,19 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
         }}
       >
         <h3 className="hao-panel-title mb-1 flex items-center gap-1">
-          <Package size={11} /> 图片 / 图集页
+          <Package size={11} /> {t('图片 / 图集页')}
           {selected.length > 1 ? (
             <span className="ml-auto font-normal normal-case tracking-normal text-accent">
-              已选 {selected.length} 张 · 拖入场景可一起创建
+              {t('已选 {0} 张 · 拖入场景可一起创建', selected.length)}
             </span>
           ) : (
             <span className="ml-auto font-normal normal-case tracking-normal text-content-lo/70">
-              ⌘/Ctrl 多选
+              {t('⌘/Ctrl 多选')}
             </span>
           )}
           <button
             type="button"
-            title="导入图片 / 图集（⌘/Ctrl+I）；也可以把文件 / 文件夹直接拖进这个面板"
+            title={t('导入图片 / 图集（⌘/Ctrl+I）；也可以把文件 / 文件夹直接拖进这个面板')}
             onClick={() => onImport?.()}
             className="hao-btn flex h-[18px] w-[18px] shrink-0 items-center justify-center p-0"
           >
@@ -259,8 +267,8 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
         </h3>
         {document.images.length === 0 ? (
           <PanelEmpty
-            title="尚无图片"
-            description="点右上角「导入」选文件，或把图片 / 图集直接拖进这个面板；导入后即可作为附件贴图使用，导出时会自动打包成图集。"
+            title={t('尚无图片')}
+            description={t('点右上角「导入」选文件，或把图片 / 图集直接拖进这个面板；导入后即可作为附件贴图使用，导出时会自动打包成图集。')}
           />
         ) : (
           <ul className="flex flex-col gap-1">
@@ -268,7 +276,7 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
               <li
                 key={image.name}
                 draggable
-                title="拖到视口 = 在落点新建插槽（先多选可以一次拖多张）；拖到层级树的插槽行 = 给该插槽加一个 display；拖到骨骼行 = 在该骨骼下新建插槽；右键可替换 / 删除"
+                title={t('拖到视口 = 在落点新建插槽（先多选可以一次拖多张）；拖到层级树的插槽行 = 给该插槽加一个 display；拖到骨骼行 = 在该骨骼下新建插槽；右键可替换 / 删除')}
                 onContextMenu={(event) => {
                   event.preventDefault()
                   setRowMenu({ x: event.clientX, y: event.clientY, name: image.name })
@@ -310,13 +318,13 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
                   {image.width}×{image.height}
                 </span>
                 {image.loose ? (
-                  <span className="shrink-0 rounded bg-warn/20 px-1 text-3xs text-warn">碎图</span>
+                  <span className="shrink-0 rounded bg-warn/20 px-1 text-3xs text-warn">{t('碎图')}</span>
                 ) : (
                   <>
-                    <span className="shrink-0 rounded bg-ink-600 px-1 text-3xs text-content-lo">图集</span>
+                    <span className="shrink-0 rounded bg-ink-600 px-1 text-3xs text-content-lo">{t('图集')}</span>
                     <button
                       type="button"
-                      title="拆成碎图：图集里的每块子图各写出一张 png（被旋转存放的会转正），引用它的附件自动改用碎图，图集从工程移除（磁盘上的原 png 保留，可 ⌘/Ctrl+Z 撤销）"
+                      title={t('拆成碎图：图集里的每块子图各写出一张 png（被旋转存放的会转正），引用它的附件自动改用碎图，图集从工程移除（磁盘上的原 png 保留，可 ⌘/Ctrl+Z 撤销）')}
                       disabled={splitting !== null}
                       className={[
                         'flex h-[16px] w-[16px] shrink-0 items-center justify-center rounded',
@@ -344,8 +352,8 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
                   type="button"
                   title={
                     bone
-                      ? `在骨骼「${bone}」下新建插槽，并用这张图片作为它的 display（也可以直接把图片拖进场景）`
-                      : '先新建一根骨骼，再用图片创建附件'
+                      ? t('在骨骼「{0}」下新建插槽，并用这张图片作为它的 display（也可以直接把图片拖进场景）', bone)
+                      : t('先新建一根骨骼，再用图片创建附件')
                   }
                   disabled={!bone}
                   className={[
@@ -359,7 +367,7 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
                     event.stopPropagation()
                     if (!bone) return
                     let created: { slot: string; attachment: string } | null = null
-                    update('用图片创建附件', (draft) => {
+                    update(t('用图片创建附件'), (draft) => {
                       created = createRegionFromImage(draft, {
                         image: image.name,
                         bone,
@@ -396,7 +404,7 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
         <ContextMenu
           x={rowMenu.x}
           y={rowMenu.y}
-          title={`图片「${rowMenu.name}」`}
+          title={t('图片「{0}」', rowMenu.name)}
           items={imageMenuItems(rowMenu.name)}
           onClose={() => setRowMenu(null)}
         />

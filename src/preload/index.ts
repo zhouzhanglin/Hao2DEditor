@@ -54,6 +54,9 @@ const bridge: HaoBridge = {
   aiInstallMcp: () => invoke(IPC.aiInstallMcp),
   aiCommandApiDoc: () => invoke(IPC.aiCommandApiDoc),
 
+  systemLocale: () => invoke<string>(IPC.i18nSystemLocale),
+  setAppLocale: (locale: string) => invoke<void>(IPC.i18nSetLocale, locale),
+
   fileUrl: (absPath: string): string => {
     const encoded = xorEncode(absPath)
     return `${FILE_SCHEME}://local/${encoded}`

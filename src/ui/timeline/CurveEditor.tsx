@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import { Easing } from '@core/model/animation'
 import type { KeySelector } from '@editor/timeline/model'
+import { t } from '@i18n'
 
 export interface CurveEditorProps {
   selectedKeys: KeySelector[]
@@ -12,6 +13,7 @@ export interface CurveEditorProps {
   showTitle?: boolean
 }
 
+/** 预设缓动：`label` 是词典键（渲染时过 `t`，`key` 也用原文，换语言时按钮不重建） */
 const PRESETS: Array<{ label: string; easing: Easing; curve: number[] | null }> = [
   { label: '线性', easing: Easing.Linear, curve: null },
   { label: '阶跃', easing: Easing.Stepped, curve: null },
@@ -141,7 +143,7 @@ export default function CurveEditor({ selectedKeys, easing, curve, onChange, sho
       </svg>
 
       <div className="flex min-w-[104px] flex-1 flex-col gap-1">
-        {showTitle ? <span className="hao-panel-title">曲线</span> : null}
+        {showTitle ? <span className="hao-panel-title">{t('曲线')}</span> : null}
         <div className="flex flex-wrap gap-1">
           {PRESETS.map((preset) => {
             const isActive =
@@ -163,7 +165,7 @@ export default function CurveEditor({ selectedKeys, easing, curve, onChange, sho
                 ].join(' ')}
                 onClick={() => onChange(preset.easing, preset.curve)}
               >
-                {preset.label}
+                {t(preset.label)}
               </button>
             )
           })}
@@ -173,9 +175,9 @@ export default function CurveEditor({ selectedKeys, easing, curve, onChange, sho
             ? easing === Easing.Bezier
               ? `c1(${active[0].toFixed(2)}, ${active[1].toFixed(2)}) c2(${active[2].toFixed(2)}, ${active[3].toFixed(2)})`
               : easing === Easing.Stepped
-                ? '阶跃：保持前一帧直到下一关键帧'
-                : '线性：匀速插值'
-            : '先在 dope sheet 里选中关键帧'}
+                ? t('阶跃：保持前一帧直到下一关键帧')
+                : t('线性：匀速插值')
+            : t('先在 dope sheet 里选中关键帧')}
         </p>
       </div>
     </div>

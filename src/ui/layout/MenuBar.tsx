@@ -15,6 +15,7 @@ import {
 import type { EditorMode } from '@editor/store/modeStore'
 import { getPlatform } from '@editor/platform'
 import { recentProjects } from '@editor/services/projectIo'
+import { t } from '@i18n'
 
 export interface MenuBarProps {
   documentName: string
@@ -26,37 +27,43 @@ export interface MenuBarProps {
   onOpenRecent: (path: string) => void
 }
 
-const QUICK_ACTIONS = [
-  { command: 'project:new', label: '新建项目', icon: FilePlus2, hint: '新建项目 (Ctrl+N)' },
-  { command: 'project:open', label: '打开', icon: FolderOpen, hint: '打开工程 (Ctrl+O)' },
-  { command: 'project:save', label: '保存', icon: Save, hint: '保存工程 (Ctrl+S)' },
-  { command: 'project:importImages', label: '导入图片', icon: Import, hint: '导入或拖入碎图 / PSD (Ctrl+I)' }
-]
+/** 顶部快捷动作（文案随语言切换，故做成函数而非模块级常量表） */
+function quickActions() {
+  return [
+    { command: 'project:new', label: t('新建项目'), icon: FilePlus2, hint: t('新建项目 (Ctrl+N)') },
+    { command: 'project:open', label: t('打开'), icon: FolderOpen, hint: t('打开工程 (Ctrl+O)') },
+    { command: 'project:save', label: t('保存'), icon: Save, hint: t('保存工程 (Ctrl+S)') },
+    { command: 'project:importImages', label: t('导入图片'), icon: Import, hint: t('导入或拖入碎图 / PSD (Ctrl+I)') }
+  ]
+}
 
 /**
  * 导出：两个并排入口（运行时 / Unity）收进一个「导出」下拉。
  * 菜单栏横向本来就紧张 —— 两个按钮各占一位，窄窗口下会把中间的文件名挤没。
+ * 文案随语言切换，故做成函数而非模块级常量表。
  */
-const EXPORT_ACTIONS = [
-  {
-    command: 'project:exportRuntime',
-    label: '导出运行时',
-    icon: Share2,
-    hint: '导出 {名称}_ske.json + {名称}_atlas.json + 图集 png (Ctrl+E)'
-  },
-  {
-    command: 'project:exportHao2d',
-    label: '导出 Unity',
-    icon: Package,
-    hint: '导出给 Unity 的 .hao2d + 图集 png + 材质 (Ctrl+Shift+E)'
-  },
-  {
-    command: 'project:exportSpine',
-    label: '导出 Spine',
-    icon: Package,
-    hint: '导出 Spine 4.3 骨骼数据：{名称}.json + {名称}.atlas + 图集 png (Ctrl+Alt+E)'
-  }
-]
+function exportActions() {
+  return [
+    {
+      command: 'project:exportRuntime',
+      label: t('导出运行时'),
+      icon: Share2,
+      hint: t('导出 {名称}_ske.json + {名称}_atlas.json + 图集 png (Ctrl+E)')
+    },
+    {
+      command: 'project:exportHao2d',
+      label: t('导出 Unity'),
+      icon: Package,
+      hint: t('导出给 Unity 的 .hao2d + 图集 png + 材质 (Ctrl+Shift+E)')
+    },
+    {
+      command: 'project:exportSpine',
+      label: t('导出 Spine'),
+      icon: Package,
+      hint: t('导出 Spine 4.3 骨骼数据：{名称}.json + {名称}.atlas + 图集 png (Ctrl+Alt+E)')
+    }
+  ]
+}
 
 /** 顶部菜单栏：品牌 + 文档名 + 快捷动作 + Pose/Animate 二段式开关。 */
 /** 最近打开的工程：点击直接打开（来自主进程持久化的列表） */
@@ -79,7 +86,7 @@ function RecentMenu({ onOpen }: { onOpen: (path: string) => void }) {
     <div className="relative">
       <button
         type="button"
-        title="最近打开的工程"
+        title={t('最近打开的工程')}
         className="hao-btn border-transparent bg-transparent"
         onClick={() => setOpen((value) => !value)}
       >
@@ -91,12 +98,12 @@ function RecentMenu({ onOpen }: { onOpen: (path: string) => void }) {
           <button
             type="button"
             className="fixed inset-0 z-40 cursor-default"
-            aria-label="关闭最近列表"
+            aria-label={t('关闭最近列表')}
             onClick={() => setOpen(false)}
           />
           <div className="hao-window-no-drag absolute left-0 top-[26px] z-50 w-[320px] rounded border border-line bg-ink-800 py-1 shadow-lg shadow-black/40">
             {list.length === 0 ? (
-              <p className="px-3 py-2 text-3xs text-content-lo">还没有最近打开的工程</p>
+              <p className="px-3 py-2 text-3xs text-content-lo">{t('还没有最近打开的工程')}</p>
             ) : (
               list.map((path) => (
                 <button
@@ -128,12 +135,12 @@ function ExportMenu({ onCommand }: { onCommand: (command: string) => void }) {
     <div className="relative">
       <button
         type="button"
-        title="导出"
+        title={t('导出')}
         onClick={() => setOpen((value) => !value)}
         className={['hao-btn border-transparent bg-transparent', open ? 'text-content-hi' : ''].join(' ')}
       >
         <Share2 size={13} />
-        <span>导出</span>
+        <span>{t('导出')}</span>
         <ChevronDown size={10} />
       </button>
       {open ? (
@@ -141,11 +148,11 @@ function ExportMenu({ onCommand }: { onCommand: (command: string) => void }) {
           <button
             type="button"
             className="fixed inset-0 z-40 cursor-default"
-            aria-label="关闭导出菜单"
+            aria-label={t('关闭导出菜单')}
             onClick={() => setOpen(false)}
           />
           <div className="hao-window-no-drag absolute left-0 top-[26px] z-50 w-[260px] rounded border border-line bg-ink-800 py-1 shadow-lg shadow-black/40">
-            {EXPORT_ACTIONS.map(({ command, label, icon: Icon, hint }) => (
+            {exportActions().map(({ command, label, icon: Icon, hint }) => (
               <button
                 key={command}
                 type="button"
@@ -206,7 +213,7 @@ export default function MenuBar({
       <div className="mx-1 h-[16px] w-px bg-line" />
 
       <div className="flex items-center gap-0.5">
-        {QUICK_ACTIONS.map(({ command, label, icon: Icon, hint }) => (
+        {quickActions().map(({ command, label, icon: Icon, hint }) => (
           <button
             key={command}
             type="button"
@@ -223,7 +230,7 @@ export default function MenuBar({
         <div className="mx-0.5 h-[16px] w-px bg-line" />
         <button
           type="button"
-          title="撤销 (Ctrl+Z)"
+          title={t('撤销 (Ctrl+Z)')}
           onClick={() => onCommand('edit:undo')}
           className="hao-tool-button"
         >
@@ -231,7 +238,7 @@ export default function MenuBar({
         </button>
         <button
           type="button"
-          title="重做 (Ctrl+Shift+Z)"
+          title={t('重做 (Ctrl+Shift+Z)')}
           onClick={() => onCommand('edit:redo')}
           className="hao-tool-button"
         >
@@ -241,7 +248,7 @@ export default function MenuBar({
 
       <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
         <span className="truncate text-panel text-content-mid">{documentName}</span>
-        {dirty ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" title="有未保存修改" /> : null}
+        {dirty ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" title={t('有未保存修改')} /> : null}
         {projectPath ? (
           <span className="max-w-[420px] truncate text-3xs text-content-lo">{projectPath}</span>
         ) : null}
@@ -253,13 +260,13 @@ export default function MenuBar({
             'flex h-[20px] items-center gap-1 rounded-[5px] px-2 text-2xs font-medium',
             mode === 'animate' ? 'bg-accent-deep text-white' : 'bg-white/[0.07] text-content-mid'
           ].join(' ')}
-          title="当前编辑状态（切换按钮在视口左上角）"
+          title={t('当前编辑状态（切换按钮在视口左上角）')}
         >
-          {mode === 'pose' ? 'Pose' : 'Animate'}
+          {mode === 'pose' ? t('准备') : t('动画')}
         </span>
         <button
           type="button"
-          title="重置面板布局"
+          title={t('重置面板布局')}
           onClick={() => window.dispatchEvent(new Event('hao2d:reset-layout'))}
           className="hao-tool-button"
         >

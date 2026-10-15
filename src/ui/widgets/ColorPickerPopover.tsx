@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { CommitTextField, parseHexColor } from './fields'
 import { hexToRgba, rgbaToHex } from '@core/util/color'
+import { t } from '@i18n'
 
 /** HSV：h 0..360、s / v 0..1。文档里存的是 `#RRGGBBAA`，这里只作拾色器的内部状态 */
 interface Hsv {
@@ -283,7 +284,7 @@ export default function ColorPickerPopover({
         />
         <button
           type="button"
-          title="关闭（Esc）"
+          title={t('关闭（Esc）')}
           className="flex size-[16px] shrink-0 cursor-pointer items-center justify-center rounded-[3px] text-content-lo transition-colors duration-panel hover:bg-ink-600 hover:text-content-hi"
           onClick={() => latest.current.onClose()}
         >
@@ -348,7 +349,7 @@ export default function ColorPickerPopover({
         <CommitTextField
           className="hao-field min-w-0 flex-1 text-2xs font-mono uppercase"
           value={hex}
-          title="颜色 #RRGGBBAA（回车 / 失焦生效）"
+          title={t('颜色 #RRGGBBAA（回车 / 失焦生效）')}
           sanitize={parseHexColor}
           onCommit={(next) => apply(fromHex(next), true)}
         />
@@ -357,7 +358,7 @@ export default function ColorPickerPopover({
             className="hao-field w-[46px] pr-4 text-right font-mono text-3xs"
             value={String(alphaPercent)}
             inputMode="decimal"
-            title="透明度百分比（0–100）；失焦 / 回车生效，中键左右拖动可调"
+            title={t('透明度百分比（0–100）；失焦 / 回车生效，中键左右拖动可调')}
             scrub
             sanitize={(raw) => {
               const next = Number(raw)

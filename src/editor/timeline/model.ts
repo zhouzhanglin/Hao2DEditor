@@ -12,6 +12,7 @@ import {
   keySlotVisible,
   pruneEmptyTracks
 } from '../commands/animationCommands'
+import { t } from '@i18n'
 
 export type KeyKind = 'bone' | 'slot' | 'deform' | 'constraint' | 'event' | 'drawOrder'
 
@@ -48,25 +49,30 @@ export interface TimelineTrack {
   channel?: string
 }
 
-/** 骨骼子轨道的顺序与中文名（位置在前，符合 TRS 习惯） */
-const BONE_CHANNELS: Array<{ channel: 'translate' | 'rotate' | 'scale' | 'shear'; label: string }> = [
-  { channel: 'translate', label: '位置' },
-  { channel: 'rotate', label: '旋转' },
-  { channel: 'scale', label: '缩放' },
-  { channel: 'shear', label: '斜切' }
-]
+/** 骨骼子轨道的顺序与名称（位置在前，符合 TRS 习惯）；文案随语言切换，故是函数 */
+function boneChannels(): Array<{ channel: 'translate' | 'rotate' | 'scale' | 'shear'; label: string }> {
+  return [
+    { channel: 'translate', label: t('位置') },
+    { channel: 'rotate', label: t('旋转') },
+    { channel: 'scale', label: t('缩放') },
+    { channel: 'shear', label: t('斜切') }
+  ]
+}
 
 /**
  * 插槽子轨道：显示（切 display）在最前，它是做换装动画最常用的通道。
  *
  * `always`：没有关键帧时也把这一行留在时间轴上 —— 「显示」是换装动画的入口，
  * 藏起来用户就找不到在哪儿切 display 了（右键该行可以选要显示的 display 并打关键帧）。
+ * 文案随语言切换，故是函数。
  */
-const SLOT_CHANNELS: Array<{ channel: 'display' | 'color' | 'visible'; label: string; always?: boolean }> = [
-  { channel: 'display', label: '显示', always: true },
-  { channel: 'color', label: '颜色' },
-  { channel: 'visible', label: '可见性' }
-]
+function slotChannels(): Array<{ channel: 'display' | 'color' | 'visible'; label: string; always?: boolean }> {
+  return [
+    { channel: 'display', label: t('显示'), always: true },
+    { channel: 'color', label: t('颜色') },
+    { channel: 'visible', label: t('可见性') }
+  ]
+}
 
 export interface KeySelector {
   kind: KeyKind
@@ -90,13 +96,16 @@ export function sameSelector(a: KeySelector, b: KeySelector): boolean {
   )
 }
 
-const GROUP_LABEL: Record<KeyKind, string> = {
-  bone: '骨骼',
-  slot: '插槽',
-  deform: 'FFD',
-  constraint: '约束',
-  event: '事件',
-  drawOrder: '插槽层级'
+/** 轨道分组名（时间轴按分组归类轨道）；文案随语言切换，故是函数 */
+function groupLabel(kind: KeyKind): string {
+  return t({
+    bone: '骨骼',
+    slot: '插槽',
+    deform: 'FFD',
+    constraint: '约束',
+    event: '事件',
+    drawOrder: '插槽层级'
+  }[kind])
 }
 
 /**
@@ -146,7 +155,7 @@ export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrac
       curve: null
     }))
     // 通道名固定叫「事件」：帧数在右侧轨道行里看得到，标题里再挂个（1）反而像编号/序号
-    tracks.push(makeTrack('event', '事件', '', 'event', keys))
+    tracks.push(makeTrack('event', t('事件'), '', 'event', keys))
   }
 
   // 骨骼：一行分组标题 + 每个有帧的通道各一行子轨道（位置 / 旋转 / 缩放 / 斜切）
@@ -155,7 +164,7 @@ export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrac
       tracks,
       'bone',
       track.bone,
-      BONE_CHANNELS.map(({ channel, label }) => {
+      boneChannels().map(({ channel, label }) => {
         const keys: TimelineKey[] = []
         pushKeys(keys, track.bone, '', 'bone', channel, track[channel])
         return { channel, label, keys }
@@ -180,7 +189,7 @@ export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrac
       tracks,
       'slot',
       track.slot,
-      SLOT_CHANNELS.map(({ channel, label, always }) => {
+      slotChannels().map(({ channel, label, always }) => {
         if (channel === 'display') return { channel, label, keys: displayKeys, always }
         const keys: TimelineKey[] = []
         pushKeys(keys, track.slot, '', 'slot', channel, track[channel])
@@ -205,8 +214,8 @@ export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrac
     }))
     tracks.push({
       id: 'drawOrder',
-      group: GROUP_LABEL.drawOrder,
-      label: GROUP_LABEL.drawOrder,
+      group: groupLabel('drawOrder'),
+      label: groupLabel('drawOrder'),
       kind: 'drawOrder',
       target: '',
       attachment: '',
@@ -698,7 +707,7 @@ function constraintKeysOf(track: AuthoringConstraintAnim, channel: string): Floa
   return Array.isArray(value) ? (value as FloatKeyframe[]) : null
 }
 
-export { GROUP_LABEL }
+export { groupLabel }
 
 /**
  * 「分组行 + 通道子轨」两层的轨道结构（骨骼与插槽共用）：
@@ -747,7 +756,7 @@ function pushGroupedTracks(
 function makeTrack(kind: KeyKind, label: string, attachment: string, target: string, keys: TimelineKey[]): TimelineTrack {
   return {
     id: `${kind}:${target}${attachment ? `:${attachment}` : ''}`,
-    group: GROUP_LABEL[kind],
+    group: groupLabel(kind),
     label,
     kind,
     target,

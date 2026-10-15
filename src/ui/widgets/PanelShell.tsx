@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useState } from 'react'
+import { t } from '@i18n'
 
 export interface PanelShellProps {
   title: string
@@ -46,7 +47,7 @@ export default function PanelShell({
             <button
               type="button"
               onClick={() => setCollapsed((v) => !v)}
-              title={collapsed ? '展开' : '折叠'}
+              title={collapsed ? t('展开') : t('折叠')}
               className="flex h-[16px] w-[16px] items-center justify-center rounded text-content-lo transition-colors duration-panel hover:text-content-hi"
             >
               {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}

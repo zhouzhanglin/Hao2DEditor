@@ -1,11 +1,14 @@
 import type { MenuItemConstructorOptions } from 'electron'
 import type { MenuCommand } from '@shared/ipcTypes'
+import type { MenuLabels } from './i18n'
 
 export interface MenuTemplateOptions {
   /** 应用名（macOS 的 app 菜单标题） */
   appName: string
   /** 是否 macOS：决定 app 菜单与「退出」放哪儿 */
   isMac: boolean
+  /** 当前语言下的菜单文案（见 main/i18n.ts） */
+  labels: MenuLabels
   /** 菜单项点下去之后，把命令派发给渲染进程（由主进程实现） */
   dispatch: (command: MenuCommand) => void
 }
@@ -25,7 +28,7 @@ export interface MenuTemplateOptions {
  *    所以这里只**显示**提示、不注册（`registerAccelerator: false`，macOS 专用开关）。
  */
 export function buildMenuTemplate(options: MenuTemplateOptions): MenuItemConstructorOptions[] {
-  const { appName, isMac, dispatch } = options
+  const { appName, isMac, labels, dispatch } = options
 
   /**
    * 普通菜单项：点击 → 把命令发给渲染进程。
@@ -53,76 +56,76 @@ export function buildMenuTemplate(options: MenuTemplateOptions): MenuItemConstru
    * 其它平台没有 app 菜单，仍留在文件菜单末尾，避免功能入口丢失。
    */
   const settingsItems: MenuItemConstructorOptions[] = [
-    item('设置…', 'app:settings', 'CmdOrCtrl+,'),
-    item('AI 接入…', 'app:aiIntegration')
+    item(labels.settings, 'app:settings', 'CmdOrCtrl+,'),
+    item(labels.aiIntegration, 'app:aiIntegration')
   ]
 
   const fileMenu: MenuItemConstructorOptions = {
-    label: '文件',
+    label: labels.file,
     submenu: [
-      item('新建工程', 'project:new', 'CmdOrCtrl+N'),
-      item('打开工程…', 'project:open', 'CmdOrCtrl+O'),
+      item(labels.newProject, 'project:new', 'CmdOrCtrl+N'),
+      item(labels.openProject, 'project:open', 'CmdOrCtrl+O'),
       { type: 'separator' },
-      item('保存', 'project:save', 'CmdOrCtrl+S'),
-      item('另存为…', 'project:saveAs', 'CmdOrCtrl+Shift+S'),
+      item(labels.save, 'project:save', 'CmdOrCtrl+S'),
+      item(labels.saveAs, 'project:saveAs', 'CmdOrCtrl+Shift+S'),
       { type: 'separator' },
-      item('导入 Spine…', 'project:importSpine'),
-      item('导入 DragonBones…', 'project:importDragonBones'),
-      item('导入图片…', 'project:importImages', 'CmdOrCtrl+I'),
-      item('导入 PSD…', 'project:importPsd'),
+      item(labels.importSpine, 'project:importSpine'),
+      item(labels.importDragonBones, 'project:importDragonBones'),
+      item(labels.importImages, 'project:importImages', 'CmdOrCtrl+I'),
+      item(labels.importPsd, 'project:importPsd'),
       { type: 'separator' },
-      item('导出运行时数据…', 'project:exportRuntime', 'CmdOrCtrl+E'),
-      item('导出 Unity…', 'project:exportHao2d', 'CmdOrCtrl+Shift+E'),
-      item('导出 Spine…', 'project:exportSpine', 'CmdOrCtrl+Alt+E'),
+      item(labels.exportRuntime, 'project:exportRuntime', 'CmdOrCtrl+E'),
+      item(labels.exportHao2d, 'project:exportHao2d', 'CmdOrCtrl+Shift+E'),
+      item(labels.exportSpine, 'project:exportSpine', 'CmdOrCtrl+Alt+E'),
       { type: 'separator' },
       ...(isMac ? [] : ([...settingsItems, { type: 'separator' }] as MenuItemConstructorOptions[])),
-      isMac ? { role: 'close', label: '关闭窗口' } : { role: 'quit', label: '退出' }
+      isMac ? { role: 'close', label: labels.closeWindow } : { role: 'quit', label: labels.quit }
     ]
   }
 
   const editMenu: MenuItemConstructorOptions = {
-    label: '编辑',
+    label: labels.edit,
     submenu: [
-      item('撤销', 'edit:undo', 'CmdOrCtrl+Z'),
-      item('重做', 'edit:redo', 'CmdOrCtrl+Shift+Z'),
+      item(labels.undo, 'edit:undo', 'CmdOrCtrl+Z'),
+      item(labels.redo, 'edit:redo', 'CmdOrCtrl+Shift+Z'),
       { type: 'separator' },
       // 拷贝 / 粘贴改成自定义命令：组合键在渲染进程里按上下文分流——
       // 焦点在输入框时走浏览器原生文本复制（见 App 的 edit:copy / edit:paste），
       // 否则复制 / 粘贴层级节点或关键帧。剪切 / 全选仍用标准角色，避免自实现文本编辑。
-      item('拷贝', 'edit:copy', 'CmdOrCtrl+C'),
-      item('粘贴', 'edit:paste', 'CmdOrCtrl+V'),
-      item('复制生成', 'edit:duplicate', 'CmdOrCtrl+D'),
+      item(labels.copy, 'edit:copy', 'CmdOrCtrl+C'),
+      item(labels.paste, 'edit:paste', 'CmdOrCtrl+V'),
+      item(labels.duplicate, 'edit:duplicate', 'CmdOrCtrl+D'),
       { type: 'separator' },
-      { role: 'cut', label: '剪切' },
-      { role: 'selectAll', label: '全选' },
+      { role: 'cut', label: labels.cut },
+      { role: 'selectAll', label: labels.selectAll },
       { type: 'separator' },
-      item('删除', 'edit:delete', 'Delete')
+      item(labels.delete, 'edit:delete', 'Delete')
     ]
   }
 
   const animMenu: MenuItemConstructorOptions = {
-    label: '动画',
+    label: labels.animation,
     submenu: [
-      item('播放 / 暂停', 'anim:playPause', 'Space'),
-      item('上一帧', 'anim:prevFrame', 'Left'),
-      item('下一帧', 'anim:nextFrame', 'Right'),
+      item(labels.playPause, 'anim:playPause', 'Space'),
+      item(labels.prevFrame, 'anim:prevFrame', 'Left'),
+      item(labels.nextFrame, 'anim:nextFrame', 'Right'),
       { type: 'separator' },
-      item('为选中项打关键帧', 'anim:keySelected', 'K')
+      item(labels.keySelected, 'anim:keySelected', 'K')
     ]
   }
 
   const viewMenu: MenuItemConstructorOptions = {
-    label: '视图',
+    label: labels.view,
     submenu: [
-      item('适配视野', 'view:fitViewport', 'F'),
-      item('重置面板布局', 'view:resetLayout'),
+      item(labels.fitViewport, 'view:fitViewport', 'F'),
+      item(labels.resetLayout, 'view:resetLayout'),
       { type: 'separator' },
-      { role: 'reload', label: '重新加载' },
-      { role: 'toggleDevTools', label: '开发者工具' },
+      { role: 'reload', label: labels.reload },
+      { role: 'toggleDevTools', label: labels.devTools },
       { type: 'separator' },
-      { role: 'resetZoom', label: '实际大小' },
-      { role: 'zoomIn', label: '放大' },
-      { role: 'zoomOut', label: '缩小' }
+      { role: 'resetZoom', label: labels.actualSize },
+      { role: 'zoomIn', label: labels.zoomIn },
+      { role: 'zoomOut', label: labels.zoomOut }
     ]
   }
 
@@ -131,14 +134,14 @@ export function buildMenuTemplate(options: MenuTemplateOptions): MenuItemConstru
     template.push({
       label: appName,
       submenu: [
-        { role: 'about', label: `关于 ${appName}` },
+        { role: 'about', label: labels.about.replace('{app}', appName) },
         { type: 'separator' },
         ...settingsItems,
         { type: 'separator' },
-        { role: 'hide', label: '隐藏' },
-        { role: 'hideOthers', label: '隐藏其他' },
+        { role: 'hide', label: labels.hide },
+        { role: 'hideOthers', label: labels.hideOthers },
         { type: 'separator' },
-        { role: 'quit', label: '退出' }
+        { role: 'quit', label: labels.quit }
       ]
     })
   }

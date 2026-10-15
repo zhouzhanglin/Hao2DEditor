@@ -33,6 +33,7 @@ import type { KeyKind } from '@editor/timeline/model'
 import type { AuthoringAnimData } from '@core/model/authoring'
 import type { Float2Keyframe, FloatKeyframe } from '@core/model/animation'
 import type { Vec2 } from '@core/math/matrix'
+import { t } from '@i18n'
 
 /**
  * 输入框那一列：两个 70px 小框 + 3px 缝 = 143px。
@@ -67,9 +68,9 @@ function sampledAngle(keys: readonly FloatKeyframe[] | undefined, time: number, 
 function hintOf(name: string, target: string, unit: string, keyed: boolean, time: number): string {
   const at = `${time.toFixed(2)}s`
   const state = keyed
-    ? `当前帧（${at}）已有关键帧 —— 点菱形重打一帧`
-    : `点右侧菱形在当前帧（${at}）打一帧`
-  return `「${target}」${name}${unit}\n${state}`
+    ? t('当前帧（{0}）已有关键帧 —— 点菱形重打一帧', at)
+    : t('点右侧菱形在当前帧（{0}）打一帧', at)
+  return `${t('「{0}」', target)}${name}${unit}\n${state}`
 }
 
 /**
@@ -170,7 +171,7 @@ function ColorSwatch({
   const begin = (): void => {
     if (dragging.current) return
     dragging.current = true
-    useProjectStore.getState().beginTransaction('插槽颜色关键帧')
+    useProjectStore.getState().beginTransaction(t('插槽颜色关键帧'))
   }
   const end = (): void => {
     if (!dragging.current) return
@@ -206,7 +207,7 @@ function ColorSwatch({
         // 不清的话颜色只填中间窄窄一条，看起来不像色块（检查器那边窄，留白不明显）
         className="h-[22px] w-[40px] shrink-0 cursor-pointer rounded border border-line bg-ink-900 p-0 [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-[3px] [&::-webkit-color-swatch]:border-0"
         value={rgb.startsWith('#') ? rgb : '#ffffff'}
-        title={`点开系统拾色器改颜色（当前 ${rgb}）`}
+        title={t('点开系统拾色器改颜色（当前 {0}）', rgb)}
         onBlur={end}
         onChange={(event) => {
           begin()
@@ -217,7 +218,7 @@ function ColorSwatch({
       <CommitTextField
         className="hao-field min-w-0 flex-1 font-mono uppercase"
         value={rgb}
-        title="颜色 #RRGGBB；失焦 / 回车生效（透明度看下一行）"
+        title={t('颜色 #RRGGBB；失焦 / 回车生效（透明度看下一行）')}
         sanitize={parseHexColor}
         // 手打 8 位（带 alpha）就整串用，否则只换 RGB、保留原透明度
         onCommit={(hex) => {
@@ -342,7 +343,7 @@ function AlphaSlider({
           setDragValue(next)
           if (!begun.current) {
             begun.current = true
-            useProjectStore.getState().beginTransaction('插槽透明度关键帧')
+            useProjectStore.getState().beginTransaction(t('插槽透明度关键帧'))
           }
           writer.current?.push(next)
         }}
@@ -352,7 +353,7 @@ function AlphaSlider({
         value={format(shown, 1)}
         inputMode="decimal"
         scrub
-        title="透明度 0 ~ 100；失焦 / 回车生效（中键左右拖动可调）"
+        title={t('透明度 0 ~ 100；失焦 / 回车生效（中键左右拖动可调）')}
         sanitize={(raw) => {
           const next = Number(raw)
           return Number.isFinite(next) ? format(quantizeAlpha(next), 1) : null
@@ -397,7 +398,7 @@ function KeyRow({
       <button
         type="button"
         onClick={onKey}
-        aria-label="在当前帧打关键帧"
+        aria-label={t('在当前帧打关键帧')}
         aria-pressed={keyed}
         className="flex h-[20px] flex-1 cursor-pointer items-center justify-end rounded-[4px] pr-1 outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
       >
@@ -531,7 +532,7 @@ function BoneRows({
     <>
       <KeyRow
         icon={Move}
-        title={hintOf('位置', bone, '（X / Y，像素）', keyed('translate'), time)}
+        title={hintOf(t('位置'), bone, t('（X / Y，像素）'), keyed('translate'), time)}
         keyed={keyed('translate')}
         onKey={() => key('translate', position)}
       >
@@ -550,7 +551,7 @@ function BoneRows({
 
       <KeyRow
         icon={RotateCw}
-        title={hintOf('旋转', bone, '（度）', keyed('rotate'), time)}
+        title={hintOf(t('旋转'), bone, t('（度）'), keyed('rotate'), time)}
         keyed={keyed('rotate')}
         onKey={() => key('rotate', rotation)}
       >
@@ -559,7 +560,7 @@ function BoneRows({
 
       <KeyRow
         icon={Scaling}
-        title={hintOf('缩放', bone, '（比例，1 = 原大）', keyed('scale'), time)}
+        title={hintOf(t('缩放'), bone, t('（比例，1 = 原大）'), keyed('scale'), time)}
         keyed={keyed('scale')}
         onKey={() => key('scale', scale)}
       >
@@ -569,7 +570,7 @@ function BoneRows({
 
       <KeyRow
         icon={MoveDiagonal2}
-        title={hintOf('斜切', bone, '（比例，不换算）', keyed('shear'), time)}
+        title={hintOf(t('斜切'), bone, t('（比例，不换算）'), keyed('shear'), time)}
         keyed={keyed('shear')}
         onKey={() => key('shear', shear)}
       >
@@ -616,7 +617,12 @@ function SlotRows({
   const [displayTicket, setDisplayTicket] = useState(0)
 
   // 颜色帧是「插槽色」：颜色与透明度两行改的都是同一个颜色帧（只显示 RGB 那一半）
-  const colorTarget: SlotColorTarget = { animate: true, animation: scope, time, label: '插槽颜色关键帧' }
+  const colorTarget: SlotColorTarget = {
+    animate: true,
+    animation: scope,
+    time,
+    label: t('插槽颜色关键帧')
+  }
   // `slotColorHexAt` 拿不到插槽时给的是 `#FFFFFFFF`（不透明），所以这里不用再兜一层
   const colorHex = slotColorHexAt(document, colorTarget, slot)
   const alphaPercent = round1(hexToRgba(colorHex).a * 100)
@@ -629,7 +635,7 @@ function SlotRows({
     const animScope = resolveAnimationName()
     return animScope === ''
       ? null
-      : { animate: true, animation: animScope, time, label: '插槽颜色关键帧' }
+      : { animate: true, animation: animScope, time, label: t('插槽颜色关键帧') }
   }
 
   /** 写一个颜色帧（颜色行 / 透明度行 / 菱形共用），报状态并刷新时间轴高亮 */
@@ -712,8 +718,11 @@ function SlotRows({
   const currentDisplay = displayReady ? displays[displayIndex]?.name ?? '' : ''
   /** 下拉项：`''` 是「不显示」，其余是当前皮肤里可选的附件名（与写入同一套名字口径） */
   const displayOptions: Array<{ value: string; label: string }> = displayReady
-    ? [{ value: '', label: '不显示' }, ...displays.map((item) => ({ value: item.name, label: item.name }))]
-    : [{ value: '', label: '视口未就绪' }]
+    ? [
+        { value: '', label: t('不显示') },
+        ...displays.map((item) => ({ value: item.name, label: item.name }))
+      ]
+    : [{ value: '', label: t('视口未就绪') }]
 
   /** 显示选择：按**附件名**写（`keySlotDisplayNow` 收的也是名字，`''` = 不显示任何附件） */
   const writeDisplay = (name: string): boolean => {
@@ -728,7 +737,7 @@ function SlotRows({
       {/* 颜色一行：色块（点开系统拾色器）+ hex。写的是 RGB，透明度原样拼回去 */}
       <KeyRow
         icon={Palette}
-        title={hintOf('颜色', slot, '（#RRGGBB）', keyed('color'), time)}
+        title={hintOf(t('颜色'), slot, t('（#RRGGBB）'), keyed('color'), time)}
         keyed={keyed('color')}
         onKey={() => writeColor(colorHex)}
       >
@@ -743,13 +752,13 @@ function SlotRows({
       {/* 透明度单独一行：与颜色共用同一个颜色帧，各改各的那一半 */}
       <KeyRow
         icon={Droplet}
-        title={hintOf('透明度', slot, '（0 ~ 100）', keyed('color'), time)}
+        title={hintOf(t('透明度'), slot, t('（0 ~ 100）'), keyed('color'), time)}
         keyed={keyed('color')}
         onKey={() => writeColor(colorHex)}
       >
         <AlphaSlider
           value={alphaPercent}
-          hint="左右拖动调透明度；右侧读数可打字或中键拖动微调"
+          hint={t('左右拖动调透明度；右侧读数可打字或中键拖动微调')}
           onChange={writeAlpha}
           onSettled={settleColor}
           onPreview={previewAlpha}
@@ -795,7 +804,8 @@ function displayTitle(info: {
   keyed: boolean
   time: number
 }): string {
-  if (!info.ready) return `「${info.slot}」显示选择\n视口还没就绪，暂时读不到显示列表`
-  const current = info.name === '' ? '不显示任何附件' : `「${info.name}」`
-  return `${hintOf('显示选择', info.slot, '', info.keyed, info.time)}\n当前：${current}`
+  if (!info.ready)
+    return `${t('「{0}」显示选择', info.slot)}\n${t('视口还没就绪，暂时读不到显示列表')}`
+  const current = info.name === '' ? t('不显示任何附件') : t('「{0}」', info.name)
+  return `${hintOf(t('显示选择'), info.slot, '', info.keyed, info.time)}\n${t('当前：{0}', current)}`
 }

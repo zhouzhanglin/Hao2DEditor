@@ -17,6 +17,7 @@ import {
   ToggleField,
   Vector2Field
 } from '@ui/widgets/fields'
+import { t } from '@i18n'
 
 const KIND_LABEL: Record<KeySelector['kind'], string> = {
   bone: '骨骼',
@@ -25,6 +26,11 @@ const KIND_LABEL: Record<KeySelector['kind'], string> = {
   constraint: '约束',
   event: '事件',
   drawOrder: '插槽层级'
+}
+
+/** 轨道种类名（中文原文在 `KIND_LABEL` 里，走词典换语言） */
+function kindLabel(kind: KeySelector['kind']): string {
+  return t(KIND_LABEL[kind])
 }
 
 /**
@@ -51,6 +57,12 @@ const CHANNEL_LABEL: Record<string, string> = {
   spacing: '间距'
 }
 
+/** 通道名（中文原文在 `CHANNEL_LABEL` 里，走词典换语言；词典里没有的枚举原样返回） */
+function channelLabel(channel: string): string {
+  const label = CHANNEL_LABEL[channel]
+  return label ? t(label) : channel
+}
+
 /**
  * 浮动条首行的两个名字：**对象名 + 通道名**（渲染成 `shouL*显示`）。
  *
@@ -59,11 +71,11 @@ const CHANNEL_LABEL: Record<string, string> = {
  * 真正要找的对象名反而不好认。多选时不写标题，那条信息交给「已选中 N 个」。
  */
 function titleOf(key: KeySelector): { object: string; channel: string } {
-  const channel = CHANNEL_LABEL[key.channel] ?? key.channel
+  const channel = channelLabel(key.channel)
   // 事件轨的 target 与 channel 都是事件名（`hit` / `footstep`），照抄会写成 `hit*hit`
-  if (key.kind === 'event') return { object: key.target || channel, channel: KIND_LABEL.event }
+  if (key.kind === 'event') return { object: key.target || channel, channel: kindLabel('event') }
   // target 为空（整具骨架一条轨，不属于任何对象）时用轨道种类兜底，免得标题只剩后半截
-  return { object: key.target || KIND_LABEL[key.kind], channel }
+  return { object: key.target || kindLabel(key.kind), channel }
 }
 
 /**
@@ -154,7 +166,7 @@ export default function KeyframeValueBar() {
     const time = single.time
     // 空名 = 这一帧起不显示任何 display，下标写 -1（与 setup「什么都不显示」同一约定）
     const index = displayName ? displaysOf(slotName).findIndex((item) => item.name === displayName) : -1
-    update('修改显示关键帧', (draft) => {
+    update(t('修改显示关键帧'), (draft) => {
       const target = draft.animations.find((item) => item.name === animationName)
       if (target) keySlotDisplay(target, slotName, time, index, displayName)
     })
@@ -169,7 +181,7 @@ export default function KeyframeValueBar() {
       ? {
           value: displayNameOf(single.target, single.time, typeof frame?.value === 'number' ? frame.value : -1),
           options: [
-            { value: '', label: '不显示' },
+            { value: '', label: t('不显示') },
             ...displaysOf(single.target).map((item) => ({ value: item.name, label: item.name }))
           ],
           onChange: setDisplay
@@ -177,7 +189,7 @@ export default function KeyframeValueBar() {
       : null
 
   const title = single ? titleOf(single) : null
-  const channels = selectedKeys.map((key) => CHANNEL_LABEL[key.channel] ?? key.channel).join('、')
+  const channels = selectedKeys.map((key) => channelLabel(key.channel)).join(t('、'))
 
   return (
     <div className="pointer-events-auto absolute bottom-2 left-1/2 z-20 flex max-w-[calc(100%-12px)] -translate-x-1/2 flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-lg border border-line bg-ink-900/85 px-2.5 py-1.5 shadow-lg shadow-black/40 backdrop-blur-sm">
@@ -188,38 +200,44 @@ export default function KeyframeValueBar() {
           <>
             <div className={SLOT}>
               <TextField
-                label="事件名"
+                label={t('事件名')}
                 value={frame?.name ?? ''}
                 commitOnBlur
                 placeholder="hit / footstep"
-                onChange={(value) => editFrames('修改事件名', (item) => { item.name = value })}
+                onChange={(value) => editFrames(t('修改事件名'), (item) => { item.name = value })}
               />
             </div>
             <div className={SLOT}>
               <TextField
-                label="字符串"
+                label={t('字符串')}
                 value={frame?.stringParam ?? ''}
                 commitOnBlur
-                placeholder="可空"
-                onChange={(value) => editFrames('修改事件字符串参数', (item) => { item.stringParam = value })}
+                placeholder={t('可空')}
+                onChange={(value) =>
+                  editFrames(t('修改事件字符串参数'), (item) => { item.stringParam = value })
+                }
               />
             </div>
             <div className={SLOT}>
               <NumberField
-                label="整数"
+                label={t('整数')}
                 value={frame?.intParam ?? 0}
                 precision={0}
                 step={1}
-                onChange={(value) => editFrames('修改事件整数参数', (item) => { item.intParam = Math.round(value) })}
+                onChange={(value) =>
+                  editFrames(t('修改事件整数参数'), (item) => { item.intParam = Math.round(value) })
+                }
               />
             </div>
             <div className={SLOT}>
               <NumberField
-                label="浮点"
+                label={t('浮点')}
                 value={frame?.floatParam ?? 0}
                 step={0.1}
                 precision={3}
-                onChange={(value) => editFrames('修改事件浮点参数', (item) => { item.floatParam = value })}
+                onChange={(value) =>
+                  editFrames(t('修改事件浮点参数'), (item) => { item.floatParam = value })
+                }
               />
             </div>
           </>
@@ -235,7 +253,10 @@ export default function KeyframeValueBar() {
           </>
         )
       ) : (
-        <InfoChip label="关键帧" value={`已选中 ${selectedKeys.length} 个（${channels}）`} />
+        <InfoChip
+          label={t('关键帧')}
+          value={t('已选中 {0} 个（{1}）', [selectedKeys.length, channels])}
+        />
       )}
     </div>
   )
@@ -289,7 +310,12 @@ function FrameValueEditor({
   if (display) {
     return (
       <div className={SLOT}>
-        <SelectField label="值" value={display.value} options={display.options} onChange={display.onChange} />
+        <SelectField
+          label={t('值')}
+          value={display.value}
+          options={display.options}
+          onChange={display.onChange}
+        />
       </div>
     )
   }
@@ -300,11 +326,11 @@ function FrameValueEditor({
     return (
       <div className={SLOT}>
         <NumberField
-          label="值"
+          label={t('值')}
           value={value}
           step={1}
           precision={3}
-          onChange={(next) => onEdit('修改关键帧值', (item) => { item.value = next })}
+          onChange={(next) => onEdit(t('修改关键帧值'), (item) => { item.value = next })}
         />
       </div>
     )
@@ -314,9 +340,9 @@ function FrameValueEditor({
     return (
       <div className={SLOT}>
         <ToggleField
-          label="值"
+          label={t('值')}
           value={value}
-          onChange={(next) => onEdit('修改关键帧值', (item) => { item.value = next })}
+          onChange={(next) => onEdit(t('修改关键帧值'), (item) => { item.value = next })}
         />
       </div>
     )
@@ -329,11 +355,13 @@ function FrameValueEditor({
     return (
       <div className={SLOT}>
         <Vector2Field
-          label="值"
+          label={t('值')}
           value={vec}
           unitScale={isTranslate ? PX_PER_UNIT : undefined}
           step={isTranslate ? 1 : 0.01}
-          onChange={(next) => onEdit('修改关键帧值', (item) => { item.value = { x: next.x, y: next.y } })}
+          onChange={(next) =>
+            onEdit(t('修改关键帧值'), (item) => { item.value = { x: next.x, y: next.y } })
+          }
         />
       </div>
     )
@@ -346,11 +374,11 @@ function FrameValueEditor({
       <div className={SLOT_COLOR}>
         <ColorField
           // 标签与其它通道统一叫「值」（对象名 * 通道名已经写明这是颜色帧，再写一遍「颜色」是重复）
-          label="值"
+          label={t('值')}
           value={rgbaToHex(color)}
           // 拾色器 / 滑杆的连续拖动包成**一条**撤销记录：不包的话每个 `input` 事件都会
           // 往撤销栈塞一条等价记录、并且每次都要深拷贝一遍整个项目快照（拖动时必卡）
-          onDragStart={() => useProjectStore.getState().beginTransaction('修改关键帧颜色')}
+          onDragStart={() => useProjectStore.getState().beginTransaction(t('修改关键帧颜色'))}
           onDragEnd={() => {
             useProjectStore.getState().endTransaction()
             usePreviewStore.getState().clearSlotColors()
@@ -359,7 +387,9 @@ function FrameValueEditor({
           onPreview={
             previewSlot === '' ? undefined : (hex) => usePreviewStore.getState().setSlotColor(previewSlot, hex)
           }
-          onChange={(hex) => onEdit('修改关键帧颜色', (item) => { item.value = hexToRgba(hex, color) })}
+          onChange={(hex) =>
+            onEdit(t('修改关键帧颜色'), (item) => { item.value = hexToRgba(hex, color) })
+          }
         />
       </div>
     )
@@ -367,5 +397,5 @@ function FrameValueEditor({
 
   // FFD（网格顶点偏移）不会走到这里：整条属性面板对 deform 帧直接不渲染，见组件顶部的早退
 
-  return <InfoChip label="值" value="该通道没有可直接编辑的值" />
+  return <InfoChip label={t('值')} value={t('该通道没有可直接编辑的值')} />
 }

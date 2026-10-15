@@ -3,6 +3,7 @@ import { useProjectStore } from '@editor/store/projectStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { findKeyframe, setKeyEasing } from '@editor/timeline/model'
 import CurveEditor from '@ui/timeline/CurveEditor'
+import { t } from '@i18n'
 
 /**
  * 关键帧曲线面板：Animate 态占左栏第三块（原「资源与皮肤」的位置）。
@@ -29,13 +30,13 @@ export default function CurvePanel() {
         curve={frame?.curve ?? null}
         showTitle={false}
         onChange={(easing, curve) => {
-          update('修改缓动', (draft) => {
+          update(t('修改缓动'), (draft) => {
             setKeyEasing(draft, animation?.name ?? null, selectedKeys, easing, curve)
           })
         }}
       />
       <p className="text-3xs text-content-lo">
-        选中关键帧后拖控制点，或点预设按钮；多选时预设作用于全部选中帧。
+        {t('选中关键帧后拖控制点，或点预设按钮；多选时预设作用于全部选中帧。')}
       </p>
     </div>
   )

@@ -19,6 +19,7 @@ export function markTimelineSelection(): void {
   skipReveal = true
 }
 import { playheadTime, usePlayheadStore } from '@editor/store/playheadStore'
+import { t } from '@i18n'
 
 export interface DopeSheetProps {
   tracks: TimelineTrack[]
@@ -838,13 +839,13 @@ export default function DopeSheet(props: DopeSheetProps) {
           className="flex shrink-0 flex-col justify-center gap-[1px] border-r border-line px-2"
           style={{ width: LABEL_WIDTH }}
         >
-          <span className="text-3xs text-content-lo">轨道 / 对象</span>
+          <span className="text-3xs text-content-lo">{t('轨道 / 对象')}</span>
           <span className="flex items-center gap-1 font-mono text-3xs text-content-lo/70">
-            {channelCount} 轨 · {totalKeys} 关键帧
+            {t('{0} 轨 · {1} 关键帧', [channelCount, totalKeys])}
             {zoomed ? (
               <button
                 type="button"
-                title="当前已缩放，点击恢复「完整适配」"
+                title={t('当前已缩放，点击恢复「完整适配」')}
                 className="flex items-center gap-0.5 rounded bg-accent-deep px-1 text-white hover:bg-accent cursor-pointer"
                 onClick={() => {
                   applyView({ start: 0, zoom: 1 })
@@ -866,7 +867,9 @@ export default function DopeSheet(props: DopeSheetProps) {
             scrubRef.current = true
             props.onScrub(snapScrub(timeAtClientX(event.clientX)))
           }}
-          title="关键帧区：左键拖动框选关键帧（Shift / Ctrl 点击加选或减选），选中后可整段左右拖动；单击空白定位播放头；滚轮上下翻轨道，Shift+滚轮横向平移；缩放用底部工具栏"
+          title={t(
+            '关键帧区：左键拖动框选关键帧（Shift / Ctrl 点击加选或减选），选中后可整段左右拖动；单击空白定位播放头；滚轮上下翻轨道，Shift+滚轮横向平移；缩放用底部工具栏'
+          )}
         >
           {minorStep > 0
             ? majorFrames.flatMap((frame) =>
@@ -954,12 +957,20 @@ export default function DopeSheet(props: DopeSheetProps) {
                 style={{ height: ROW_HEIGHT, paddingLeft: 5 + track.depth * 12 }}
                 title={
                   track.kind === 'drawOrder'
-                    ? '插槽层级（绘制顺序）：每帧是一份完整顺序快照，在 slot 层级面板调完顺序后打帧；点选后按 Delete 可删除整条通道'
+                    ? t(
+                        '插槽层级（绘制顺序）：每帧是一份完整顺序快照，在 slot 层级面板调完顺序后打帧；点选后按 Delete 可删除整条通道'
+                      )
                     : track.isGroup
-                      ? `${track.kind === 'slot' ? '插槽' : '骨骼'}「${track.label}」的通道（点击选中该对象）`
+                      ? t('{0}「{1}」的通道（点击选中该对象）', [
+                          track.kind === 'slot' ? t('插槽') : t('骨骼'),
+                          track.label
+                        ])
                       : track.kind === 'slot' && track.channel === 'display'
-                        ? `${track.group} · 显示 · 单击选中插槽，按 K 在当前时间打显示帧`
-                        : `${track.group} · ${track.label} · 点击选中该通道（按 K 只给它打帧，Delete 删除整条通道）`
+                        ? t('{0} · 显示 · 单击选中插槽，按 K 在当前时间打显示帧', track.group)
+                        : t('{0} · {1} · 点击选中该通道（按 K 只给它打帧，Delete 删除整条通道）', [
+                            track.group,
+                            track.label
+                          ])
                 }
                 onClick={() => props.onSelectTarget(track)}
                 onContextMenu={(event) => {
@@ -976,7 +987,7 @@ export default function DopeSheet(props: DopeSheetProps) {
                   <span
                     role="presentation"
                     className="flex h-[13px] w-[13px] shrink-0 items-center justify-center rounded text-content-lo hover:bg-ink-600 hover:text-content-hi"
-                    title="折叠 / 展开该骨骼的通道"
+                    title={t('折叠 / 展开该骨骼的通道')}
                     onClick={(event) => {
                       event.stopPropagation()
                       toggleCollapse(track.id)
@@ -1000,7 +1011,7 @@ export default function DopeSheet(props: DopeSheetProps) {
             })}
             {visibleTracks.length === 0 ? (
               <div className="px-2 py-3 text-3xs text-content-lo">
-                没有轨道：在 Pose 状态调整骨骼/插槽后按 K 打关键帧
+                {t('没有轨道：在 Pose 状态调整骨骼/插槽后按 K 打关键帧')}
               </div>
             ) : null}
           </div>
@@ -1058,7 +1069,7 @@ export default function DopeSheet(props: DopeSheetProps) {
                 />
                 <button
                   type="button"
-                  title="左右拖动缩放选中关键帧"
+                  title={t('左右拖动缩放选中关键帧')}
                   className="absolute z-40 w-1.5 cursor-ew-resize bg-accent/80 hover:bg-accent active:bg-white"
                   style={{
                     left: `${selectionBox.left}%`,
@@ -1070,7 +1081,7 @@ export default function DopeSheet(props: DopeSheetProps) {
                 />
                 <button
                   type="button"
-                  title="左右拖动缩放选中关键帧"
+                  title={t('左右拖动缩放选中关键帧')}
                   className="absolute z-40 w-1.5 cursor-ew-resize bg-accent/80 hover:bg-accent active:bg-white"
                   style={{
                     left: `${selectionBox.right}%`,
@@ -1120,7 +1131,10 @@ export default function DopeSheet(props: DopeSheetProps) {
                             : 'text-danger/85 hover:text-danger'
                         ].join(' ')}
                         style={{ left: `${left}%` }}
-                        title={`${marker.channels[0]} @ ${marker.slot.toFixed(3)}s（事件；拖动改时间，Delete 删除）`}
+                        title={t('{0} @ {1}s（事件；拖动改时间，Delete 删除）', [
+                          marker.channels[0],
+                          marker.slot.toFixed(3)
+                        ])}
                         onPointerDown={(event) => startMarkerDrag(event, marker, selected, track)}
                       >
                         <Flag size={11} fill="currentColor" strokeWidth={2} />
@@ -1138,7 +1152,11 @@ export default function DopeSheet(props: DopeSheetProps) {
                           : 'border-accent/70 bg-accent/40 hover:bg-accent/70'
                       ].join(' ')}
                       style={{ left: `${left}%` }}
-                      title={`${rowLabel(track)} · ${marker.channels.join(' / ')} @ ${marker.slot.toFixed(3)}s（拖动整组改时间，Delete 删除）`}
+                      title={t('{0} · {1} @ {2}s（拖动整组改时间，Delete 删除）', [
+                        rowLabel(track),
+                        marker.channels.join(' / '),
+                        marker.slot.toFixed(3)
+                      ])}
                       onPointerDown={(event) => startMarkerDrag(event, marker, selected, track)}
                     />
                   )
@@ -1156,7 +1174,7 @@ export default function DopeSheet(props: DopeSheetProps) {
       <div className="flex h-[26px] shrink-0 items-center gap-2 border-t border-line/60 bg-ink-800/80 px-1.5">
         <button
           type="button"
-          title="洋葱皮：显示前后帧的骨骼姿态"
+          title={t('洋葱皮：显示前后帧的骨骼姿态')}
           className={['hao-tool-button', onionSkin ? 'hao-tool-button-active' : ''].join(' ')}
           onClick={toggleOnionSkin}
         >
@@ -1172,9 +1190,11 @@ export default function DopeSheet(props: DopeSheetProps) {
           title={
             smartFilter
               ? filterTarget
-                ? `智能过滤：「${filterTarget}」的轨道（再点一次恢复全部）`
-                : '智能过滤已开启，但还没选中对象：选中骨骼 / 插槽 / 约束后只显示它的轨道（再点一次恢复全部）'
-              : '智能过滤：只显示当前选中对象的轨道'
+                ? t('智能过滤：「{0}」的轨道（再点一次恢复全部）', filterTarget)
+                : t(
+                    '智能过滤已开启，但还没选中对象：选中骨骼 / 插槽 / 约束后只显示它的轨道（再点一次恢复全部）'
+                  )
+              : t('智能过滤：只显示当前选中对象的轨道')
           }
           onClick={() => setSmartFilter((value) => !value)}
           className={['hao-tool-button', smartFilter ? 'hao-tool-button-active' : ''].join(' ')}
@@ -1182,8 +1202,8 @@ export default function DopeSheet(props: DopeSheetProps) {
           <Filter size={13} />
         </button>
         {smartFilter && filterTarget ? (
-          <span className="shrink-0 text-3xs text-accent" title="再点一次「智能过滤」恢复全部轨道">
-            「{filterTarget}」
+          <span className="shrink-0 text-3xs text-accent" title={t('再点一次「智能过滤」恢复全部轨道')}>
+            {t('「{0}」', filterTarget)}
           </span>
         ) : null}
 
@@ -1197,13 +1217,13 @@ export default function DopeSheet(props: DopeSheetProps) {
           disabled={maxStart <= 0}
           value={Math.round((maxStart > 0 ? start / maxStart : 0) * 1000)}
           onChange={(event) => applyView({ start: (Number(event.target.value) / 1000) * maxStart })}
-          title="左右滑动时间轴（拖到最右 = 时间轴末尾）"
+          title={t('左右滑动时间轴（拖到最右 = 时间轴末尾）')}
         />
 
         {/* 缩放组：以可见窗口中心为锚点 */}
         <button
           type="button"
-          title="缩小时间轴（看得更全）"
+          title={t('缩小时间轴（看得更全）')}
           className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded text-content-mid hover:bg-ink-600 hover:text-content-hi"
           onClick={() => zoomAround(zoom / 1.25)}
         >
@@ -1217,11 +1237,11 @@ export default function DopeSheet(props: DopeSheetProps) {
           step={1}
           value={Math.round(zoom * 100)}
           onChange={(event) => zoomAround(Number(event.target.value) / 100)}
-          title="时间轴缩放"
+          title={t('时间轴缩放')}
         />
         <button
           type="button"
-          title="放大时间轴（逐帧精修）"
+          title={t('放大时间轴（逐帧精修）')}
           className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded text-content-mid hover:bg-ink-600 hover:text-content-hi"
           onClick={() => zoomAround(zoom * 1.25)}
         >
@@ -1230,7 +1250,7 @@ export default function DopeSheet(props: DopeSheetProps) {
         {zoomed ? (
           <button
             type="button"
-            title="恢复「完整适配」"
+            title={t('恢复「完整适配」')}
             className="shrink-0 rounded bg-accent-deep px-1 text-3xs text-white hover:bg-accent"
             onClick={() => {
               applyView({ start: 0, zoom: 1 })

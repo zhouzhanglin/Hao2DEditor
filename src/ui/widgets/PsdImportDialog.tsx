@@ -4,6 +4,7 @@ import { EyeOff, Folder, Image as ImageIcon, Layers, X } from 'lucide-react'
 import { toPanelOrder } from '@importers/psdImport'
 import type { PsdLayerNode, ParsedPsd } from '@importers/psdImport'
 import { useDialogDrag } from './dialogDrag'
+import { t } from '@i18n'
 
 export interface PsdImportDialogProps {
   parsed: ParsedPsd
@@ -124,9 +125,11 @@ export default function PsdImportDialog({ parsed, onConfirm, onClose }: PsdImpor
           <span className={['min-w-0 flex-1 truncate', node.isGroup ? 'font-semibold text-content-mid' : 'text-content-mid'].join(' ')}>
             {node.name}
           </span>
-          {node.hidden ? <EyeOff size={10} className="shrink-0 text-warn/80" title="在 PSD 中隐藏" /> : null}
+          {node.hidden ? (
+            <EyeOff size={10} className="shrink-0 text-warn/80" title={t('在 PSD 中隐藏')} />
+          ) : null}
           <span className="shrink-0 font-mono text-content-lo/80">
-            {node.isGroup ? '组' : node.hasPixels ? `${node.width}×${node.height}` : '无像素'}
+            {node.isGroup ? t('组') : node.hasPixels ? `${node.width}×${node.height}` : t('无像素')}
           </span>
         </label>
         {node.children.map((child) => renderNode(child))}
@@ -143,20 +146,20 @@ export default function PsdImportDialog({ parsed, onConfirm, onClose }: PsdImpor
       >
         <div className="flex h-[30px] shrink-0 items-center gap-2 border-b border-line bg-ink-700 px-2.5" {...handleProps}>
           <Layers size={13} className="text-accent" />
-          <span className="text-panel font-semibold text-content-hi">导入 PSD</span>
+          <span className="text-panel font-semibold text-content-hi">{t('导入 PSD')}</span>
           <span className="truncate text-3xs text-content-lo" title={parsed.fileName}>
             {parsed.fileName} · {parsed.width}×{parsed.height}
           </span>
-          <button type="button" title="关闭（Esc）" className="hao-tool-button ml-auto" onClick={onClose}>
+          <button type="button" title={t('关闭（Esc）')} className="hao-tool-button ml-auto" onClick={onClose}>
             <X size={13} />
           </button>
         </div>
 
         <div className="flex flex-col gap-1.5 px-2.5 py-2">
           <div className="flex items-center justify-between text-3xs text-content-lo">
-            <span>图层（勾选要导入的层，编组可整组勾选）</span>
+            <span>{t('图层（勾选要导入的层，编组可整组勾选）')}</span>
             <span className="font-mono">
-              已选 {selectedCount} / {parsed.pixelCount} 层
+              {t('已选 {0} / {1} 层', [selectedCount, parsed.pixelCount])}
             </span>
           </div>
           <div className="hao-scroll max-h-[300px] min-h-[80px] overflow-auto rounded border border-line/60 bg-ink-900/40 p-1">
@@ -172,10 +175,10 @@ export default function PsdImportDialog({ parsed, onConfirm, onClose }: PsdImpor
               checked={addToScene}
               onChange={(event) => setAddToScene(event.target.checked)}
             />
-            按 PSD 位置直接添加到场景
+            {t('按 PSD 位置直接添加到场景')}
           </label>
           <button type="button" className="hao-btn" onClick={onClose}>
-            取消
+            {t('取消')}
           </button>
           <button
             ref={confirmRef}
@@ -184,7 +187,7 @@ export default function PsdImportDialog({ parsed, onConfirm, onClose }: PsdImpor
             disabled={selectedCount === 0}
             onClick={() => onConfirm(checked, addToScene)}
           >
-            导入
+            {t('导入')}
           </button>
         </div>
       </div>

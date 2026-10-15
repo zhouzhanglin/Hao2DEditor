@@ -4,10 +4,11 @@ import { Lasso, Network, SquarePen, SquarePlus, SquareX } from 'lucide-react'
 import { getActiveScene } from '@editor/activeScene'
 import { useModeStore } from '@editor/store/modeStore'
 import type { MeshSubtool } from '@editor/store/toolStore'
-import { BOUNDARY_REDRAW_WARNING, MESH_SUBTOOLS, useToolStore } from '@editor/store/toolStore'
+import { boundaryRedrawWarning, meshSubtools, useToolStore } from '@editor/store/toolStore'
 import type { BoundaryRedrawLoss } from '@editor/tools/authoringTools'
 import { boundaryRedrawLoss, closeMeshBoundaryOn } from '@editor/tools/authoringTools'
 import ConfirmDialog from '@ui/widgets/ConfirmDialog'
+import { t } from '@i18n'
 
 /**
  * 网格工具（Pose 态的「网格工具 M」）的**子工具图标条**：贴在视口左下角。
@@ -75,17 +76,19 @@ export function meshSubtoolCursor(subtool: MeshSubtool): string {
  * 与重建时真正清掉的东西对应）。
  */
 function lossDetails(loss: BoundaryRedrawLoss): ReactNode {
-  const parts = [`${loss.vertices} 个网格点`]
-  if (loss.bones > 0) parts.push(`${loss.bones} 根骨骼的绑定权重`)
-  if (loss.ffdFrames > 0) parts.push(`${loss.ffdFrames} 个 FFD 关键帧（${loss.ffdAnims} 个动画）`)
+  const parts = [t('{0} 个网格点', loss.vertices)]
+  if (loss.bones > 0) parts.push(t('{0} 根骨骼的绑定权重', loss.bones))
+  if (loss.ffdFrames > 0) parts.push(t('{0} 个 FFD 关键帧（{1} 个动画）', [loss.ffdFrames, loss.ffdAnims]))
   return (
     <>
       <span>
-        对象：<span className="text-content-mid">{loss.slot}</span> /{' '}
+        {t('对象：')}
+        <span className="text-content-mid">{loss.slot}</span> /{' '}
         <span className="text-content-mid">{loss.attachment}</span>
       </span>
       <span>
-        本次将丢弃：<span className="text-content-mid">{parts.join('、')}</span>
+        {t('本次将丢弃：')}
+        <span className="text-content-mid">{parts.join(t('、'))}</span>
       </span>
     </>
   )
@@ -112,9 +115,11 @@ export default function MeshSubtoolBar({ onStatus }: { onStatus: (message: strin
       else scene.setViewState({ pendingMeshPath: null, hoveredVertex: -1 })
     }
     setMeshSubtool(next)
-    const item = MESH_SUBTOOLS.find((entry) => entry.id === next)
+    const item = meshSubtools().find((entry) => entry.id === next)
     onStatus(
-      next === 'edit' ? `网格工具：${item?.label ?? '编辑顶点'}` : `网格工具：${item?.label ?? ''}（右键回到「编辑顶点」）`
+      next === 'edit'
+        ? t('网格工具：{0}', item?.label ?? t('编辑顶点'))
+        : t('网格工具：{0}（右键回到「编辑顶点」）', item?.label ?? '')
     )
   }
 
@@ -144,7 +149,7 @@ export default function MeshSubtoolBar({ onStatus }: { onStatus: (message: strin
         onPointerDown={(event) => event.stopPropagation()}
         onContextMenu={(event) => event.stopPropagation()}
       >
-        {MESH_SUBTOOLS.map((item) => {
+        {meshSubtools().map((item) => {
           const Icon = SUBTOOL_ICONS[item.id]
           const active = item.id === meshSubtool
           return (
@@ -152,7 +157,7 @@ export default function MeshSubtoolBar({ onStatus }: { onStatus: (message: strin
               {item.divider ? <span className="mx-0.5 h-4 w-px bg-line" /> : null}
               <button
                 type="button"
-                title={`${item.label}\n${item.hint}`}
+                title={t('{0}\n{1}', [item.label, item.hint])}
                 aria-label={item.label}
                 aria-pressed={active}
                 onClick={() => pick(item.id)}
@@ -172,13 +177,13 @@ export default function MeshSubtoolBar({ onStatus }: { onStatus: (message: strin
 
       {pendingLoss ? (
         <ConfirmDialog
-          title="重绘网格边线"
+          title={t('重绘网格边线')}
           icon={Lasso}
           danger
-          message={BOUNDARY_REDRAW_WARNING}
+          message={boundaryRedrawWarning()}
           details={lossDetails(pendingLoss)}
-          hint="这一步可以用 Ctrl+Z 整步撤销"
-          confirmLabel="重绘"
+          hint={t('这一步可以用 Ctrl+Z 整步撤销')}
+          confirmLabel={t('重绘')}
           onConfirm={() => {
             setPendingLoss(null)
             enter('boundary', 'boundary')

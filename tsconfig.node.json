@@ -22,6 +22,8 @@
       "@render/*": ["src/render/*"],
       "@editor/*": ["src/editor/*"],
       "@ui/*": ["src/ui/*"],
+      "@i18n": ["src/i18n/index.ts"],
+      "@i18n/*": ["src/i18n/*"],
       "@shared/*": ["src/shared/*"]
     }
   },
@@ -34,6 +36,7 @@
     "src/render/**/*.ts",
     "src/editor/**/*.ts",
     "src/ui/**/*.ts",
+    "src/i18n/**/*.ts",
     "electron.vite.config.ts",
     "vite.web.config.ts",
     "vitest.config.ts",

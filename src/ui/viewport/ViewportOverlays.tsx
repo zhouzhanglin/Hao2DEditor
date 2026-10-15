@@ -1,5 +1,6 @@
 import { Crosshair } from 'lucide-react'
 import type { OverlayState } from '@editor/store/toolStore'
+import { t } from '@i18n'
 
 export interface ViewportOverlaysProps {
   zoom: number
@@ -14,10 +15,13 @@ export interface ViewportOverlaysProps {
  * 「网格 / FFD / 权重」都已移除：它们分别跟着选中项、顶点工具、权重刷工具自动显示，
  * 手动开全局版只会把整个角色铺满线条与顶点，还得记着关回去。
  */
-const OVERLAYS: Array<{ key: keyof OverlayState; label: string; hint: string }> = [
-  { key: 'bones', label: '骨骼', hint: '显示 / 隐藏骨骼骨架' },
-  { key: 'constraints', label: '约束', hint: '显示 / 隐藏约束手柄（IK / 路径）' }
-]
+/** 叠加层文案随语言切换，故做成函数 */
+function overlays(): Array<{ key: keyof OverlayState; label: string; hint: string }> {
+  return [
+    { key: 'bones', label: t('骨骼'), hint: t('显示 / 隐藏骨骼骨架') },
+    { key: 'constraints', label: t('约束'), hint: t('显示 / 隐藏约束手柄（IK / 路径）') }
+  ]
+}
 
 /**
  * 视口**右上角**的浮动面板：叠加层开关（骨骼 / 约束）+ 缩放读数与「适配视野」。
@@ -32,7 +36,7 @@ export default function ViewportOverlays(props: ViewportOverlaysProps) {
 
   return (
     <div className="pointer-events-auto absolute right-3 top-3 z-20 flex items-center gap-0.5 rounded-[7px] border border-white/10 bg-ink-900/70 p-0.5 shadow-lg shadow-black/30 backdrop-blur-md">
-      {OVERLAYS.map(({ key, label, hint }) => (
+      {overlays().map(({ key, label, hint }) => (
         <button
           key={key}
           type="button"
@@ -59,7 +63,7 @@ export default function ViewportOverlays(props: ViewportOverlaysProps) {
       </span>
       <button
         type="button"
-        title="适配视野 (F)"
+        title={t('适配视野 (F)')}
         onClick={props.onFitViewport}
         className="hao-tool-button h-[30px] w-[28px]"
       >

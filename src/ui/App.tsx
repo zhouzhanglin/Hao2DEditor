@@ -27,10 +27,15 @@ import type { EditorTool, GizmoMode } from '@editor/store/toolStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { playheadTime } from '@editor/store/playheadStore'
 import { useShallow } from 'zustand/react/shallow'
+import { t, useLocale } from '@i18n'
 
 /** W/E/R/T → 骨骼变换工具（与小坐标轴工具条从上到下一致） */
 const GIZMO_KEYS: Record<string, GizmoMode> = { w: 'move', e: 'rotate', r: 'scale', t: 'shear' }
-const GIZMO_LABEL: Record<GizmoMode, string> = { move: '移动', rotate: '旋转', scale: '缩放', shear: '斜切' }
+
+/** 变换工具名（随语言切换，故做成函数而非模块级常量表） */
+function gizmoLabel(mode: GizmoMode): string {
+  return t({ move: '移动', rotate: '旋转', scale: '缩放', shear: '斜切' }[mode])
+}
 
 /** 当前焦点是否在可编辑文本元素内（输入框 / 文本域 / contentEditable） */
 function activeEditableElement(): HTMLElement | null {
@@ -52,12 +57,17 @@ const TOOL_KEYS: Record<string, EditorTool> = {
   g: 'weight',
   d: 'ffd'
 }
-const TOOL_LABEL: Record<EditorTool, string> = {
-  select: '选择',
-  pose: 'Pose（拖顶点改贴图 / 拖骨骼改绑定）',
-  bone: '画骨骼（拖拽连续绑定）',
-  weight: '权重刷',
-  ffd: '网格 / FFD 顶点'
+/** 编辑工具名与用途说明（随语言切换，故做成函数而非模块级常量表） */
+function toolLabel(tool: EditorTool): string {
+  return t(
+    {
+      select: '选择',
+      pose: 'Pose（拖顶点改贴图 / 拖骨骼改绑定）',
+      bone: '画骨骼（拖拽连续绑定）',
+      weight: '权重刷',
+      ffd: '网格 / FFD 顶点'
+    }[tool]
+  )
 }
 
 /** 左下「资源与皮肤」面板的初始高度与拖拽范围（高度可拖长，图片多时不用只靠滚动） */
@@ -113,6 +123,8 @@ import { undoMeshBoundaryPoint } from '@editor/tools/authoringTools'
 import { copySelection, pasteSelection, duplicateSelection } from '@editor/commands/clipboardCommands'
 
 export default function App() {
+  // 订阅界面语言：切换语言时整棵子树重渲染，所有 t() 重新求值
+  useLocale()
   const mode = useModeStore((s) => s.mode)
   const setModeRaw = useModeStore((s) => s.setMode)
   const doc = useProjectStore((s) => s.document)
@@ -249,7 +261,7 @@ export default function App() {
       const name = store.skeletons[index]?.armatureName ?? String(index)
       store.setActiveSkeleton(index)
       resetForSkeletonChange()
-      flash(`已切换到骨架「${name}」`)
+      flash(t('已切换到骨架「{0}」', name))
     },
     [flash, resetForSkeletonChange]
   )
@@ -257,13 +269,14 @@ export default function App() {
   const addSkeleton = useCallback(() => {
     useProjectStore.getState().addSkeleton()
     resetForSkeletonChange()
-    flash(`已新建骨架「${useProjectStore.getState().document.armatureName}」：图片池与其它骨架共享`)
+    const name = useProjectStore.getState().document.armatureName
+    flash(t('已新建骨架「{0}」：图片池与其它骨架共享', name))
   }, [flash, resetForSkeletonChange])
 
   const renameSkeleton = useCallback(
     (index: number, name: string) => {
       useProjectStore.getState().renameSkeleton(index, name)
-      flash(`骨架已重命名为「${name}」`)
+      flash(t('骨架已重命名为「{0}」', name))
     },
     [flash]
   )
@@ -272,13 +285,13 @@ export default function App() {
     (index: number) => {
       const store = useProjectStore.getState()
       if (store.skeletons.length <= 1) {
-        flash('项目里至少保留一个骨架')
+        flash(t('项目里至少保留一个骨架'))
         return
       }
       const name = store.skeletons[index]?.armatureName ?? ''
       store.removeSkeleton(index)
       resetForSkeletonChange()
-      flash(`已删除骨架「${name}」（图片池未动）`)
+      flash(t('已删除骨架「{0}」（图片池未动）', name))
     },
     [flash, resetForSkeletonChange]
   )
@@ -310,7 +323,7 @@ export default function App() {
         const tool = useToolStore.getState().tool
         if (tool !== 'select' && tool !== 'ffd') {
           useToolStore.getState().setTool('select')
-          flash('Animate 状态已切回选择工具（FFD 顶点仍可用）')
+          flash(t('Animate 状态已切回选择工具（FFD 顶点仍可用）'))
         }
         return
       }
@@ -332,11 +345,11 @@ export default function App() {
     void (async () => {
       const path = await lastProject()
       if (!path) {
-        flash('新建空白工程：可导入图片或 Spine / DragonBones 资源开始')
+        flash(t('新建空白工程：可导入图片或 Spine / DragonBones 资源开始'))
         return
       }
       const result = await openProjectAt(path)
-      flash(result.ok ? `已打开上次的工程：${result.message.replace(/^已打开\s*/, '')}` : result.message)
+      flash(result.ok ? t('已打开上次的工程：{0}', result.message.replace(/^已打开\s*/, '')) : result.message)
     })()
   }, [flash])
 
@@ -391,7 +404,7 @@ export default function App() {
   /** 统一的异步命令执行：显示进度、结束后回显结果（失败只提示，不改动当前工程） */
   const run = useCallback(
     (task: Promise<{ ok: boolean; message: string }> | { ok: boolean; message: string }, label?: string) => {
-      setBusy(label ?? '处理中…')
+      setBusy(label ?? t('处理中…'))
       return Promise.resolve(task)
         .then((result) => {
           if (result.message) flash(result.message)
@@ -407,7 +420,7 @@ export default function App() {
       const parsed = psdImport
       if (!parsed) return
       setPsdImport(null)
-      void run(importPsdLayers(parsed, selectedIds, addToScene), '正在导入 PSD…')
+      void run(importPsdLayers(parsed, selectedIds, addToScene), t('正在导入 PSD…'))
     },
     [psdImport, run]
   )
@@ -420,7 +433,7 @@ export default function App() {
     (name: string, dir: string, frameRate?: number) => {
       setNewProjectOpen(false)
       const task = createProjectAt(name, dir, frameRate)
-      run(task, '正在新建项目…')
+      run(task, t('正在新建项目…'))
       task.then((result) => {
         if (!result.ok) return
         // 新建后回到 Pose（绑定）态，视口原点居中、缩放 100%（空场景默认即 PPU）
@@ -447,16 +460,16 @@ export default function App() {
           run(saveProject(true))
           return
         case 'project:importSpine':
-          run(importSpineFlow(), '正在导入 Spine 资源…')
+          run(importSpineFlow(), t('正在导入 Spine 资源…'))
           return
         case 'project:importDragonBones':
-          run(importDragonBonesFlow(), '正在导入 DragonBones 资源…')
+          run(importDragonBonesFlow(), t('正在导入 DragonBones 资源…'))
           return
         case 'project:importImages':
-          run(importImagesFlow(), '正在导入图片…')
+          run(importImagesFlow(), t('正在导入图片…'))
           return
         case 'project:importPsd':
-          run(pickAndParsePsd(), '正在读取 PSD…')
+          run(pickAndParsePsd(), t('正在读取 PSD…'))
           return
         case 'project:exportRuntime':
           // 两个导出命令都走弹窗：选目录、调图集缩放 / 页尺寸、先看预览再导出
@@ -484,15 +497,15 @@ export default function App() {
           const scene = getActiveScene()
           if (scene && undoMeshBoundaryPoint(scene, flash)) return
           useProjectStore.getState().undo()
-          flash('已撤销')
+          flash(t('已撤销'))
           return
         }
         case 'edit:redo':
           useProjectStore.getState().redo()
-          flash('已重做')
+          flash(t('已重做'))
           return
         case 'edit:delete':
-          flash('删除操作请使用层级树里的删除按钮')
+          flash(t('删除操作请使用层级树里的删除按钮'))
           return
         case 'edit:copy': {
           // 焦点在输入框：交给浏览器原生文本复制，避免破坏文本编辑
@@ -501,7 +514,7 @@ export default function App() {
             return
           }
           const count = copySelection()
-          if (count > 0) flash(`已复制 ${count} 项`)
+          if (count > 0) flash(t('已复制 {0} 项', count))
           return
         }
         case 'edit:paste': {
@@ -510,13 +523,13 @@ export default function App() {
             return
           }
           const count = pasteSelection()
-          flash(count > 0 ? `已粘贴 ${count} 项` : '没有可粘贴的内容')
+          flash(count > 0 ? t('已粘贴 {0} 项', count) : t('没有可粘贴的内容'))
           return
         }
         case 'edit:duplicate': {
           if (activeEditableElement()) return
           const count = duplicateSelection()
-          if (count > 0) flash(`已复制生成 ${count} 项`)
+          if (count > 0) flash(t('已复制生成 {0} 项', count))
           return
         }
         case 'edit:selectAll': {
@@ -530,7 +543,7 @@ export default function App() {
         }
         case 'view:fitViewport':
           getActiveScene()?.fit()
-          flash('已适配视野')
+          flash(t('已适配视野'))
           return
         case 'view:resetLayout':
           window.dispatchEvent(new Event('hao2d:reset-layout'))
@@ -541,18 +554,18 @@ export default function App() {
           return
         case 'anim:playPause': {
           if (mode !== 'animate') {
-            flash('播放控制仅在 Animate 状态可用（Tab 切换）')
+            flash(t('播放控制仅在 Animate 状态可用（Tab 切换）'))
             return
           }
           const timeline = useTimelineStore.getState()
           if (!timeline.currentAnimation) {
             // 未选动画时点播放：自动选中第一个动画，避免「点了没反应」
             if (doc.animations.length === 0) {
-              flash('当前工程还没有动画，可点时间轴上的「+ 动画」新建')
+              flash(t('当前工程还没有动画，可点时间轴上的「+ 动画」新建'))
               return
             }
             timeline.setAnimation(doc.animations[0].name)
-            flash(`已自动选择动画「${doc.animations[0].name}」`)
+            flash(t('已自动选择动画「{0}」', doc.animations[0].name))
             timeline.setPlaying(true)
             return
           }
@@ -563,7 +576,7 @@ export default function App() {
         case 'anim:keyframe':
         case 'anim:keySelected': {
           if (mode !== 'animate') {
-            flash('打关键帧只在 Animate 状态可用（Tab 切换）')
+            flash(t('打关键帧只在 Animate 状态可用（Tab 切换）'))
             return
           }
           const result = keyframeNow()
@@ -589,7 +602,7 @@ export default function App() {
           return
         }
         default:
-          flash('该命令将在对应模块接入后生效')
+          flash(t('该命令将在对应模块接入后生效'))
       }
     },
     [doc.frameRate, flash, mode, run, setMode, resetSceneView]
@@ -615,7 +628,7 @@ export default function App() {
         // 结束「绑定骨骼」状态：那期间视口的点击会被拾取骨骼吃掉
         if (useToolStore.getState().pendingWeightBone) {
           useToolStore.getState().setPendingWeightBone(null)
-          flash('已结束绑定骨骼')
+          flash(t('已结束绑定骨骼'))
         }
       } else if (event.key === 'Tab') {
         event.preventDefault()
@@ -631,37 +644,37 @@ export default function App() {
         // V/B/S/M/G/D/C：切换编辑工具（与视口工具面板、顶部工具条一致）
         const next = TOOL_KEYS[event.key.toLowerCase()]
         useToolStore.getState().setTool(next)
-        flash(`工具：${TOOL_LABEL[next]}（${event.key.toUpperCase()}）`)
+        flash(t('工具：{0}（{1}）', [toolLabel(next), event.key.toUpperCase()]))
       } else if (!mod && GIZMO_KEYS[event.key.toLowerCase()]) {
         // W/E/R/T：切换骨骼变换小坐标轴（移动 / 旋转 / 缩放 / 斜切）
         const next = GIZMO_KEYS[event.key.toLowerCase()]
         const before = useToolStore.getState().tool
         useToolStore.getState().setGizmo(next)
         const switched = useToolStore.getState().tool !== before
-        flash(`骨骼工具：${GIZMO_LABEL[next]}（${event.key.toUpperCase()}）${switched ? '· 已退出绘制工具' : ''}`)
+        flash(t('骨骼工具：{0}（{1}）{2}', [gizmoLabel(next), event.key.toUpperCase(), switched ? t('· 已退出绘制工具') : '']))
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
         // 优先：视口里选中了网格顶点（网格 / FFD 工具点选）→ 删顶点。
         // 顶点属于**绑定网格**，只在 Pose 态能改（Animate 态拖顶点写的是 FFD 帧，顶点本身没动）
         const pick = useSelectionStore.getState()
         if (pick.vertices.length > 0) {
           if (useModeStore.getState().mode !== 'pose') {
-            flash('删除顶点改的是绑定网格：请切到 Pose 状态')
+            flash(t('删除顶点改的是绑定网格：请切到 Pose 状态'))
           } else {
             // 选中的是**共享缓冲**下标，必须换算成附件自己的顶点下标（跨插槽合并过）；
             // 顺带以它为准确定是哪个插槽 / 附件 —— 点选顶点不会改「选中的附件」
             const ref = getActiveScene()?.vertexRefAt(pick.vertices[0]) ?? null
             if (!ref) {
-              flash('顶点信息已过期：请在视口里重新点选顶点')
+              flash(t('顶点信息已过期：请在视口里重新点选顶点'))
             } else {
               let removed = false
-              useProjectStore.getState().update('删除网格顶点', (draft) => {
+              useProjectStore.getState().update(t('删除网格顶点'), (draft) => {
                 removed = deleteMeshVertex(draft, ref.slot, ref.attachment, ref.vertex)
               })
               if (removed) useSelectionStore.getState().selectVertices([])
               flash(
                 removed
-                  ? `已删除「${ref.attachment}」的顶点 #${ref.vertex}`
-                  : '删除失败：顶点不存在或网格至少需要保留 3 个顶点'
+                  ? t('已删除「{0}」的顶点 #{1}', [ref.attachment, ref.vertex])
+                  : t('删除失败：顶点不存在或网格至少需要保留 3 个顶点')
               )
             }
           }
@@ -708,17 +721,17 @@ export default function App() {
   const selectionText =
     selection.kind === 'bone'
       ? selection.bones.length > 1
-        ? `${selection.bones.length} 根骨骼（主选中「${selection.bone}」）`
-        : `骨骼「${selection.bone}」`
+        ? t('{0} 根骨骼（主选中「{1}」）', [selection.bones.length, selection.bone])
+        : t('骨骼「{0}」', selection.bone)
       : selection.kind === 'slot'
-        ? `插槽「${selection.slot}」`
+        ? t('插槽「{0}」', selection.slot)
         : selection.kind === 'attachment'
-          ? `附件「${selection.attachment}」`
+          ? t('附件「{0}」', selection.attachment)
           : selection.kind === 'constraint'
-            ? `约束「${selection.constraint}」`
+            ? t('约束「{0}」', selection.constraint)
             : mode === 'pose'
-              ? 'Pose 状态'
-              : 'Animate 状态'
+              ? t('Pose 状态')
+              : t('Animate 状态')
 
   return (
     <div
@@ -758,21 +771,21 @@ export default function App() {
         left={
           <>
             <PanelShell
-              title="层级结构"
+              title={t('层级结构')}
               grow
-              actions={<span className="text-3xs text-content-lo" title="单棵树：插槽挂在宿主骨骼下，约束挂在驱动骨骼下">图标区分类型</span>}
+              actions={<span className="text-3xs text-content-lo" title={t('单棵树：插槽挂在宿主骨骼下，约束挂在驱动骨骼下')}>{t('图标区分类型')}</span>}
             >
               <HierarchyTree onStatus={flash} />
             </PanelShell>
             {/* 分隔条：向上拖把「slot 层级」拉高（高度会记住） */}
             <Splitter direction="vertical" onResize={resizeSlotOrderPanel} />
             <PanelShell
-              title="slot 层级"
+              title={t('slot 层级')}
               grow={false}
               style={{ height: slotOrderHeight }}
               actions={
                 <span className="text-3xs text-content-lo">
-                  {mode === 'animate' ? '调整会写入绘制顺序帧' : '绘制顺序（setup）'}
+                  {mode === 'animate' ? t('调整会写入绘制顺序帧') : t('绘制顺序（setup）')}
                 </span>
               }
             >
@@ -783,19 +796,19 @@ export default function App() {
             <Splitter direction="vertical" onResize={mode === 'animate' ? resizeCurvePanel : resizeAssetPanel} />
             {mode === 'animate' ? (
               <PanelShell
-                title="曲线"
+                title={t('曲线')}
                 grow={false}
                 style={{ height: curveHeight }}
-                actions={<span className="text-3xs text-content-lo">选中关键帧后拖控制点</span>}
+                actions={<span className="text-3xs text-content-lo">{t('选中关键帧后拖控制点')}</span>}
               >
                 <CurvePanel />
               </PanelShell>
             ) : (
               <PanelShell
-                title="资源与皮肤"
+                title={t('资源与皮肤')}
                 grow={false}
                 style={{ height: assetHeight }}
-                actions={<span className="text-3xs text-content-lo">拖动上方分隔条调高</span>}
+                actions={<span className="text-3xs text-content-lo">{t('拖动上方分隔条调高')}</span>}
               >
                 <AssetPanel
                   onImport={() => handleCommand('project:importImages')}
@@ -808,9 +821,9 @@ export default function App() {
         center={
           <div className="hao-panel m-[3px] flex flex-1 flex-col overflow-hidden">
             <div className="flex h-[26px] shrink-0 items-center justify-between border-b border-line bg-ink-700 px-2">
-              <span className="hao-panel-title">视口</span>
+              <span className="hao-panel-title">{t('视口')}</span>
               <span className="text-3xs text-content-lo">
-                {mode === 'pose' ? 'Pose · 绑定状态（编辑 setup）' : 'Animate · 动画编辑状态'}
+                {mode === 'pose' ? t('Pose · 绑定状态（编辑 setup）') : t('Animate · 动画编辑状态')}
               </span>
             </div>
             <div className="relative flex min-h-0 flex-1">
@@ -833,9 +846,9 @@ export default function App() {
               {/* 空白工程提示：不再自带示例角色，首次启动给个上手指引 */}
               {doc.bones.length === 0 && doc.images.length === 0 ? (
                 <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 text-center">
-                  <span className="text-panel text-content-lo">空白工程</span>
+                  <span className="text-panel text-content-lo">{t('空白工程')}</span>
                   <span className="text-3xs text-content-lo/70">
-                    顶部菜单「导入图片 / 导入 Spine / 导入 DragonBones」开始，或「打开」已有工程
+                    {t('顶部菜单「导入图片 / 导入 Spine / 导入 DragonBones」开始，或「打开」已有工程')}
                   </span>
                 </div>
               ) : null}
@@ -849,10 +862,10 @@ export default function App() {
             <>
               {/* hao-inspector：面板内的按钮统一换成「实心蓝 + 白字」，与工具条开关同色（见 styles/index.css） */}
               <PanelShell
-                title="属性"
+                title={t('属性')}
                 grow
                 bodyClassName="hao-inspector"
-                actions={<span className="text-3xs text-content-lo">当前选中对象</span>}
+                actions={<span className="text-3xs text-content-lo">{t('当前选中对象')}</span>}
               >
                 <InspectorPanel onStatus={flash} />
               </PanelShell>

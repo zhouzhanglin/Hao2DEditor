@@ -88,7 +88,9 @@ export const IPC = {
   openExternal: 'shell:openExternal',
   aiMcpInfo: 'ai:mcpInfo',
   aiInstallMcp: 'ai:installMcp',
-  aiCommandApiDoc: 'ai:commandApiDoc'
+  aiCommandApiDoc: 'ai:commandApiDoc',
+  i18nSystemLocale: 'i18n:systemLocale',
+  i18nSetLocale: 'i18n:setLocale'
 } as const
 
 export type MenuCommand =
@@ -236,6 +238,10 @@ export interface HaoBridge {
   aiInstallMcp(): Promise<IpcResult<McpInstallReport>>
   /** AI 接入：返回内置命令接口文档（随包发布的 docs/ai-command-api.md 内容），供写出到工程目录让 AI 免配置上手 */
   aiCommandApiDoc(): Promise<IpcResult<{ text: string }>>
+  /** 语言：主进程侧的系统语言标签（`app.getLocale()`，首次启动用它判定界面语言） */
+  systemLocale(): Promise<IpcResult<string>>
+  /** 语言：把当前界面语言同步给主进程，让它按该语言重建菜单 */
+  setAppLocale(locale: string): Promise<IpcResult<void>>
   /**
    * 本地命令服务（AI / 脚本用）：监听主进程转来的命令请求。
    * 执行完用 `sendCommandResult` 送回结果；返回值是取消监听的函数。

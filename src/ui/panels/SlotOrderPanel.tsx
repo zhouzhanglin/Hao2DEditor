@@ -12,6 +12,7 @@ import { moveSlotLayer } from '@editor/slotOrderOps'
 import ContextMenu from '@ui/widgets/ContextMenu'
 import { slotLayerMenuItems } from '@ui/widgets/slotLayerMenuItems'
 import type { ContextMenuItem } from '@ui/widgets/ContextMenu'
+import { t } from '@i18n'
 
 type Direction = 'up' | 'down' | 'top' | 'bottom'
 const ORDER_MIME = 'application/x-hao2d-slotorder'
@@ -52,17 +53,17 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
     if (animate && animation) {
       const order = [...names].reverse() // 图层列表顶层在前 → 绘制顺序反过来（第 0 个最先画）
       const at = timeline.time
-      update('绘制顺序关键帧', (draft) => {
+      update(t('绘制顺序关键帧'), (draft) => {
         const target = draft.animations.find((item) => item.name === animation.name)
         if (target) keyDrawOrder(target, at, order)
       })
-      onStatus?.(`已在 ${at.toFixed(2)}s 写入绘制顺序帧（${names.length} 个插槽）`)
+      onStatus?.(t('已在 {0}s 写入绘制顺序帧（{1} 个插槽）', [at.toFixed(2), names.length]))
       return
     }
-    update('调整插槽层级', (draft) => {
+    update(t('调整插槽层级'), (draft) => {
       applySlotOrder(draft, names)
     })
-    onStatus?.('已调整插槽绘制顺序（setup）')
+    onStatus?.(t('已调整插槽绘制顺序（setup）'))
   }
 
   const move = (name: string, direction: Direction): void => {
@@ -111,7 +112,7 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
   }, [selection.kind, selection.slot])
 
   const toggleVisible = (name: string): void => {
-    update('切换插槽可见性', (draft) => {
+    update(t('切换插槽可见性'), (draft) => {
       const target = draft.slots.find((item) => item.name === name)
       if (target) target.visible = !target.visible
     })
@@ -126,17 +127,21 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
   const clearFrame = (): void => {
     if (!animation) return
     const at = timeline.time
-    update('清除绘制顺序帧', (draft) => {
+    update(t('清除绘制顺序帧'), (draft) => {
       const target = draft.animations.find((item) => item.name === animation.name)
       if (target) target.drawOrder = target.drawOrder.filter((frame) => Math.abs(frame.time - at) > 1e-4)
     })
-    onStatus?.(`已清除 ${at.toFixed(2)}s 的绘制顺序帧（该时段回到 setup 顺序）`)
+    onStatus?.(t('已清除 {0}s 的绘制顺序帧（该时段回到 setup 顺序）', at.toFixed(2)))
   }
 
   const arrowButton = (name: string, direction: 'up' | 'down'): React.ReactNode => (
     <button
       type="button"
-      title={direction === 'up' ? '上移一层（更晚绘制，盖住下面的）' : '下移一层（更早绘制，被上面的盖住）'}
+      title={
+        direction === 'up'
+          ? t('上移一层（更晚绘制，盖住下面的）')
+          : t('下移一层（更早绘制，被上面的盖住）')
+      }
       className="flex h-[14px] w-[14px] items-center justify-center rounded text-content-lo hover:bg-ink-600 hover:text-content-hi"
       onClick={(event) => {
         event.stopPropagation()
@@ -152,20 +157,20 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
       <p className="border-b border-line/60 px-2 py-1 text-3xs leading-relaxed text-content-lo">
         {animate ? (
           <>
-            Animate：拖动或点箭头会在 {timeline.time.toFixed(2)}s 写入绘制顺序帧
+            {t('Animate：拖动或点箭头会在 {0}s 写入绘制顺序帧', timeline.time.toFixed(2))}
             {hasFrameAtTime ? (
               <button
                 type="button"
-                title="删除当前时刻的绘制顺序帧（该时段回到 setup 顺序）"
+                title={t('删除当前时刻的绘制顺序帧（该时段回到 setup 顺序）')}
                 className="ml-1 rounded px-1 text-content-lo underline decoration-dotted hover:text-danger"
                 onClick={clearFrame}
               >
-                清除此帧
+                {t('清除此帧')}
               </button>
             ) : null}
           </>
         ) : (
-          '上面的行画在更前面；调整的是 setup 绘制顺序'
+          t('上面的行画在更前面；调整的是 setup 绘制顺序')
         )}
       </p>
       {/* 落点全部由容器统一判定（按行中心线算插入位置）：行边缘 / 缝隙 / 空白都能拖 */}
@@ -240,7 +245,10 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
                 if (selection.kind !== 'slot' || selection.slot !== name) selection.selectSlot(name)
                 setRowMenu({ x: event.clientX, y: event.clientY, slot: name })
               }}
-              title={`${slot.name}（挂载于「${hostName(slot)}」）：拖动调整绘制顺序${animate ? '，Animate 态自动打关键帧，右键可写层级帧' : ''}`}
+              title={
+                t('{0}（挂载于「{1}」）：拖动调整绘制顺序', [slot.name, hostName(slot)]) +
+                (animate ? t('，Animate 态自动打关键帧，右键可写层级帧') : '')
+              }
             >
               {/* 落点指示线：绝对定位，不占布局（占位会推挤行、让落点来回跳） */}
               {dropIndex === index ? (
@@ -249,7 +257,7 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
               <GripVertical size={10} className="shrink-0 text-content-lo/70" />
               <button
                 type="button"
-                title={slot.visible ? '隐藏插槽' : '显示插槽'}
+                title={slot.visible ? t('隐藏插槽') : t('显示插槽')}
                 className="flex h-[14px] w-[14px] shrink-0 items-center justify-center text-content-lo hover:text-content-hi"
                 onClick={(event) => {
                   event.stopPropagation()
@@ -277,10 +285,11 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
         <ContextMenu
           x={rowMenu.x}
           y={rowMenu.y}
-          title={`插槽「${rowMenu.slot}」· 层级${
+          title={
+            t('插槽「{0}」· 层级', rowMenu.slot) +
             // 置灰项的 hover 提示看不到，把原因写在标题里
-            animate && !animation ? '（当前没有可打帧的动画：先在时间轴点「+ 动画」）' : ''
-          }`}
+            (animate && !animation ? t('（当前没有可打帧的动画：先在时间轴点「+ 动画」）') : '')
+          }
           items={[
             // 移动 / 删除与视口右键菜单同一套（Animate 态没有「删除」）
             ...slotLayerMenuItems(rowMenu.slot, { pose: !animate, onStatus }),
@@ -318,11 +327,11 @@ function slotOrderKeyframeItem(
   return [
     {
       key: 'k-order',
-      label: '层级关键帧',
+      label: t('层级关键帧'),
       // 没有动画时置灰并说明原因（点了只会闪一行状态栏，容易被当成「没反应」）
       hint: canKey
-        ? `${slot} 所在层级 · 把当前绘制顺序写入 ${time.toFixed(2)}s`
-        : '工程里还没有动画：先在时间轴点「+ 动画」',
+        ? t('{0} 所在层级 · 把当前绘制顺序写入 {1}s', [slot, time.toFixed(2)])
+        : t('工程里还没有动画：先在时间轴点「+ 动画」'),
       icon: <KeyRound size={12} />,
       disabled: !canKey,
       onSelect: onKey
@@ -332,7 +341,7 @@ function slotOrderKeyframeItem(
 
 /** 宿主骨骼的显示名：为空（工程里一根骨骼都没有时建的插槽）要说成「根层」，别渲染成「」 */
 function hostName(slot: { bone: string }): string {
-  return slot.bone || '根层'
+  return slot.bone || t('根层')
 }
 
 function rowByName(doc: { slots: Array<{ name: string; bone: string; visible: boolean }> }, name: string) {

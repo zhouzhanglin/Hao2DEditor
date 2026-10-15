@@ -5,6 +5,7 @@ import { getPlatform, joinPath } from '@editor/platform'
 import { DEFAULT_PROJECT_NAME } from '@editor/store/projectStore'
 import { PROJECT_EXTENSION } from '@core/codec/projectJson'
 import { useDialogDrag } from './dialogDrag'
+import { t } from '@i18n'
 
 export interface NewProjectDialogProps {
   onClose: () => void
@@ -67,7 +68,7 @@ export default function NewProjectDialog({ onClose, onConfirm }: NewProjectDialo
     const picked = await getPlatform().pickFiles({
       directory: true,
       multi: false,
-      title: '选择项目的保存位置（会在里面建一个 <项目名>.hao2d.proj）'
+      title: t('选择项目的保存位置（会在里面建一个 <项目名>.hao2d.proj）')
     })
     const next = picked[0]
     if (!next) return
@@ -94,19 +95,19 @@ export default function NewProjectDialog({ onClose, onConfirm }: NewProjectDialo
       >
         <div className="flex h-[30px] shrink-0 items-center gap-2 border-b border-line bg-ink-700 px-2.5" {...handleProps}>
           <FilePlus2 size={13} className="text-accent" />
-          <span className="text-panel font-semibold text-content-hi">新建项目</span>
-          <button type="button" title="关闭（Esc）" className="hao-tool-button ml-auto" onClick={onClose}>
+          <span className="text-panel font-semibold text-content-hi">{t('新建项目')}</span>
+          <button type="button" title={t('关闭（Esc）')} className="hao-tool-button ml-auto" onClick={onClose}>
             <X size={13} />
           </button>
         </div>
 
         <div className="flex flex-col gap-2 px-2.5 py-2.5">
           <div className="flex items-center gap-2">
-            <span className="hao-label w-[54px] shrink-0">项目名</span>
+            <span className="hao-label w-[54px] shrink-0">{t('项目名')}</span>
             <input
               ref={inputRef}
               value={name}
-              placeholder={'必填，不能含空格或 / \\ : * ? " < > |，例如 dragon_01 或 龙_01'}
+              placeholder={t('必填，不能含空格或 / \\ : * ? " < > |，例如 dragon_01 或 龙_01')}
               className="hao-field min-w-0 flex-1 text-panel text-content-hi"
               onChange={(event) => setName(event.target.value)}
               onKeyDown={(event) => {
@@ -116,17 +117,17 @@ export default function NewProjectDialog({ onClose, onConfirm }: NewProjectDialo
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="hao-label w-[54px] shrink-0">保存位置</span>
-            <div className="hao-field min-w-0 flex-1 truncate text-content-mid" title={dir || '尚未选择'}>
-              {dir || '尚未选择（点右侧按钮选一个目录）'}
+            <span className="hao-label w-[54px] shrink-0">{t('保存位置')}</span>
+            <div className="hao-field min-w-0 flex-1 truncate text-content-mid" title={dir || t('尚未选择')}>
+              {dir || t('尚未选择（点右侧按钮选一个目录）')}
             </div>
             <button type="button" className="hao-btn shrink-0" onClick={() => void pickDir()}>
-              <FolderOpen size={12} /> 选择…
+              <FolderOpen size={12} /> {t('选择…')}
             </button>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="hao-label w-[54px] shrink-0">帧率</span>
+            <span className="hao-label w-[54px] shrink-0">{t('帧率')}</span>
             <div className="flex flex-wrap gap-1">
               {FRAME_RATES.map((fps) => {
                 const active = fps === frameRate
@@ -141,7 +142,7 @@ export default function NewProjectDialog({ onClose, onConfirm }: NewProjectDialo
                         ? 'border-transparent bg-accent-deep text-white'
                         : 'border-line bg-ink-900/60 text-content-mid hover:text-content-hi'
                     ].join(' ')}
-                    title={`${fps} 帧 / 秒`}
+                    title={t('{0} 帧 / 秒', fps)}
                   >
                     {fps}
                   </button>
@@ -152,35 +153,40 @@ export default function NewProjectDialog({ onClose, onConfirm }: NewProjectDialo
           </div>
 
           <div className="hao-label leading-[16px]">
-            项目文件：<span className="text-content-mid">{filePath || '（填项目名并选好目录后显示）'}</span>
+            {t('项目文件：')}
+            <span className="text-content-mid">{filePath || t('（填项目名并选好目录后显示）')}</span>
           </div>
           <div className="hao-label leading-[16px] text-content-lo">
-            项目名也是导出时的图集名与输出目录名；骨架名在骨架那一栏单独改。
+            {t('项目名也是导出时的图集名与输出目录名；骨架名在骨架那一栏单独改。')}
           </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-2 border-t border-line bg-ink-700/60 px-2.5 py-2">
           <span className="hao-label mr-auto">
             {trimmed.length === 0
-              ? '项目名不能为空'
+              ? t('项目名不能为空')
               : !nameValid
-                ? '项目名不能含空格或文件系统非法字符（/ \\ : * ? " < > |）'
+                ? t('项目名不能含空格或文件系统非法字符（/ \\ : * ? " < > |）')
                 : dir.length === 0
-                  ? '请选择保存位置'
+                  ? t('请选择保存位置')
                   : ''}
           </span>
           <button type="button" className="hao-btn" onClick={onClose} disabled={busy}>
-            取消
+            {t('取消')}
           </button>
           <button
             type="button"
             className="hao-btn hao-btn-accent"
             disabled={!ready}
-            title={ready ? '创建项目并立刻写出工程文件' : '项目名不能含空格 / 文件系统非法字符，且需选择保存位置'}
+            title={
+              ready
+                ? t('创建项目并立刻写出工程文件')
+                : t('项目名不能含空格 / 文件系统非法字符，且需选择保存位置')
+            }
             onClick={() => void confirm()}
           >
             {busy ? <Loader2 size={12} className="animate-spin" /> : null}
-            {busy ? '正在创建…' : '创建'}
+            {busy ? t('正在创建…') : t('创建')}
           </button>
         </div>
       </div>

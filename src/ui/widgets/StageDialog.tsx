@@ -8,13 +8,16 @@ import { PPU } from '@editor/commands/authoringCommands'
 import type { EditorDocument, StageImage } from '@core/model/authoring'
 import { NumberField, SliderField } from './fields'
 import { useDialogDrag } from './dialogDrag'
+import { t } from '@i18n'
 
 export interface StageDialogProps {
   onClose: () => void
   onStatus?: (text: string) => void
 }
 
-const IMAGE_FILTER = [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]
+function imageFilter(): Array<{ name: string; extensions: string[] }> {
+  return [{ name: t('图片'), extensions: ['png', 'jpg', 'jpeg', 'webp'] }]
+}
 
 /**
  * 「舞台」弹窗：给视口铺一张背景参考图（构图 / 姿态参照）。
@@ -59,17 +62,17 @@ export default function StageDialog({ onClose, onStatus = () => undefined }: Sta
 
   const pickImage = async (replace: boolean): Promise<void> => {
     const platform = getPlatform()
-    const picked = await platform.pickFiles({ filters: IMAGE_FILTER, multi: false })
+    const picked = await platform.pickFiles({ filters: imageFilter(), multi: false })
     if (picked.length === 0) return
     const path = useProjectStore.getState().projectPath
     if (!path) {
-      onStatus('请先保存工程：参考图要存到工程目录的 stage/ 下')
+      onStatus(t('请先保存工程：参考图要存到工程目录的 stage/ 下'))
       return
     }
     const src = picked[0]
     const bytes = await platform.readBinary(src)
     if (!bytes.length) {
-      onStatus('读不到图片文件')
+      onStatus(t('读不到图片文件'))
       return
     }
     const infos = await platform.imageInfo([src])
@@ -103,7 +106,7 @@ export default function StageDialog({ onClose, onStatus = () => undefined }: Sta
       height: size.height ? size.height / PPU : 8,
       opacity: 0.5
     }
-    useProjectStore.getState().update(replace && stage ? '更换舞台参考图' : '设置舞台参考图', (draft) => {
+    useProjectStore.getState().update(replace && stage ? t('更换舞台参考图') : t('设置舞台参考图'), (draft) => {
       draft.editorMeta.stage = init
     })
   }
@@ -112,7 +115,7 @@ export default function StageDialog({ onClose, onStatus = () => undefined }: Sta
     if (!stage) return
     const path = useProjectStore.getState().projectPath
     if (path) await getPlatform().deleteFile(stageFilePath(dirName(path), stage.file))
-    useProjectStore.getState().update('删除舞台参考图', (draft) => {
+    useProjectStore.getState().update(t('删除舞台参考图'), (draft) => {
       draft.editorMeta.stage = null
     })
   }
@@ -132,7 +135,7 @@ export default function StageDialog({ onClose, onStatus = () => undefined }: Sta
         <div className="flex h-[30px] items-center justify-between border-b border-white/10 px-3" {...handleProps}>
           <span className="flex items-center gap-1.5 text-[12px] font-medium">
             <ImageIcon size={14} />
-            舞台参考图
+            {t('舞台参考图')}
           </span>
           <button
             type="button"
@@ -151,24 +154,24 @@ export default function StageDialog({ onClose, onStatus = () => undefined }: Sta
                 {previewUrl ? (
                   <img
                     src={previewUrl}
-                    alt="舞台参考图预览"
+                    alt={t('舞台参考图预览')}
                     className="h-[60px] w-[60px] rounded border border-white/10 object-contain"
                   />
                 ) : (
                   <div className="flex h-[60px] w-[60px] items-center justify-center rounded border border-white/10 bg-white/5 text-content-lo">
-                    无预览
+                    {t('无预览')}
                   </div>
                 )}
                 <div className="flex flex-col gap-1.5">
-                  <span className="text-[11px] text-content-mid">文件：{stage.file}</span>
+                  <span className="text-[11px] text-content-mid">{t('文件：{0}', stage.file)}</span>
                   <span className="text-[11px] text-content-lo">
-                    仅编辑器显示 · 不导出 · 存于工程 stage/ 目录
+                    {t('仅编辑器显示 · 不导出 · 存于工程 stage/ 目录')}
                   </span>
                 </div>
               </div>
 
               <div className="flex flex-col gap-1.5 rounded border border-white/10 bg-white/[0.03] p-2">
-                <span className="text-3xs uppercase tracking-wide text-content-lo">位置（世界坐标，y 向上）</span>
+                <span className="text-3xs uppercase tracking-wide text-content-lo">{t('位置（世界坐标，y 向上）')}</span>
                 <div className="flex gap-2">
                   <NumberField
                     label="X"
@@ -176,7 +179,7 @@ export default function StageDialog({ onClose, onStatus = () => undefined }: Sta
                     unitScale={PPU}
                     precision={0}
                     step={PPU}
-                    onChange={(v) => setStage((s) => (s.x = v), '调整参考图位置')}
+                    onChange={(v) => setStage((s) => (s.x = v), t('调整参考图位置'))}
                   />
                   <NumberField
                     label="Y"
@@ -184,43 +187,45 @@ export default function StageDialog({ onClose, onStatus = () => undefined }: Sta
                     unitScale={PPU}
                     precision={0}
                     step={PPU}
-                    onChange={(v) => setStage((s) => (s.y = v), '调整参考图位置')}
+                    onChange={(v) => setStage((s) => (s.y = v), t('调整参考图位置'))}
                   />
                 </div>
               </div>
 
               <div className="flex flex-col gap-1.5 rounded border border-white/10 bg-white/[0.03] p-2">
-                <span className="text-3xs uppercase tracking-wide text-content-lo">大小（显示像素）</span>
+                <span className="text-3xs uppercase tracking-wide text-content-lo">{t('大小（显示像素）')}</span>
                 <div className="flex gap-2">
                   <NumberField
-                    label="宽"
+                    label={t('宽')}
                     value={stage.width}
                     unitScale={PPU}
                     precision={0}
                     step={PPU}
                     min={PPU * 0.5}
-                    onChange={(v) => setStage((s) => (s.width = v), '调整参考图大小')}
+                    onChange={(v) => setStage((s) => (s.width = v), t('调整参考图大小'))}
                   />
                   <NumberField
-                    label="高"
+                    label={t('高')}
                     value={stage.height}
                     unitScale={PPU}
                     precision={0}
                     step={PPU}
                     min={PPU * 0.5}
-                    onChange={(v) => setStage((s) => (s.height = v), '调整参考图大小')}
+                    onChange={(v) => setStage((s) => (s.height = v), t('调整参考图大小'))}
                   />
                 </div>
               </div>
 
               <SliderField
-                label="透明度"
+                label={t('透明度')}
                 value={stage.opacity}
                 min={0}
                 max={1}
                 step={0.05}
-                transaction="调整参考图透明度"
-                onChange={(v, silent) => setStage((s) => (s.opacity = v), '调整参考图透明度', silent)}
+                transaction={t('调整参考图透明度')}
+                onChange={(v, silent) =>
+                  setStage((s) => (s.opacity = v), t('调整参考图透明度'), silent)
+                }
               />
 
               <div className="flex justify-between gap-2 pt-1">
@@ -230,7 +235,7 @@ export default function StageDialog({ onClose, onStatus = () => undefined }: Sta
                   onClick={() => void pickImage(true)}
                 >
                   <Upload size={13} />
-                  更换图片
+                  {t('更换图片')}
                 </button>
                 <button
                   type="button"
@@ -238,7 +243,7 @@ export default function StageDialog({ onClose, onStatus = () => undefined }: Sta
                   onClick={() => void removeImage()}
                 >
                   <Trash2 size={13} />
-                  删除图片
+                  {t('删除图片')}
                 </button>
               </div>
             </>
@@ -247,9 +252,9 @@ export default function StageDialog({ onClose, onStatus = () => undefined }: Sta
               <div className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-white/5 text-content-lo">
                 <ImageIcon size={30} />
               </div>
-              <span className="text-[12px] text-content-mid">还没有参考图</span>
+              <span className="text-[12px] text-content-mid">{t('还没有参考图')}</span>
               <span className="px-6 text-center text-[11px] text-content-lo">
-                选一张图铺在视口后面当背景参照（构图 / 姿态），它只显示在编辑器里，导出时不会带上。
+                {t('选一张图铺在视口后面当背景参照（构图 / 姿态），它只显示在编辑器里，导出时不会带上。')}
               </span>
               <button
                 type="button"
@@ -257,7 +262,7 @@ export default function StageDialog({ onClose, onStatus = () => undefined }: Sta
                 onClick={() => void pickImage(false)}
               >
                 <Upload size={13} />
-                选择参考图片…
+                {t('选择参考图片…')}
               </button>
             </div>
           )}

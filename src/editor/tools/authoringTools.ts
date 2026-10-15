@@ -437,12 +437,18 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     /*
      * 没抓到顶点：看看是否点在了某个 display 上（含已转网格的 Mesh）。
      * 点中就直接选中它，使其顶点可见可编辑 —— 否则在网格工具下点别的 Mesh 永远选不中，
-     * 只能去层级树里点，很别扭。命中骨骼手柄 / 约束准星时仍让骨骼优先（与选择工具一致）。
+     * 只能去层级树里点，很别扭。
+     *
+     * 两种情况下让开：① 命中骨骼手柄 / 约束准星（与选择工具一致）；
+     * ② 指针落在**操作器手柄**上（`onGizmo`）。Pose 工具的操作器画在选中骨骼上，
+     * 而骨骼整根压在角色图片上 —— 轴端 / 旋转圈 / 斜切边这些落点常常同时命中图片，
+     * 这里先选附件就把手柄吃掉了，表现出来就是「操作器拖不动，得绕开图片才抓得到」；
+     * 选择工具没这问题，因为它的操作器判定排在本段之后（见下面的 gizmo / 斜切分支）。
      */
     const hitBone = scene.pickBoneHandleAt(info.world.x, info.world.y)
     const constraintHit = hitBone ? -1 : scene.constraintTargetIndexAt(info.world.x, info.world.y)
     const effectiveHit = hitBone ?? (constraintHit >= 0 ? { boneIndex: constraintHit, zone: 'origin' as const, distance: 0 } : null)
-    const att = effectiveHit ? null : scene.pickAttachmentAt(info.world.x, info.world.y)
+    const att = effectiveHit || onGizmo ? null : scene.pickAttachmentAt(info.world.x, info.world.y)
     if (att && slotLocked(att.slot)) {
       host.status(`插槽「${att.slot}」已锁定：在层级树里解锁后才能选中`)
       return true

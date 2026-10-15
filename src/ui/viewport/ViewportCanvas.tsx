@@ -856,11 +856,16 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     /*
      * 悬停预览：把「鼠标底下的 display」也标出来，点下去之前就知道会选中谁。
      *
-     * 两个约束：
+     * 三个约束：
      * ① 只在选择工具下算 —— 其它工具点下去干的是别的事（刷权重 / 插顶点），提示会误导；
-     * ② 只在**变化时**写状态 —— pointermove 的频率远高于帧率，每次都写会白重绘。
+     * ② 鼠标在**骨骼 / 约束图标**上时不算 —— 骨骼手柄压着图片是常态（关节圈、IK 把手
+     *    几乎都叠在贴图上），这时还亮出图片轮廓，等于告诉用户「这儿有两个东西」，
+     *    而点下去选中的只有骨骼；右键菜单走同一条判定（见 onContextMenu）；
+     * ③ 只在**变化时**写状态 —— pointermove 的频率远高于帧率，每次都写会白重绘。
      */
-    const picked = useToolStore.getState().tool === 'select' ? scene.pickAttachmentAt(world.x, world.y) : null
+    const overBoneUi = hit !== null || scene.pickConstraintTargetAt(world.x, world.y) !== null
+    const picked =
+      useToolStore.getState().tool === 'select' && !overBoneUi ? scene.pickAttachmentAt(world.x, world.y) : null
     // 锁定的插槽不参与悬停高亮 —— 与「视口里点不中」保持一致，不然会看着能选却选不上
     const hovered = picked && slotLocked(picked.slot) ? null : picked
     const previous = scene.state.hoveredDisplay ?? null
@@ -887,8 +892,9 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     const mode = useToolStore.getState().gizmo
     const shearEdge = mode === 'shear' ? scene.pickShearEdgeAt(world.x, world.y) : null
     const part = mode === 'shear' ? null : scene.pickGizmoAt(world.x, world.y)
-    // 约束准星悬停：骨骼层关掉时 hoveredBone 高亮看不见，光标给 pointer 提示「准星能点」
-    const overConstraint = !hit && scene.pickConstraintTargetAt(world.x, world.y) !== null
+    // 约束准星悬停：骨骼层关掉时 hoveredBone 高亮看不见，光标给 pointer 提示「准星能点」。
+    // `overBoneUi` 上面已经算过（悬停预览要用），这里不再重复拾取一次
+    const overConstraint = overBoneUi && !hit
     const cursor = shearEdge
       ? shearEdge === 'top' || shearEdge === 'bottom'
         ? 'ew-resize'
@@ -1114,7 +1120,17 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         const mode = useModeStore.getState().mode
         if (mode !== 'pose' && mode !== 'animate') return
         const world = toWorld(event)
-        const hit = world ? sceneRef.current?.pickAttachmentAt(world.x, world.y) : null
+        const scene = sceneRef.current
+        if (!scene || !world) return
+        /*
+         * 鼠标在**骨骼 / 约束图标**上时右键不弹图片菜单：那里点下去选中的是骨骼
+         * （与左键点选、悬停预览同一条判定，见上面 pointermove 里的 `overBoneUi`）。
+         * 不拦的话，压在图片上的关节圈 / IK 把手右键会同时亮出图片菜单，选谁全看手快。
+         */
+        const overBoneUi =
+          scene.pickBoneHandleAt(world.x, world.y) !== null || scene.pickConstraintTargetAt(world.x, world.y) !== null
+        if (overBoneUi) return
+        const hit = scene.pickAttachmentAt(world.x, world.y)
         if (!hit) return
         // 菜单**只认点中的附件**：选中骨骼 / 空白处右键都不弹（层级操作针对的就是被点中的这个插槽）
         // 右键谁就选谁（与左键一致），菜单标题和检查器都跟着切过去

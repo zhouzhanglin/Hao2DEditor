@@ -26,20 +26,43 @@ const KIND_LABEL: Record<KeySelector['kind'], string> = {
   drawOrder: '插槽层级'
 }
 
+/**
+ * 这些轨道的帧**没有**可直接编辑的值，浮动条对它们整条不出现（免得白挂一行字挡在视口下边）：
+ * - `deform`（FFD / 网格顶点偏移）：一帧偏移是「每个顶点两个数」，只能在视口里用 FFD 工具拖；
+ * - `drawOrder`（插槽层级 / 绘制顺序）：一帧存的是**所有插槽的先后顺序**，只能在层级树里拖行调整。
+ */
+const NO_VALUE_KINDS: ReadonlySet<KeySelector['kind']> = new Set(['deform', 'drawOrder'])
+
 const CHANNEL_LABEL: Record<string, string> = {
   rotate: '旋转',
   translate: '位移',
   scale: '缩放',
   shear: '斜切',
   color: '颜色',
-  display: '显示附件',
-  displayIndex: '显示附件',
+  // 与时间轴的行内标签同一口径（`SLOT_CHANNELS` 里就是「显示」）
+  display: '显示',
+  displayIndex: '显示',
   visible: '可见性',
   order: '绘制顺序',
   offsets: 'FFD 偏移',
   mix: '权重',
   position: '位置',
   spacing: '间距'
+}
+
+/**
+ * 浮动条首行的两个名字：**对象名 + 通道名**（渲染成 `shouL*显示`）。
+ *
+ * 原先一行塞了四段「种类 · 对象 · 通道 · 时间（第 N 帧）」：时间在 dope sheet 的播放头与底栏
+ * 时间码上都有，种类（骨骼 / 插槽 / 约束…）也多半能从通道名一眼看出来 —— 挤在一起的结果是
+ * 真正要找的对象名反而不好认。多选时不写标题，那条信息交给「已选中 N 个」。
+ */
+function titleOf(key: KeySelector): { object: string; channel: string } {
+  const channel = CHANNEL_LABEL[key.channel] ?? key.channel
+  // 事件轨的 target 与 channel 都是事件名（`hit` / `footstep`），照抄会写成 `hit*hit`
+  if (key.kind === 'event') return { object: key.target || channel, channel: KIND_LABEL.event }
+  // target 为空（整具骨架一条轨，不属于任何对象）时用轨道种类兜底，免得标题只剩后半截
+  return { object: key.target || KIND_LABEL[key.kind], channel }
 }
 
 /**
@@ -52,6 +75,17 @@ const CHANNEL_LABEL: Record<string, string> = {
  * 196px 时每个框只有 66px（可用 48px ≈ 6.7 字符），`117.413` 这种 7 字符就已经被切掉了。
  */
 const SLOT = 'w-[220px] shrink-0'
+
+/**
+ * 颜色行要更宽：`ColorField` 一行摆了四件**固定宽**的东西 —— 色块 30 + 透明度滑杆 64 + 百分比 46，
+ * 加上 52px 标签与 4 道 6px 缝就有 216px，而上面那个槽位是 220px；夹在中间的 hex 输入框是
+ * `flex-1 min-w-0`，只能分到 4px —— 缩成一条只剩左右 padding + 边框的空框（约 22px 宽），
+ * `#FFFFFFFF` 一个字符都看不见（截图里「颜色显示值框显示不全」就是它）。
+ *
+ * 310px 让 hex 拿到 94px：`.hao-field` 是 12px 字（Menlo 等宽约 7.2px/字符），
+ * 扣掉 px-2 与 1px 边框还有 76px ≈ 10.5 字符，`#FFFFFFFF` 九字符放得下。
+ */
+const SLOT_COLOR = 'w-[310px] shrink-0'
 
 /**
  * 关键帧「值」浮动面板：贴在**视口正下方中间**，横向排列，风格与视口工具面板一致。
@@ -85,11 +119,8 @@ export default function KeyframeValueBar() {
   }
 
   if (selectedKeys.length === 0) return null
-  /*
-   * FFD（网格顶点偏移）**没有**可直接编辑的值：一帧偏移是「每个顶点两个数」，只能在视口里用
-   * FFD 工具拖。这条面板对它只剩一句占位提示，干脆整条不出现 —— 免得白挂一行字挡在视口下边。
-   */
-  if (selectedKeys.every((key) => key.kind === 'deform')) return null
+  // 全是「没有值可编辑」的轨道就不渲染；混选了骨骼 / 插槽等仍有值可改的轨道时照常显示
+  if (selectedKeys.every((key) => NO_VALUE_KINDS.has(key.kind))) return null
 
   /** display 清单来自当前皮肤（空则 default）：帧里那个下标就是它的下标，`-1` = 不显示 */
   const activeSkin =
@@ -144,15 +175,16 @@ export default function KeyframeValueBar() {
         }
       : null
 
-  const frameIndex = single ? Math.round(single.time * document.frameRate) : 0
+  const title = single ? titleOf(single) : null
   const channels = selectedKeys.map((key) => CHANNEL_LABEL[key.channel] ?? key.channel).join('、')
 
   return (
     <div className="pointer-events-auto absolute bottom-2 left-1/2 z-20 flex max-w-[calc(100%-12px)] -translate-x-1/2 flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-lg border border-line bg-ink-900/85 px-2.5 py-1.5 shadow-lg shadow-black/40 backdrop-blur-sm">
+      {/* 首行只留「对象名 * 通道名」：时间与帧号在 dope sheet / 底栏时间码上都有，不重复占地方 */}
+      {title ? <KeyTitle object={title.object} channel={title.channel} /> : null}
       {single ? (
         single.kind === 'event' ? (
           <>
-            <InfoChip label="时间" value={`${single.time.toFixed(3)}s · 第 ${frameIndex} 帧`} />
             <div className={SLOT}>
               <TextField
                 label="事件名"
@@ -190,23 +222,8 @@ export default function KeyframeValueBar() {
               />
             </div>
           </>
-        ) : single.kind === 'drawOrder' ? (
-          <>
-            <InfoChip label="轨道" value="插槽层级 · 绘制顺序" />
-            <InfoChip label="时间" value={`${single.time.toFixed(3)}s · 第 ${frameIndex} 帧`} />
-            <InfoChip
-              label="顺序"
-              value={((frame as { order?: string[] } | null)?.order ?? []).join(' → ') || '（空）'}
-            />
-          </>
         ) : (
           <>
-            {/* 信息合成一行文本：浮动条要小，不做成三组「标签 + 值」 */}
-            <span className="shrink-0 text-3xs text-content-lo">
-              {KIND_LABEL[single.kind]} · <span className="text-content-mid">{single.target || '（无）'}</span> ·{' '}
-              {channels || single.channel} · <span className="font-mono">{single.time.toFixed(3)}s</span>
-              （第 {frameIndex} 帧）
-            </span>
             <FrameValueEditor
               frame={frame}
               channel={single.channel}
@@ -219,6 +236,19 @@ export default function KeyframeValueBar() {
         <InfoChip label="关键帧" value={`已选中 ${selectedKeys.length} 个（${channels}）`} />
       )}
     </div>
+  )
+}
+
+/**
+ * 浮动条首行的标题：`对象名*通道名`（例如 `shouL*显示`）。
+ *
+ * 只留这两个名字 —— 对象亮一档、通道压在底色上，扫一眼就能分清「谁 · 哪条通道」。
+ */
+function KeyTitle({ object, channel }: { object: string; channel: string }) {
+  return (
+    <span className="shrink-0 text-3xs text-content-lo">
+      <span className="text-content-mid">{object}</span>*{channel}
+    </span>
   )
 }
 
@@ -307,7 +337,8 @@ function FrameValueEditor({
   if (value && typeof value === 'object' && 'r' in value) {
     const color = value as RGBA
     return (
-      <div className={SLOT}>
+      // 颜色行用更宽的槽位，理由见 SLOT_COLOR：220px 槽位下 hex 输入框只剩 4px 宽
+      <div className={SLOT_COLOR}>
         <ColorField
           label="颜色"
           value={rgbaToHex(color)}

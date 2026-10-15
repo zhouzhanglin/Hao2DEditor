@@ -523,8 +523,21 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       const isNew = att.slot !== sel.slot || att.attachment !== sel.attachment
       if (isNew) useSelectionStore.getState().selectAttachment(att.slot, att.attachment)
       if (host.mode === 'pose') {
-        beginAttachmentGizmoDrag(host, att.slot, att.attachment, 'center', 'move', info.world)
-        if (isNew) host.status(`已选中附件「${att.attachment}」（${att.slot}），拖动即可移动`)
+        /*
+         * 点附件本体 = 按**当前小坐标轴模式**拖（与点骨骼本体同一规则：见下面的 beginGizmoDrag）。
+         * 早先这里把模式写死成 'move'，于是不论切到移动 / 旋转 / 缩放 / 斜切，
+         * 拖附件都只是平移 —— 看起来就像「什么工具都能拖动它」。
+         *
+         * 斜切不支持附件（与「斜切模式下不画附件操作器」一致，见 scene.drawOverlays），
+         * 这里只提示、不起拖拽，避免出现「拖了但看不出在斜切」的假交互。
+         */
+        const mode = host.tools.gizmo
+        if (mode === 'shear') {
+          host.status(`斜切不支持附件：「${att.attachment}」请用移动 / 旋转 / 缩放，或斜切它所在的骨骼`)
+        } else {
+          beginAttachmentGizmoDrag(host, att.slot, att.attachment, 'center', mode, info.world)
+          if (isNew) host.status(`已选中附件「${att.attachment}」（${att.slot}）：拖动即可${GIZMO_LABEL[mode]}`)
+        }
         return true
       }
       if (isNew) {

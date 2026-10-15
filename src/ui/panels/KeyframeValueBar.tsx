@@ -345,7 +345,8 @@ function FrameValueEditor({
       // 颜色行用更宽的槽位，理由见 SLOT_COLOR：220px 槽位下 hex 输入框只剩 4px 宽
       <div className={SLOT_COLOR}>
         <ColorField
-          label="颜色"
+          // 标签与其它通道统一叫「值」（对象名 * 通道名已经写明这是颜色帧，再写一遍「颜色」是重复）
+          label="值"
           value={rgbaToHex(color)}
           // 拾色器 / 滑杆的连续拖动包成**一条**撤销记录：不包的话每个 `input` 事件都会
           // 往撤销栈塞一条等价记录、并且每次都要深拷贝一遍整个项目快照（拖动时必卡）

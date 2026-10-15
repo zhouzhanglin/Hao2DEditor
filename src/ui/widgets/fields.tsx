@@ -711,6 +711,19 @@ export function ColorField({ label, value, onChange, onDragStart, onDragEnd, onP
    * 所以在行内补一条透明度滑杆 + 百分比输入，不用再手动改 hex 的后两位。
    */
   const alpha = value.length === 9 ? parseInt(value.slice(7), 16) / 255 : 1
+  /*
+   * 拖动中的透明度（0~1）。
+   *
+   * 传了 `onPreview` 时，拖动期间**不写主 store**（见上面 `createDragWriter` 的说明），
+   * 于是 `value` / `alpha` 一动不动 —— 而 range 是受控输入：React 在每个 `change` 事件
+   * 末尾都会把 DOM 值「恢复」成最近一次渲染的 props 值（`restoreControlledState`），
+   * 拖动中被拨回原处，表现就是「滑杆怎么拖滑块都不动」（颜色本身在视口里是跟手的，
+   * 所以更显得像滑杆坏了）。所以拖动期间取值交给本地状态，松手清掉、交回文档真值
+   * （`writer.settle()` 已经把最后一个值提交进去了）。
+   */
+  const [dragAlpha, setDragAlpha] = useState<number | null>(null)
+  /** 滑杆与百分比读数显示的值：拖动中跟手，其余时刻跟文档 */
+  const shownAlpha = dragAlpha ?? alpha
   /** 透明度百分比 → `#RRGGBBAA`（RGB 取当前值，只换后两位） */
   const hexWithAlpha = (percent: number): string => {
     const clamped = Math.min(100, Math.max(0, percent))
@@ -755,20 +768,28 @@ export function ColorField({ label, value, onChange, onDragStart, onDragEnd, onP
         step={0.01}
         className="h-[14px] w-[64px] shrink-0 cursor-pointer accent-accent"
         title="透明度（alpha）"
-        value={alpha}
+        value={shownAlpha}
         onPointerDown={begin}
-        onPointerUp={end}
-        onPointerCancel={end}
+        onPointerUp={() => {
+          end()
+          setDragAlpha(null)
+        }}
+        onPointerCancel={() => {
+          end()
+          setDragAlpha(null)
+        }}
         onChange={(event) => {
           begin()
+          const next = Number(event.target.value)
+          setDragAlpha(next)
           // 滑杆也是连续拖动：按帧合并（`begin` 只开一次事务，整段仍是一条撤销记录）
-          writer.current?.push(hexWithAlpha(Number(event.target.value) * 100))
+          writer.current?.push(hexWithAlpha(next * 100))
         }}
       />
       <div className="relative shrink-0">
         <CommitTextField
           className="hao-field w-[46px] pr-4 text-right font-mono text-3xs"
-          value={String(Math.round(alpha * 100))}
+          value={String(Math.round(shownAlpha * 100))}
           inputMode="decimal"
           title="透明度百分比（0–100）；失焦 / 回车生效，中键左右拖动可调"
           scrub

@@ -269,6 +269,19 @@ function AlphaSlider({
   const pointer = useRef(false)
   /** 事务是否已经开了：开了才需要收尾，也保证整段只开一次 */
   const begun = useRef(false)
+  /**
+   * 拖动中的透明度读数（%）。
+   *
+   * 传了 `onPreview` 时拖动期间**不写主 store**（见 `createDragWriter`）—— 文档、历史、
+   * 面板全都不动，所以上面那个 `value`（文档里的值）在整个拖动过程中是不变的。而滑杆是
+   * 受控输入：React 在每个 `change` 事件末尾都会把 DOM 值「恢复」成最近一次渲染的 props 值
+   * （`restoreControlledState`），于是手一拖就被拨回原处 —— 表现就是「拖动时滑块一动不动」，
+   * 而视口里的透明度其实是跟手的。所以拖动期间取值交给本地状态，松手清掉、交回文档真值
+   * （`writer.settle()` 已经把最后一个值提交进主 store 了）。
+   */
+  const [dragValue, setDragValue] = useState<number | null>(null)
+  /** 滑杆与右侧读数显示的值：拖动中跟手，其余时刻跟文档 */
+  const shown = dragValue ?? value
   const latest = useRef({ onChange, onSettled, onPreview })
   latest.current = { onChange, onSettled, onPreview }
   /**
@@ -306,20 +319,27 @@ function AlphaSlider({
         min={0}
         max={100}
         step={0.1}
-        value={value}
+        value={shown}
         title={hint}
         onPointerDown={() => {
           pointer.current = true
         }}
-        onPointerUp={finish}
-        onPointerCancel={finish}
+        onPointerUp={() => {
+          finish()
+          setDragValue(null)
+        }}
+        onPointerCancel={() => {
+          finish()
+          setDragValue(null)
+        }}
         onChange={(event) => {
           const next = quantizeAlpha(Number(event.target.value))
           if (!pointer.current) {
-            // 键盘方向键调滑杆：没有按下 / 松开配对，按普通可撤销编辑写
+            // 键盘方向键调滑杆：没有按下 / 松开配对，按普通可撤销编辑写（写不进去就维持原值）
             onChange(next, false)
             return
           }
+          setDragValue(next)
           if (!begun.current) {
             begun.current = true
             useProjectStore.getState().beginTransaction('插槽透明度关键帧')
@@ -329,7 +349,7 @@ function AlphaSlider({
       />
       <CommitTextField
         className="hao-field w-[42px] shrink-0 text-right font-mono"
-        value={format(value, 1)}
+        value={format(shown, 1)}
         inputMode="decimal"
         scrub
         title="透明度 0 ~ 100；失焦 / 回车生效（中键左右拖动可调）"

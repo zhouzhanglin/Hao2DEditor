@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@esotericsoftware/spine-core": "^4.3.13",
+    "ag-psd": "^31.0.3",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
     "immer": "^10.1.1",

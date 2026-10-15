@@ -98,6 +98,7 @@ export type MenuCommand =
   | 'project:importSpine'
   | 'project:importDragonBones'
   | 'project:importImages'
+  | 'project:importPsd'
   | 'project:exportRuntime'
   | 'project:exportHao2d'
   | 'project:exportSpine'

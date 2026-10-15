@@ -11,6 +11,7 @@ import { dbTextureNames, parseDbTextureJson } from '@importers/dragonBonesAtlas'
 import { detectSkeletonFormat, isDbTextureJson } from '@importers/detect'
 import { registerLooseImages } from '@importers/looseImages'
 import { ASSET_DIR, copyAssets, planAssetCopies, resolveImagePaths } from './projectAssets'
+import { openPsdDialog, parsePsdAt } from './psdImport'
 import type { AtlasRegion, PageSizes } from '@importers/uv'
 import { DEFAULT_PROJECT_NAME, useProjectStore } from '../store/projectStore'
 import { useModeStore } from '../store/modeStore'
@@ -456,15 +457,36 @@ export async function importImagesFlow(paths?: readonly string[]): Promise<IoRes
   const picked = paths && paths.length > 0
     ? [...paths]
     : await platform.pickFiles({
-        filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+        // psd 也放进可选范围：选到它转入「导入 PSD」弹窗（按图层拆图），不走碎图登记
+        filters: [{ name: '图片 / PSD', extensions: ['png', 'jpg', 'jpeg', 'webp', 'psd'] }],
         multi: true
       })
   if (picked.length === 0) return { ok: false, message: '已取消' }
 
-  const infos = await platform.imageInfo(picked)
+  // PSD 与碎图分开处理：PSD 要经弹窗勾选图层，碎图直接登记（见 parsePsdAt / openPsdDialog）
+  const psdPaths = picked.filter((path) => /\.psd$/i.test(path))
+  const imagePaths = picked.filter((path) => !/\.psd$/i.test(path))
+  let psdNote = ''
+  if (psdPaths.length > 0) {
+    const parsed = await parsePsdAt(psdPaths[0])
+    if (parsed.parsed) {
+      openPsdDialog(parsed.parsed)
+      psdNote =
+        psdPaths.length > 1
+          ? `（选了 ${psdPaths.length} 个 PSD，已打开第一个的导入窗口）`
+          : '（PSD 已打开导入窗口，勾选要导入的图层）'
+    } else {
+      psdNote = `（${parsed.message}）`
+    }
+    if (imagePaths.length === 0) {
+      return parsed.parsed ? { ok: true, message: 'PSD 已打开导入窗口，勾选要导入的图层' } : parsed
+    }
+  }
+
+  const infos = await platform.imageInfo(imagePaths)
   const inputs = infos.length > 0
     ? infos.map((info) => ({ path: info.path, name: baseName(info.path), width: info.width, height: info.height }))
-    : picked.map((path) => ({ path, name: baseName(path), width: 0, height: 0 }))
+    : imagePaths.map((path) => ({ path, name: baseName(path), width: 0, height: 0 }))
 
   const existing = useProjectStore.getState().document.images
   const { images, warnings } = registerLooseImages(inputs, existing)
@@ -479,9 +501,10 @@ export async function importImagesFlow(paths?: readonly string[]): Promise<IoRes
   })
   useProjectStore.getState().setWarnings(warnings)
   const added = images.length - existing.length
+  const message = added > 0 ? `已导入 ${added} 张图片` : '没有新增图片（可能已存在）'
   return {
     ok: true,
-    message: added > 0 ? `已导入 ${added} 张图片` : '没有新增图片（可能已存在）',
+    message: psdNote ? `${message}${psdNote}` : message,
     warnings
   }
 }
@@ -520,11 +543,32 @@ async function expandDroppedPaths(
 export async function importDroppedPaths(paths: readonly string[]): Promise<IoResult> {
   const platform = getPlatform()
 
-  const { list, folderImages } = await expandDroppedPaths(platform, paths)
+  // 拖入 PSD：解析并打开「导入 PSD」弹窗（其余文件照常按下面的规则分派，两边互不干扰）
+  const psdPath = paths.find((path) => /\.psd$/i.test(path))
+  const rest = psdPath ? paths.filter((path) => path !== psdPath) : [...paths]
+  let psdNote = ''
+  if (psdPath) {
+    const parsed = await parsePsdAt(psdPath)
+    if (parsed.parsed) {
+      openPsdDialog(parsed.parsed)
+      psdNote = 'PSD 已打开导入窗口，勾选要导入的图层'
+    } else {
+      psdNote = parsed.message
+    }
+    if (rest.length === 0) {
+      return parsed.parsed
+        ? { ok: true, message: psdNote }
+        : { ok: false, message: psdNote }
+    }
+  }
+
+  const { list, folderImages } = await expandDroppedPaths(platform, rest)
   if (list.length === 0) {
     return {
       ok: false,
-      message: '拖入的文件夹里没有可导入的图片（支持 png / jpg / webp / gif / bmp）'
+      message: psdNote
+        ? psdNote
+        : '拖入的文件夹里没有可导入的图片（支持 png / jpg / webp / gif / bmp / psd）'
     }
   }
 
@@ -536,11 +580,17 @@ export async function importDroppedPaths(paths: readonly string[]): Promise<IoRe
   const jsons = list.filter((p) => /\.json$/i.test(p))
   const atlases = list.filter((p) => /\.atlas(\.txt)?$/i.test(p))
 
+  // 有 PSD 时把「已打开导入窗口」拼进结果提示（弹窗本身已经打开，这里只补一句说明）
+  const withPsdNote = (result: IoResult): IoResult =>
+    psdNote ? { ...result, message: `${result.message}（${psdNote}）` } : result
+
   if (images.length > 0 && jsons.length === 0) {
     const result = await importImagesFlow(images)
-    return folderImages > 0
-      ? { ...result, message: `${result.message}（文件夹里找到 ${folderImages} 张图片）` }
-      : result
+    return withPsdNote(
+      folderImages > 0
+        ? { ...result, message: `${result.message}（文件夹里找到 ${folderImages} 张图片）` }
+        : result
+    )
   }
 
   if (jsons.length > 0) {
@@ -584,9 +634,11 @@ export async function importDroppedPaths(paths: readonly string[]): Promise<IoRe
     }
   }
   const loose = await importImagesFlow(leaves)
-  return folderImages > 0
-    ? { ...loose, message: `${loose.message}（文件夹里找到 ${folderImages} 张图片）` }
-    : loose
+  return withPsdNote(
+    folderImages > 0
+      ? { ...loose, message: `${loose.message}（文件夹里找到 ${folderImages} 张图片）` }
+      : loose
+  )
 }
 
 /** 兜底：把无法识别的路径按图片尝试导入 */

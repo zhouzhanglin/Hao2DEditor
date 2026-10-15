@@ -6,6 +6,7 @@ import {
   FolderOpen,
   History,
   Import,
+  Layers,
   Package,
   Save,
   Share2,
@@ -30,7 +31,8 @@ const QUICK_ACTIONS = [
   { command: 'project:new', label: '新建项目', icon: FilePlus2, hint: '新建项目 (Ctrl+N)' },
   { command: 'project:open', label: '打开', icon: FolderOpen, hint: '打开工程 (Ctrl+O)' },
   { command: 'project:save', label: '保存', icon: Save, hint: '保存工程 (Ctrl+S)' },
-  { command: 'project:importImages', label: '导入图片', icon: Import, hint: '导入或拖入碎图 (Ctrl+I)' }
+  { command: 'project:importImages', label: '导入图片', icon: Import, hint: '导入或拖入碎图 (Ctrl+I)' },
+  { command: 'project:importPsd', label: '导入 PSD', icon: Layers, hint: '导入 Photoshop 文档：按图层拆图，可选直接按原位置摆进场景' }
 ]
 
 /**

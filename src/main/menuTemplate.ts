@@ -69,6 +69,7 @@ export function buildMenuTemplate(options: MenuTemplateOptions): MenuItemConstru
       item('导入 Spine…', 'project:importSpine'),
       item('导入 DragonBones…', 'project:importDragonBones'),
       item('导入图片…', 'project:importImages', 'CmdOrCtrl+I'),
+      item('导入 PSD…', 'project:importPsd'),
       { type: 'separator' },
       item('导出运行时数据…', 'project:exportRuntime', 'CmdOrCtrl+E'),
       item('导出 Unity…', 'project:exportHao2d', 'CmdOrCtrl+Shift+E'),

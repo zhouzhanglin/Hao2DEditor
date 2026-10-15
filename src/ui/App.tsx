@@ -102,6 +102,9 @@ import type { ExportMode } from '@ui/widgets/ExportDialog'
 import NewProjectDialog from '@ui/widgets/NewProjectDialog'
 import SettingsDialog from '@ui/widgets/SettingsDialog'
 import AiIntegrationDialog from '@ui/widgets/AiIntegrationDialog'
+import PsdImportDialog from '@ui/widgets/PsdImportDialog'
+import { importPsdLayers, pickAndParsePsd, setPsdDialogOpener } from '@editor/services/psdImport'
+import type { ParsedPsd } from '@importers/psdImport'
 import { deleteSelectedTrack, keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
 import { PPU, deleteMeshVertex } from '@editor/commands/authoringCommands'
 import { undoMeshBoundaryPoint } from '@editor/tools/authoringTools'
@@ -151,6 +154,15 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   /** AI 接入弹窗：false = 未打开 */
   const [aiOpen, setAiOpen] = useState(false)
+  /** 「导入 PSD」弹窗：null = 未打开；解析结果（图层树 + 每层画布）在这里暂存 */
+  const [psdImport, setPsdImport] = useState<ParsedPsd | null>(null)
+
+  // PSD 弹窗的统一打开入口：「导入 PSD」菜单 / 「导入图片」选到 .psd / 拖入 .psd 都经服务层回调到这里
+  useEffect(() => {
+    setPsdDialogOpener(setPsdImport)
+    return () => setPsdDialogOpener(null)
+  }, [])
+
   const booted = useRef(false)
 
   const flash = useCallback((message: string) => {
@@ -385,6 +397,17 @@ export default function App() {
     [flash]
   )
 
+  /** 「导入 PSD」弹窗确认：先关弹窗再导入（run 负责进度与结果提示） */
+  const confirmPsdImport = useCallback(
+    (selectedIds: ReadonlySet<string>, addToScene: boolean) => {
+      const parsed = psdImport
+      if (!parsed) return
+      setPsdImport(null)
+      void run(importPsdLayers(parsed, selectedIds, addToScene), '正在导入 PSD…')
+    },
+    [psdImport, run]
+  )
+
   /** 「新建项目」弹窗：项目名与保存位置都要用户确认（项目名不能为空） */
   const [newProjectOpen, setNewProjectOpen] = useState(false)
 
@@ -427,6 +450,9 @@ export default function App() {
           return
         case 'project:importImages':
           run(importImagesFlow(), '正在导入图片…')
+          return
+        case 'project:importPsd':
+          run(pickAndParsePsd(), '正在读取 PSD…')
           return
         case 'project:exportRuntime':
           // 两个导出命令都走弹窗：选目录、调图集缩放 / 页尺寸、先看预览再导出
@@ -851,6 +877,10 @@ export default function App() {
       {settingsOpen ? <SettingsDialog onClose={() => setSettingsOpen(false)} /> : null}
 
       {aiOpen ? <AiIntegrationDialog onClose={() => setAiOpen(false)} /> : null}
+
+      {psdImport ? (
+        <PsdImportDialog parsed={psdImport} onConfirm={confirmPsdImport} onClose={() => setPsdImport(null)} />
+      ) : null}
     </div>
   )
 }

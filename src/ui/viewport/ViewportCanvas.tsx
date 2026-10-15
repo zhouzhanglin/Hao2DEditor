@@ -13,6 +13,7 @@ import { useToolStore } from '@editor/store/toolStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { usePlayheadStore } from '@editor/store/playheadStore'
+import { usePreviewStore } from '@editor/store/previewStore'
 import {
   baseBrushMode,
   brushModeFor,
@@ -38,7 +39,7 @@ import {
 } from '@editor/commands/authoringCommands'
 import { hasImageDrag, readImageDrag } from '@ui/widgets/dragDrop'
 import { gridDropLayout } from '@ui/viewport/dropLayout'
-import type { AuthoringImage } from '@core/model/authoring'
+import type { AuthoringImage, EditorDocument } from '@core/model/authoring'
 import { rootBoneName } from '@core/model/authoring'
 import { stageFilePath } from '@editor/services/projectAssets'
 import { ImageSource, Texture } from 'pixi.js'
@@ -176,11 +177,23 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
 
   // 文档 → 场景
   useEffect(() => {
+    /**
+     * 上一次同步过的文档 / 皮肤。
+     *
+     * 主 store 是**无选择器**订阅：任何 `set`（改面板偏好、切选中项、改工具设置…）都会跑到这里。
+     * 不做守卫的话每次都白跑一遍 `setDocument` + `loadTextures`（贴图逐张查表）。文档没变就早退。
+     */
+    let syncedDocument: EditorDocument | null = null
+    let syncedSkin: string | null = null
     const sync = (): void => {
       const scene = sceneRef.current
       if (!scene) return
       const { document } = useProjectStore.getState()
       const selection = useSelectionStore.getState()
+      // `scene.runtime` 兜一层：视口重挂载后运行期是空的，即便文档没换也必须重新灌进去
+      if (document === syncedDocument && selection.skin === syncedSkin && scene.runtime) return
+      syncedDocument = document
+      syncedSkin = selection.skin
       scene.setDocument(document, selection.skin)
       void loadTextures(texturesRef.current, document, scene.imageAlpha)
     }
@@ -193,6 +206,22 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       unsubscribe()
       unsubscribeSelection()
     }
+  }, [])
+
+  /**
+   * 拖动预览 → 场景（**不进主 store**）。
+   *
+   * 拖颜色 / 拖滑杆时值只写这条高频通道：文档不动 ⇒ 不深拷贝、不重建运行期、不刷面板，
+   * 只有这里按帧把颜色热写进运行期。松手时调用方提交一次文档（一条撤销记录）并清空预览。
+   */
+  useEffect(() => {
+    const apply = (): void => {
+      const scene = sceneRef.current
+      if (!scene) return
+      scene.setPreviewSlotColors(usePreviewStore.getState().slotColors)
+    }
+    apply()
+    return usePreviewStore.subscribe(apply)
   }, [])
 
   // 选中 / 工具 / 时间轴 → 场景

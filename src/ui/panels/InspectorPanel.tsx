@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Brush, Crosshair, Grid3x3, Layers, RotateCcw, Trash2 } from 'lucide-react'
 import { BlendMode } from '@core/model/types'
 import { curvePercent } from '@core/anim/interpolation'
+import { usePreviewStore } from '@editor/store/previewStore'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import type { BrushModeSetting } from '@editor/store/toolStore'
@@ -902,7 +903,12 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             label="颜色"
             value={slot.color}
             onDragStart={() => useProjectStore.getState().beginTransaction('修改插槽颜色')}
-            onDragEnd={() => useProjectStore.getState().endTransaction()}
+            onDragEnd={() => {
+              useProjectStore.getState().endTransaction()
+              usePreviewStore.getState().clearSlotColors()
+            }}
+            // 拖动中只写预览通道：视口按帧热更新颜色，文档 / 历史 / 面板一动不动（松手才提交一次）
+            onPreview={(value) => usePreviewStore.getState().setSlotColor(slot.name, value)}
             onChange={(value) =>
               update('修改插槽颜色', (draft) => {
                 const target = draft.slots.find((s) => s.name === slot.name)

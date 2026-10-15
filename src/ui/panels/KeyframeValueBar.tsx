@@ -2,6 +2,7 @@ import { hexToRgba, rgbaToHex } from '@core/util/color'
 import type { EditorDocument } from '@core/model/authoring'
 import type { RGBA } from '@core/model/types'
 import { keySlotDisplay } from '@editor/commands/animationCommands'
+import { usePreviewStore } from '@editor/store/previewStore'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
@@ -228,6 +229,7 @@ export default function KeyframeValueBar() {
               frame={frame}
               channel={single.channel}
               display={displayField}
+              previewSlot={single.kind === 'slot' ? single.target : ''}
               onEdit={(label, mutate) => editFrames(label, mutate)}
             />
           </>
@@ -269,6 +271,7 @@ function FrameValueEditor({
   frame,
   channel,
   display,
+  previewSlot,
   onEdit
 }: {
   frame: AnyKeyframe | null
@@ -276,6 +279,8 @@ function FrameValueEditor({
   channel: string
   /** display 通道的下拉（帧里存的是下标，得按名字选）；其它通道为 null */
   display: { value: string; options: Array<{ value: string; label: string }>; onChange: (name: string) => void } | null
+  /** 颜色帧所属插槽名（不是插槽轨就是空串）：拖动预览要按插槽名热写运行期颜色 */
+  previewSlot: string
   onEdit: (label: string, mutate: (frame: AnyKeyframe) => void) => void
 }) {
   const value = frame?.value
@@ -345,7 +350,14 @@ function FrameValueEditor({
           // 拾色器 / 滑杆的连续拖动包成**一条**撤销记录：不包的话每个 `input` 事件都会
           // 往撤销栈塞一条等价记录、并且每次都要深拷贝一遍整个项目快照（拖动时必卡）
           onDragStart={() => useProjectStore.getState().beginTransaction('修改关键帧颜色')}
-          onDragEnd={() => useProjectStore.getState().endTransaction()}
+          onDragEnd={() => {
+            useProjectStore.getState().endTransaction()
+            usePreviewStore.getState().clearSlotColors()
+          }}
+          // 拖动中只写预览通道：视口按帧热更新颜色，文档 / 历史 / 面板一动不动（松手才提交一次）
+          onPreview={
+            previewSlot === '' ? undefined : (hex) => usePreviewStore.getState().setSlotColor(previewSlot, hex)
+          }
           onChange={(hex) => onEdit('修改关键帧颜色', (item) => { item.value = hexToRgba(hex, color) })}
         />
       </div>

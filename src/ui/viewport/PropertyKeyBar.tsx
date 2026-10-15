@@ -14,6 +14,7 @@ import { hexToRgba, rgbaToHex } from '@core/util/color'
 import { getActiveScene } from '@editor/activeScene'
 import { highlightSlotColorKey, slotColorHexAt, slotColorMessage, writeSlotColor } from '@editor/slotColorOps'
 import { useModeStore } from '@editor/store/modeStore'
+import { usePreviewStore } from '@editor/store/previewStore'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
@@ -24,7 +25,8 @@ import {
   setBoneChannelNow
 } from '@editor/timeline/actions'
 import { findKeyframe } from '@editor/timeline/model'
-import { CommitTextField, createFrameWriter, format, parseHexColor, PX_PER_UNIT, VectorInput } from '@ui/widgets/fields'
+import { CommitTextField, createDragWriter, format, parseHexColor, PX_PER_UNIT, VectorInput } from '@ui/widgets/fields'
+import type { DragWriter } from '@ui/widgets/fields'
 import type { BoneChannel } from '@editor/commands/animationCommands'
 import type { SlotColorTarget } from '@editor/slotColorOps'
 import type { KeyKind } from '@editor/timeline/model'
@@ -127,7 +129,8 @@ function Field({
 function ColorSwatch({
   value,
   onChange,
-  onSettled
+  onSettled,
+  onPreview
 }: {
   /** `#RRGGBBAA` */
   value: string
@@ -138,22 +141,30 @@ function ColorSwatch({
   onChange: (hex: string, silent: boolean) => void
   /** 整段改完（拾色器关闭 / 失焦）时收尾：关事务 + 报状态 + 高亮关键帧 */
   onSettled: () => void
+  /**
+   * 拖动中的**预览**（可选）。传了它，拾色器拖动期间就**不写主 store**：每个事件
+   * （帧级合并后每帧一次）只调它 —— 调用方转给预览通道，视口按帧热更新颜色，而文档、
+   * 历史、订阅 `document` 的面板全都一动不动；松手才用最终值走一次 `onChange`（一条撤销记录）。
+   */
+  onPreview?: (hex: string) => void
 }) {
   const rgb = value.length === 9 ? value.slice(0, 7) : value
   const alphaHex = value.length === 9 ? value.slice(7) : 'FF'
   const dragging = useRef(false)
-  const latest = useRef({ onChange, onSettled })
-  latest.current = { onChange, onSettled }
+  const latest = useRef({ onChange, onSettled, onPreview })
+  latest.current = { onChange, onSettled, onPreview }
   /**
-   * 系统拾色器拖动时连发 `input`（一秒上百个），而这里每一次写入都要深拷贝整份文档、
-   * 让视口重建运行期、所有面板重渲染 —— 不合并的话事件会越堆越多，表现就是
-   * 「拖动越来越卡、颜色半天跟不上手」。按帧合并（见 `createFrameWriter`）后每帧最多写一次，
-   * 队列不再积压；松手前先 `flush` 把最后一个值落地。
+   * 连续写入走 `createDragWriter`：
+   * - 传了 `onPreview`：拖动中只写预览通道（主 store 一动不动），松手 `settle()` 提交一次；
+   * - 没传：老行为 —— 帧级合并后每帧 `updateSilent`（silent 在落地时按「是否还在拖动」判定），
+   *   整段由下面的事务收成一条。
    */
-  const writer = useRef<{ push: (value: string) => void; flush: () => void } | null>(null)
+  const writer = useRef<DragWriter<string> | null>(null)
   if (!writer.current) {
-    // silent 在**落地时**按「是否还在拖动」判定：拾色器整段算拖动中，手打 hex 不算
-    writer.current = createFrameWriter<string>((hex) => latest.current.onChange(hex, dragging.current))
+    writer.current = createDragWriter<string>(
+      () => (latest.current.onPreview ? (hex: string) => latest.current.onPreview?.(hex) : null),
+      (hex) => latest.current.onChange(hex, dragging.current)
+    )
   }
 
   const begin = (): void => {
@@ -163,9 +174,9 @@ function ColorSwatch({
   }
   const end = (): void => {
     if (!dragging.current) return
-    // 先落地待写的最后一个值（此时仍判为「拖动中」，走的还是 silent），再关事务：
-    // 否则它会落在事务之外，多出一条撤销记录
-    writer.current?.flush()
+    // settle：先落地最后一个值（此时仍判为「拖动中」，走的还是 silent）、预览模式下再补一次
+    // 提交，两步都在关事务之前 —— 顺序反了会多出一条撤销记录
+    writer.current?.settle()
     dragging.current = false
     useProjectStore.getState().endTransaction()
     latest.current.onSettled()
@@ -210,8 +221,8 @@ function ColorSwatch({
         sanitize={parseHexColor}
         // 手打 8 位（带 alpha）就整串用，否则只换 RGB、保留原透明度
         onCommit={(hex) => {
-          // 手打是单次提交：先把待写的预览值落地，免得两次写入顺序倒过来；它要能单独撤销
-          writer.current?.flush()
+          // 手打是单次提交：先收尾掉拖动残留的预览，再写手打的值（它要能单独撤销）
+          writer.current?.settle()
           latest.current.onChange(hex.length === 9 ? hex : `${hex}${alphaHex}`, false)
         }}
       />
@@ -239,7 +250,8 @@ function AlphaSlider({
   value,
   onChange,
   onSettled,
-  hint
+  hint,
+  onPreview
 }: {
   /** 0 ~ 100 */
   value: number
@@ -247,23 +259,34 @@ function AlphaSlider({
   /** 拖动收尾：关事务 + 报一次状态 + 高亮刚写的关键帧 */
   onSettled: () => void
   hint: string
+  /**
+   * 拖动中的**预览**（可选）：`percent` = 拖动中的透明度，调用方拼成 `#RRGGBBAA` 写预览通道。
+   * 传了它，拖动期间就不写主 store；松手才用最终值走一次 `onChange`（一条撤销记录）。
+   */
+  onPreview?: (percent: number) => void
 }) {
   /** 指针是否按在滑杆上（区分「拖动」与「键盘调值」，只有前者才降级成 silent） */
   const pointer = useRef(false)
   /** 事务是否已经开了：开了才需要收尾，也保证整段只开一次 */
   const begun = useRef(false)
-  const latest = useRef({ onChange, onSettled })
-  latest.current = { onChange, onSettled }
-  /** 拖动中的滑杆事件同样按帧合并：不合并的话每个事件都要深拷贝文档 + 全部面板重渲染 */
-  const writer = useRef<{ push: (value: number) => void; flush: () => void } | null>(null)
+  const latest = useRef({ onChange, onSettled, onPreview })
+  latest.current = { onChange, onSettled, onPreview }
+  /**
+   * 连续写入走 `createDragWriter`：有 `onPreview` 时拖动只写预览通道（不深拷贝文档、
+   * 不重建运行期、不刷面板），松手 `settle()` 提交一次；没有则老行为 —— 帧级合并后每帧
+   * `updateSilent`（silent 在落地时按「指针是否还按着」判定），整段由事务收成一条。
+   */
+  const writer = useRef<DragWriter<number> | null>(null)
   if (!writer.current) {
-    // silent 在**落地时**按「指针是否还按着」判定：flush 发生在清 pointer 之前，整段仍是 silent
-    writer.current = createFrameWriter<number>((percent) => latest.current.onChange(percent, pointer.current))
+    writer.current = createDragWriter<number>(
+      () => (latest.current.onPreview ? (percent: number) => latest.current.onPreview?.(percent) : null),
+      (percent) => latest.current.onChange(percent, pointer.current)
+    )
   }
 
   const finish = (): void => {
-    // 先落地待写的最后一个值（此时 pointer 还是 true，走的仍是 silent），再关事务
-    writer.current?.flush()
+    // settle：先落地最后一个值（此时 pointer 还是 true，走的仍是 silent）、预览模式下再补一次提交
+    writer.current?.settle()
     pointer.current = false
     if (!begun.current) return
     begun.current = false
@@ -315,8 +338,8 @@ function AlphaSlider({
           return Number.isFinite(next) ? format(quantizeAlpha(next), 1) : null
         }}
         onCommit={(next) => {
-          // 手输是单次提交：先把待写的预览值落地，免得两次写入顺序倒过来
-          writer.current?.flush()
+          // 手输是单次提交：先收尾掉拖动残留的预览，再写手输的值
+          writer.current?.settle()
           onChange(quantizeAlpha(Number(next)), false)
         }}
       />
@@ -615,8 +638,26 @@ function SlotRows({
     if (target !== null) writeSlotColor(slot, hex, target, silent)
   }
 
-  /** 拾色器整段改完的收尾：报一次结果 + 把时间轴上刚写的这一帧点亮 */
+  /**
+   * 拖动中的颜色**预览**：只写预览通道 —— 视口按帧把颜色热写进运行期，而文档、历史、
+   * 订阅 `document` 的面板一动不动（拖动卡顿的主因，详见 `previewStore`）。
+   */
+  const previewColor = (hex: string): void => {
+    usePreviewStore.getState().setSlotColor(slot, hex)
+  }
+
+  /** 透明度行的预览：换成新透明度、RGB 取当前值 */
+  const previewAlpha = (percent: number): void => {
+    const byte = Math.round((Math.min(100, Math.max(0, percent)) / 100) * 255)
+      .toString(16)
+      .padStart(2, '0')
+      .toUpperCase()
+    previewColor(`${colorHex.slice(0, 7)}${byte}`)
+  }
+
+  /** 拾色器整段改完的收尾：先撤预览（提交值 = 预览值，画面不会闪），再报结果 + 点亮关键帧 */
   const settleColor = (): void => {
+    usePreviewStore.getState().clearSlotColors()
     const target = colorWriteTarget()
     if (target === null) {
       onStatus(NO_ANIMATION_MESSAGE)
@@ -671,7 +712,12 @@ function SlotRows({
         keyed={keyed('color')}
         onKey={() => writeColor(colorHex)}
       >
-        <ColorSwatch value={colorHex} onChange={(hex, silent) => writeColorQuiet(hex, silent)} onSettled={settleColor} />
+        <ColorSwatch
+          value={colorHex}
+          onChange={(hex, silent) => writeColorQuiet(hex, silent)}
+          onSettled={settleColor}
+          onPreview={previewColor}
+        />
       </KeyRow>
 
       {/* 透明度单独一行：与颜色共用同一个颜色帧，各改各的那一半 */}
@@ -686,6 +732,7 @@ function SlotRows({
           hint="左右拖动调透明度；右侧读数可打字或中键拖动微调"
           onChange={writeAlpha}
           onSettled={settleColor}
+          onPreview={previewAlpha}
         />
       </KeyRow>
 

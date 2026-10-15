@@ -63,7 +63,7 @@ export interface ShearBox {
 import type { MeshBuildResult } from '@core/skin/meshBuilder'
 import type { AttachmentData } from '@core/model/types'
 import type { AuthoringAttachment, EditorDocument, StageImage } from '@core/model/authoring'
-import { animationDuration, buildRuntime, needsRebuild } from './runtime'
+import { animationDuration, applyPreviewSlotColors, applyValueChanges, buildRuntime, needsRebuild } from './runtime'
 import type { RuntimeBundle } from './runtime'
 import type { OverlayState } from './store/toolStore'
 
@@ -295,6 +295,20 @@ export class EditorScene {
     this.dirty = true
   }
 
+  /**
+   * 拖动中的颜色预览：`{ 插槽名: '#RRGGBBAA' }`，只改运行期（文档 / 历史 / 面板都不动）。
+   *
+   * 配合 `previewStore`：拖动期间颜色只写这里，于是不再每帧深拷贝文档、不再重建运行期、
+   * 也不会让订阅 `document` 的面板（时间轴 / 层级树 / 检查器…）整棵重渲染 —— 拖动卡顿的主因。
+   * 松手时调用方把最终值提交进文档（一条撤销记录）并清空预览；因为提交值与预览值相同，
+   * 画面上不会闪一下。
+   */
+  setPreviewSlotColors(colors: Record<string, string>): void {
+    const bundle = this.bundle
+    if (!bundle) return
+    if (applyPreviewSlotColors(bundle, colors)) this.invalidateSkin()
+  }
+
   async init(): Promise<void> {
     // 注意：这里不要清空 contentLayer —— 文档同步可能先于 init 完成，
     // 清空会把已经挂上的角色容器一并移除（表现为视口空白）。
@@ -358,6 +372,16 @@ export class EditorScene {
         this.bundle.player.refresh()
       }
       this.markDirty()
+    } else {
+      // 只改了「值」（目前是插槽颜色）：运行期原地更新，**不重建**。
+      // 重建是全量重编译 + 销毁重建视图 + 新建玩家；热更只是几次分量赋值（见 `applyValueChanges`）。
+      const bundle = this.bundle
+      if (bundle) {
+        applyValueChanges(bundle, doc)
+        // 引用要跟上：它既是「这份 bundle 编译自哪份文档」，也是下次值比较的基准
+        bundle.sourceDocument = doc
+        this.invalidateSkin()
+      }
     }
     if (!this.view && this.bundle) {
       this.view = new SkeletonView(this.bundle.asset, this.textures, skinName)

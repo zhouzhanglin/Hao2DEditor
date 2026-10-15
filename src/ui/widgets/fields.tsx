@@ -68,6 +68,62 @@ export function createFrameWriter<T>(write: (value: T) => void): {
   }
 }
 
+/** `createDragWriter` 的返回值：连续编辑的三个动作 */
+export interface DragWriter<T> {
+  /** 拖动中的每个事件（内部按帧合并），只在主线程空下来时落地 */
+  push: (value: T) => void
+  /** 立刻把待写的值落地（不改提交语义） */
+  flush: () => void
+  /** 收尾：先落地最后一个值；走预览通道时再把它**提交**进主 store */
+  settle: () => void
+}
+
+/**
+ * 「拖动中只做预览、松手提交一次」的写入器 —— 连续编辑（拾色器 / 滑杆）的推荐用法。
+ *
+ * 拖动中的每个事件只付 `createFrameWriter` 的代价（每帧最多一次），而且写的是**预览通道**
+ * （`preview` 非空时）：主 store 一动不动 —— 于是不再每帧深拷贝整份文档、不再重建视口运行期、
+ * 也不会让订阅 `document` 的面板（时间轴 / 层级树 / 检查器…）整棵重渲染。视口自己订阅预览通道
+ * 按帧热更新（见 `@editor/store/previewStore`）。
+ *
+ * `settle()` 是收尾：先把最后一个预览值落地，再把它提交进主 store（一次 `commit`，
+ * 因此只留一条撤销记录）。`preview` 返回空（没传 `onPreview`）时退回老行为：拖动中每帧走 `commit`。
+ *
+ * 为什么 `preview` 是**函数**而不是值：调用方（如 `ColorField`）的 props 每帧都可能换，
+ * 用 `latest.current` 取当下的那个才不会写到过期的回调上。
+ */
+export function createDragWriter<T>(
+  preview: () => ((value: T) => void) | null,
+  commit: (value: T) => void
+): DragWriter<T> {
+  let last: { value: T } | null = null
+  /** 这一次拖动是否真的走过预览通道：决定收尾要不要补一次提交 */
+  let previewed = false
+  const frame = createFrameWriter<T>((value) => {
+    const write = preview()
+    if (!write) {
+      commit(value)
+      return
+    }
+    previewed = true
+    write(value)
+  })
+  return {
+    push: (value) => {
+      last = { value }
+      frame.push(value)
+    },
+    flush: () => frame.flush(),
+    settle: () => {
+      frame.flush()
+      // 预览值只是画面上的临时值，必须真的落进文档，否则松手后颜色会退回去
+      if (previewed && last) commit(last.value)
+      last = null
+      previewed = false
+    }
+  }
+}
+
 /**
  * 拖动步长的**兜底**：调用方没声明 `step` 时，按当前值是否是整数猜（整数 ±1、浮点 ±0.1）。
  *
@@ -275,6 +331,14 @@ export function format(value: number, precision = 3): string {
 export interface SliderFieldProps {
   label: string
   /**
+   * 当前值（滑杆与读数框都以它为准）。
+   *
+   * 之前漏了这条声明：组件里 destructure 了 `value`，类型上却没有这个字段 ——
+   * `tsc` 一直在报「Property 'value' does not exist on type 'SliderFieldProps'」，
+   * 调用方把值传错也检查不出来。
+   */
+  value: number
+  /**
    * 写值。`silent = true` 是**拖动中**的高频写入，要走不记历史的 `updateSilent`
    * （事务由控件按下 / 松开时开关，整段拖动只留一条撤销记录）；
    * `silent = false` 是键盘微调 / 数字框提交这类一次性写入，按普通可撤销编辑写。
@@ -475,6 +539,16 @@ export interface ColorFieldProps {
   value: string
   onChange: (value: string) => void
   /**
+   * 拖动中的**预览**（可选）。给了它就**不再每帧写主 store**：拾色器 / 透明度滑杆的
+   * 高频事件（帧级合并后每帧一次）只调它，由调用方转给预览通道 ——
+   * 视口按帧热更新颜色，而文档 / 历史 / 面板一动不动；松手时才用最终值走一次 `onChange`
+   * （一次提交 = 一条撤销记录）。
+   *
+   * 不传 = 老行为：拖动中每帧写主 store（每帧深拷贝文档 + 重建运行期 + 全 UI 重渲染）。
+   * 典型用法：`onPreview={(hex) => usePreviewStore.getState().setSlotColor(slot, hex)}`。
+   */
+  onPreview?: (value: string) => void
+  /**
    * 连续拖拽（拾色器打开 → 关闭）的开始 / 结束回调。
    *
    * 传了就把这段拖拽包成**单条撤销记录**：拖动期间每帧都实时 `onChange`（实时预览），
@@ -583,21 +657,28 @@ export function parseHexColor(raw: string): string | null {
   return `#${digits.toUpperCase()}`
 }
 
-export function ColorField({ label, value, onChange, onDragStart, onDragEnd }: ColorFieldProps) {
+export function ColorField({ label, value, onChange, onDragStart, onDragEnd, onPreview }: ColorFieldProps) {
   /**
    * 拾色器拖动期间实时预览：每帧都发 input 事件，直接 `onChange`（实时预览视口 / 色块）。
    * 拖动开始（pointerdown / 首个 input）开事务，结束（拾色器关闭的 `change` / 失焦）收尾，
    * 整段合并成一条撤销记录 —— 与骨骼、权重刷、关键帧的连续编辑是同一套路，既流畅又不污染撤销栈。
    */
   const dragging = useRef(false)
-  const latest = useRef({ onChange, onDragStart, onDragEnd })
-  latest.current = { onChange, onDragStart, onDragEnd }
+  const latest = useRef({ onChange, onDragStart, onDragEnd, onPreview })
+  latest.current = { onChange, onDragStart, onDragEnd, onPreview }
   /**
-   * 拾色器 / 透明度滑杆的连续写入走**帧级合并**（见 `createFrameWriter`）：
-   * 一次拖动能连发上百个 `input`，每个都直接写的话，事件会堆在写入后面越拖越卡。
+   * 拾色器 / 透明度滑杆的连续写入走 `createDragWriter`：
+   * - 传了 `onPreview`：拖动中只写预览通道（主 store 一动不动 —— 不深拷贝文档、不重建运行期、
+   *   不刷面板），松手 `settle()` 才把最终值提交一次；
+   * - 没传：老行为 —— 帧级合并后每帧写主 store，整段由 `onDragStart/onDragEnd` 的事务收成一条。
    */
-  const writer = useRef<{ push: (value: string) => void; flush: () => void } | null>(null)
-  if (!writer.current) writer.current = createFrameWriter<string>((hex) => latest.current.onChange(hex))
+  const writer = useRef<DragWriter<string> | null>(null)
+  if (!writer.current) {
+    writer.current = createDragWriter<string>(
+      () => (latest.current.onPreview ? (hex: string) => latest.current.onPreview?.(hex) : null),
+      (hex) => latest.current.onChange(hex)
+    )
+  }
   const begin = (): void => {
     if (dragging.current) return
     dragging.current = true
@@ -605,8 +686,8 @@ export function ColorField({ label, value, onChange, onDragStart, onDragEnd }: C
   }
   const end = (): void => {
     if (!dragging.current) return
-    // 先把待写的最后一个值落地，再关事务：否则它落在事务之外，会多出一条撤销记录
-    writer.current?.flush()
+    // settle：先落地最后一个值，再补一次提交 —— 两步都在关事务之前，顺序反了会多出一条撤销记录
+    writer.current?.settle()
     dragging.current = false
     latest.current.onDragEnd?.()
   }
@@ -661,8 +742,9 @@ export function ColorField({ label, value, onChange, onDragStart, onDragEnd }: C
         value={value}
         sanitize={parseHexColor}
         onCommit={(hex) => {
-          // 手打 hex 是单次提交：先把待写的预览值落地，免得两次写入顺序倒过来
-          writer.current?.flush()
+          // 手打 hex 是单次提交：先收尾掉拖动残留的预览（含它自己的提交与状态清理），
+          // 再写手打的值 —— 顺序反了会被残留值顶回去
+          writer.current?.settle()
           onChange(hex)
         }}
       />
@@ -696,8 +778,8 @@ export function ColorField({ label, value, onChange, onDragStart, onDragEnd }: C
             return String(Math.round(Math.min(100, Math.max(0, next))))
           }}
           onCommit={(raw) => {
-            // 手输百分比是单次提交：先把待写的预览值落地，免得两次写入顺序倒过来
-            writer.current?.flush()
+            // 手输百分比是单次提交：先收尾掉拖动残留的预览，再写手输的值
+            writer.current?.settle()
             setAlphaPercent(Number(raw))
           }}
         />

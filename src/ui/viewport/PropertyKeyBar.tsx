@@ -24,7 +24,7 @@ import {
   setBoneChannelNow
 } from '@editor/timeline/actions'
 import { findKeyframe } from '@editor/timeline/model'
-import { CommitTextField, format, parseHexColor, PX_PER_UNIT, VectorInput } from '@ui/widgets/fields'
+import { CommitTextField, createFrameWriter, format, parseHexColor, PX_PER_UNIT, VectorInput } from '@ui/widgets/fields'
 import type { BoneChannel } from '@editor/commands/animationCommands'
 import type { SlotColorTarget } from '@editor/slotColorOps'
 import type { KeyKind } from '@editor/timeline/model'
@@ -131,7 +131,11 @@ function ColorSwatch({
 }: {
   /** `#RRGGBBAA` */
   value: string
-  onChange: (hex: string) => void
+  /**
+   * 值变化。`silent` = 这一次属于**拾色器整段拖动**（由调用方降级成 `updateSilent`：
+   * 不记账，整段由事务收成一条）；手打 hex 是单次提交，`silent` 为 false，要能单独撤销。
+   */
+  onChange: (hex: string, silent: boolean) => void
   /** 整段改完（拾色器关闭 / 失焦）时收尾：关事务 + 报状态 + 高亮关键帧 */
   onSettled: () => void
 }) {
@@ -140,6 +144,17 @@ function ColorSwatch({
   const dragging = useRef(false)
   const latest = useRef({ onChange, onSettled })
   latest.current = { onChange, onSettled }
+  /**
+   * 系统拾色器拖动时连发 `input`（一秒上百个），而这里每一次写入都要深拷贝整份文档、
+   * 让视口重建运行期、所有面板重渲染 —— 不合并的话事件会越堆越多，表现就是
+   * 「拖动越来越卡、颜色半天跟不上手」。按帧合并（见 `createFrameWriter`）后每帧最多写一次，
+   * 队列不再积压；松手前先 `flush` 把最后一个值落地。
+   */
+  const writer = useRef<{ push: (value: string) => void; flush: () => void } | null>(null)
+  if (!writer.current) {
+    // silent 在**落地时**按「是否还在拖动」判定：拾色器整段算拖动中，手打 hex 不算
+    writer.current = createFrameWriter<string>((hex) => latest.current.onChange(hex, dragging.current))
+  }
 
   const begin = (): void => {
     if (dragging.current) return
@@ -148,6 +163,9 @@ function ColorSwatch({
   }
   const end = (): void => {
     if (!dragging.current) return
+    // 先落地待写的最后一个值（此时仍判为「拖动中」，走的还是 silent），再关事务：
+    // 否则它会落在事务之外，多出一条撤销记录
+    writer.current?.flush()
     dragging.current = false
     useProjectStore.getState().endTransaction()
     latest.current.onSettled()
@@ -181,7 +199,8 @@ function ColorSwatch({
         onBlur={end}
         onChange={(event) => {
           begin()
-          latest.current.onChange(`${event.target.value.toUpperCase()}${alphaHex}`)
+          // 透明度仍取当前值拼回：系统拾色器只给 RGB
+          writer.current?.push(`${event.target.value.toUpperCase()}${alphaHex}`)
         }}
       />
       <CommitTextField
@@ -190,7 +209,11 @@ function ColorSwatch({
         title="颜色 #RRGGBB；失焦 / 回车生效（透明度看下一行）"
         sanitize={parseHexColor}
         // 手打 8 位（带 alpha）就整串用，否则只换 RGB、保留原透明度
-        onCommit={(hex) => latest.current.onChange(hex.length === 9 ? hex : `${hex}${alphaHex}`)}
+        onCommit={(hex) => {
+          // 手打是单次提交：先把待写的预览值落地，免得两次写入顺序倒过来；它要能单独撤销
+          writer.current?.flush()
+          latest.current.onChange(hex.length === 9 ? hex : `${hex}${alphaHex}`, false)
+        }}
       />
     </>
   )
@@ -229,10 +252,18 @@ function AlphaSlider({
   const pointer = useRef(false)
   /** 事务是否已经开了：开了才需要收尾，也保证整段只开一次 */
   const begun = useRef(false)
-  const latest = useRef({ onSettled })
-  latest.current = { onSettled }
+  const latest = useRef({ onChange, onSettled })
+  latest.current = { onChange, onSettled }
+  /** 拖动中的滑杆事件同样按帧合并：不合并的话每个事件都要深拷贝文档 + 全部面板重渲染 */
+  const writer = useRef<{ push: (value: number) => void; flush: () => void } | null>(null)
+  if (!writer.current) {
+    // silent 在**落地时**按「指针是否还按着」判定：flush 发生在清 pointer 之前，整段仍是 silent
+    writer.current = createFrameWriter<number>((percent) => latest.current.onChange(percent, pointer.current))
+  }
 
   const finish = (): void => {
+    // 先落地待写的最后一个值（此时 pointer 还是 true，走的仍是 silent），再关事务
+    writer.current?.flush()
     pointer.current = false
     if (!begun.current) return
     begun.current = false
@@ -260,12 +291,17 @@ function AlphaSlider({
         onPointerUp={finish}
         onPointerCancel={finish}
         onChange={(event) => {
-          const dragging = pointer.current
-          if (dragging && !begun.current) {
+          const next = quantizeAlpha(Number(event.target.value))
+          if (!pointer.current) {
+            // 键盘方向键调滑杆：没有按下 / 松开配对，按普通可撤销编辑写
+            onChange(next, false)
+            return
+          }
+          if (!begun.current) {
             begun.current = true
             useProjectStore.getState().beginTransaction('插槽透明度关键帧')
           }
-          onChange(quantizeAlpha(Number(event.target.value)), dragging)
+          writer.current?.push(next)
         }}
       />
       <CommitTextField
@@ -278,7 +314,11 @@ function AlphaSlider({
           const next = Number(raw)
           return Number.isFinite(next) ? format(quantizeAlpha(next), 1) : null
         }}
-        onCommit={(next) => onChange(quantizeAlpha(Number(next)), false)}
+        onCommit={(next) => {
+          // 手输是单次提交：先把待写的预览值落地，免得两次写入顺序倒过来
+          writer.current?.flush()
+          onChange(quantizeAlpha(Number(next)), false)
+        }}
       />
     </>
   )
@@ -563,10 +603,16 @@ function SlotRows({
     return true
   }
 
-  /** 拖拾色器时的实时预览：只写值。每动一下都刷状态栏会把状态栏刷花，收尾时统一报一次 */
-  const writeColorQuiet = (hex: string): void => {
+  /**
+   * 写颜色（透明度那一半原样保留）。每动一下都刷状态栏会把状态栏刷花，收尾时统一报一次。
+   *
+   * `silent` 由 `ColorSwatch` 按「是否在拾色器拖动中」给出：拖动中走 `updateSilent`
+   * （不记账，整段由事务收成一条，也省掉每帧的 `dirty` / 撤销状态计算）；
+   * 手打 hex 是单次提交，走普通 `update`，要能单独撤销。
+   */
+  const writeColorQuiet = (hex: string, silent: boolean): void => {
     const target = colorWriteTarget()
-    if (target !== null) writeSlotColor(slot, hex, target)
+    if (target !== null) writeSlotColor(slot, hex, target, silent)
   }
 
   /** 拾色器整段改完的收尾：报一次结果 + 把时间轴上刚写的这一帧点亮 */
@@ -625,7 +671,7 @@ function SlotRows({
         keyed={keyed('color')}
         onKey={() => writeColor(colorHex)}
       >
-        <ColorSwatch value={colorHex} onChange={writeColorQuiet} onSettled={settleColor} />
+        <ColorSwatch value={colorHex} onChange={(hex, silent) => writeColorQuiet(hex, silent)} onSettled={settleColor} />
       </KeyRow>
 
       {/* 透明度单独一行：与颜色共用同一个颜色帧，各改各的那一半 */}

@@ -17,6 +17,57 @@ export function unitsToPx(units: number): number {
   return units * PX_PER_UNIT
 }
 
+/** `requestAnimationFrame` 的兜底（测试 / 无 DOM 环境退化成 16ms 定时器） */
+function nextFrame(fn: () => void): number {
+  return typeof requestAnimationFrame === 'function' ? requestAnimationFrame(fn) : (setTimeout(fn, 16) as unknown as number)
+}
+
+function cancelFrame(id: number): void {
+  if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(id)
+  else clearTimeout(id)
+}
+
+/**
+ * 连续拖动的**帧级合并**：把高频写入压成「每帧最多一次」，且最后一次一定落地。
+ *
+ * 原生拾色器 / 滑杆一次拖动能连发几十上百个 `input`（拾色器最凶，一秒上百个），
+ * 而每次写入的代价远不止一帧：深拷贝整份文档 + 换掉文档对象 → 视口按 `needsRebuild`
+ * 重建整个运行期 + 所有订阅 `document` 的面板（时间轴 / 层级树 / 检查器…）全部重渲染。
+ * 于是事件越堆越多、写入永远追不上手 —— 表现就是「拖颜色越来越卡、颜色半天不跟手」。
+ *
+ * 这里只留最新值：`push` 只写一个 ref（几乎零成本），真正的写入交给 `rAF`。
+ * `rAF` 只会在主线程空下来时才轮到，所以队列不会积压 —— 卡也就只卡在「一帧一次」上，
+ * 而不是「几百个事件排队」。
+ *
+ * 用法：拖动中的每个事件 `push(最新值)`，收尾（关事务前）`flush()` ——
+ * **必须先 flush 再关事务**，否则最后那个值会落在事务之外，多出一条撤销记录。
+ */
+export function createFrameWriter<T>(write: (value: T) => void): {
+  push: (value: T) => void
+  flush: () => void
+} {
+  // 包一层对象：值本身可能是 0 或空串，不能用假值判断「有没有待写」
+  let pending: { value: T } | null = null
+  let frame = 0
+  const land = (): void => {
+    frame = 0
+    if (!pending) return
+    const value = pending.value
+    pending = null
+    write(value)
+  }
+  return {
+    push: (value) => {
+      pending = { value }
+      if (!frame) frame = nextFrame(land)
+    },
+    flush: () => {
+      if (frame) cancelFrame(frame)
+      land()
+    }
+  }
+}
+
 /**
  * 拖动步长的**兜底**：调用方没声明 `step` 时，按当前值是否是整数猜（整数 ±1、浮点 ±0.1）。
  *
@@ -539,8 +590,14 @@ export function ColorField({ label, value, onChange, onDragStart, onDragEnd }: C
    * 整段合并成一条撤销记录 —— 与骨骼、权重刷、关键帧的连续编辑是同一套路，既流畅又不污染撤销栈。
    */
   const dragging = useRef(false)
-  const latest = useRef({ onDragStart, onDragEnd })
-  latest.current = { onDragStart, onDragEnd }
+  const latest = useRef({ onChange, onDragStart, onDragEnd })
+  latest.current = { onChange, onDragStart, onDragEnd }
+  /**
+   * 拾色器 / 透明度滑杆的连续写入走**帧级合并**（见 `createFrameWriter`）：
+   * 一次拖动能连发上百个 `input`，每个都直接写的话，事件会堆在写入后面越拖越卡。
+   */
+  const writer = useRef<{ push: (value: string) => void; flush: () => void } | null>(null)
+  if (!writer.current) writer.current = createFrameWriter<string>((hex) => latest.current.onChange(hex))
   const begin = (): void => {
     if (dragging.current) return
     dragging.current = true
@@ -548,6 +605,8 @@ export function ColorField({ label, value, onChange, onDragStart, onDragEnd }: C
   }
   const end = (): void => {
     if (!dragging.current) return
+    // 先把待写的最后一个值落地，再关事务：否则它落在事务之外，会多出一条撤销记录
+    writer.current?.flush()
     dragging.current = false
     latest.current.onDragEnd?.()
   }
@@ -571,14 +630,16 @@ export function ColorField({ label, value, onChange, onDragStart, onDragEnd }: C
    * 所以在行内补一条透明度滑杆 + 百分比输入，不用再手动改 hex 的后两位。
    */
   const alpha = value.length === 9 ? parseInt(value.slice(7), 16) / 255 : 1
-  const setAlphaPercent = (percent: number): void => {
+  /** 透明度百分比 → `#RRGGBBAA`（RGB 取当前值，只换后两位） */
+  const hexWithAlpha = (percent: number): string => {
     const clamped = Math.min(100, Math.max(0, percent))
     const byte = Math.round((clamped / 100) * 255)
       .toString(16)
       .padStart(2, '0')
       .toUpperCase()
-    onChange(`${rgb}${byte}`)
+    return `${rgb}${byte}`
   }
+  const setAlphaPercent = (percent: number): void => onChange(hexWithAlpha(percent))
   return (
     <label className="flex items-center gap-1.5">
       <span className="hao-label w-[52px] shrink-0">{label}</span>
@@ -591,14 +652,19 @@ export function ColorField({ label, value, onChange, onDragStart, onDragEnd }: C
         onChange={(e) => {
           begin()
           const alphaHex = value.length === 9 ? value.slice(7) : 'FF'
-          onChange(`${e.target.value.toUpperCase()}${alphaHex}`)
+          // 拾色器拖动中连发的 input 按帧合并；透明度仍取当前值（拾色器只改 RGB）
+          writer.current?.push(`${e.target.value.toUpperCase()}${alphaHex}`)
         }}
       />
       <CommitTextField
         className="hao-field min-w-0 flex-1 font-mono uppercase"
         value={value}
         sanitize={parseHexColor}
-        onCommit={onChange}
+        onCommit={(hex) => {
+          // 手打 hex 是单次提交：先把待写的预览值落地，免得两次写入顺序倒过来
+          writer.current?.flush()
+          onChange(hex)
+        }}
       />
       <input
         type="range"
@@ -613,7 +679,8 @@ export function ColorField({ label, value, onChange, onDragStart, onDragEnd }: C
         onPointerCancel={end}
         onChange={(event) => {
           begin()
-          setAlphaPercent(Number(event.target.value) * 100)
+          // 滑杆也是连续拖动：按帧合并（`begin` 只开一次事务，整段仍是一条撤销记录）
+          writer.current?.push(hexWithAlpha(Number(event.target.value) * 100))
         }}
       />
       <div className="relative shrink-0">
@@ -628,7 +695,11 @@ export function ColorField({ label, value, onChange, onDragStart, onDragEnd }: C
             if (!Number.isFinite(next)) return null
             return String(Math.round(Math.min(100, Math.max(0, next))))
           }}
-          onCommit={(raw) => setAlphaPercent(Number(raw))}
+          onCommit={(raw) => {
+            // 手输百分比是单次提交：先把待写的预览值落地，免得两次写入顺序倒过来
+            writer.current?.flush()
+            setAlphaPercent(Number(raw))
+          }}
         />
         <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-3xs text-content-lo">
           %

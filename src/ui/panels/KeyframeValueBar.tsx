@@ -342,6 +342,10 @@ function FrameValueEditor({
         <ColorField
           label="颜色"
           value={rgbaToHex(color)}
+          // 拾色器 / 滑杆的连续拖动包成**一条**撤销记录：不包的话每个 `input` 事件都会
+          // 往撤销栈塞一条等价记录、并且每次都要深拷贝一遍整个项目快照（拖动时必卡）
+          onDragStart={() => useProjectStore.getState().beginTransaction('修改关键帧颜色')}
+          onDragEnd={() => useProjectStore.getState().endTransaction()}
           onChange={(hex) => onEdit('修改关键帧颜色', (item) => { item.value = hexToRgba(hex, color) })}
         />
       </div>

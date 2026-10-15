@@ -1,5 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Bone } from 'lucide-react'
+import ContextMenu from '@ui/widgets/ContextMenu'
+import { slotLayerMenuItems } from '@ui/widgets/slotLayerMenuItems'
 import { EditorScene } from '@editor/scene'
 import { TextureStore } from '@render/material'
 import { ImageAlphaCache } from '@render/imageAlpha'
@@ -81,6 +83,11 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
   /** 绑定骨骼状态下跟着鼠标走的提示图标（用 ref 直接改位置，避免每次移动都触发重渲染） */
   const bindIconRef = useRef<HTMLDivElement | null>(null)
   const pendingWeightBone = useToolStore((s) => s.pendingWeightBone)
+  /**
+   * 视口右键菜单（Pose / Animate 下右键 slot / display）：
+   * pose = 打开时是否 Pose 态（决定菜单里有没有「删除插槽」），打开后不再跟随模式变化。
+   */
+  const [slotMenu, setSlotMenu] = useState<{ x: number; y: number; slot: string; pose: boolean } | null>(null)
 
   useEffect(() => {
     const host = hostRef.current
@@ -374,7 +381,9 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     }
   }
 
-  const toWorld = (event: React.PointerEvent<HTMLDivElement>): { x: number; y: number } | null => {
+  const toWorld = (
+    event: React.PointerEvent<HTMLDivElement> | React.MouseEvent<HTMLDivElement>
+  ): { x: number; y: number } | null => {
     const scene = sceneRef.current
     if (!scene) return null
     const rect = event.currentTarget.getBoundingClientRect()
@@ -486,6 +495,13 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       meshTools.setMeshSubtool('edit')
       return
     }
+
+    /*
+     * 右键 = 上下文菜单（见 onContextMenu）。工具一律**不接管**右键按下：
+     * 否则 Pose 态右键点附件会像左键一样开始拖拽，松手才弹菜单 —— 假交互。
+     * （绑骨骼 / 网格子工具的右键语义在上面各自的分支里处理，轮不到这里。）
+     */
+    if (event.button === 2) return
 
     // Alt+点击 = 插入顶点。这里只**记下待定插点**（不在这里判工具 / 选中：松手时才决定
     // 是插点还是解释为什么不插），真正插入放到松手时 —— 期间没拖动过才算「点击」，
@@ -945,7 +961,25 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         event.stopPropagation()
         onImageDrop(event)
       }}
-      onContextMenu={(e) => e.preventDefault()}
+      onContextMenu={(event) => {
+        event.preventDefault()
+        // 右键菜单只服务 Pose / Animate（选择 / Pose 工具）下对 slot / display 的操作：
+        // 权重刷 / 网格 / 顶点这些工具有自己的右键语义（收尾、结束绑定），别抢
+        const tools = useToolStore.getState()
+        if (tools.tool !== 'select' && tools.tool !== 'pose') return
+        const mode = useModeStore.getState().mode
+        if (mode !== 'pose' && mode !== 'animate') return
+        const world = toWorld(event)
+        const hit = world ? sceneRef.current?.pickAttachmentAt(world.x, world.y) : null
+        if (!hit) return
+        // 菜单**只认点中的附件**：选中骨骼 / 空白处右键都不弹（层级操作针对的就是被点中的这个插槽）
+        // 右键谁就选谁（与左键一致），菜单标题和检查器都跟着切过去
+        const selection = useSelectionStore.getState()
+        if (selection.kind !== 'attachment' || selection.slot !== hit.slot || selection.attachment !== hit.attachment) {
+          selection.selectAttachment(hit.slot, hit.attachment)
+        }
+        setSlotMenu({ x: event.clientX, y: event.clientY, slot: hit.slot, pose: mode === 'pose' })
+      }}
       style={{ cursor: pointer.current.panning ? 'grabbing' : 'default' }}
     >
       {/* 绑定骨骼状态：一个「骨骼」图标跟在鼠标右下角，提示此时点视口是在选骨骼。
@@ -958,6 +992,17 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         >
           <Bone size={14} />
         </div>
+      ) : null}
+
+      {/* 右键菜单：插槽层级（Pose 改 setup / Animate 打层级帧；Animate 态没有「删除」） */}
+      {slotMenu ? (
+        <ContextMenu
+          x={slotMenu.x}
+          y={slotMenu.y}
+          title={`插槽「${slotMenu.slot}」`}
+          items={slotLayerMenuItems(slotMenu.slot, { pose: slotMenu.pose, onStatus })}
+          onClose={() => setSlotMenu(null)}
+        />
       ) : null}
     </div>
   )

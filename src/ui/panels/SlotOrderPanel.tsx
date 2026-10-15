@@ -8,7 +8,9 @@ import { useTimelineStore } from '@editor/store/timelineStore'
 import { useShallow } from 'zustand/react/shallow'
 import { drawOrderFrameAt, keyDrawOrder } from '@editor/commands/animationCommands'
 import { applySlotOrder } from '@editor/commands/hierarchyCommands'
+import { moveSlotLayer } from '@editor/slotOrderOps'
 import ContextMenu from '@ui/widgets/ContextMenu'
+import { slotLayerMenuItems } from '@ui/widgets/slotLayerMenuItems'
 import type { ContextMenuItem } from '@ui/widgets/ContextMenu'
 
 type Direction = 'up' | 'down' | 'top' | 'bottom'
@@ -29,7 +31,7 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
   const [dropIndex, setDropIndex] = useState<number | null>(null)
   /** 行元素（按插槽名索引）：插入位置靠它们的中心线算 */
   const rowRefs = useRef(new Map<string, HTMLDivElement | null>())
-  /** 行右键菜单（Animate 态：写层级帧） */
+  /** 行右键菜单（两种模式都有：Pose 改 setup 层级 / Animate 写层级帧；菜单项见 slotLayerMenuItems） */
   const [rowMenu, setRowMenu] = useState<{ x: number; y: number; slot: string } | null>(null)
 
   const animate = mode === 'animate' && timeline.currentAnimation !== null
@@ -64,20 +66,9 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
   }
 
   const move = (name: string, direction: Direction): void => {
-    const names = [...layers]
-    const index = names.indexOf(name)
-    if (index < 0) return
-    const [moved] = names.splice(index, 1)
-    const target =
-      direction === 'up'
-        ? Math.max(0, index - 1)
-        : direction === 'down'
-          ? Math.min(names.length, index + 1)
-          : direction === 'top'
-            ? 0
-            : names.length
-    names.splice(target, 0, moved)
-    commitOrder(names)
+    // 与视口右键菜单走同一条路（@editor/slotOrderOps）：Pose 改 setup，Animate 写当前时间的层级帧
+    const message = moveSlotLayer(name, direction)
+    if (message) onStatus?.(message)
   }
 
   /**
@@ -243,9 +234,10 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
               ].join(' ')}
               onClick={() => selection.selectSlot(name)}
               onContextMenu={(event) => {
-                // Animate 态：右键插槽 = 写当前时间的层级（绘制顺序）帧
-                if (!animate) return
+                // 右键 = 层级操作菜单，两种模式都有（Pose 改 setup / Animate 打层级帧）
                 event.preventDefault()
+                // 右键谁就选谁：菜单操作与检查器都对着这一行
+                if (selection.kind !== 'slot' || selection.slot !== name) selection.selectSlot(name)
                 setRowMenu({ x: event.clientX, y: event.clientY, slot: name })
               }}
               title={`${slot.name}（挂载于「${hostName(slot)}」）：拖动调整绘制顺序${animate ? '，Animate 态自动打关键帧，右键可写层级帧' : ''}`}
@@ -285,13 +277,23 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
         <ContextMenu
           x={rowMenu.x}
           y={rowMenu.y}
-          title={`插槽「${rowMenu.slot}」· 层级帧${
+          title={`插槽「${rowMenu.slot}」· 层级${
             // 置灰项的 hover 提示看不到，把原因写在标题里
-            animation ? '' : '（当前没有可打帧的动画：先在时间轴点「+ 动画」）'
+            animate && !animation ? '（当前没有可打帧的动画：先在时间轴点「+ 动画」）' : ''
           }`}
-          items={slotOrderKeyframeItem(rowMenu.slot, timeline.time, Boolean(animation), () =>
-            commitOrder(layers)
-          )}
+          items={[
+            // 移动 / 删除与视口右键菜单同一套（Animate 态没有「删除」）
+            ...slotLayerMenuItems(rowMenu.slot, { pose: !animate, onStatus }),
+            // Animate 态额外保留「不动、直接把当前顺序写成帧」的入口（与拖动 / 箭头同一路径）
+            ...(animate
+              ? [
+                  { key: 'sep-key', label: '', separator: true },
+                  ...slotOrderKeyframeItem(rowMenu.slot, timeline.time, Boolean(animation), () =>
+                    commitOrder(layers)
+                  )
+                ]
+              : [])
+          ]}
           onClose={() => setRowMenu(null)}
         />
       ) : null}
@@ -300,8 +302,9 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
 }
 
 /**
- * 这个面板只负责**绘制顺序（层级）**，所以右键只留一项「层级关键帧」：
- * 把当前图层顺序写成当前时间的绘制顺序帧 —— 与拖动 / 点箭头走的是同一条写入路径。
+ * Animate 态右键菜单里额外的一项「层级关键帧」：不动顺序、直接把当前图层顺序写成
+ * 当前时间的绘制顺序帧 —— 与拖动 / 点箭头走的是同一条写入路径。
+ * （移动 / 删除等公共项来自 slotLayerMenuItems，与视口右键菜单共用。）
  *
  * 显示 / 颜色 / 可见性这些**通道**帧归层级树（那边才是按对象 / 通道打帧的入口），
  * 堆在这里只会让人以为「层级面板也能改颜色」。

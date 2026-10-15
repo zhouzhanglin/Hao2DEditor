@@ -250,6 +250,25 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       // 选中网格所绑定的骨骼：叠加层用高亮色画出来（权重骨骼列表里有哪几根就画哪几根）
       let weightBones: string[] = []
       if (selectedAttachmentData?.type === 'mesh') weightBones = weightBonesOf(selectedAttachmentData)
+      /*
+       * 网格线框 / 顶点画在哪个插槽上（场景按它决定**整个网格层**的显隐，见 Scene.drawOverlays
+       * 的 `showMesh`；空串 = 不画）。
+       *
+       * - **权重工具**：只看 `slot`、不看 `kind`。「先选网格、再去点骨骼或刷顶点」是常态，
+       *   那时 kind 已是 bone，但 slot 仍指向要刷的网格 —— 按 kind 卡死会让权重着色与顶点一起消失。
+       * - **选择 / Pose 工具**：必须连 `kind` 一起看。这两个工具没有「骨骼 + 网格」的组合语义，
+       *   而 `selectBone` 出于权重刷的需要**不会**清掉 `slot` / `attachment`，
+       *   于是选了骨骼之后，上一个 display 的线框与四个顶点会一直留着
+       *   —— 用户看到的「选了骨骼，图片的框还在」就是它。
+       *   同一个顾虑在操作器（`selectedAttachment`）与轮廓（`selectedDisplay`）上都是按 kind 卡的，
+       *   只有这里漏了。
+       */
+      const focusMeshSlot =
+        selection.slot &&
+        (tools.tool === 'weight' ||
+          ((tools.tool === 'select' || tools.tool === 'pose') && selection.kind === 'attachment'))
+          ? selection.slot
+          : ''
       scene.setViewState({
         overlay: tools.overlay,
         gizmo: tools.gizmo,
@@ -309,14 +328,8 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
           selectedAttachmentData?.type === 'mesh'
             ? { slot: selection.slot, attachment: selection.attachment }
             : null,
-        /*
-         * 只看 `slot`、不看 `kind`：权重工具里「先选骨骼、再点顶点刷」是常态，那时 kind 是 bone，
-         * 但 slot 仍指向要刷的网格 —— 按 kind 卡死会让权重着色与顶点一起消失。
-         */
-        focusMeshSlot:
-          (tools.tool === 'select' || tools.tool === 'pose' || tools.tool === 'weight') && selection.slot
-            ? selection.slot
-            : '',
+        // 取值规则与理由见上面 focusMeshSlot 的注释
+        focusMeshSlot,
         // 舞台参考图：背景层，仅编辑器显示，不参与导出
         stage: useProjectStore.getState().document.editorMeta.stage
       })

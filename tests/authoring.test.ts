@@ -1100,6 +1100,87 @@ describe('骨骼多选', () => {
     expect(selection().bone).toBe('')
   })
 
+  it('selectedObjects 是规范化的选中对象数组：骨骼多选逐个展开，附件在这一层叫 display', () => {
+    selection().selectBone('armL')
+    expect(selection().selectedObjects).toEqual([{ kind: 'bone', name: 'armL' }])
+
+    selection().toggleBone('armR')
+    expect(selection().selectedObjects).toEqual([
+      { kind: 'bone', name: 'armL' },
+      { kind: 'bone', name: 'armR' }
+    ])
+
+    selection().selectSlot('head')
+    expect(selection().selectedObjects).toEqual([{ kind: 'slot', name: 'head' }])
+
+    // 附件带上所属插槽：「哪个插槽下的哪个 display」才是完整身份
+    selection().selectAttachment('head', 'mesh')
+    expect(selection().selectedObjects).toEqual([{ kind: 'display', slot: 'head', name: 'mesh' }])
+
+    // 约束不在 bone / slot / display 三类里，数组为空（要看对象选中得读 kind）
+    selection().selectConstraint('look')
+    expect(selection().selectedObjects).toEqual([])
+  })
+
+  it('点了骨骼就清掉资源面板里选中的图片（两处选中不能同时亮着）', () => {
+    selection().setPickedImages(['a.png', 'b.png'])
+    expect(selection().pickedImages).toEqual(['a.png', 'b.png'])
+
+    selection().selectBone('armL')
+    expect(selection().pickedImages).toEqual([])
+
+    // 选中 display 同样清掉
+    selection().setPickedImages(['c.png'])
+    selection().selectAttachment('head', 'mesh')
+    expect(selection().pickedImages).toEqual([])
+
+    // 但重复选中「已经是它」的对象时语义没变 → 不该把图片选中清掉
+    selection().setPickedImages(['d.png'])
+    selection().selectAttachment('head', 'mesh')
+    expect(selection().pickedImages).toEqual(['d.png'])
+  })
+
+  it('selectBone 保留 slot/attachment（权重刷要用），所以「点回同一张图片」只能靠 kind 判是否真的换了对象', () => {
+    selection().selectAttachment('head', 'mesh')
+    selection().selectBone('armL')
+
+    // 关键前提：kind 换了，但 slot / attachment 仍留着 ——
+    // 消费方只比这两个字段就会把「点回同一张图片」误判成「没变化」而静默跳过（视口的点选判重踩过）
+    expect(selection().kind).toBe('bone')
+    expect(selection().slot).toBe('head')
+    expect(selection().attachment).toBe('mesh')
+
+    // 视口点回同一个 display 时调的就是这一句：kind 必须切回来，否则图片点不中
+    selection().selectAttachment('head', 'mesh')
+    expect(selection().kind).toBe('attachment')
+    expect(selection().selectedObjects).toEqual([{ kind: 'display', slot: 'head', name: 'mesh' }])
+  })
+
+  it('选中没变化就不通知订阅者（拖拽中反复选中同一根骨骼不会打一串事件）', () => {
+    let notified = 0
+    const unsubscribe = useSelectionStore.subscribe(() => {
+      notified += 1
+    })
+
+    selection().selectBone('armL')
+    expect(notified).toBe(1)
+
+    // 同一根骨骼、同样的顶点：语义没变化 → 不通知
+    selection().selectBone('armL')
+    expect(notified).toBe(1)
+
+    selection().selectBone('armR')
+    expect(notified).toBe(2)
+
+    // 图片选中同理：写同一批内容只发一次
+    selection().setPickedImages(['a.png'])
+    expect(notified).toBe(3)
+    selection().setPickedImages(['a.png'])
+    expect(notified).toBe(3)
+
+    unsubscribe()
+  })
+
   it('wrapDegrees：把角度差收进 (-180, 180]，跨过 atan2 的 ±180° 断开处不会倒转一大圈', () => {
     expect(wrapDegrees(60)).toBe(60)
     expect(wrapDegrees(-45)).toBe(-45)

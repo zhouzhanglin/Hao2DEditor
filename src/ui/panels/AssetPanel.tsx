@@ -26,12 +26,19 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
   const removeImage = useProjectStore((s) => s.removeImage)
   const replaceImage = useProjectStore((s) => s.replaceImage)
   const selection = useSelectionStore()
+  /**
+   * 已选图片（多选）：拖拽时整组一起走，落到视口里一次建多个插槽。
+   *
+   * 存在 `selectionStore` 里而不是本面板的 `useState`：它属于「当前选中」的一部分 ——
+   * 点了骨骼 / 插槽 / display 就该跟着清掉（由 `selectionStore` 的 `commit` 统一处理），
+   * 留在面板里就会出现「骨骼已选中、图片行还亮着」两处高亮同时存在。
+   */
+  const picked = selection.pickedImages
+  const setPicked = selection.setPickedImages
   /** 从系统拖文件悬停在本面板上（面板范围内的高亮，不是整窗覆盖层） */
   const [fileDragging, setFileDragging] = useState(false)
   /** 悬停的图片 + 所在行元素（预览浮层贴在行旁边） */
   const [hovered, setHovered] = useState<{ image: AuthoringImage; row: HTMLElement } | null>(null)
-  /** 已选图片（多选）：拖拽时整组一起走，落到视口里一次建多个插槽 */
-  const [picked, setPicked] = useState<string[]>([])
   /** Shift 范围选择的锚点（上一次普通点击 / Cmd 点击的行） */
   const anchorRef = useRef<string | null>(null)
   /** 右键菜单：位置 + 目标图片名 */
@@ -83,7 +90,8 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
       if (!ok) return
     }
     removeImage(name)
-    setPicked((current) => current.filter((item) => item !== name))
+    // 读 store 的现值而不是渲染闭包里的 `picked`：删除是右键菜单触发的，用最新值更稳
+    setPicked(useSelectionStore.getState().pickedImages.filter((item) => item !== name))
     onStatus?.(refs > 0 ? `已删除「${name}」（${refs} 个附件的贴图已清空）` : `已删除「${name}」`)
   }
 

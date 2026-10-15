@@ -448,8 +448,15 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       return true
     }
     if (att) {
+      /*
+       * 判「是不是换了个 display」必须连 `kind` 一起看：`selectBone` 出于权重刷的需要会**保留**
+       * 上一个 display 的 `slot` / `attachment`（见 ViewportCanvas 的 focusMeshSlot 注释）。
+       * 只比这两个字段的话，「选图片 → 点骨骼 → 再点回同一张图片」会被判成没变化而整段跳过，
+       * 表现出来就是**图片选不中了**（点了几次，选中框再也不回来）。
+       */
       const sel = host.selection
-      if (att.slot !== sel.slot || att.attachment !== sel.attachment) {
+      const isNew = sel.kind !== 'attachment' || att.slot !== sel.slot || att.attachment !== sel.attachment
+      if (isNew) {
         useSelectionStore.getState().selectAttachment(att.slot, att.attachment)
         host.status(`已选中附件「${att.attachment}」（${att.slot}）：可编辑其顶点`)
       }
@@ -520,7 +527,8 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       return true
     }
     if (att) {
-      const isNew = att.slot !== sel.slot || att.attachment !== sel.attachment
+      // 判重同样要连 `kind` 看，理由见上面网格工具那处：`slot` / `attachment` 会因为选中骨骼而留着旧值
+      const isNew = sel.kind !== 'attachment' || att.slot !== sel.slot || att.attachment !== sel.attachment
       if (isNew) useSelectionStore.getState().selectAttachment(att.slot, att.attachment)
       if (host.mode === 'pose') {
         /*

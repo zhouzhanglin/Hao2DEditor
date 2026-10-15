@@ -332,7 +332,10 @@ export default function DopeSheet(props: DopeSheetProps) {
 
   /**
    * 智能过滤的匹配对象：选中骨骼 → 骨骼轨，选中插槽 / 附件 → 该插槽的轨，
-   * 选中约束 → 该约束的轨；什么都没选中时按钮置灰（没有可过滤的目标）
+   * 选中约束 → 该约束的轨。
+   *
+   * 没选中任何对象时为空 —— 此时**按钮照样能按**（先把过滤开着，等选中对象再生效），
+   * 只是过滤不落地：没有可匹配的 target，列表仍旧是全部轨道。
    */
   const selection = useSelectionStore()
   const filterTarget =
@@ -1159,25 +1162,24 @@ export default function DopeSheet(props: DopeSheetProps) {
         >
           <Zap size={13} />
         </button>
+        {/*
+          智能过滤：只显示当前选中对象的轨道。
+          不带文字（底部工具栏就 26px 高，写字会把平移滑块挤窄）—— 与旁边的洋葱皮同款图标按钮，
+          `title` 里写清含义与当前状态；没选中对象也能按：先开着，选中后立即生效。
+        */}
         <button
           type="button"
-          disabled={!filterTarget}
           title={
-            filterTarget
-              ? '智能过滤：只显示当前选中对象的轨道（再点一次恢复全部）'
-              : '智能过滤：先在层级树 / 视口 / 时间轴里选中一个对象'
+            smartFilter
+              ? filterTarget
+                ? `智能过滤：「${filterTarget}」的轨道（再点一次恢复全部）`
+                : '智能过滤已开启，但还没选中对象：选中骨骼 / 插槽 / 约束后只显示它的轨道（再点一次恢复全部）'
+              : '智能过滤：只显示当前选中对象的轨道'
           }
           onClick={() => setSmartFilter((value) => !value)}
-          className={[
-            'flex h-[18px] shrink-0 items-center gap-1 rounded-[4px] px-1.5 text-3xs transition-colors duration-panel',
-            smartFilter && filterTarget
-              ? 'bg-accent-deep text-white'
-              : 'text-content-mid hover:bg-ink-600 hover:text-content-hi',
-            !filterTarget ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'
-          ].join(' ')}
+          className={['hao-tool-button', smartFilter ? 'hao-tool-button-active' : ''].join(' ')}
         >
-          <Filter size={11} />
-          <span>智能过滤</span>
+          <Filter size={13} />
         </button>
         {smartFilter && filterTarget ? (
           <span className="shrink-0 text-3xs text-accent" title="再点一次「智能过滤」恢复全部轨道">

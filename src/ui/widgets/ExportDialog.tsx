@@ -14,6 +14,7 @@ import type { RuntimeAtlasPage } from '@core/codec/runtimeSkeJson'
 import type { SpinePreviewInfo } from '@shared/ipcTypes'
 import { collectHao2dWarnings } from '@core/codec/hao2dWriter'
 import { loadImageElement } from '@render/imageLoader'
+import { useDialogDrag } from './dialogDrag'
 
 /** 三套导出目标：自定义运行时数据 / 给 Unity 的 .hao2d / Spine 4.3 骨骼数据 */
 export type ExportMode = 'runtime' | 'unity' | 'spine'
@@ -106,6 +107,8 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   )
   const rootRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  /** 标题栏拖动弹窗（见 dialogDrag） */
+  const { panelStyle, handleProps } = useDialogDrag()
   /** 预览用的已加载图片（按源图名缓存，切页 / 调参数不用重新解码） */
   const loadedRef = useRef(new Map<string, HTMLImageElement>())
   /** 在线预览：正在编译产物 */
@@ -468,9 +471,10 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
       <div
         ref={rootRef}
         className="my-auto flex w-[780px] max-w-[94vw] flex-col rounded border border-line bg-ink-800 shadow-2xl shadow-black/60"
+        style={panelStyle}
       >
         {/* 标题栏 */}
-        <div className="flex h-[30px] shrink-0 items-center gap-2 border-b border-line bg-ink-700 px-2.5">
+        <div className="flex h-[30px] shrink-0 items-center gap-2 border-b border-line bg-ink-700 px-2.5" {...handleProps}>
           <Package size={13} className="text-accent" />
           <span className="text-panel font-semibold text-content-hi">{MODE_TITLE[mode]}</span>
           <span className="hao-label ml-1">

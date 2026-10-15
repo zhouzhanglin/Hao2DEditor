@@ -7,6 +7,7 @@ import { stageFilePath } from '@editor/services/projectAssets'
 import { PPU } from '@editor/commands/authoringCommands'
 import type { EditorDocument, StageImage } from '@core/model/authoring'
 import { NumberField, SliderField } from './fields'
+import { useDialogDrag } from './dialogDrag'
 
 export interface StageDialogProps {
   onClose: () => void
@@ -26,6 +27,8 @@ export default function StageDialog({ onClose, onStatus = () => undefined }: Sta
   const stage = useProjectStore((s) => s.document.editorMeta.stage)
   const projectPath = useProjectStore((s) => s.projectPath)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  /** 标题栏拖动弹窗（见 dialogDrag） */
+  const { panelStyle, handleProps } = useDialogDrag()
 
   // 预览图 URL 是异步拿到的（hao2d-file:// 协议），按当前文件刷新
   useEffect(() => {
@@ -123,16 +126,18 @@ export default function StageDialog({ onClose, onStatus = () => undefined }: Sta
     >
       <div
         className="w-[380px] overflow-hidden rounded-[10px] border border-white/10 bg-ink-900 text-content-hi shadow-xl shadow-black/40"
+        style={panelStyle}
         onKeyDown={(event) => event.stopPropagation()}
       >
-        <div className="flex h-[30px] items-center justify-between border-b border-white/10 px-3">
+        <div className="flex h-[30px] items-center justify-between border-b border-white/10 px-3" {...handleProps}>
           <span className="flex items-center gap-1.5 text-[12px] font-medium">
             <ImageIcon size={14} />
             舞台参考图
           </span>
           <button
             type="button"
-            className="rounded p-0.5 text-content-lo hover:bg-white/10 hover:text-content-hi"
+            // 标题栏的 `cursor: grab` 会被继承下来，按钮自己声明 pointer 盖掉它
+            className="cursor-pointer rounded p-0.5 text-content-lo hover:bg-white/10 hover:text-content-hi"
             onClick={onClose}
           >
             ✕

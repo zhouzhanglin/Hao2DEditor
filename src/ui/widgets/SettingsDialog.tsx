@@ -4,6 +4,7 @@ import { X } from 'lucide-react'
 import { useSettingsStore } from '@editor/store/settingsStore'
 import { format } from '@ui/widgets/fields'
 import { DEFAULT_BONE_STYLE, normalizeBoneHex } from '@render/overlays/boneStyle'
+import { useDialogDrag } from './dialogDrag'
 
 export interface SettingsDialogProps {
   onClose: () => void
@@ -25,6 +26,8 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
   const setBoneStyle = useSettingsStore((s) => s.setBoneStyle)
   const resetBoneStyle = useSettingsStore((s) => s.resetBoneStyle)
   const rootRef = useRef<HTMLDivElement | null>(null)
+  /** 标题栏拖动弹窗（见 dialogDrag） */
+  const { panelStyle, handleProps } = useDialogDrag()
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -44,12 +47,14 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
       <div
         ref={rootRef}
         className="flex max-h-[86vh] w-[440px] flex-col rounded-[6px] border border-line bg-ink-800 shadow-2xl"
+        style={panelStyle}
       >
-        <div className="flex h-[28px] shrink-0 items-center justify-between border-b border-line px-3">
+        <div className="flex h-[28px] shrink-0 items-center justify-between border-b border-line px-3" {...handleProps}>
           <span className="hao-panel-title">全局设置</span>
           <button
             type="button"
-            className="text-content-lo hover:text-content-hi"
+            // 标题栏的 `cursor: grab` 会被继承下来，按钮自己声明 pointer 盖掉它
+            className="cursor-pointer text-content-lo hover:text-content-hi"
             title="关闭"
             onClick={onClose}
           >

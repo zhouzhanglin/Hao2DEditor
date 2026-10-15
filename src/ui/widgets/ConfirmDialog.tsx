@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { LucideIcon } from 'lucide-react'
 import { X } from 'lucide-react'
+import { useDialogDrag } from './dialogDrag'
 
 export interface ConfirmDialogProps {
   title: string
@@ -44,6 +45,8 @@ export default function ConfirmDialog({
 }: ConfirmDialogProps) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const confirmRef = useRef<HTMLButtonElement | null>(null)
+  /** 标题栏拖动弹窗（见 dialogDrag） */
+  const { panelStyle, handleProps } = useDialogDrag()
 
   // 默认焦点落在「确定」上：Enter 即确认（与系统确认框的习惯一致）
   useEffect(() => {
@@ -68,8 +71,9 @@ export default function ConfirmDialog({
       <div
         ref={rootRef}
         className="flex w-[420px] max-w-[94vw] flex-col rounded border border-line bg-ink-800 shadow-2xl shadow-black/60"
+        style={panelStyle}
       >
-        <div className="flex h-[30px] shrink-0 items-center gap-2 border-b border-line bg-ink-700 px-2.5">
+        <div className="flex h-[30px] shrink-0 items-center gap-2 border-b border-line bg-ink-700 px-2.5" {...handleProps}>
           {Icon ? <Icon size={13} className="text-accent" /> : null}
           <span className="text-panel font-semibold text-content-hi">{title}</span>
           <button type="button" title="关闭（Esc）" className="hao-tool-button ml-auto" onClick={onClose}>

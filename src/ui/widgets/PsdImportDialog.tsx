@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { EyeOff, Folder, Image as ImageIcon, Layers, X } from 'lucide-react'
 import { toPanelOrder } from '@importers/psdImport'
 import type { PsdLayerNode, ParsedPsd } from '@importers/psdImport'
+import { useDialogDrag } from './dialogDrag'
 
 export interface PsdImportDialogProps {
   parsed: ParsedPsd
@@ -40,6 +41,8 @@ export default function PsdImportDialog({ parsed, onConfirm, onClose }: PsdImpor
   const [addToScene, setAddToScene] = useState(true)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const confirmRef = useRef<HTMLButtonElement | null>(null)
+  /** 标题栏拖动弹窗（见 dialogDrag） */
+  const { panelStyle, handleProps } = useDialogDrag()
   // 展示用反转成 Photoshop 面板顺序（最上层在前）；勾选集合用的是节点 id，与展示顺序无关
   const displayRoot = useMemo(() => toPanelOrder(parsed.root), [parsed])
 
@@ -136,8 +139,9 @@ export default function PsdImportDialog({ parsed, onConfirm, onClose }: PsdImpor
       <div
         ref={rootRef}
         className="flex w-[480px] max-w-[94vw] flex-col rounded border border-line bg-ink-800 shadow-2xl shadow-black/60"
+        style={panelStyle}
       >
-        <div className="flex h-[30px] shrink-0 items-center gap-2 border-b border-line bg-ink-700 px-2.5">
+        <div className="flex h-[30px] shrink-0 items-center gap-2 border-b border-line bg-ink-700 px-2.5" {...handleProps}>
           <Layers size={13} className="text-accent" />
           <span className="text-panel font-semibold text-content-hi">导入 PSD</span>
           <span className="truncate text-3xs text-content-lo" title={parsed.fileName}>

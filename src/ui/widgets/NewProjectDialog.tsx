@@ -4,6 +4,7 @@ import { FilePlus2, FolderOpen, Loader2, X } from 'lucide-react'
 import { getPlatform, joinPath } from '@editor/platform'
 import { DEFAULT_PROJECT_NAME } from '@editor/store/projectStore'
 import { PROJECT_EXTENSION } from '@core/codec/projectJson'
+import { useDialogDrag } from './dialogDrag'
 
 export interface NewProjectDialogProps {
   onClose: () => void
@@ -29,6 +30,8 @@ export default function NewProjectDialog({ onClose, onConfirm }: NewProjectDialo
   const [busy, setBusy] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  /** 标题栏拖动弹窗（见 dialogDrag） */
+  const { panelStyle, handleProps } = useDialogDrag()
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -87,8 +90,9 @@ export default function NewProjectDialog({ onClose, onConfirm }: NewProjectDialo
       <div
         ref={rootRef}
         className="flex w-[460px] max-w-[94vw] flex-col rounded border border-line bg-ink-800 shadow-2xl shadow-black/60"
+        style={panelStyle}
       >
-        <div className="flex h-[30px] shrink-0 items-center gap-2 border-b border-line bg-ink-700 px-2.5">
+        <div className="flex h-[30px] shrink-0 items-center gap-2 border-b border-line bg-ink-700 px-2.5" {...handleProps}>
           <FilePlus2 size={13} className="text-accent" />
           <span className="text-panel font-semibold text-content-hi">新建项目</span>
           <button type="button" title="关闭（Esc）" className="hao-tool-button ml-auto" onClick={onClose}>

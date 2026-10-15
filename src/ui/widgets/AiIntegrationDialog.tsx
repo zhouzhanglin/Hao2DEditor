@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Check, Copy, X } from 'lucide-react'
 import { getPlatform } from '@editor/platform'
 import type { McpClientResult } from '@shared/ipcTypes'
+import { useDialogDrag } from './dialogDrag'
 
 export interface AiIntegrationDialogProps {
   onClose: () => void
@@ -28,6 +29,8 @@ export default function AiIntegrationDialog({ onClose }: AiIntegrationDialogProp
   const [installing, setInstalling] = useState(false)
   const [copied, setCopied] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
+  /** 标题栏拖动弹窗（见 dialogDrag） */
+  const { panelStyle, handleProps } = useDialogDrag()
 
   useEffect(() => {
     void getPlatform()
@@ -79,10 +82,17 @@ export default function AiIntegrationDialog({ onClose }: AiIntegrationDialogProp
       <div
         ref={rootRef}
         className="flex h-auto w-[520px] flex-col rounded-[6px] border border-line bg-ink-800 shadow-2xl"
+        style={panelStyle}
       >
-        <div className="flex h-[28px] shrink-0 items-center justify-between border-b border-line px-3">
+        <div className="flex h-[28px] shrink-0 items-center justify-between border-b border-line px-3" {...handleProps}>
           <span className="hao-panel-title">AI 接入</span>
-          <button type="button" className="text-content-lo hover:text-content-hi" title="关闭" onClick={onClose}>
+          <button
+            type="button"
+            // 标题栏的 `cursor: grab` 会被继承下来，按钮自己声明 pointer 盖掉它
+            className="cursor-pointer text-content-lo hover:text-content-hi"
+            title="关闭"
+            onClick={onClose}
+          >
             <X size={14} />
           </button>
         </div>

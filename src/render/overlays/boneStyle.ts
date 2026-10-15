@@ -23,10 +23,10 @@ export interface BoneOverlayStyle {
 }
 
 export const DEFAULT_BONE_STYLE: BoneOverlayStyle = {
-  widthPercent: 3,
+  widthPercent: 5,
   jointRadius: 6,
-  fillColor: '#c4c4c4',
-  fillAlpha: 1,
+  fillColor: '#CCD2D8',
+  fillAlpha: 0.55,
   strokeColor: '#CCD2D8',
   strokeAlpha: 0.9,
   selectedColor: '#4FE3F7'

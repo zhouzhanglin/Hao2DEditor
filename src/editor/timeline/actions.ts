@@ -5,10 +5,12 @@ import { useTimelineStore } from '../store/timelineStore'
 import type { Selection } from '../store/selectionStore'
 import type { RuntimeBundle } from '../runtime'
 import { buildTimeline, deleteKeys, keyframeTargets, syncDuration } from './model'
-import { keySlotDisplay } from '../commands/animationCommands'
+import { keyBoneChannel, keySlotDisplay } from '../commands/animationCommands'
+import type { BoneChannel } from '../commands/animationCommands'
 import type { KeyframeTarget, KeyKind, KeySelector, PoseSnapshot } from './model'
 import type { AuthoringAnimData } from '@core/model/authoring'
 import type { EventKeyframe } from '@core/model/animation'
+import type { Vec2 } from '@core/math/matrix'
 
 export interface ActionResult {
   ok: boolean
@@ -38,8 +40,11 @@ export function selectionTargets(selection: Selection): Array<{ kind: KeyKind; t
  * 打帧要写进哪个动画：优先当前选中的动画；**没选但工程里有动画时自动选第一个** ——
  * 右键菜单打帧不该因为「还没在时间轴上点过动画」就静默失败（只闪一行状态栏，很难发现）。
  * 一个动画都没有时返回空串，由调用方给出明确提示。
+ *
+ * 导出给视口左下角的「属性打帧条」用：那张面板上「菱形亮不亮」和「点下去写到哪」必须是
+ * 同一个动画，否则会出现「亮着但点下去打在别处」。
  */
-function resolveAnimationName(): string {
+export function resolveAnimationName(): string {
   const current = useTimelineStore.getState().currentAnimation
   if (current) return current
   const first = useProjectStore.getState().document.animations[0]
@@ -49,8 +54,8 @@ function resolveAnimationName(): string {
   return first.name
 }
 
-/** 没有可用动画时的统一提示 */
-const NO_ANIMATION_MESSAGE = '工程里还没有动画：先在时间轴点「+ 动画」建一个，再打关键帧'
+/** 没有可用动画时的统一提示（视口属性打帧条也用它，避免同一件事两套说法） */
+export const NO_ANIMATION_MESSAGE = '工程里还没有动画：先在时间轴点「+ 动画」建一个，再打关键帧'
 
 /**
  * 打帧目标 → 时间轴子轨道 id（与 `buildTimeline` 的 id 规则一致）：
@@ -325,6 +330,39 @@ export function deleteSelectedTrack(): ActionResult {
   return removed > 0
     ? { ok: true, message: `已删除通道「${trackLabelOf(focus)}」（${removed} 个关键帧）` }
     : { ok: false, message: `通道「${trackLabelOf(focus)}」没有可删除的关键帧` }
+}
+
+/**
+ * 给**一条骨骼通道**写入一个**明确的值** —— 也就是「改值即打帧」：Animate 态下改一个数就是
+ * 把当前帧的关键帧写成这个值（视口 gizmo 拖拽也是这么干的，见 `writeBoneValue`）。
+ *
+ * 与 `keyframeTargetsNow` 只差值的来源：那个从运行时姿态捕获，这个直接用调用方给的数；
+ * 收尾完全一致（同步时长 / 时间轴滚到该轨道并高亮 / 选中刚打的帧）。
+ * 不写运行时姿态：姿态会被下一次采样冲掉（播放、拖时间、任何一次文档编辑都会重采样），
+ * 只改姿态等于「输进去的数字一会儿自己变回去」。
+ *
+ * 提示文案里不回报数值：调用方（视口属性打帧条）显示的是像素 / 度这类界面单位，
+ * 而这里的 value 是文档单位（世界单位 / 度 / 比例），报出来会和输入框里的数对不上。
+ */
+export function setBoneChannelNow(bone: string, channel: BoneChannel, value: number | Vec2): ActionResult {
+  const animScope = resolveAnimationName()
+  if (!animScope) return { ok: false, message: NO_ANIMATION_MESSAGE }
+  const at = useTimelineStore.getState().time
+  const label = trackLabelOf({ kind: 'bone', target: bone, channel })
+  let written = false
+  useProjectStore.getState().update(`${label}关键帧`, (draft) => {
+    const animation = draft.animations.find((item) => item.name === animScope)
+    if (!animation) return
+    keyBoneChannel(animation, bone, channel, at, value)
+    // 帧落在动画时长之外时同步延长（与时间轴打帧同一套兜底）
+    syncDuration(animation)
+    written = true
+  })
+  if (!written) return { ok: false, message: `找不到动画「${animScope}」` }
+
+  useTimelineStore.getState().notifyKeyed(`bone:${bone}:${channel}`, at)
+  useTimelineStore.getState().setSelectedKeys([{ kind: 'bone', target: bone, attachment: '', channel, time: at }])
+  return { ok: true, message: `已在 ${at.toFixed(2)}s 打「${label}」关键帧` }
 }
 
 /** 通道名的中文label（提示文案用） */

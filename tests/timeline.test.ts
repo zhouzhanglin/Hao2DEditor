@@ -8,6 +8,7 @@ import type { PoseSnapshot } from '@editor/timeline/model'
 import {
   buildTimeline,
   deleteKeys,
+  findKeyframe,
   keyframeTargets,
   lastKeyTime,
   moveKeys,
@@ -534,6 +535,38 @@ describe('打关键帧', () => {
     const color = d.animations[0].slots[0].color[0].value
     expect(color.r).toBe(1)
     expect(color.g).toBeCloseTo(0.5, 4)
+  })
+
+  /**
+   * 视口左下角「属性打帧条」的**读法**：打完帧后用它那套 selector 形状去查必须命中。
+   * 查不到的后果不是报错，而是「菱形一直是灰的、点一下也不变亮」—— 面板本身不会崩，
+   * 所以只能用测试钉住「写进去的」和「读出来的」是同一帧。
+   */
+  it('面板的 selector 形状能查回刚打的帧（骨骼 4 通道 + 插槽颜色 / 显示）', () => {
+    const d = docWithAnim()
+    for (const channel of ['translate', 'rotate', 'scale', 'shear']) {
+      const selector = { kind: 'bone' as const, target: 'root', attachment: '', channel, time: 0.5 }
+      expect(findKeyframe(d.animations[0], selector)).toBeNull()
+      keyframeTargets(d, 'idle', pose, [{ kind: 'bone', target: 'root', attachment: '', channel }], 0.5)
+      expect(findKeyframe(d.animations[0], selector)).not.toBeNull()
+    }
+    // 时间戳是浮点累加出来的，面板靠 1e-4 容差命中（严格相等会漏）
+    expect(
+      findKeyframe(d.animations[0], {
+        kind: 'bone',
+        target: 'root',
+        attachment: '',
+        channel: 'rotate',
+        time: 0.5 + 5e-5
+      })
+    ).not.toBeNull()
+
+    for (const channel of ['color', 'display']) {
+      keyframeTargets(d, 'idle', pose, [{ kind: 'slot', target: 'torso', attachment: '', channel }], 0.5)
+      expect(
+        findKeyframe(d.animations[0], { kind: 'slot', target: 'torso', attachment: '', channel, time: 0.5 })
+      ).not.toBeNull()
+    }
   })
 
   it('FFD 目标写入偏移数组；没有偏移时跳过', () => {

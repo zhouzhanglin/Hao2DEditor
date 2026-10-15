@@ -78,19 +78,29 @@ export function slotColorMessage(slotName: string, target: SlotColorTarget): str
 /**
  * 写入颜色（含透明度）：Animate 打当前时间的颜色帧，Pose 改 setup 颜色。
  *
- * 拖动拾色器时由调用方先 `beginTransaction(label)` 再反复调它：事务期间的每次写入会合并成
+ * 拖动拾色器 / 滑杆时由调用方先 `beginTransaction(label)` 再反复调它：事务期间的每次写入会合并成
  * **一条**撤销记录（见 History.push），画面则是逐帧实时预览。
  * 返回状态栏文案；写不成（插槽 / 动画已不在）时返回原因。
  */
-export function writeSlotColor(slotName: string, hex: string, target: SlotColorTarget): string {
-  const { document, update } = useProjectStore.getState()
+export function writeSlotColor(
+  slotName: string,
+  hex: string,
+  target: SlotColorTarget,
+  /**
+   * 拖动中的高频写入：走 `updateSilent`（不记账，整段由调用方的事务收成一条）。
+   * 与 `SliderField` 的 `silent` 是同一个约定 —— 直接一路 `update` 的话，撤销要按几十下才退回去。
+   */
+  silent = false
+): string {
+  const store = useProjectStore.getState()
+  const { document } = store
   if (!document.slots.some((slot) => slot.name === slotName)) return `插槽「${slotName}」已不存在`
   if (target.animate && !document.animations.some((item) => item.name === target.animation)) {
     return `找不到动画「${target.animation ?? ''}」：先在时间轴选一个动画`
   }
   const color = hexToRgba(hex)
   const value = rgbaToHex(color)
-  update(target.label, (draft) => {
+  const apply = (draft: EditorDocument): void => {
     if (target.animate) {
       const animation = draft.animations.find((item) => item.name === target.animation)
       if (!animation) return
@@ -101,7 +111,9 @@ export function writeSlotColor(slotName: string, hex: string, target: SlotColorT
     }
     const slot = draft.slots.find((item) => item.name === slotName)
     if (slot) slot.color = value
-  })
+  }
+  if (silent) store.updateSilent(apply)
+  else store.update(target.label, apply)
   return slotColorMessage(slotName, target)
 }
 

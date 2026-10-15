@@ -332,8 +332,11 @@ export interface Vector2FieldProps {
  *
  * 不能边打字边解析回写：输入 `1.` 时 `Number('1.')` 就是 1，值没变 → React 把输入框
  * 重新渲染成 `1`，小数点当场被吃掉（小数根本打不进去）。留原文再提交就没这个问题。
+ *
+ * 导出给视口左下角的「属性打帧条」用：那里一个图标旁边就是一两个这样的小框
+ * （宽度由调用方在外层包裹元素上控制 —— 输入框自己是 `hao-field` 的 `w-full`）。
  */
-function VectorInput({
+export function VectorInput({
   value,
   onCommit,
   unitScale = 1,

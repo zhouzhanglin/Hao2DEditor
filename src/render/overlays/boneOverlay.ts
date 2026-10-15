@@ -3,7 +3,7 @@ import type { Skeleton } from '@core/model/skeleton'
 import type { Constraint } from '@core/model/constraints'
 import { BONE_ORIGIN_RADIUS, attachmentGizmoFrame, gizmoGeometry, unshearedWorldRot } from '@render/picking'
 import type { GizmoGeometry } from '@render/picking'
-import { circlePolygon } from './shapes'
+import { circlePolygon, DOT_SEGMENTS } from './shapes'
 
 export interface BoneOverlayOptions {
   /** 1 世界单位对应的屏幕像素的倒数（= 1 / zoom），用于保持描边视觉宽度恒定 */
@@ -250,27 +250,74 @@ export const GIZMO_CENTER_RADIUS = 8
 export const GIZMO_RING_RADIUS = 46
 
 /**
- * 洋葱皮：用**另一时刻**的世界矩阵画一套暗色骨骼作为参考。
- * 只画骨骼线段（不重渲染网格），足以判断前后帧的姿态差异，开销可以忽略。
+ * 洋葱皮幽灵骨骼的配色：**前一帧暖珊瑚、后一帧冷蓝**。
+ * 一暖一冷是各家的通行约定，一眼看出「从哪来（前一帧）、到哪去（后一帧）」；
+ * 早先两帧同色，两个幽灵叠在一起根本分不清哪个是哪个。
+ */
+export const GHOST_PREV_COLOR = 0xff8a6a
+export const GHOST_NEXT_COLOR = 0x5cc8ff
+
+/**
+ * 洋葱皮：用**另一时刻**的世界矩阵画一套幽灵骨骼作参考（不重渲染网格，开销可忽略）。
+ *
+ * 形状与本体骨骼同一套语言（见 drawBoneOverlay）：**细长的风筝 + 关节小圈**，
+ * 但只描边、不填充、尺寸更瘦 —— 幽灵是背景参照，不能和当前姿态抢眼。
+ *
+ * 早先画的是「父骨原点 → 子骨原点」的等宽直线：根骨骼（父 = 自己）退化成零长度
+ * **根本画不出来**，整体又是一团同色乱线，读不出每根骨骼的朝向与长度，所以显得糙。
  */
 export function drawGhostBones(
   g: Graphics,
-  boneCount: number,
-  parentIndices: readonly number[],
   matrices: Float32Array,
+  lengths: readonly number[],
   unitsPerPixel: number,
+  color: number,
   alpha: number
 ): void {
-  for (let i = 0; i < boneCount; i++) {
-    const offset = i * 16
-    const x = matrices[offset + 12]
-    const y = matrices[offset + 13]
-    const parent = parentIndices[i]
-    const px = parent >= 0 ? matrices[parent * 16 + 12] : x
-    const py = parent >= 0 ? matrices[parent * 16 + 13] : y
-    g.moveTo(px, py).lineTo(x, y)
+  const w = unitsPerPixel
+  // 骨骼体与关节圈分两批描边：同一批内的所有路径合并成一次绘制调用
+  for (let i = 0; i < lengths.length; i++) {
+    const o = i * 16
+    const sx = matrices[o]
+    const sy = matrices[o + 1]
+    const scale = Math.hypot(sx, sy)
+    if (scale < 1e-6) continue
+    const reach = lengths[i] * scale
+    if (reach < 1e-4) continue
+    const x = matrices[o + 12]
+    const y = matrices[o + 13]
+    // 幽灵只作参照，方向直接取矩阵 x 轴（不必像本体那样剔除剪切）
+    const dx = sx / scale
+    const dy = sy / scale
+    const px = -dy
+    const py = dx
+    // 比本体更瘦（本体半宽 5% 长度）：细一点不抢戏，但足够看出朝向
+    const shoulder = reach * 0.12
+    const halfW = Math.min(Math.max(reach * 0.035, w * 1.1), reach * 0.24)
+    g.poly(
+      [
+        x,
+        y, // 顶点（骨骼原点）
+        x + dx * shoulder + px * halfW,
+        y + dy * shoulder + py * halfW, // 左肩
+        x + dx * reach,
+        y + dy * reach, // 末端尖端
+        x + dx * shoulder - px * halfW,
+        y + dy * shoulder - py * halfW // 右肩
+      ],
+      true
+    )
   }
-  g.stroke({ width: unitsPerPixel * 1.6, color: 0x8B5CF6, alpha })
+  g.stroke({ width: w * 1.3, color, alpha })
+
+  // 关节小圈：比本体（半径 6px）小一档，只提示「关节在这儿」，不喧宾夺主
+  const joint = w * 3.6
+  for (let i = 0; i < lengths.length; i++) {
+    const o = i * 16
+    // 小圈用 DOT_SEGMENTS：半径只有 3.6px，48 段看不出差别，纯属白白多算顶点
+    g.poly(circlePolygon(matrices[o + 12], matrices[o + 13], joint, DOT_SEGMENTS), true)
+  }
+  g.stroke({ width: w * 1.1, color, alpha: alpha * 0.7 })
 }
 
 /**

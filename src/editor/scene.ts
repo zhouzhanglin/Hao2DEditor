@@ -14,7 +14,9 @@ import {
   drawBoneOverlay,
   drawDisplayOutline,
   drawGhostBones,
-  drawShearBox
+  drawShearBox,
+  GHOST_NEXT_COLOR,
+  GHOST_PREV_COLOR
 } from '@render/overlays/boneOverlay'
 import { circlePolygon } from '@render/overlays/shapes'
 import type { GizmoDrawMode } from '@render/overlays/boneOverlay'
@@ -191,6 +193,11 @@ export class EditorScene {
   private readonly meshFill = new Graphics()
   private readonly boneStroke = new Graphics()
   private readonly boneFill = new Graphics()
+  /**
+   * 洋葱皮：前后帧的幽灵骨骼。**必须独立成层** —— 骨骼层每次重绘都会 `clear()`，
+   * 幽灵画进 boneStroke 会被紧接着的 drawBoneOverlay 当场擦掉（开了洋葱皮看不到东西）。
+   */
+  private readonly ghostBones = new Graphics()
   /** display 轮廓线（选中 + 悬停共用；只描线不填色，画在骨骼之下、网格之上） */
   private readonly outlineStroke = new Graphics()
   /** 骨骼变换小坐标轴（描边 / 填充分开，同 pixi v8 的路径规则） */
@@ -250,6 +257,8 @@ export class EditorScene {
       this.meshStroke,
       // 轮廓线压在最下面：骨骼与操作器都盖在它之上，手柄不会被描边挡住
       this.outlineStroke,
+      // 洋葱皮的幽灵骨骼压在当前骨骼之下：真人骨骼盖住幽灵，对比更清楚
+      this.ghostBones,
       this.boneFill,
       this.boneStroke,
       /*
@@ -1183,22 +1192,30 @@ export class EditorScene {
     const player = bundle.player
     const skeleton = bundle.skeleton
     const current = player.time
-    const step = Math.max(1 / 120, duration * 0.04)
+    /*
+     * 前后偏移取时长的 8%（不低于 1/30s）：4% 时（1 秒动画 ≈ 40ms）姿态差异太小，
+     * 幽灵几乎与本体完全重合，看上去就像「没开」。放大到 8% 才看得出前后姿态的走向。
+     */
+    const step = Math.max(1 / 30, duration * 0.08)
 
-    const ghosts: Array<{ matrices: Float32Array; alpha: number }> = []
+    const ghosts: Array<{ matrices: Float32Array; color: number }> = []
     for (const offset of [-step, step]) {
       let target = current + offset
       if (target < 0) target += duration
       if (target > duration) target -= duration
       player.seek(target)
-      ghosts.push({ matrices: skeleton.world.slice(), alpha: 0.22 })
+      ghosts.push({
+        matrices: skeleton.world.slice(),
+        color: offset < 0 ? GHOST_PREV_COLOR : GHOST_NEXT_COLOR
+      })
     }
     // 回到原来的时间点，恢复当前姿态
     player.seek(current)
 
-    const parents = bundle.asset.bones.map((bone) => bone.parentIndex)
+    const lengths = bundle.asset.bones.map((bone) => bone.length)
     for (const ghost of ghosts) {
-      drawGhostBones(g, skeleton.boneCount, parents, ghost.matrices, unitsPerPixel, ghost.alpha)
+      // alpha 0.45：只描边的空心风筝，压在角色贴图上要看得清，又不与当前姿态抢眼
+      drawGhostBones(g, ghost.matrices, lengths, unitsPerPixel, ghost.color, 0.45)
     }
   }
 
@@ -1377,7 +1394,14 @@ export class EditorScene {
       : new Map<number, number>()
     this.boneStroke.visible = showBoneLayer
     this.boneFill.visible = showBoneLayer
-    if (showSkeleton && bundle && state.onionSkin) this.drawOnionSkin(this.boneStroke, unitPerPixel)
+    /*
+     * 洋葱皮画在**独立图层**：骨骼层每次重绘都会 clear()，幽灵画进 boneStroke 会被
+     * 紧随其后的 drawBoneOverlay 当场擦掉（这就是「开了洋葱皮什么都看不到」的原因）。
+     * 可见性跟骨骼开关走 —— 只在「显示骨骼」时幽灵才有参照意义。
+     */
+    this.ghostBones.visible = showSkeleton
+    this.ghostBones.clear()
+    if (showSkeleton && bundle && state.onionSkin) this.drawOnionSkin(this.ghostBones, unitPerPixel)
     if (showBoneLayer && bundle) {
       drawBoneOverlay(this.boneStroke, this.boneFill, bundle.skeleton, bundle.asset.constraints, {
         unitsPerPixel: unitPerPixel,

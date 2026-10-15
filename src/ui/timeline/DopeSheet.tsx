@@ -731,6 +731,8 @@ export default function DopeSheet(props: DopeSheetProps) {
   ): void => {
     event.stopPropagation()
     if (event.button !== 0) return
+    // 点击关键帧的同时把播放头定位到该帧（未播放时点哪条竖线就跳到哪帧上方）
+    props.onScrub(snapScrub(marker.slot))
     props.onSelectTarget(track)
     // 直接读 store 的选择状态：连续快速点击时 props / propsRef 都还没跟上渲染，会读到过期值
     const live = useTimelineStore.getState().selectedKeys

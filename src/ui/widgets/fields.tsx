@@ -171,12 +171,14 @@ export function NumberField({
     setText(format(next, precision))
   }
 
-  // 中键左右拖动调值：步长与字段的 step 一致（与上下键微调同步）
+  // 中键左右拖动调值：显示值是整数时按 1 步进（整数字段的手感），否则用字段声明的 step。
+  // 显示空间里看到的是整数（如长度 200 / 缩放 1.0），就该一格一格走，别被分数 step 拖成 0.05 这种细碎增量。
+  const scrubStep = Number.isInteger(shown) ? 1 : step
   const scrub = useScrubDrag(shown, (next) => commit(String(next)), {
     enabled: !disabled,
     min,
     max,
-    step
+    step: scrubStep
   })
 
   return (
@@ -363,14 +365,15 @@ function VectorInput({
     setText(format(parsed))
   }
 
-  // 中键左右拖动调值：步长与字段的 step 一致（与上下键微调同步）
+  // 中键左右拖动调值：显示值是整数时按 1 步进（与 NumberField 同口径）
+  const scrubStep = Number.isInteger(shown) ? 1 : step
   const scrub = useScrubDrag(
     shown,
     (next) => {
       onCommit(next / scale)
       setText(format(next))
     },
-    { step }
+    { step: scrubStep }
   )
 
   return (
@@ -559,27 +562,75 @@ export function ColorField({ label, value, onChange, onDragStart, onDragEnd }: C
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const rgb = value.length === 9 ? value.slice(0, 7) : value
+  /*
+   * alpha 通道（#RRGGBBAA 的 AA）：原生 `<input type=color>` 的弹窗只有 RGB + 色相条，
+   * **没有 alpha**——而颜色值本身带 alpha 且运行时真的在用（mesh.alpha = color.a），
+   * 所以在行内补一条透明度滑杆 + 百分比输入，不用再手动改 hex 的后两位。
+   */
+  const alpha = value.length === 9 ? parseInt(value.slice(7), 16) / 255 : 1
+  const setAlphaPercent = (percent: number): void => {
+    const clamped = Math.min(100, Math.max(0, percent))
+    const byte = Math.round((clamped / 100) * 255)
+      .toString(16)
+      .padStart(2, '0')
+      .toUpperCase()
+    onChange(`${rgb}${byte}`)
+  }
   return (
     <label className="flex items-center gap-1.5">
       <span className="hao-label w-[52px] shrink-0">{label}</span>
       <input
         ref={inputRef}
         type="color"
-        className="h-[22px] w-[30px] cursor-pointer rounded border border-line bg-ink-900 p-0"
+        className="h-[22px] w-[30px] shrink-0 cursor-pointer rounded border border-line bg-ink-900 p-0"
         value={rgb.startsWith('#') ? rgb : '#ffffff'}
         onBlur={end}
         onChange={(e) => {
           begin()
-          const alpha = value.length === 9 ? value.slice(7) : 'FF'
-          onChange(`${e.target.value.toUpperCase()}${alpha}`)
+          const alphaHex = value.length === 9 ? value.slice(7) : 'FF'
+          onChange(`${e.target.value.toUpperCase()}${alphaHex}`)
         }}
       />
       <CommitTextField
-        className="hao-field font-mono uppercase"
+        className="hao-field min-w-0 flex-1 font-mono uppercase"
         value={value}
         sanitize={parseHexColor}
         onCommit={onChange}
       />
+      <input
+        type="range"
+        min={0}
+        max={1}
+        step={0.01}
+        className="h-[14px] w-[64px] shrink-0 cursor-pointer accent-accent"
+        title="透明度（alpha）"
+        value={alpha}
+        onPointerDown={begin}
+        onPointerUp={end}
+        onPointerCancel={end}
+        onChange={(event) => {
+          begin()
+          setAlphaPercent(Number(event.target.value) * 100)
+        }}
+      />
+      <div className="relative shrink-0">
+        <CommitTextField
+          className="hao-field w-[46px] pr-4 text-right font-mono text-3xs"
+          value={String(Math.round(alpha * 100))}
+          inputMode="decimal"
+          title="透明度百分比（0–100）；失焦 / 回车生效，中键左右拖动可调"
+          scrub
+          sanitize={(raw) => {
+            const next = Number(raw)
+            if (!Number.isFinite(next)) return null
+            return String(Math.round(Math.min(100, Math.max(0, next))))
+          }}
+          onCommit={(raw) => setAlphaPercent(Number(raw))}
+        />
+        <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-3xs text-content-lo">
+          %
+        </span>
+      </div>
     </label>
   )
 }

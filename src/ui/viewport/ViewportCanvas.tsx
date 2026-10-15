@@ -6,7 +6,7 @@ import { EditorScene } from '@editor/scene'
 import { TextureStore } from '@render/material'
 import { ImageAlphaCache } from '@render/imageAlpha'
 import { imageSources } from '@render/imageSourceRegistry'
-import { getPlatform } from '@editor/platform'
+import { getPlatform, dirName } from '@editor/platform'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useToolStore } from '@editor/store/toolStore'
@@ -40,6 +40,9 @@ import { hasImageDrag, readImageDrag } from '@ui/widgets/dragDrop'
 import { gridDropLayout } from '@ui/viewport/dropLayout'
 import type { AuthoringImage } from '@core/model/authoring'
 import { rootBoneName } from '@core/model/authoring'
+import { stageFilePath } from '@editor/services/projectAssets'
+import { ImageSource, Texture } from 'pixi.js'
+import { loadImageElement } from '@render/imageLoader'
 
 /**
  * 权重刷的鼠标光标：**形状本身就是提示** —— 加号=增加、减号=减少、圆点=覆盖（直接替换）。
@@ -313,7 +316,9 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         focusMeshSlot:
           (tools.tool === 'select' || tools.tool === 'pose' || tools.tool === 'weight') && selection.slot
             ? selection.slot
-            : ''
+            : '',
+        // 舞台参考图：背景层，仅编辑器显示，不参与导出
+        stage: useProjectStore.getState().document.editorMeta.stage
       })
     }
     push()
@@ -328,6 +333,48 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     ]
     return () => {
       for (const unsubscribe of unsubscribers) unsubscribe()
+    }
+  }, [])
+
+  // 舞台参考图贴图：舞台文件（或工程路径）变化时（重新）加载，喂给场景；移除时清掉
+  useEffect(() => {
+    let cancelled = false
+    let lastKey = ''
+    const load = async (): Promise<void> => {
+      const state = useProjectStore.getState()
+      const stage = state.document.editorMeta.stage
+      const projectPath = state.projectPath
+      const scene = sceneRef.current
+      if (!stage || !projectPath || !scene) {
+        scene?.setStageTexture(null)
+        return
+      }
+      const absPath = stageFilePath(dirName(projectPath), stage.file)
+      if (absPath === lastKey) return
+      lastKey = absPath
+      try {
+        const url = await getPlatform().imageUrl(absPath)
+        if (!url || cancelled) return
+        const image = await loadImageElement(url)
+        if (cancelled) return
+        const texture = new Texture({
+          source: new ImageSource({ resource: image, alphaMode: 'premultiply-alpha-on-upload' })
+        })
+        if (cancelled) {
+          texture.destroy(true)
+          return
+        }
+        scene.setStageTexture(texture)
+      } catch (error) {
+        console.error('[视口] 加载舞台参考图失败：', error)
+        if (!cancelled) scene.setStageTexture(null)
+      }
+    }
+    void load()
+    const unsubscribe = useProjectStore.subscribe(() => void load())
+    return () => {
+      cancelled = true
+      unsubscribe()
     }
   }, [])
 

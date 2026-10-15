@@ -40,6 +40,11 @@ export class Viewport {
 
   /** 坐标轴图层：位于棋盘格之上、角色之下 */
   readonly axisLayer = new Container()
+  /**
+   * 舞台参考图图层：棋盘格之上、坐标轴与角色**之下** —— 参考图是背景，
+   * 原点 / 轴线要一直压在它上面看得见，角色更是要盖住它。
+   */
+  readonly stageLayer = new Container()
 
   private readonly onZoomChange: (zoom: number) => void
   private readonly canvas: HTMLCanvasElement
@@ -62,7 +67,7 @@ export class Viewport {
     this.canvas.style.height = '100%'
     host.appendChild(this.canvas)
     this.onZoomChange = options.onZoomChange ?? (() => undefined)
-    this.world.addChild(this.axisLayer, this.contentLayer, this.overlayLayer)
+    this.world.addChild(this.stageLayer, this.axisLayer, this.contentLayer, this.overlayLayer)
     this.app.stage.addChild(this.world)
     this.hostObserver =
       typeof ResizeObserver === 'undefined'

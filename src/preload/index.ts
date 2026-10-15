@@ -36,6 +36,7 @@ const bridge: HaoBridge = {
   writeBatch: (files: BatchFile[]) => invoke<void>(IPC.writeBatch, files),
   listDir: (dir: string, recursive: boolean) => invoke<DirEntry[]>(IPC.listDir, dir, recursive),
   exists: (p: string) => invoke<boolean>(IPC.exists, p),
+  deleteFile: (p: string) => invoke<boolean>(IPC.deleteFile, p),
   imageInfo: (paths: string[]) => invoke<ImageInfo[]>(IPC.imageInfo, paths),
   registerAssetRoot: (dir: string) => invoke<void>(IPC.registerAssetRoot, dir),
   recentList: () => invoke<string[]>(IPC.recentList),

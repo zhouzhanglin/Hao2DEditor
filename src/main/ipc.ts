@@ -55,6 +55,7 @@ export function registerIpcHandlers(): void {
     fs.safe(() => fs.listDir(dir, Boolean(recursive)))
   )
   ipcMain.handle(IPC.exists, (_e, p: string) => fs.safe(() => fs.pathExists(p)))
+  ipcMain.handle(IPC.deleteFile, (_e, p: string) => fs.safe(() => fs.deleteFile(p)))
   ipcMain.handle(IPC.imageInfo, (_e, paths: string[]) => fs.safe(() => fs.imageInfo(paths)))
   ipcMain.handle(IPC.registerAssetRoot, (_e, dir: string) =>
     fs.safe(() => fs.registerAssetRootFor(dir))

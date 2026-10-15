@@ -18,7 +18,8 @@ import type {
   AuthoringSlot,
   AuthoringVertex,
   EditorDocument,
-  EditorMeta
+  EditorMeta,
+  StageImage
 } from '../model/authoring'
 import { CURRENT_SCHEMA_VERSION, createDefaultMeta, createEmptyDocument } from '../model/authoring'
 
@@ -582,7 +583,23 @@ function normalizeMeta(raw: unknown): EditorMeta {
       // 老工程的 strength 是 0..1 的直接强度；换成 0..100 的 Hardness 要乘 100
       hardness: num(brush.hardness, num(brush.strength, base.brush.hardness / 100) * 100),
       normalize: bool(brush.normalize, base.brush.normalize)
-    }
+    },
+    stage: normalizeStage(raw.stage)
+  }
+}
+
+/** 舞台参考图：缺字段填默认值；没有 file（没设置过 / 老工程）就是 null */
+function normalizeStage(raw: unknown): StageImage | null {
+  if (!isRecord(raw)) return null
+  const file = str(raw.file)
+  if (!file) return null
+  return {
+    file,
+    x: num(raw.x),
+    y: num(raw.y),
+    width: Math.max(0.01, num(raw.width, 1)),
+    height: Math.max(0.01, num(raw.height, 1)),
+    opacity: Math.min(1, Math.max(0, num(raw.opacity, 0.5)))
   }
 }
 

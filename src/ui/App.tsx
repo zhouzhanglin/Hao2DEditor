@@ -103,6 +103,7 @@ import NewProjectDialog from '@ui/widgets/NewProjectDialog'
 import SettingsDialog from '@ui/widgets/SettingsDialog'
 import AiIntegrationDialog from '@ui/widgets/AiIntegrationDialog'
 import PsdImportDialog from '@ui/widgets/PsdImportDialog'
+import StageDialog from '@ui/widgets/StageDialog'
 import { importPsdLayers, pickAndParsePsd, setPsdDialogOpener } from '@editor/services/psdImport'
 import type { ParsedPsd } from '@importers/psdImport'
 import { deleteSelectedTrack, keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
@@ -156,6 +157,8 @@ export default function App() {
   const [aiOpen, setAiOpen] = useState(false)
   /** 「导入 PSD」弹窗：null = 未打开；解析结果（图层树 + 每层画布）在这里暂存 */
   const [psdImport, setPsdImport] = useState<ParsedPsd | null>(null)
+  /** 舞台参考图弹窗 */
+  const [stageOpen, setStageOpen] = useState(false)
 
   // PSD 弹窗的统一打开入口：「导入 PSD」菜单 / 「导入图片」选到 .psd / 拖入 .psd 都经服务层回调到这里
   useEffect(() => {
@@ -819,7 +822,7 @@ export default function App() {
                 onToggleOverlay={tools.toggleOverlay}
                 onFitViewport={() => handleCommand('view:fitViewport')}
               />
-              <ViewportTools onStatus={flash} />
+              <ViewportTools onStatus={flash} onOpenStage={() => setStageOpen(true)} />
               {/* 左下角网格子工具条：只在「网格工具 + Pose 态」出现（见 MeshSubtoolBar 内部判断） */}
               <MeshSubtoolBar onStatus={flash} />
               {/* 关键帧的值：贴在视口正下方中间，改值时光看画面即可（仅 Animate 态出现） */}
@@ -881,6 +884,7 @@ export default function App() {
       {psdImport ? (
         <PsdImportDialog parsed={psdImport} onConfirm={confirmPsdImport} onClose={() => setPsdImport(null)} />
       ) : null}
+      {stageOpen ? <StageDialog onClose={() => setStageOpen(false)} onStatus={flash} /> : null}
     </div>
   )
 }

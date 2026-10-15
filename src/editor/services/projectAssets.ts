@@ -11,6 +11,23 @@ import type { BatchFile } from '@shared/ipcTypes'
  */
 export const ASSET_DIR = 'images'
 
+/**
+ * 舞台参考图目录名：参考图存到 `<工程目录>/stage/`。
+ * 与 ASSET_DIR 不同，参考图不进图集、不参与导出，只在编辑器里当背景显示；
+ * `editorMeta.stage.file` 只存文件名，加载时按 `<工程目录>/stage/<file>` 解析。
+ */
+export const STAGE_DIR = 'stage'
+
+/** 舞台参考图在磁盘上的绝对路径 */
+export function stageFilePath(projectDir: string, file: string): string {
+  return joinPath(projectDir, STAGE_DIR, file)
+}
+
+/** 舞台参考图在工程内的相对路径（用于显示/调试，不参与导出） */
+export function stageRelativePath(file: string): string {
+  return `${STAGE_DIR}/${file}`
+}
+
 /** 内联或网络资源（不是磁盘文件）：dataURL、blob、http(s)、file、内存文件系统 */
 const NON_FILE_RE = /^(data|blob|https?|file):/i
 

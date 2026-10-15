@@ -71,6 +71,7 @@ export const IPC = {
   writeBatch: 'fs:writeBatch',
   listDir: 'fs:listDir',
   exists: 'fs:exists',
+  deleteFile: 'fs:deleteFile',
   stat: 'fs:stat',
   imageInfo: 'fs:imageInfo',
   registerAssetRoot: 'assets:registerRoot',
@@ -209,6 +210,8 @@ export interface HaoBridge {
   writeBatch(files: BatchFile[]): Promise<IpcResult<void>>
   listDir(dir: string, recursive: boolean): Promise<IpcResult<DirEntry[]>>
   exists(path: string): Promise<IpcResult<boolean>>
+  /** 删除文件（舞台参考图等编辑器自己写出的文件）；返回是否真的删了（不存在返回 false） */
+  deleteFile(path: string): Promise<IpcResult<boolean>>
   imageInfo(paths: string[]): Promise<IpcResult<ImageInfo[]>>
   /** 把目录登记为可被 hao2d-file:// 读取的资源根（导入碎图时调用） */
   registerAssetRoot(dir: string): Promise<IpcResult<void>>

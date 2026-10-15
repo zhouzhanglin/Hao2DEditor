@@ -1,4 +1,4 @@
-import { Container, FillGradient, Graphics } from 'pixi.js'
+import { Container, FillGradient, Graphics, Sprite, Texture } from 'pixi.js'
 import { MAT4_LENGTH, invert, mul, mulPoint, trs } from '@core/math/matrix'
 import type { Vec2 } from '@core/math/matrix'
 import { Viewport } from '@render/viewport'
@@ -62,13 +62,15 @@ export interface ShearBox {
 }
 import type { MeshBuildResult } from '@core/skin/meshBuilder'
 import type { AttachmentData } from '@core/model/types'
-import type { AuthoringAttachment, EditorDocument } from '@core/model/authoring'
+import type { AuthoringAttachment, EditorDocument, StageImage } from '@core/model/authoring'
 import { animationDuration, buildRuntime, needsRebuild } from './runtime'
 import type { RuntimeBundle } from './runtime'
 import type { OverlayState } from './store/toolStore'
 
 export interface SceneViewState {
   overlay: OverlayState
+  /** 舞台参考图（背景，仅编辑器用）：null = 没设置；贴图由 ViewportCanvas 异步喂进来 */
+  stage: StageImage | null
   /**
    * 网格线框 / 顶点**只画这个插槽**（'' = 不限制）。
    *
@@ -211,6 +213,11 @@ export class EditorScene {
   private readonly regionFrame = new Graphics()
   /** 网格子工具正在画的折线（画边界 / 自定义布线）：同样画在最上层 */
   private readonly meshPath = new Graphics()
+  /**
+   * 舞台参考图（背景）：挂在 `viewport.stageLayer`（棋盘格之上、坐标轴与角色之下）。
+   * 贴图由 ViewportCanvas 异步加载后经 `setStageTexture` 喂进来；配置每帧应用（改弹窗实时生效）。
+   */
+  private readonly stageSprite = new Sprite()
   /** 软边圆用的径向渐变（按模式缓存：颜色与停止点都是固定的，与半径无关） */
   private readonly brushGradients = new Map<BrushMode, FillGradient>()
   /** 需要画成空心的骨骼名集合（编辑期模型才有 hollow 字段） */
@@ -224,6 +231,7 @@ export class EditorScene {
   private viewState: SceneViewState = {
     // 网格 / FFD / 权重显示都不看开关：按选中项、工具与权重刷自动决定
     overlay: { bones: true, constraints: true },
+    stage: null,
     focusMeshSlot: '',
     isolateMeshSlot: '',
     isolateMeshAttachment: '',
@@ -275,6 +283,16 @@ export class EditorScene {
     )
     this.viewport.overlayLayer.addChild(this.overlay)
     this.viewport.axisLayer.addChild(this.axes)
+    this.viewport.stageLayer.addChild(this.stageSprite)
+  }
+
+  /** 换舞台参考图的贴图（ViewportCanvas 加载完成后调用；null = 清掉） */
+  setStageTexture(texture: Texture | null): void {
+    const prev = this.stageSprite.texture
+    this.stageSprite.texture = texture ?? Texture.EMPTY
+    // 旧贴图是我们自己 new 出来的，换掉就没人引用了，销毁掉避免 GPU 资源泄漏
+    if (prev && prev !== Texture.EMPTY && prev !== texture) prev.destroy(true)
+    this.dirty = true
   }
 
   async init(): Promise<void> {
@@ -409,6 +427,8 @@ export class EditorScene {
     if (patch.pendingMeshPath !== undefined) this.markDirty()
     // 进出「自己绘制边界」要换一整帧的显示（藏网格 / 画 region 框）
     if (patch.boundaryTarget !== undefined) this.markDirty()
+    // 舞台参考图：位置 / 大小 / 透明度变了要立即重画
+    if (patch.stage !== undefined) this.markDirty()
 
     // 外部改时间（拖时间轴 / 逐帧 / 切关键帧）→ 立即 seek 到播放器并重建一帧。
     // 播放中同样生效，这样「拖时间轴时画面跟着走」和「继续播放」不会互相打架。
@@ -1361,10 +1381,28 @@ export class EditorScene {
     g.stroke({ width: unitPerPixel * 1.4, color: REGION_FRAME_COLOR, alpha: 0.9 })
   }
 
+  /** 把舞台参考图的配置应用到精灵上（每帧调用：弹窗里改位置 / 大小 / 透明度实时生效） */
+  private updateStageSprite(): void {
+    const stage = this.viewState.stage
+    const texture = this.stageSprite.texture
+    if (!stage || !texture || texture === Texture.EMPTY) {
+      this.stageSprite.visible = false
+      return
+    }
+    this.stageSprite.visible = true
+    // 锚点居中：配置里的 x/y 是图片**中心**的世界坐标；世界 y 轴向上（相机做了 y 翻转），
+    // 贴图要再翻回来，否则参考图是倒立的
+    this.stageSprite.anchor.set(0.5, 0.5)
+    this.stageSprite.position.set(stage.x, stage.y)
+    this.stageSprite.scale.set(stage.width / texture.width, -(stage.height / texture.height))
+    this.stageSprite.alpha = stage.opacity
+  }
+
   private drawOverlays(): void {
     const bundle = this.bundle
     const state = this.viewState
     const unitPerPixel = this.viewport.pixelsToWorld(1)
+    this.updateStageSprite()
     // 骨骼本体与约束是**两个独立开关**，但共用同一对绘制层：
     // 「骨骼」关掉、「约束」仍开时这一层还要留着画约束手柄，只是跳过骨骼本体。
     // 曾经用 `bones || constraints` 当作骨骼自身的可见条件，于是关掉「骨骼」后骨架仍在屏幕上。

@@ -23,6 +23,7 @@ const log = createLogger('fs')
 const TEXT_EXT = new Set([
   '.json',
   '.txt',
+  '.md',
   '.atlas',
   '.skel',
   '.hao2d.json',
@@ -160,6 +161,22 @@ export async function pathExists(p: string): Promise<boolean> {
   const target = assertSafePath(p)
   const st = await fsp.stat(target).catch(() => null)
   return st !== null
+}
+
+/**
+ * 删除文件（舞台参考图等**编辑器自己写出**的文件）。
+ * 返回是否真的删了（文件本来就不存在返回 false，调用方不用为此报错）。
+ */
+export async function deleteFile(p: string): Promise<boolean> {
+  const target = assertSafePath(p)
+  const existed = await fsp
+    .access(target)
+    .then(() => true)
+    .catch(() => false)
+  if (!existed) return false
+  await fsp.rm(target, { force: true })
+  log.info(`已删除文件：${target}`)
+  return true
 }
 
 export async function imageInfo(paths: string[]): Promise<ImageInfo[]> {

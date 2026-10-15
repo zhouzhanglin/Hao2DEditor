@@ -2,6 +2,7 @@ import {
   Bone,
   ChartPie,
   Grid3x3,
+  Image as ImageIcon,
   MousePointer2,
   Move,
   MoveDiagonal2,
@@ -116,9 +117,14 @@ const GIZMO_TONE: Record<GizmoMode, string> = {
 
 export interface ViewportToolsProps {
   onStatus?: (text: string) => void
+  /** 点「舞台」按钮：打开舞台参考图弹窗 */
+  onOpenStage?: () => void
 }
 
-export default function ViewportTools({ onStatus = () => undefined }: ViewportToolsProps) {
+export default function ViewportTools({
+  onStatus = () => undefined,
+  onOpenStage
+}: ViewportToolsProps) {
   const mode = useModeStore((s) => s.mode)
   const tool = useToolStore((s) => s.tool)
   const setTool = useToolStore((s) => s.setTool)
@@ -189,6 +195,20 @@ export default function ViewportTools({ onStatus = () => undefined }: ViewportTo
           </button>
         )
       })}
+
+      <div className="mx-1 my-0.5 h-px bg-line" />
+
+      <button
+        type="button"
+        title="舞台（参考图）\n设置视口背景参考图：位置 / 大小 / 透明度，仅编辑器显示，不导出"
+        onClick={() => {
+          onOpenStage?.()
+          onStatus('舞台：打开参考图设置')
+        }}
+        className={[buttonClass, 'border-transparent text-content-mid hover:bg-white/[0.08] hover:text-content-hi'].join(' ')}
+      >
+        <ImageIcon size={17} />
+      </button>
     </div>
   )
 }

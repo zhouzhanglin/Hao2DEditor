@@ -35,6 +35,8 @@ export interface Platform {
   writeBatch(files: BatchFile[]): Promise<void>
   listDir(dir: string, recursive: boolean): Promise<DirEntry[]>
   exists(path: string): Promise<boolean>
+  /** 删除文件（舞台参考图等编辑器自己写出的文件）；文件不存在返回 false */
+  deleteFile(path: string): Promise<boolean>
   imageInfo(paths: string[]): Promise<ImageInfo[]>
   registerAssetRoot(dir: string): Promise<void>
   recentList(): Promise<string[]>
@@ -129,6 +131,10 @@ class ElectronPlatform implements Platform {
 
   exists(path: string): Promise<boolean> {
     return this.bridge.exists(path).then((r) => unwrap(r, false))
+  }
+
+  deleteFile(path: string): Promise<boolean> {
+    return this.bridge.deleteFile(path).then((r) => unwrap(r, false))
   }
 
   imageInfo(paths: string[]): Promise<ImageInfo[]> {
@@ -334,6 +340,17 @@ class MemoryPlatform implements Platform {
 
   async exists(path: string): Promise<boolean> {
     return this.files.has(path)
+  }
+
+  /** 内存文件系统：直接摘掉条目，blob URL 一并回收 */
+  async deleteFile(path: string): Promise<boolean> {
+    const existed = this.files.delete(path)
+    const blob = this.blobs.get(path)
+    if (blob) {
+      URL.revokeObjectURL(blob)
+      this.blobs.delete(path)
+    }
+    return existed
   }
 
   async imageInfo(paths: string[]): Promise<ImageInfo[]> {

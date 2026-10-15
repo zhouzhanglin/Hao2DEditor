@@ -249,6 +249,28 @@ export interface EditorMeta {
   }
   /** 上次导出的图集缩放（有存档时持久化进工程文件，下次导出默认沿用）；未设置按 1 处理 */
   exportScale?: number
+  /**
+   * 舞台参考图：铺在角色**后面**的背景图（构图 / 姿态参照），null = 没设置。
+   * 只活在编辑器里 —— 运行时导出完全不读它；图片文件存在工程目录的 `stage/` 下随工程走。
+   */
+  stage: StageImage | null
+}
+
+/**
+ * 舞台参考图的配置。图片文件本体不进工程 JSON（只有这份描述进），
+ * 文件存 `<工程目录>/stage/<file>`，位置 / 大小都用世界单位（与附件同一把尺：1 单位 = PPU 像素）。
+ */
+export interface StageImage {
+  /** 图片文件名（相对工程目录的 stage/ 文件夹） */
+  file: string
+  /** 图片中心点的世界坐标（y 轴向上） */
+  x: number
+  y: number
+  /** 显示尺寸（世界单位） */
+  width: number
+  height: number
+  /** 不透明度 0..1（参考图要压暗，别喧宾夺主） */
+  opacity: number
 }
 
 export const CURRENT_SCHEMA_VERSION = 1
@@ -280,7 +302,8 @@ export function createDefaultMeta(): EditorMeta {
     activeSkin: '',
     activeAnimation: '',
     overlay: { bones: true, constraints: true },
-    brush: { mode: 'addSubtract', size: 40, hardness: 1.5, normalize: true }
+    brush: { mode: 'addSubtract', size: 40, hardness: 1.5, normalize: true },
+    stage: null
   }
 }
 

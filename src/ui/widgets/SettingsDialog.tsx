@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import { useSettingsStore } from '@editor/store/settingsStore'
-import { format } from '@ui/widgets/fields'
+import { CommitTextField, format, parseHexColor } from '@ui/widgets/fields'
 import { DEFAULT_BONE_STYLE, normalizeBoneHex } from '@render/overlays/boneStyle'
 import { useDialogDrag } from './dialogDrag'
 
@@ -228,10 +228,14 @@ function NumberRow({
 }
 
 /**
- * 颜色行：色块（系统拾色器）+ 透明度滑杆。
+ * 颜色行：色块（系统拾色器）+ hex 输入框 + 透明度滑杆 + 百分比输入框。
  *
- * 颜色与 alpha 在设置里是**两个字段**（`#RRGGBB` + 0..1），与 `ColorField` 的
- * `#RRGGBBAA` 单串不同 —— 这里不拖动文档值，没必要引入整套拖动事务。
+ * 长相照抄检查器 / 关键帧值条里的 `ColorField`（色块 30×22、`hao-field` 输入框、
+ * 64px 蓝色滑杆、46px 百分比框），但**不直接复用它**，两个原因：
+ * - 设置里颜色与 alpha 是**两个字段**（`#RRGGBB` + 0..1），`ColorField` 吃的是
+ *   `#RRGGBBAA` 单串，硬凑会多一层拆装；
+ * - `ColorField` 的百分比输入框带中键拖动，那条路会开 `projectStore` 事务
+ *   （见本文件顶部注释：改全局偏好不该留撤销记录、更不该把工程标成未保存）。
  */
 function ColorRow({
   label,
@@ -244,7 +248,7 @@ function ColorRow({
   label: string
   hint?: string
   hex: string
-  /** 给了才显示透明度滑杆（「选中颜色」不需要：选中态的透明度是写死的高亮档） */
+  /** 给了才显示透明度滑杆与百分比框（「选中颜色」不需要：选中态的透明度是写死的高亮档） */
   alpha?: number
   onHex: (hex: string) => void
   onAlpha?: (alpha: number) => void
@@ -254,27 +258,49 @@ function ColorRow({
       <span className="hao-label w-[52px] shrink-0">{label}</span>
       <input
         type="color"
-        className="h-[18px] w-[36px] shrink-0 cursor-pointer rounded-[3px] border border-line bg-ink-900 p-0"
+        className="h-[22px] w-[30px] shrink-0 cursor-pointer rounded border border-line bg-ink-900 p-0"
         value={normalizeHex(hex)}
         onChange={(event) => onHex(event.target.value.toUpperCase())}
+      />
+      {/* 显示归一化后的值：设置里存了坏值（手改 localStorage）时，文本框与色块显示同一个退回色 */}
+      <CommitTextField
+        className="hao-field min-w-0 flex-1 font-mono uppercase"
+        value={normalizeHex(hex).toUpperCase()}
+        sanitize={parseSettingsHex}
+        onCommit={onHex}
       />
       {alpha !== undefined && onAlpha ? (
         <>
           <input
             type="range"
-            className="h-[14px] min-w-0 flex-1 cursor-pointer accent-cyan-400"
+            className="h-[14px] w-[64px] shrink-0 cursor-pointer accent-accent"
+            title="透明度（alpha）"
             min={0}
             max={1}
             step={0.01}
             value={alpha}
             onChange={(event) => onAlpha(Number(event.target.value))}
           />
-          <span className="w-[30px] shrink-0 text-right font-mono text-3xs text-content-lo">
-            {Math.round(alpha * 100)}%
-          </span>
+          <div className="relative shrink-0">
+            <CommitTextField
+              className="hao-field w-[46px] pr-4 text-right font-mono text-3xs"
+              value={String(Math.round(alpha * 100))}
+              inputMode="decimal"
+              title="透明度百分比（0–100）；失焦 / 回车生效"
+              sanitize={parsePercent}
+              onCommit={(raw) => onAlpha(Number(raw) / 100)}
+            />
+            <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-3xs text-content-lo">
+              %
+            </span>
+          </div>
         </>
       ) : (
-        <span className="font-mono text-3xs text-content-lo">{normalizeHex(hex)}</span>
+        /* 「选中颜色」没有 alpha：补两个同宽空位，让三行的色块与 hex 框左右对齐 */
+        <>
+          <span className="w-[64px] shrink-0" aria-hidden />
+          <span className="w-[46px] shrink-0" aria-hidden />
+        </>
       )}
     </div>
   )
@@ -283,4 +309,17 @@ function ColorRow({
 /** `<input type="color">` 只吃 6 位 hex；设置里存坏值（手改 localStorage）时退回默认色 */
 function normalizeHex(hex: string): string {
   return normalizeBoneHex(hex, DEFAULT_BONE_STYLE.fillColor).toLowerCase()
+}
+
+/** hex 框的校验：设置里的颜色就是 `#RRGGBB`（alpha 是另一个字段），带 alpha 的 8 位一律作废 */
+function parseSettingsHex(raw: string): string | null {
+  const parsed = parseHexColor(raw)
+  return parsed && parsed.length === 7 ? parsed : null
+}
+
+/** 百分比框的校验：夹到 0–100 的整数 */
+function parsePercent(raw: string): string | null {
+  const next = Number(raw)
+  if (!Number.isFinite(next)) return null
+  return String(Math.round(Math.min(100, Math.max(0, next))))
 }

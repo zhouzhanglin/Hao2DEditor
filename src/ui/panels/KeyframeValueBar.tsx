@@ -1,10 +1,21 @@
 import { hexToRgba, rgbaToHex } from '@core/util/color'
+import type { EditorDocument } from '@core/model/authoring'
 import type { RGBA } from '@core/model/types'
+import { keySlotDisplay } from '@editor/commands/animationCommands'
 import { useProjectStore } from '@editor/store/projectStore'
+import { useSelectionStore } from '@editor/store/selectionStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { findKeyframe } from '@editor/timeline/model'
 import type { AnyKeyframe, KeySelector } from '@editor/timeline/model'
-import { ColorField, NumberField, PX_PER_UNIT, TextField, ToggleField, Vector2Field } from '@ui/widgets/fields'
+import {
+  ColorField,
+  NumberField,
+  PX_PER_UNIT,
+  SelectField,
+  TextField,
+  ToggleField,
+  Vector2Field
+} from '@ui/widgets/fields'
 
 const KIND_LABEL: Record<KeySelector['kind'], string> = {
   bone: '骨骼',
@@ -55,6 +66,8 @@ export default function KeyframeValueBar() {
   const update = useProjectStore((s) => s.update)
   const animationName = useTimelineStore((s) => s.currentAnimation)
   const selectedKeys = useTimelineStore((s) => s.selectedKeys)
+  /** 当前皮肤：display 通道的下拉要从它取清单（取法同层级树 / 属性面板） */
+  const skinName = useSelectionStore((s) => s.skin)
 
   const animation = document.animations.find((item) => item.name === animationName) ?? null
   const single = selectedKeys.length === 1 ? selectedKeys[0] : null
@@ -72,6 +85,64 @@ export default function KeyframeValueBar() {
   }
 
   if (selectedKeys.length === 0) return null
+  /*
+   * FFD（网格顶点偏移）**没有**可直接编辑的值：一帧偏移是「每个顶点两个数」，只能在视口里用
+   * FFD 工具拖。这条面板对它只剩一句占位提示，干脆整条不出现 —— 免得白挂一行字挡在视口下边。
+   */
+  if (selectedKeys.every((key) => key.kind === 'deform')) return null
+
+  /** display 清单来自当前皮肤（空则 default）：帧里那个下标就是它的下标，`-1` = 不显示 */
+  const activeSkin =
+    (skinName ? document.skins.find((item) => item.name === skinName) : null) ?? document.skins[0] ?? null
+  const displaysOf = (slotName: string): EditorDocument['skins'][number]['slots'][number]['attachments'] =>
+    activeSkin?.slots.find((item) => item.slot === slotName)?.attachments ?? []
+
+  /**
+   * 选中的这一帧显示的是哪个 display（按**名**取）。
+   *
+   * 帧里只存了下标，名字在并行的 `displayAttachment` 里；两者不一致时**名字优先**
+   * （运行期与导出同一口径，见 core 的 resolveDisplay 与 spineExport 的 resolveDisplayAttachment），
+   * 所以先按名字取，名字为空（DragonBones 导入的数据没名字）再按下标回查当前皮肤。
+   */
+  const displayNameOf = (slotName: string, time: number, index: number): string => {
+    const track = animation?.slots.find((item) => item.slot === slotName)
+    const at = track ? track.displayIndex.findIndex((item) => Math.abs(item.time - time) < 1e-4) : -1
+    const byName = at >= 0 ? (track?.displayAttachment[at] ?? '') : ''
+    return byName || displaysOf(slotName)[index]?.name || ''
+  }
+
+  /**
+   * 改「显示附件」关键帧：下拉给的是 display 名，帧里要写的却是**下标**，两者必须成对写回
+   * （交给 `keySlotDisplay`，它按时间 upsert 并保持配对）。只写一个的话名字优先级更高，
+   * 播放时看到的还是原来那个 display。
+   */
+  const setDisplay = (displayName: string): void => {
+    if (!single) return
+    const slotName = single.target
+    const time = single.time
+    // 空名 = 这一帧起不显示任何 display，下标写 -1（与 setup「什么都不显示」同一约定）
+    const index = displayName ? displaysOf(slotName).findIndex((item) => item.name === displayName) : -1
+    update('修改显示关键帧', (draft) => {
+      const target = draft.animations.find((item) => item.name === animationName)
+      if (target) keySlotDisplay(target, slotName, time, index, displayName)
+    })
+  }
+
+  /**
+   * display 通道专用下拉：帧里存的是下标（还有 `-1` 这种「不显示」的隐藏值），
+   * 让人对着一个数字猜是哪个 display 没有意义 —— 名字才是能看懂、也是运行期认的那个口径。
+   */
+  const displayField =
+    single && single.kind === 'slot' && (single.channel === 'display' || single.channel === 'displayIndex')
+      ? {
+          value: displayNameOf(single.target, single.time, typeof frame?.value === 'number' ? frame.value : -1),
+          options: [
+            { value: '', label: '不显示' },
+            ...displaysOf(single.target).map((item) => ({ value: item.name, label: item.name }))
+          ],
+          onChange: setDisplay
+        }
+      : null
 
   const frameIndex = single ? Math.round(single.time * document.frameRate) : 0
   const channels = selectedKeys.map((key) => CHANNEL_LABEL[key.channel] ?? key.channel).join('、')
@@ -136,7 +207,12 @@ export default function KeyframeValueBar() {
               {channels || single.channel} · <span className="font-mono">{single.time.toFixed(3)}s</span>
               （第 {frameIndex} 帧）
             </span>
-            <FrameValueEditor frame={frame} channel={single.channel} onEdit={(label, mutate) => editFrames(label, mutate)} />
+            <FrameValueEditor
+              frame={frame}
+              channel={single.channel}
+              display={displayField}
+              onEdit={(label, mutate) => editFrames(label, mutate)}
+            />
           </>
         )
       ) : (
@@ -158,18 +234,30 @@ function InfoChip({ label, value }: { label: string; value: string }) {
   )
 }
 
-/** 按关键帧值的实际形状分派编辑控件（数值 / 二维 / 颜色 / 布尔 / FFD 数组） */
+/** 按关键帧值的实际形状分派编辑控件（display 下拉 / 数值 / 二维 / 颜色 / 布尔） */
 function FrameValueEditor({
   frame,
   channel,
+  display,
   onEdit
 }: {
   frame: AnyKeyframe | null
   /** 轨道名（translate / rotate / scale / …）：同一控件承载不同物理量，长度类要按轨道决定是否按像素显示 */
   channel: string
+  /** display 通道的下拉（帧里存的是下标，得按名字选）；其它通道为 null */
+  display: { value: string; options: Array<{ value: string; label: string }>; onChange: (name: string) => void } | null
   onEdit: (label: string, mutate: (frame: AnyKeyframe) => void) => void
 }) {
   const value = frame?.value
+
+  // 显示附件要排在数值分支前面：它的值恰好也是数字（下标），但这里要选的是 display 名
+  if (display) {
+    return (
+      <div className={SLOT}>
+        <SelectField label="值" value={display.value} options={display.options} onChange={display.onChange} />
+      </div>
+    )
+  }
 
   if (typeof value === 'number') {
     // 标量轨道无量纲（rotate 是度、mix 是权重）：不换算。
@@ -229,10 +317,7 @@ function FrameValueEditor({
     )
   }
 
-  if (frame && Array.isArray(frame.offsets)) {
-    const count = Math.floor(frame.offsets.length / 2)
-    return <InfoChip label="FFD" value={`${count} 个顶点偏移（视口用 FFD 工具拖）`} />
-  }
+  // FFD（网格顶点偏移）不会走到这里：整条属性面板对 deform 帧直接不渲染，见组件顶部的早退
 
   return <InfoChip label="值" value="该通道没有可直接编辑的值" />
 }

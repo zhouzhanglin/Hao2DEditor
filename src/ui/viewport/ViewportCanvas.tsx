@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bone } from 'lucide-react'
+import { Bone, Palette } from 'lucide-react'
 import ContextMenu from '@ui/widgets/ContextMenu'
+import ColorPickerPopover from '@ui/widgets/ColorPickerPopover'
 import { slotLayerMenuItems } from '@ui/widgets/slotLayerMenuItems'
+import {
+  highlightSlotColorKey,
+  slotColorHexAt,
+  slotColorMessage,
+  slotColorTarget,
+  writeSlotColor
+} from '@editor/slotColorOps'
+import type { SlotColorTarget } from '@editor/slotColorOps'
 import { EditorScene } from '@editor/scene'
 import { TextureStore } from '@render/material'
 import { ImageAlphaCache } from '@render/imageAlpha'
@@ -91,6 +100,17 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
    * pose = 打开时是否 Pose 态（决定菜单里有没有「删除插槽」），打开后不再跟随模式变化。
    */
   const [slotMenu, setSlotMenu] = useState<{ x: number; y: number; slot: string; pose: boolean } | null>(null)
+  /**
+   * 右键菜单「修改颜色」弹出的拾色器：`target` 在打开时定死（Pose 改 setup 颜色 /
+   * Animate 在当前时间打颜色帧），`value` 只是打开那一刻的初始颜色，之后由弹层自己维护。
+   */
+  const [colorPicker, setColorPicker] = useState<{
+    x: number
+    y: number
+    slot: string
+    target: SlotColorTarget
+    value: string
+  } | null>(null)
 
   useEffect(() => {
     const host = hostRef.current
@@ -482,7 +502,50 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     return insertMeshVertexAt(clientX, clientY, rect)
   }
 
+  /**
+   * 鼠标「已经不在视口上」时的一次性清理：跟随图标藏起来，悬停轮廓 / 刷子圈 / 网格悬停收掉。
+   * onPointerLeave 用它；弹层上的事件也用它（见 isOwnEvent）。
+   */
+  const resetPointerPreview = (): void => {
+    // 跟随图标藏起来（下次进来随手一动，它又回到鼠标旁边）
+    if (bindIconRef.current) bindIconRef.current.style.visibility = 'hidden'
+    // 悬停轮廓也要清掉：鼠标已经不在视口里了，留着会像「卡住的选中态」
+    const scene = sceneRef.current
+    if (scene?.state.hoveredDisplay) {
+      scene.setViewState({ hoveredDisplay: null })
+      scene.markDirty()
+    }
+    // 刷子半径圈同理：它是跟着鼠标走的光标，鼠标出去了就该收起来
+    if (scene?.state.brushRing) scene.setViewState({ brushRing: null })
+    // 网格子工具的悬停 / 橡皮筋末端也是跟鼠标走的，出去一并清掉
+    if (scene) {
+      const path = scene.state.pendingMeshPath
+      if (scene.state.hoveredVertex >= 0 || path?.cursor) {
+        scene.setViewState({ hoveredVertex: -1, pendingMeshPath: path ? { ...path, cursor: null } : null })
+      }
+    }
+    pointer.current.boneClick = null
+  }
+
+  /**
+   * 这个指针事件是不是**真的发生在视口里**。
+   *
+   * 右键菜单和拾色器都 portal 到 body，但**仍然是 ViewportCanvas 的 React 子树**：
+   * React 的事件按 **React 树**（不是 DOM 树）冒泡，所以弹层里拖一下会一路冒到宿主的
+   * onPointerMove / onPointerDown 上 —— 表现就是「穿透」：调颜色时视口跟着悬停骨骼、
+   * 点选、甚至起拖，滚轮缩放、双击适配视野、右键还会弹插槽菜单。
+   *
+   * 判据：事件目标落在宿主的 DOM 子树里才算视口自己的事件（portal 的内容挂在 body 下，不在其中）。
+   * 不属于视口时顺手清掉悬停预览 —— 鼠标已经不在视口上了，与 onPointerLeave 同一口径。
+   */
+  const isOwnEvent = (event: { target: EventTarget | null }): boolean => {
+    if (event.target instanceof Node && hostRef.current?.contains(event.target) === true) return true
+    resetPointerPreview()
+    return false
+  }
+
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (!isOwnEvent(event)) return
     const scene = sceneRef.current
     if (!scene) return
 
@@ -662,6 +725,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
   }
 
   const onPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (!isOwnEvent(event)) return
     if (bindIconRef.current) moveBindIcon(event)
     const scene = sceneRef.current
     if (!scene) return
@@ -817,6 +881,11 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
   }
 
   const releasePointer = (event: React.PointerEvent<HTMLDivElement>): void => {
+    /*
+     * 这里**刻意不查 isOwnEvent**：松手必须收尾（清 pointer.current、结束工具拖拽）。
+     * 它做的事都由「视口里的按下」触发（那些按下已经被 isOwnEvent 挡掉了），
+     * 弹层上的松手进来也是空跑；挡掉反而可能把待定插点 / 拖拽状态留在半路。
+     */
     const pending = pointer.current.insert
     pointer.current.panning = false
     pointer.current.insert = null
@@ -854,6 +923,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
   }
 
   const onWheel = (event: React.WheelEvent<HTMLDivElement>): void => {
+    if (!isOwnEvent(event)) return
     const scene = sceneRef.current
     if (!scene) return
     const rect = event.currentTarget.getBoundingClientRect()
@@ -951,11 +1021,23 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     }
   }
 
+  /**
+   * 打开「修改颜色」拾色器：模式 / 动画 / 时间都在这一刻定死（拖完之前一直沿用），
+   * 初始颜色与运行期同一口径 —— Animate 且该插槽已有颜色轨 → 按当前时间采样，否则 setup 颜色。
+   */
+  const openColorPicker = (menu: { x: number; y: number; slot: string }): void => {
+    const doc = useProjectStore.getState().document
+    if (!doc.slots.some((slot) => slot.name === menu.slot)) return
+    const target = slotColorTarget()
+    setColorPicker({ x: menu.x, y: menu.y, slot: menu.slot, target, value: slotColorHexAt(doc, target, menu.slot) })
+  }
+
   return (
     <div
       ref={hostRef}
       className="hao-checkerboard relative flex-1 overflow-hidden"
       onMouseDown={(e) => {
+        if (!isOwnEvent(e)) return
         // 中键默认会触发浏览器的「自动滚动」（四向箭头 + 滚动页面），在 mousedown 阶段拦掉
         if (e.button === 1) e.preventDefault()
       }}
@@ -966,28 +1048,11 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       onPointerEnter={() => {
         if (bindIconRef.current) bindIconRef.current.style.visibility = ''
       }}
-      onPointerLeave={() => {
-        // 鼠标离开视口就把跟随图标藏起来（下次进来随手一动，它又回到鼠标旁边）
-        if (bindIconRef.current) bindIconRef.current.style.visibility = 'hidden'
-        // 悬停轮廓也要清掉：鼠标已经不在视口里了，留着会像「卡住的选中态」
-        const scene = sceneRef.current
-        if (scene?.state.hoveredDisplay) {
-          scene.setViewState({ hoveredDisplay: null })
-          scene.markDirty()
-        }
-        // 刷子半径圈同理：它是跟着鼠标走的光标，鼠标出去了就该收起来
-        if (scene?.state.brushRing) scene.setViewState({ brushRing: null })
-        // 网格子工具的悬停 / 橡皮筋末端也是跟鼠标走的，出去一并清掉
-        if (scene) {
-          const path = scene.state.pendingMeshPath
-          if (scene.state.hoveredVertex >= 0 || path?.cursor) {
-            scene.setViewState({ hoveredVertex: -1, pendingMeshPath: path ? { ...path, cursor: null } : null })
-          }
-        }
-        pointer.current.boneClick = null
-      }}
+      // 离开视口（含移到弹层上，见 isOwnEvent）就把跟随图标藏起来 + 清掉悬停预览
+      onPointerLeave={resetPointerPreview}
       onWheel={onWheel}
       onDoubleClick={(event) => {
+        if (!isOwnEvent(event)) return
         // 网格 / FFD 工具下双击网格内部 = 插一个顶点（与 Alt+点击共用同一实现）
         if (tryInsertMeshVertex(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect())) {
           return
@@ -996,6 +1061,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         onStatus('已适配视野')
       }}
       onDragOver={(event) => {
+        if (!isOwnEvent(event)) return
         if (!hasImageDrag(event.dataTransfer)) return
         // 内部图片拖拽在视口里处理完就停下，别冒泡去触发整窗的拖放兜底处理
         event.preventDefault()
@@ -1003,12 +1069,14 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         event.dataTransfer.dropEffect = 'copy'
       }}
       onDrop={(event) => {
+        if (!isOwnEvent(event)) return
         if (!hasImageDrag(event.dataTransfer)) return
         event.preventDefault()
         event.stopPropagation()
         onImageDrop(event)
       }}
       onContextMenu={(event) => {
+        if (!isOwnEvent(event)) return
         event.preventDefault()
         // 右键菜单只服务 Pose / Animate（选择 / Pose 工具）下对 slot / display 的操作：
         // 权重刷 / 网格 / 顶点这些工具有自己的右键语义（收尾、结束绑定），别抢
@@ -1041,14 +1109,64 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         </div>
       ) : null}
 
-      {/* 右键菜单：插槽层级（Pose 改 setup / Animate 打层级帧；Animate 态没有「删除」） */}
+      {/* 右键菜单：最上面是「修改颜色」（点中谁就改谁的颜色），下面是插槽层级
+          （Pose 改 setup / Animate 打层级帧；Animate 态没有「删除」） */}
       {slotMenu ? (
         <ContextMenu
           x={slotMenu.x}
           y={slotMenu.y}
           title={`插槽「${slotMenu.slot}」`}
-          items={slotLayerMenuItems(slotMenu.slot, { pose: slotMenu.pose, onStatus })}
+          items={[
+            {
+              key: 'edit-color',
+              label: '修改颜色',
+              icon: <Palette size={12} />,
+              hint: slotMenu.pose
+                ? '修改插槽的颜色与透明度（写 setup 颜色）'
+                : '在当前时间打插槽颜色关键帧（颜色 + 透明度一起进帧）',
+              onSelect: () => openColorPicker(slotMenu)
+            },
+            { key: 'edit-color-sep', label: '', separator: true },
+            ...slotLayerMenuItems(slotMenu.slot, { pose: slotMenu.pose, onStatus })
+          ]}
           onClose={() => setSlotMenu(null)}
+        />
+      ) : null}
+
+      {/* 拾色器：弹层自己 portal 到 body（与右键菜单一致，不受视口 overflow 裁剪）。
+          拖动整段只留一条撤销记录 —— onDragStart 开事务、onDragEnd 收尾 + 报一次状态栏。 */}
+      {colorPicker ? (
+        <ColorPickerPopover
+          key={colorPicker.slot}
+          x={colorPicker.x}
+          y={colorPicker.y}
+          title={`插槽「${colorPicker.slot}」· 颜色 / 透明度`}
+          value={colorPicker.value}
+          hint={
+            colorPicker.target.animate
+              ? `Animate：改动会写入 ${colorPicker.target.time.toFixed(3)}s 的颜色关键帧（含透明度）`
+              : 'Pose：改动写 setup 颜色；Animate 下改的是当前时间的关键帧'
+          }
+          /*
+           * 点视口关弹层的那一按要吞掉：视口的按下 = 点选（点空白取消选择 / 点别的 display 换选中 /
+           * 点附件起拖）。关个拾色器不该动选中态，哪怕弹层消失之后也一样。
+           */
+          absorbDismiss={(target) => target instanceof Node && hostRef.current?.contains(target) === true}
+          onChange={(hex) => {
+            // 拖动中不刷状态栏（收尾时统一报一次），只把值实时写进去
+            writeSlotColor(colorPicker.slot, hex, colorPicker.target)
+          }}
+          onDragStart={() => useProjectStore.getState().beginTransaction(colorPicker.target.label)}
+          onDragEnd={() => {
+            useProjectStore.getState().endTransaction()
+            if (colorPicker.target.animate) highlightSlotColorKey(colorPicker.slot, colorPicker.target.time)
+            onStatus(slotColorMessage(colorPicker.slot, colorPicker.target))
+          }}
+          onCommit={(hex) => {
+            onStatus(writeSlotColor(colorPicker.slot, hex, colorPicker.target))
+            if (colorPicker.target.animate) highlightSlotColorKey(colorPicker.slot, colorPicker.target.time)
+          }}
+          onClose={() => setColorPicker(null)}
         />
       ) : null}
     </div>

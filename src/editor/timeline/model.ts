@@ -76,6 +76,20 @@ export interface KeySelector {
   time: number
 }
 
+/**
+ * 两个选择器是不是**同一帧**（时间按 1e-4 容差比 —— 时间戳是浮点累加出来的，严格相等不可靠）。
+ * 用来判「这一帧本来就已经选中了吗」：DopeSheet 的选中判定与打帧后的高亮都认它。
+ */
+export function sameSelector(a: KeySelector, b: KeySelector): boolean {
+  return (
+    a.kind === b.kind &&
+    a.target === b.target &&
+    a.attachment === b.attachment &&
+    a.channel === b.channel &&
+    Math.abs(a.time - b.time) < 1e-4
+  )
+}
+
 const GROUP_LABEL: Record<KeyKind, string> = {
   bone: '骨骼',
   slot: '插槽',

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Filter, Flag, Lock, Minus, Plus, Zap, ZoomIn } from 'lucide-react'
 import { TIMELINE_ZOOM_MAX, TIMELINE_ZOOM_MIN } from '@editor/store/timelineStore'
+import { sameSelector } from '@editor/timeline/model'
 import type { KeySelector, TimelineTrack } from '@editor/timeline/model'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
@@ -107,16 +108,6 @@ const CHANNEL_TONE: Record<string, string> = {
   display: 'bg-accent-violet',
   color: 'bg-warn',
   visible: 'bg-ok'
-}
-
-function sameSelector(a: KeySelector, b: KeySelector): boolean {
-  return (
-    a.kind === b.kind &&
-    a.target === b.target &&
-    a.attachment === b.attachment &&
-    a.channel === b.channel &&
-    Math.abs(a.time - b.time) < 1e-4
-  )
 }
 
 /**
@@ -391,21 +382,45 @@ export default function DopeSheet(props: DopeSheetProps) {
           ? selection.slot
           : ''
       : ''
+  /**
+   * 已经 reveal 过的对象名：**同一个对象不重复滚 / 不重复闪**。
+   * 依赖里带着 `visibleTracks`（新建轨道要等它出现才能滚），而打关键帧会让轨道列表每一帧都是新数组 ——
+   * 比如拖着视口拾色器改颜色，明明「选中的还是它」，列表却一遍遍滚回顶部 + 反复闪。
+   * 名字变了（换了对象）或者取消选中后才重新记名，这样再选回同一个对象还会正常 reveal。
+   */
+  const revealedRef = useRef('')
   useEffect(() => {
     // 消费「时间轴内点击」标记：点了时间轴里的轨道就不滚动 / 不闪（见 markTimelineSelection）
     const fromTimeline = skipReveal
     skipReveal = false
-    if (!revealName || fromTimeline) return
+    // 取消选中 / 切回 Pose：这次没得 reveal，名字作废，下次再选它还要滚
+    if (!revealName) {
+      revealedRef.current = ''
+      return
+    }
+    // 点了时间轴里的轨道：这次不滚 / 不闪，但记成「已处理」——
+    // 否则紧接着的轨道列表变动（例如打帧新建颜色轨）会把同一次选中又滚一遍
+    if (fromTimeline) {
+      revealedRef.current = revealName
+      return
+    }
     const group = visibleTracks.find((track) => track.isGroup && track.target === revealName)
     if (!group) return
+    if (revealedRef.current === revealName) return
+    revealedRef.current = revealName
     const row = trackListRef.current?.querySelector(`[data-track-id="${CSS.escape(group.id)}"]`)
     // block: 'start' = 滚到滚动容器顶部可见（相当于显示在 timeline 最上面）
     row?.scrollIntoView({ block: 'start' })
     setRevealId(group.id)
-    const timer = window.setTimeout(() => setRevealId(null), 900)
-    return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealName, visibleTracks])
+
+  /** 高亮只闪一下（900ms）：定时器单独一个 effect，reveal 提前 return 也不会把高亮卡住 */
+  useEffect(() => {
+    if (revealId === null) return
+    const timer = window.setTimeout(() => setRevealId(null), 900)
+    return () => window.clearTimeout(timer)
+  }, [revealId])
 
   /** 某行是否处于「选中对象高亮」状态（分组行 / 它的子通道行都算） */
   const isRevealed = (track: TimelineTrack): boolean =>

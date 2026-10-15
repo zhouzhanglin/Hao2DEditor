@@ -911,7 +911,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             }
           />
           <SelectField
-            label={animating ? '显示（关键帧）' : 'setup 显示'}
+            label={animating ? '显示（关键帧）' : '显示'}
             value={slot.attachment}
             options={[{ value: '', label: '（不显示）' }, ...(skinSlot?.attachments ?? []).map((a) => ({ value: a.name, label: a.name }))]}
             onChange={(value) => {

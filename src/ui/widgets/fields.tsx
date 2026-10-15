@@ -522,8 +522,8 @@ export function CommitTextField({
   )
 }
 
-/** 十六进制颜色：#RGB / #RRGGBB / 可带两位 alpha */
-function parseHexColor(raw: string): string | null {
+/** 十六进制颜色：#RGB / #RRGGBB / 可带两位 alpha（拾色器弹层也用它校验 hex 输入） */
+export function parseHexColor(raw: string): string | null {
   const digits = raw.trim().replace(/^#/, '')
   if (!/^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(digits)) return null
   return `#${digits.toUpperCase()}`

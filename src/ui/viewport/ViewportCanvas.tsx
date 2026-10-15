@@ -1,16 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bone, Palette } from 'lucide-react'
+import { Bone } from 'lucide-react'
 import ContextMenu from '@ui/widgets/ContextMenu'
-import ColorPickerPopover from '@ui/widgets/ColorPickerPopover'
 import { slotLayerMenuItems } from '@ui/widgets/slotLayerMenuItems'
-import {
-  highlightSlotColorKey,
-  slotColorHexAt,
-  slotColorMessage,
-  slotColorTarget,
-  writeSlotColor
-} from '@editor/slotColorOps'
-import type { SlotColorTarget } from '@editor/slotColorOps'
 import { EditorScene } from '@editor/scene'
 import { TextureStore } from '@render/material'
 import { ImageAlphaCache } from '@render/imageAlpha'
@@ -100,17 +91,6 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
    * pose = 打开时是否 Pose 态（决定菜单里有没有「删除插槽」），打开后不再跟随模式变化。
    */
   const [slotMenu, setSlotMenu] = useState<{ x: number; y: number; slot: string; pose: boolean } | null>(null)
-  /**
-   * 右键菜单「修改颜色」弹出的拾色器：`target` 在打开时定死（Pose 改 setup 颜色 /
-   * Animate 在当前时间打颜色帧），`value` 只是打开那一刻的初始颜色，之后由弹层自己维护。
-   */
-  const [colorPicker, setColorPicker] = useState<{
-    x: number
-    y: number
-    slot: string
-    target: SlotColorTarget
-    value: string
-  } | null>(null)
 
   useEffect(() => {
     const host = hostRef.current
@@ -1021,17 +1001,6 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     }
   }
 
-  /**
-   * 打开「修改颜色」拾色器：模式 / 动画 / 时间都在这一刻定死（拖完之前一直沿用），
-   * 初始颜色与运行期同一口径 —— Animate 且该插槽已有颜色轨 → 按当前时间采样，否则 setup 颜色。
-   */
-  const openColorPicker = (menu: { x: number; y: number; slot: string }): void => {
-    const doc = useProjectStore.getState().document
-    if (!doc.slots.some((slot) => slot.name === menu.slot)) return
-    const target = slotColorTarget()
-    setColorPicker({ x: menu.x, y: menu.y, slot: menu.slot, target, value: slotColorHexAt(doc, target, menu.slot) })
-  }
-
   return (
     <div
       ref={hostRef}
@@ -1109,64 +1078,15 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         </div>
       ) : null}
 
-      {/* 右键菜单：最上面是「修改颜色」（点中谁就改谁的颜色），下面是插槽层级
+      {/* 右键菜单：插槽层级操作
           （Pose 改 setup / Animate 打层级帧；Animate 态没有「删除」） */}
       {slotMenu ? (
         <ContextMenu
           x={slotMenu.x}
           y={slotMenu.y}
           title={`插槽「${slotMenu.slot}」`}
-          items={[
-            {
-              key: 'edit-color',
-              label: '修改颜色',
-              icon: <Palette size={12} />,
-              hint: slotMenu.pose
-                ? '修改插槽的颜色与透明度（写 setup 颜色）'
-                : '在当前时间打插槽颜色关键帧（颜色 + 透明度一起进帧）',
-              onSelect: () => openColorPicker(slotMenu)
-            },
-            { key: 'edit-color-sep', label: '', separator: true },
-            ...slotLayerMenuItems(slotMenu.slot, { pose: slotMenu.pose, onStatus })
-          ]}
+          items={[...slotLayerMenuItems(slotMenu.slot, { pose: slotMenu.pose, onStatus })]}
           onClose={() => setSlotMenu(null)}
-        />
-      ) : null}
-
-      {/* 拾色器：弹层自己 portal 到 body（与右键菜单一致，不受视口 overflow 裁剪）。
-          拖动整段只留一条撤销记录 —— onDragStart 开事务、onDragEnd 收尾 + 报一次状态栏。 */}
-      {colorPicker ? (
-        <ColorPickerPopover
-          key={colorPicker.slot}
-          x={colorPicker.x}
-          y={colorPicker.y}
-          title={`插槽「${colorPicker.slot}」· 颜色 / 透明度`}
-          value={colorPicker.value}
-          hint={
-            colorPicker.target.animate
-              ? `Animate：改动会写入 ${colorPicker.target.time.toFixed(3)}s 的颜色关键帧（含透明度）`
-              : 'Pose：改动写 setup 颜色；Animate 下改的是当前时间的关键帧'
-          }
-          /*
-           * 点视口关弹层的那一按要吞掉：视口的按下 = 点选（点空白取消选择 / 点别的 display 换选中 /
-           * 点附件起拖）。关个拾色器不该动选中态，哪怕弹层消失之后也一样。
-           */
-          absorbDismiss={(target) => target instanceof Node && hostRef.current?.contains(target) === true}
-          onChange={(hex) => {
-            // 拖动中不刷状态栏（收尾时统一报一次），只把值实时写进去
-            writeSlotColor(colorPicker.slot, hex, colorPicker.target)
-          }}
-          onDragStart={() => useProjectStore.getState().beginTransaction(colorPicker.target.label)}
-          onDragEnd={() => {
-            useProjectStore.getState().endTransaction()
-            if (colorPicker.target.animate) highlightSlotColorKey(colorPicker.slot, colorPicker.target.time)
-            onStatus(slotColorMessage(colorPicker.slot, colorPicker.target))
-          }}
-          onCommit={(hex) => {
-            onStatus(writeSlotColor(colorPicker.slot, hex, colorPicker.target))
-            if (colorPicker.target.animate) highlightSlotColorKey(colorPicker.slot, colorPicker.target.time)
-          }}
-          onClose={() => setColorPicker(null)}
         />
       ) : null}
     </div>

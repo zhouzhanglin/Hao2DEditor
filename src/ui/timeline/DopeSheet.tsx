@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, Filter, Flag, Lock, Minus, Plus, ZoomIn } from 'lucide-react'
+import { ChevronDown, ChevronRight, Filter, Flag, Lock, Minus, Plus, Zap, ZoomIn } from 'lucide-react'
 import { TIMELINE_ZOOM_MAX, TIMELINE_ZOOM_MIN } from '@editor/store/timelineStore'
 import type { KeySelector, TimelineTrack } from '@editor/timeline/model'
 import { useProjectStore } from '@editor/store/projectStore'
@@ -328,6 +328,9 @@ export default function DopeSheet(props: DopeSheetProps) {
   const activeTrack = useTimelineStore((state) => state.selectedTrack)
   // 仅拖框选择才显示缩放框，逐点点击不显示
   const selectionByBox = useTimelineStore((state) => state.selectionByBox)
+  /** 洋葱皮（显示前后帧骨骼姿态）：从 store 直接读，避免为这一个按钮拖累 TimelinePanel 顶部栏 */
+  const onionSkin = useTimelineStore((state) => state.onionSkin)
+  const toggleOnionSkin = useTimelineStore((state) => state.toggleOnionSkin)
   const isTrackActive = (track: TimelineTrack): boolean =>
     !track.isGroup &&
     activeTrack !== null &&
@@ -1120,6 +1123,14 @@ export default function DopeSheet(props: DopeSheetProps) {
         滚轮不再缩放时间轴（只上下翻轨道），缩放与快速平移的入口统一收拢到这里
       */}
       <div className="flex h-[26px] shrink-0 items-center gap-2 border-t border-line/60 bg-ink-800/80 px-1.5">
+        <button
+          type="button"
+          title="洋葱皮：显示前后帧的骨骼姿态"
+          className={['hao-tool-button', onionSkin ? 'hao-tool-button-active' : ''].join(' ')}
+          onClick={toggleOnionSkin}
+        >
+          <Zap size={13} />
+        </button>
         <button
           type="button"
           disabled={!filterTarget}

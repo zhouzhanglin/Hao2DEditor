@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Flag, KeyRound, Pause, Play, Repeat, SkipBack, SkipForward, Square, Timer, Trash2, Zap } from 'lucide-react'
+import { Flag, KeyRound, Pause, Play, Repeat, SkipBack, SkipForward, Square, Timer, Trash2 } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { playheadTime, usePlayheadStore } from '@editor/store/playheadStore'
@@ -38,7 +38,6 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
       playing: s.playing,
       loop: s.loop,
       speed: s.speed,
-      onionSkin: s.onionSkin,
       snapToFrame: s.snapToFrame,
       zoom: s.zoom,
       setAnimation: s.setAnimation,
@@ -47,7 +46,6 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
       togglePlaying: s.togglePlaying,
       toggleLoop: s.toggleLoop,
       setSpeed: s.setSpeed,
-      toggleOnionSkin: s.toggleOnionSkin,
       setSnapToFrame: s.setSnapToFrame,
       setZoom: s.setZoom,
       setSelectedKeys: s.setSelectedKeys,
@@ -406,14 +404,6 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
           ))}
         </select>
 
-        <button
-          type="button"
-          className={['hao-tool-button', timeline.onionSkin ? 'hao-tool-button-active' : ''].join(' ')}
-          title="洋葱皮：显示前后帧的骨骼姿态"
-          onClick={timeline.toggleOnionSkin}
-        >
-          <Zap size={13} />
-        </button>
         <button
           type="button"
           className={['hao-tool-button', timeline.snapToFrame ? 'hao-tool-button-active' : ''].join(' ')}

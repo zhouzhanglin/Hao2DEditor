@@ -1710,7 +1710,7 @@ function paintAt(host: ToolHost, world: Vec2): void {
  * 返回 null 表示不该重算 UV：边缘顶点（移动它们本来就要拉伸 / 裁剪贴图）、
  * 非网格附件，或样本退化（邻居太少 / 几乎共线）。
  */
-function prepareUvField(
+export function prepareUvField(
   slot: string,
   attachmentName: string,
   vertexIndex: number

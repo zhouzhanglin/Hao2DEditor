@@ -1,6 +1,7 @@
 import { rootBoneName } from '@core/model/authoring'
 import { getActiveScene } from '../activeScene'
 import { useProjectStore } from '../store/projectStore'
+import { useModeStore } from '../store/modeStore'
 import {
   addWeightBone,
   autoGenerateRegionMesh,
@@ -8,6 +9,7 @@ import {
   convertMeshToRegion,
   convertRegionToMesh,
   deleteMeshVertex,
+  findAttachment,
   insertMeshVertex,
   meshVertexSamples,
   removeWeightBone,
@@ -15,10 +17,10 @@ import {
   setVertexWeight
 } from './authoringCommands'
 import type { VertexSample } from './authoringCommands'
-import { changed, defineAction, defineWrite } from './registry'
+import { changed, defineAction, defineWrite, unchanged } from './registry'
 import type { Args } from './registry'
 import { need, needNum, optNum, optTextList, optVec } from './args'
-import { connectMeshVertices, rebuildMeshBoundary } from '../tools/authoringTools'
+import { connectMeshVertices, prepareUvField, rebuildMeshBoundary } from '../tools/authoringTools'
 import type { Vec2 } from '@core/math/matrix'
 import type { AlphaMask } from '@core/mesh/autoMesh'
 import { getPlatform } from '../platform'
@@ -244,6 +246,57 @@ export function registerMeshCommands(): void {
         throw new Error('删不掉：目标不是网格、下标越界，或者删完会只剩不到 3 个顶点')
       }
       return changed({ slot, attachment, vertexIndex }, `已删除顶点 ${vertexIndex}`)
+    }
+  )
+
+  defineWrite(
+    {
+      name: 'moveMeshVertex',
+      title: '移动网格顶点',
+      description:
+        '把绑定网格的一个顶点挪到新位置（改的是绑定网格，需 Pose 态；Animate 态改顶点形变用 keyDeformFrame）。point 用**附件局部坐标**（与 getAttachmentVertices 读出的一致）。内部顶点的 UV 会按邻居自动重算（贴图不跟着跑），边界顶点只挪位置不动 UV',
+      args: {
+        slot: { type: 'string', description: '插槽名', required: true },
+        attachment: { type: 'string', description: '网格附件名', required: true },
+        vertexIndex: { type: 'number', description: '顶点下标', required: true },
+        point: { type: 'object', description: '新位置（附件局部坐标 {x,y}）', required: true }
+      },
+      returns: '{ slot, attachment, vertexIndex, point, uvUpdated }'
+    },
+    (draft, args) => {
+      if (useModeStore.getState().mode !== 'pose') {
+        throw new Error('移动绑定网格顶点要在 Pose 态做：先 setMode 切到 pose（Animate 态改顶点形变请用 keyDeformFrame）')
+      }
+      const slot = need(args, 'slot')
+      const attachment = need(args, 'attachment')
+      const vertexIndex = needNum(args, 'vertexIndex')
+      const point = optVec(args, 'point')
+      if (!point) throw new Error('缺少参数 point（附件局部坐标 {x,y}）')
+      const att = findAttachment(draft, slot, attachment)
+      if (!att || att.type !== 'mesh') {
+        throw new Error(`${slot} / ${attachment} 不是网格附件（用 listDisplays 看它的 type，Region 先 convertToMesh）`)
+      }
+      if (vertexIndex < 0 || vertexIndex >= att.vertices.length) {
+        throw new Error(`顶点下标越界：合法范围 0 ~ ${att.vertices.length - 1}（用 getAttachmentVertices 核对）`)
+      }
+      const current = att.vertices[vertexIndex]
+      if (current.x === point.x && current.y === point.y) return unchanged('顶点本来就在这个位置')
+      // 原地改 x / y：整个对象换掉会把已绑好的 weights 一起丢掉
+      current.x = point.x
+      current.y = point.y
+      // 内部顶点：UV 跟着新位置重算（与视口拖顶点同一套拟合逻辑）；边界顶点 UV 保持原样
+      let uvUpdated = false
+      const uvField = prepareUvField(slot, attachment, vertexIndex)
+      if (uvField && att.uvs.length >= vertexIndex * 2 + 2) {
+        const uv = uvField(point.x, point.y)
+        att.uvs[vertexIndex * 2] = uv.u
+        att.uvs[vertexIndex * 2 + 1] = uv.v
+        uvUpdated = true
+      }
+      return changed(
+        { slot, attachment, vertexIndex, point, uvUpdated },
+        `已把顶点 ${vertexIndex} 挪到 (${point.x}, ${point.y})${uvUpdated ? '，UV 已按邻居重算' : ''}`
+      )
     }
   )
 

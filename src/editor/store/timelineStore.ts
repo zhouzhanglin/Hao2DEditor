@@ -11,6 +11,11 @@ export interface TimelineState {
   loop: boolean
   speed: number
   onionSkin: boolean
+  /**
+   * 智能过滤：只显示当前选中对象的轨道。
+   * 放在 store 而不是 DopeSheet 局部状态：AI 命令（setSmartFilter）也要能改它。
+   */
+  smartFilter: boolean
   snapToFrame: boolean
   /**
    * 时间轴时间缩放（1 = 完整适配动画长度；越大时间轴越长、关键帧越松散）。
@@ -46,6 +51,7 @@ export interface TimelineState {
   toggleLoop: () => void
   setSpeed: (speed: number) => void
   toggleOnionSkin: () => void
+  setSmartFilter: (value: boolean) => void
   setSnapToFrame: (snap: boolean) => void
   setZoom: (zoom: number) => void
   setSelectedKeys: (keys: KeySelector[]) => void
@@ -70,6 +76,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   loop: true,
   speed: 1,
   onionSkin: false,
+  smartFilter: false,
   snapToFrame: true,
   zoom: TIMELINE_ZOOM_DEFAULT,
   selectedKeys: [],
@@ -99,6 +106,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   toggleLoop: () => set({ loop: !get().loop }),
   setSpeed: (speed) => set({ speed: Math.max(0.1, Math.min(4, speed)) }),
   toggleOnionSkin: () => set({ onionSkin: !get().onionSkin }),
+  setSmartFilter: (smartFilter) => set({ smartFilter }),
   setSnapToFrame: (snapToFrame) => set({ snapToFrame }),
   setZoom: (zoom) => set({ zoom: Math.max(TIMELINE_ZOOM_MIN, Math.min(TIMELINE_ZOOM_MAX, zoom)) }),
   // 任何「非拖框」方式改选中（命令 / 逐点点击 / 粘贴等）都默认关掉缩放框，

@@ -347,7 +347,9 @@ export default function DopeSheet(props: DopeSheetProps) {
         : selection.kind === 'constraint'
           ? selection.constraint
           : ''
-  const [smartFilter, setSmartFilter] = useState(false)
+  // 智能过滤放进了 timelineStore：AI 命令（setSmartFilter）与按钮操作同一份状态
+  const smartFilter = useTimelineStore((state) => state.smartFilter)
+  const setSmartFilter = useTimelineStore((state) => state.setSmartFilter)
 
   /** 折叠的骨骼分组（只影响显示，不动数据） */
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
@@ -1196,7 +1198,7 @@ export default function DopeSheet(props: DopeSheetProps) {
                   )
               : t('智能过滤：只显示当前选中对象的轨道')
           }
-          onClick={() => setSmartFilter((value) => !value)}
+          onClick={() => setSmartFilter(!smartFilter)}
           className={['hao-tool-button', smartFilter ? 'hao-tool-button-active' : ''].join(' ')}
         >
           <Filter size={13} />

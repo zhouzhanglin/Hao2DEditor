@@ -1,6 +1,8 @@
 import { getActiveScene } from '../activeScene'
 import { useProjectStore } from '../store/projectStore'
 import { useSelectionStore } from '../store/selectionStore'
+import { useModeStore, pickAnimationForAnimate } from '../store/modeStore'
+import { useTimelineStore } from '../store/timelineStore'
 import {
   applyRename,
   autoGenerateRegionMesh,
@@ -14,11 +16,13 @@ import type { RenameTarget } from './authoringCommands'
 import { copyKeyframes, copyNodes, duplicateSelection, pasteKeyframes, pasteNodes } from './clipboardCommands'
 import { applySlotOrder, moveDisplay, moveSlot, moveBone } from './hierarchyCommands'
 import type { DropZone } from './hierarchyCommands'
-import { changed, defineAction, defineRead, defineWrite } from './registry'
+import { changed, defineAction, defineRead, defineWrite, unchanged } from './registry'
 import { need, needNum, needOneOf, optBool, optNum, optText, optTextList } from './args'
 import { getPlatform, joinPath, dirName, baseName, stripExtension } from '../platform'
 import { ASSET_DIR } from '../services/projectAssets'
 import { splitAtlasImage } from '../services/atlasSplit'
+import { useToolStore } from '../store/toolStore'
+import { lastKeyTime } from '@core/model/authoring'
 
 /**
  * 把编辑器已有的成熟操作再包一层命令：层级移动、重命名、绘制顺序、图片池、选择。
@@ -358,6 +362,216 @@ export function registerBindAllCommands(): void {
         attachment: now.attachment,
         constraint: now.constraint
       }
+    }
+  )
+
+  // ---------------- 编辑状态（Pose / Animate）切换 ----------------
+
+  defineAction(
+    {
+      kind: 'read',
+      name: 'setMode',
+      title: '切换编辑状态',
+      description:
+        '在 Pose（绑定）态与 Animate（动画编辑）态之间切换。切到 Animate 时会自动选中一个动画（优先上次离开时选的，否则第一个）；切回 Pose 会记录当前动画并清空时间轴选择。时间轴只在 Animate 态出现，做关键帧编辑前要先切到 Animate',
+      args: {
+        mode: { type: 'string', description: '目标状态', values: ['pose', 'animate'], required: true }
+      },
+      returns: '{ mode, animation }'
+    },
+    (args) => {
+      const next = needOneOf(args, 'mode', ['pose', 'animate'] as const)
+      const modeStore = useModeStore.getState()
+      if (next === modeStore.mode) {
+        return unchanged(`已在 ${next} 状态`)
+      }
+      const timeline = useTimelineStore.getState()
+      if (next === 'animate') {
+        if (!timeline.currentAnimation) {
+          const picked = pickAnimationForAnimate(
+            useProjectStore.getState().document.animations.map((a) => a.name),
+            modeStore.lastAnimation
+          )
+          if (picked) timeline.setAnimation(picked)
+        }
+        modeStore.setMode('animate')
+      } else {
+        modeStore.setLastAnimation(timeline.currentAnimation)
+        timeline.setAnimation(null)
+        modeStore.setMode('pose')
+      }
+      const nowMode = useModeStore.getState().mode
+      return changed(
+        { mode: nowMode, animation: useTimelineStore.getState().currentAnimation },
+        `已切换到 ${nowMode} 状态`
+      )
+    }
+  )
+
+  defineAction(
+    {
+      kind: 'read',
+      name: 'setAnimation',
+      title: '切换当前动画',
+      description:
+        '在 Animate（动画编辑）态下切换当前正在编辑的动画。name 必须是工程中已存在的动画名。要先 setMode 切到 animate 才能用；切换会清空时间轴选择与播放头归零',
+      args: {
+        name: { type: 'string', description: '目标动画名（工程里已存在的）', required: true }
+      },
+      returns: '{ animation }'
+    },
+    (args) => {
+      if (useModeStore.getState().mode !== 'animate') {
+        throw new Error('当前不在 Animate 状态：请先调用 setMode 切到 animate 再做动画编辑')
+      }
+      const name = need(args, 'name')
+      const document = useProjectStore.getState().document
+      if (!document.animations.some((a) => a.name === name)) {
+        throw new Error(`没有这个动画：${name}（用 listAnimations 查全部动画名）`)
+      }
+      useTimelineStore.getState().setAnimation(name)
+      return changed({ animation: useTimelineStore.getState().currentAnimation }, `已切换到动画「${name}」`)
+    }
+  )
+
+  // ---------------- 视口叠加层 / 相机 ----------------
+
+  defineAction(
+    {
+      kind: 'read',
+      name: 'setOverlay',
+      title: '切换叠加层',
+      description:
+        '显示 / 隐藏视口叠加层：bones = 骨骼骨架，constraints = 约束手柄（IK / 变换 / 路径）。与视口右上角的「骨骼 / 约束」开关等效。visible 不传 = 切换',
+      args: {
+        key: { type: 'string', description: '开关哪一层', values: ['bones', 'constraints'], required: true },
+        visible: { type: 'boolean', description: 'true = 显示，false = 隐藏；不传 = 切换' }
+      },
+      returns: '{ overlay: { bones, constraints } }'
+    },
+    (args) => {
+      const key = needOneOf(args, 'key', ['bones', 'constraints'] as const)
+      const tools = useToolStore.getState()
+      const next = optBool(args, 'visible') ?? !tools.overlay[key]
+      tools.setOverlay({ ...tools.overlay, [key]: next })
+      const overlay = useToolStore.getState().overlay
+      return {
+        changed: false,
+        data: { overlay: { ...overlay } },
+        message: `「${key === 'bones' ? '骨骼' : '约束'}」叠加层已${overlay[key] ? '显示' : '隐藏'}`
+      }
+    }
+  )
+
+  defineAction(
+    {
+      kind: 'read',
+      name: 'fitViewport',
+      title: '适配视野',
+      description: '把视口缩放 / 平移到刚好框住整个角色（与右上角「适配视野」按钮、F 键等效）。captureViewport 前常用它先把角色摆正',
+      args: {},
+      returns: '{}'
+    },
+    () => {
+      const scene = getActiveScene()
+      if (!scene) throw new Error('视口还没就绪：等编辑器窗口画完一帧再试')
+      scene.fit()
+      return { changed: false, message: '已适配视野' }
+    }
+  )
+
+  // ---------------- 时间轴面板（洋葱皮 / 智能过滤 / 缩放 / 帧数） ----------------
+
+  defineAction(
+    {
+      kind: 'read',
+      name: 'setOnionSkin',
+      title: '洋葱皮开关',
+      description: '显示 / 隐藏时间轴的洋葱皮（前后帧骨骼姿态）。enabled 不传 = 切换',
+      args: {
+        enabled: { type: 'boolean', description: 'true = 开，false = 关；不传 = 切换' }
+      },
+      returns: '{ onionSkin }'
+    },
+    (args) => {
+      const timeline = useTimelineStore.getState()
+      const next = optBool(args, 'enabled') ?? !timeline.onionSkin
+      if (next !== timeline.onionSkin) timeline.toggleOnionSkin()
+      const now = useTimelineStore.getState().onionSkin
+      return { changed: false, data: { onionSkin: now }, message: `洋葱皮已${now ? '开启' : '关闭'}` }
+    }
+  )
+
+  defineAction(
+    {
+      kind: 'read',
+      name: 'setSmartFilter',
+      title: '智能过滤开关',
+      description:
+        '只显示当前选中对象（骨骼 / 插槽 / 约束）的时间轴轨道。先用 setSelection 选中对象再开过滤才有效。enabled 不传 = 切换',
+      args: {
+        enabled: { type: 'boolean', description: 'true = 开，false = 关；不传 = 切换' }
+      },
+      returns: '{ smartFilter }'
+    },
+    (args) => {
+      const timeline = useTimelineStore.getState()
+      const next = optBool(args, 'enabled') ?? !timeline.smartFilter
+      timeline.setSmartFilter(next)
+      return { changed: false, data: { smartFilter: next }, message: `智能过滤已${next ? '开启' : '关闭'}` }
+    }
+  )
+
+  defineAction(
+    {
+      kind: 'read',
+      name: 'setTimelineZoom',
+      title: '时间轴缩放',
+      description:
+        '设置时间轴时间缩放：1 = 完整适配动画长度；越大时间轴越长、关键帧越松散（逐帧精修），最小 0.5、最大 2。超范围会自动夹住',
+      args: {
+        zoom: { type: 'number', description: '缩放倍数（0.5 ~ 2）', required: true }
+      },
+      returns: '{ zoom }'
+    },
+    (args) => {
+      const zoom = needNum(args, 'zoom')
+      if (!Number.isFinite(zoom) || zoom <= 0) throw new Error('zoom 必须是正数')
+      useTimelineStore.getState().setZoom(zoom)
+      const now = useTimelineStore.getState().zoom
+      return { changed: false, data: { zoom: now }, message: `时间轴缩放已设为 ${now}×` }
+    }
+  )
+
+  defineWrite(
+    {
+      name: 'setAnimationFrames',
+      title: '设置动画帧数',
+      description:
+        '按帧数设置动画时长（帧数 ÷ 工程帧率 = 秒）。这是「可编辑范围」——改大就能在后面继续加帧；播放与导出仍按最后一个关键帧算。不能短于最后一个关键帧，不够时会自动抬高并说明',
+      args: {
+        frames: { type: 'number', description: '时长（帧数），至少 1', required: true },
+        animation: { type: 'string', description: '动画名；不传 = 当前选中的动画' }
+      },
+      returns: '{ name, frames, duration }'
+    },
+    (draft, args) => {
+      const frames = Math.max(1, Math.round(needNum(args, 'frames')))
+      const name = optText(args, 'animation') || draft.editorMeta.activeAnimation
+      if (!name) {
+        throw new Error('没有指定动画：传 animation 参数，或先 setMode 切到 animate（会自动选中一个动画）')
+      }
+      const target = draft.animations.find((item) => item.name === name)
+      if (!target) throw new Error(`没有这个动画：${name}（用 listAnimations 查全部动画名）`)
+      const minFrames = Math.ceil(lastKeyTime(target) * draft.frameRate - 1e-6)
+      const finalFrames = Math.max(frames, minFrames)
+      target.duration = finalFrames / draft.frameRate
+      return changed(
+        { name, frames: finalFrames, duration: target.duration },
+        finalFrames !== frames
+          ? `时长不能短于最后一个关键帧（${minFrames} 帧），已按 ${minFrames} 帧设置`
+          : `动画「${name}」的时长已设为 ${finalFrames} 帧`
+      )
     }
   )
 

@@ -254,7 +254,7 @@ export function registerProjectCommands(): void {
           next: hasStage
             ? undefined
             : [
-                '要装配角色且有装配参考图：先 setStage {imagePath, opacity:0.5} 铺成视口底图，再逐张挂部件（addSlot + addDisplay）与底图对比大小/位置/层级，对齐后 removeStage；完整流程调 getAiGuide'
+                '要装配角色且有装配参考图：先 setStage {imagePath, opacity:0.5} 铺成视口底图 → 用 listImages 对比标定底图大小（updateStage 设 width/height，使底图与部件在世界单位下 1:1）→ 底图定好后再对位：从图片池一张一张放、好一张再下一张（addSlot 不传 bone = 挂根骨骼 + addDisplay），setDisplayTransform 调位置/旋转、setDrawOrder 调层级，captureViewport 对比到与底图重合（要数值用 getDisplayWorldBounds）→ 全部放好后停手等用户确认，不要直接绑骨 → 用户确认后再 setSlotHost 逐个绑骨（保持全局位姿）→ removeStage 删底图；完整流程调 getAiGuide'
               ]
         },
         result.message

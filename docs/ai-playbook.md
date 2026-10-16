@@ -40,6 +40,6 @@ addSkin {name} 建皮肤 → addDisplay {slot, image, skin} 往该皮肤放件 �
 - 撤销栈只有 80 条：大改动分批，不要把几十条命令拆成单发刷屏
 - setActiveSkeleton / setActiveSkin 会清空选中与时间轴状态，切完先重新查状态
 - 在线预览、画笔式刷权重是有意不开放的：预览给人看，权重用 autoWeightMesh
-- 有装配参考图时：setStage {imagePath, opacity:0.5} 铺成视口底图 → 部件一张一张挂，每挂一个用 getDisplayWorldBounds 读世界包围盒与底图目标框对比、setDisplayTransform 修到重合 → 全部对齐后 removeStage 删底图。**别在外部算好坐标一口气执行**——编辑器返回的包围盒才是权威几何
+- 有装配参考图时（顺序很重要）：setStage {imagePath, opacity:0.5} 铺底图 → **先标定底图大小**：量参考图里某部件的像素尺寸 h_ref，用 listImages 读该部件实际图片的像素尺寸 h_img，比例 k=h_img/h_ref，再 updateStage {width,height} 把底图设为「参考图像素×k÷100」世界单位，使其与部件 1:1 → 底图大小定好后再对位：从「图片/图集页」**一张一张放、好一张再下一张**——addSlot（**不传 bone = 挂根骨骼**）+ addDisplay 放进视口，用 setDisplayTransform 调位置/旋转、setDrawOrder 调层级，captureViewport 对比到与底图重合（要数值用 getDisplayWorldBounds）→ **全部放好后停手等用户确认，不要直接绑骨** → 用户说没问题后，再 setSlotHost 把每个 slot 绑到对应骨骼（绑骨保持全局位姿，画面不动）→ removeStage 删底图。**别在外部算好坐标一口气执行**——以编辑器返回的几何与截图为准
 - 别猜命令名：先 GET /commands（或 __catalog 命令）拿目录，每条命令的参数说明都在里面
 - 要做「角色装配 + 动画」：先调 getAiGuide 命令拿完整分阶段流程与验收标准（任务书 / 参考图对位公式 / 网格蒙皮 / 打帧自查）；同样的内容也在工程 ai/ 目录（hao2d-ai-playbook.md / hao2d-ai-rigging-playbook.md），离线可读

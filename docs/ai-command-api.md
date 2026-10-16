@@ -119,6 +119,9 @@ POST /batch
    - 播放与事件帧：`setTime`（播放头）、`setPlaying`（播放 / 暂停）、`keyEvent` / `setEvent` / `removeEvent`（时间轴最上面的事件轨）
    - 导出：`exportProject`（`mode` = `runtime` / `unity` / `spine`，写盘到 `dir`，**不弹对话框**）；图集缩放持久偏好 → `setExportScale`
    - 撤销 / 重做：`undo` / `redo`（等价 Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z）
+   - 工程重命名：`setProjectName`（窗口标题与导出标题用它；保存后写进工程文件，**不**重命名磁盘文件）
+   - 相机（只移动视口、不改数据）：`focusNode`（聚焦骨骼 / 插槽 / 附件 / 约束，等同层级树双击）/ `panViewport`（按屏幕像素平移）/ `setViewportZoom`（缩放）/ `centerViewport`（把世界坐标点移到视口中心）
+   - 舞台参考图（视口背景参照，存工程 `stage/`，**不参与导出**）：`setStage`（按路径设 / 换参考图）/ `updateStage`（改位置 / 大小 / 透明度）/ `removeStage`
 
 预览效果：在线预览（浏览器里用 Spine / Hao2D 运行时播放）**有意不开放**给 AI —— 那是给人看的成品展示。AI 想要可交付产物就 `exportProject` 落盘，再让用户打开。
 
@@ -129,7 +132,7 @@ POST /batch
   - `importImage`：把外部图片（base64/dataURL 或本地绝对路径）写入工程目录 `images/` 并登记到图片池，AI 不必依赖弹窗；之后用 `addDisplay` 把它做成附件
   - `splitAtlas`：把整页图集（Spine/DragonBones 导入带来的 `loose=false` 图片）按区域拆成独立碎图，让引用它的附件改指碎图
   - 直接改图（换图）仍用 `replaceImage`
-- **仍有意不开放**：在线预览（给人看的成品展示）、画笔式刷权重、舞台参考图、纯相机拖拽 / 聚焦（`fitViewport` 之外的视口操作）
+- **仍有意不开放**：在线预览（给人看的成品展示）、画笔式刷权重
 - 场景未就绪时（窗口还没画第一帧）依赖像素的命令（`autoWeightMesh`、`convertToOutlineMesh`）会明确报错，稍后重试即可
 - 服务停止（关编辑器）后 `command-server.json` 会被删除，探活失败即表示编辑器没开
 

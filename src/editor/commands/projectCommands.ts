@@ -150,6 +150,27 @@ export function registerProjectCommands(): void {
     }
   )
 
+  defineAction(
+    {
+      name: 'setProjectName',
+      title: '重命名工程',
+      description:
+        '改工程名（窗口标题与导出标题用它，保存时写进工程文件）。**不会**重命名磁盘上的工程文件',
+      args: { name: { type: 'string', description: '新的工程名（不能为空）', required: true } },
+      returns: '{ projectName }'
+    },
+    async (args) => {
+      const name = need(args, 'name').trim()
+      if (!name) throw new Error('工程名不能为空')
+      const store = useProjectStore.getState()
+      if (name === store.projectName) return unchanged(`工程名已经是「${name}」`)
+      store.setProjectInfo({ projectName: name })
+      // 工程名会写进 .proj，属于要落盘的改动：标脏，提醒保存
+      useProjectStore.setState({ dirty: true })
+      return changed({ projectName: name }, `工程已重命名为「${name}」（保存后写进工程文件）`)
+    }
+  )
+
   // ---------------- 导入外部资源（按路径，不弹对话框） ----------------
 
   defineAction(

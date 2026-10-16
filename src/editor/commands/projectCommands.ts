@@ -93,7 +93,7 @@ export function registerProjectCommands(): void {
         dir: { type: 'string', description: '保存目录（绝对路径）', required: true },
         frameRate: { type: 'number', description: '帧率 24 / 30 / 60；不传用 30' }
       },
-      returns: '{ projectName, path }'
+      returns: '{ projectName, path, next }'
     },
     async (args) => {
       const name = need(args, 'name')
@@ -102,7 +102,18 @@ export function registerProjectCommands(): void {
       const result = await createProjectAt(name, dir, frameRate)
       if (!result.ok) throw new Error(result.message)
       const store = useProjectStore.getState()
-      return changed({ projectName: store.projectName, path: store.projectPath }, result.message)
+      // 指南送达的最后一环：AI 多半不会主动调 getAiGuide / 读 docs——
+      // 在它必经的建工程返回里把参考图流程直接递到眼前（与 getProjectState 的 next 同模式）
+      return changed(
+        {
+          projectName: store.projectName,
+          path: store.projectPath,
+          next: [
+            '装配角色且手头有装配参考图（示例图）：先 setStage {imagePath, opacity:0.5} 把它铺成视口底图，部件一张一张挂上与底图对比大小/位置/层级，全部对齐后 removeStage 删底图；完整流程与验收标准调 getAiGuide'
+          ]
+        },
+        result.message
+      )
     }
   )
 
@@ -225,7 +236,7 @@ export function registerProjectCommands(): void {
       args: {
         paths: { type: 'array', description: '图片绝对路径数组（png / jpg / webp / gif / bmp）', required: true }
       },
-      returns: '{ added, total }'
+      returns: '{ added, total, next }'
     },
     async (args) => {
       const paths = optTextList(args, 'paths')
@@ -234,7 +245,20 @@ export function registerProjectCommands(): void {
       const result = await importImagesFlow(paths)
       if (!result.ok) throw new Error(result.message)
       const total = useProjectStore.getState().document.images.length
-      return changed({ added: total - before, total }, result.message)
+      // 已铺底图就不用再提示参考图流程
+      const hasStage = Boolean(useProjectStore.getState().document.editorMeta.stage)
+      return changed(
+        {
+          added: total - before,
+          total,
+          next: hasStage
+            ? undefined
+            : [
+                '要装配角色且有装配参考图：先 setStage {imagePath, opacity:0.5} 铺成视口底图，再逐张挂部件（addSlot + addDisplay）与底图对比大小/位置/层级，对齐后 removeStage；完整流程调 getAiGuide'
+              ]
+        },
+        result.message
+      )
     }
   )
 

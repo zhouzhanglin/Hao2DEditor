@@ -51,9 +51,11 @@ export function commandSpecToMcpTool(spec: CommandSpec): McpTool {
     properties[key] = argToSchema(arg)
     if (arg.required) required.push(key)
   }
+  // MCP tool 没有独立的「示例」字段：把 JSON 调用示例拼进 description（AI 对 description 的遵从度最高）
+  const example = spec.example ? `\n示例：{"name":"${spec.name}","args":${JSON.stringify(spec.example)}}` : ''
   return {
     name: spec.name,
-    description: `${spec.title}：${spec.description}\n返回：${spec.returns}`,
+    description: `${spec.title}：${spec.description}\n返回：${spec.returns}${example}`,
     inputSchema: {
       type: 'object',
       properties,

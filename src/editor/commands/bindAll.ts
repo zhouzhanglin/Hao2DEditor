@@ -781,7 +781,8 @@ export function registerBindAllCommands(): void {
         name: { type: 'string', description: '图片名（不含目录与扩展名）；不传用原文件名' },
         ext: { type: 'string', description: 'data 模式下的格式（png/jpg/jpeg/webp/gif），不传从 dataURL 推断或默认 png' }
       },
-      returns: '{ name, width, height, path }'
+      returns: '{ name, width, height, path }',
+      example: { path: '/Users/me/art/sword.png' }
     },
     async (args) => {
       const platform = getPlatform()

@@ -6,6 +6,7 @@ import { registerQueryCommands } from './queryCommands'
 import { catalog, defineRead } from './registry'
 import { registerSkeletonCommands } from './skeletonCommands'
 import { registerViewCommands } from './viewCommands'
+import { AI_PLAYBOOK } from '@shared/aiPlaybook'
 
 export { catalog, clearRegistry, executeCommand, hasCommand, registerCommand } from './registry'
 export type { Args, CommandOutcome } from './registry'
@@ -24,15 +25,16 @@ export function installCommands(): void {
   registerProjectCommands()
   registerViewCommands()
   registerQueryCommands()
-  // 本地服务的 GET /commands 用它拉命令自描述（AI 通常不必直接调用）
+  // 本地服务的 GET /commands 用它拉命令自描述（AI 通常不必直接调用）。
+  // playbook 随数据一起透传：AI 拿目录的同时就拿到「怎么用对」的手册（见 aiPlaybook.ts）
   defineRead(
     {
       name: '__catalog',
       title: '命令目录',
-      description: '内部命令：返回全部命令的自描述，本地服务的 GET /commands 调用它。一般不用直接执行',
+      description: '内部命令：返回全部命令的自描述与 AI 使用手册，本地服务的 GET /commands 调用它。一般不用直接执行',
       args: {},
-      returns: '{ commands }'
+      returns: '{ commands, playbook }'
     },
-    () => ({ commands: catalog() })
+    () => ({ commands: catalog(), playbook: AI_PLAYBOOK })
   )
 }

@@ -88,7 +88,8 @@ export function registerAnimCommands(): void {
         time: { type: 'number', description: '时间点（秒）', required: true },
         value: { type: 'object', description: 'rotate 传数字（度）；translate / scale / shear 传 {x,y}' }
       },
-      returns: '{ animation, bone, channel, time, value }'
+      returns: '{ animation, bone, channel, time, value }',
+      example: { bone: 'chest', channel: 'rotate', time: 0.5, value: -12 }
     },
     (draft, args) => {
       const channel = needOneOf(args, 'channel', BONE_CHANNELS)
@@ -140,7 +141,8 @@ export function registerAnimCommands(): void {
         attachment: { type: 'string', description: '要显示的附件名；空串 = 不显示', required: true },
         skin: { type: 'string', description: '皮肤名；不传则用当前皮肤' }
       },
-      returns: '{ animation, slot, time, attachment, displayIndex }'
+      returns: '{ animation, slot, time, attachment, displayIndex }',
+      example: { slot: 'hand', time: 0.5, attachment: 'sword', skin: 'default' }
     },
     (draft, args) => {
       const attachment = rawText(args, 'attachment')
@@ -193,7 +195,8 @@ export function registerAnimCommands(): void {
         time: { type: 'number', description: '时间点（秒）', required: true },
         color: { type: 'string', description: '颜色 #RRGGBB 或 #RRGGBBAA', required: true }
       },
-      returns: '{ animation, slot, time, color }'
+      returns: '{ animation, slot, time, color }',
+      example: { slot: 'torso', time: 0, color: '#FFFFFF00' }
     },
     (draft, args) => {
       const result = keySlotColorFrame(draft, {

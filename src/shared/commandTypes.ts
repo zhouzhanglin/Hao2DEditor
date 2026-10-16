@@ -55,6 +55,12 @@ export interface CommandSpec {
   args: Record<string, CommandArgSpec>
   /** `data` 字段的形状说明 */
   returns: string
+  /**
+   * 可选的调用示例（**args 形状的 JSON**）：只给最易错的命令配（参数形状特殊 /
+   * 单位约定容易被搞错的），随 `GET /commands` 原样下发；MCP `tools/list` 里拼进
+   * description（MCP tool 没有独立的示例字段）。内容必须能直接照抄执行。
+   */
+  example?: Record<string, unknown>
 }
 
 /** 命令通道：两个方向各一个（主 → 渲染递命令，渲染 → 主回结果） */

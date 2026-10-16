@@ -47,4 +47,10 @@ describe('commandSpecToMcpTool', () => {
     }
     expect(commandSpecToMcpTool(noRequired).inputSchema.required).toBeUndefined()
   })
+
+  it('spec 带 example 时把 JSON 调用示例拼进 description；没有则不拼', () => {
+    const withExample = commandSpecToMcpTool({ ...sample, example: { name: 'chest', length: 0.9 } })
+    expect(withExample.description).toContain('示例：{"name":"addBone","args":{"name":"chest","length":0.9}}')
+    expect(commandSpecToMcpTool(sample).description).not.toContain('示例')
+  })
 })

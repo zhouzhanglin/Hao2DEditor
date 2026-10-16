@@ -38,7 +38,7 @@
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
 | GET | `/health` | 探活：`{ ok, service, port, url }` |
-| GET | `/commands` | **全部命令的自描述**（名字、标题、参数、返回值）——先读它再动手 |
+| GET | `/commands` | **全部命令的自描述**（名字、标题、参数、返回值）——先读它再动手；易错命令带 `example`（可直接照抄的 args JSON），查询命令的返回里带 `next`（状态感知的下一步建议） |
 | POST | `/command` | 执行一条命令：`{ "name": "addBone", "args": { … } }` |
 | POST | `/batch` | 批量：`{ "commands": [ … ], "transaction": true }` |
 | WS | `/ws` | 长连接版；消息 `{ id?, name, args }` 或 `{ id?, batch: [...], transaction? }`。连上先收到一条 `{ id: null, hello: "hao2d-command", instructions }` 握手消息（就是 8.4 的通信指引） |
@@ -137,6 +137,12 @@ POST /batch
 - 服务停止（关编辑器）后 `command-server.json` 会被删除，探活失败即表示编辑器没开
 
 ## 7. 给 AI 的系统提示词（可直接粘贴）
+
+> **通常不用粘贴**：编辑器会自动把「使用手册」（坐标/单位约定、标准工作循环、从零到导出的
+> 食谱、常见坑，见 `src/shared/aiPlaybook.ts`）随服务发现一起下发 —— MCP 客户端在
+> `initialize` 的 `instructions` 里收到，HTTP/WS 客户端在 `GET /commands` 响应的
+> `playbook` 字段与 WS 握手消息里收到。下面这份提示词留给**读不到上述字段的客户端**，
+> 内容与自动下发的手册一致且互不冲突。
 
 ```text
 你在操作一个叫 Hao2DEditor 的 2D 骨骼动画编辑器。它在本机跑了一个命令服务：

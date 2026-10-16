@@ -391,7 +391,8 @@ export function registerMeshCommands(): void {
         falloff: { type: 'number', description: '距离衰减指数，越大越「硬」，默认 2', default: 2 },
         maxBones: { type: 'number', description: '每个顶点最多绑几根骨骼（最多 4），默认 4', default: 4 }
       },
-      returns: '{ slot, attachment, touched, bones }'
+      returns: '{ slot, attachment, touched, bones }',
+      example: { slot: 'torso', attachment: 'body_art', falloff: 2, maxBones: 4 }
     },
     (args) => {
       const slot = need(args, 'slot')

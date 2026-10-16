@@ -131,7 +131,8 @@ export function registerProjectCommands(): void {
       args: {
         path: { type: 'string', description: '另存到的文件路径；不传则写回当前工程路径' }
       },
-      returns: '{ path, warnings }'
+      returns: '{ path, warnings }',
+      example: { path: '/Users/me/projects/hero.hao2d.proj' }
     },
     async (args) => {
       const store = useProjectStore.getState()
@@ -493,7 +494,8 @@ export function registerProjectCommands(): void {
         intParam: { type: 'number', description: '整数参数' },
         floatParam: { type: 'number', description: '浮点参数' }
       },
-      returns: '{ animation, time, name }'
+      returns: '{ animation, time, name }',
+      example: { time: 0.5, name: 'footstep', stringParam: 'left', intParam: 1 }
     },
     (draft, args) => {
       const animation = requireAnimation(draft, optText(args, 'animation'))
@@ -597,7 +599,8 @@ export function registerProjectCommands(): void {
           default: 'all'
         }
       },
-      returns: '{ mode, dir, files, warnings }'
+      returns: '{ mode, dir, files, warnings }',
+      example: { mode: 'spine', dir: '/Users/me/projects/hero/export', scale: 1, maxSize: 2048 }
     },
     async (args) => {
       const rawMode = optText(args, 'mode') ?? 'runtime'

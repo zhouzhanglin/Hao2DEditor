@@ -10,6 +10,7 @@ import { WebSocketServer } from 'ws'
 import type { WebSocket } from 'ws'
 import { COMMAND_CHANNEL, AI_TRANSPORT_NOTICE } from '@shared/commandTypes'
 import type { CommandResponse, CommandServerInfo, CommandSpec } from '@shared/commandTypes'
+import { AI_PLAYBOOK } from '@shared/aiPlaybook'
 import { commandSpecToMcpTool } from '@shared/mcpSchema'
 import { createLogger } from './logger'
 
@@ -24,11 +25,21 @@ const log = createLogger('命令服务')
  * 端点：GET /health、GET /commands（命令自描述）、POST /command、POST /batch、WS /ws。
  * 端口不固定，启动后把 `{ port, token, url, file, instructions }` 写进 userData/command-server.json，
  * AI 读它即可发现服务（路径也会打进启动日志）。通信指引（AI_TRANSPORT_NOTICE）随每个
- * 「获取命令」的入口一同下发：GET /commands 顶层、MCP initialize、WS 握手消息、两份发现文件。
+ * 「获取命令」的入口一同下发：GET /commands 顶层、MCP initialize、WS 握手消息、两份发现文件；
+ * MCP initialize 与 WS 握手还会额外带上 AI 使用手册（AI_PLAYBOOK，见 aiPlaybook.ts）。
  */
 
 const CALL_TIMEOUT_MS = 20_000
 const BODY_LIMIT = 4 * 1024 * 1024
+
+/**
+ * 下发给 AI 的完整指引 = 通信方式 + 使用手册。
+ *
+ * MCP `initialize.instructions` 与 WS 握手消息用这份（客户端会把它注入 AI 上下文）；
+ * `GET /commands` 顶层只带通信指引，playbook 走响应数据里的 `playbook` 字段
+ * （结构化，客户端可以分开处理）。
+ */
+const AI_INSTRUCTIONS = `${AI_TRANSPORT_NOTICE}\n\n${AI_PLAYBOOK}`
 
 let server: Server | null = null
 let wss: WebSocketServer | null = null
@@ -379,7 +390,7 @@ async function handleMcpMessage(req: IncomingMessage, res: ServerResponse, body:
         capabilities: { tools: {} },
         serverInfo: { name: 'hao2d-editor', version: '0.1.0' },
         // MCP 规范里的全局说明：客户端会把它注入 AI 上下文，先于任何 tools/call
-        instructions: AI_TRANSPORT_NOTICE
+        instructions: AI_INSTRUCTIONS
       }
     })
     return
@@ -478,7 +489,7 @@ export async function startCommandServer(getWindow: () => BrowserWindow | null):
     }
     // WS 没有「命令目录」这种入口，连接建立即推一条握手消息把通信指引送达：
     // 结构与命令响应刻意不同（id 为 null、带 hello、没有 ok），客户端按 id 匹配响应时不会错认
-    socket.send(JSON.stringify({ id: null, hello: 'hao2d-command', instructions: AI_TRANSPORT_NOTICE }))
+    socket.send(JSON.stringify({ id: null, hello: 'hao2d-command', instructions: AI_INSTRUCTIONS }))
     socket.on('message', (data) => {
       void handleSocketMessage(socket, data.toString())
     })

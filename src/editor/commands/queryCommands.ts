@@ -34,10 +34,23 @@ export function registerQueryCommands(): void {
       title: '查工程状态',
       description: '当前工程名、保存路径、是否有未保存改动、有几个骨架、撤销栈状态。AI 开工前先读它',
       args: {},
-      returns: 'projectName / projectPath / dirty / activeSkeleton / skeletonCount / canUndo / canRedo / warnings'
+      returns: 'projectName / projectPath / dirty / activeSkeleton / skeletonCount / canUndo / canRedo / warnings / next（建议的下一步）'
     },
     () => {
       const state = useProjectStore.getState()
+      // 状态感知的下一步建议：AI 拿到状态就知道该往哪走，少一轮试错
+      const next: string[] = []
+      if (!state.projectPath) {
+        next.push('工程还没落盘：先 createProject {name, dir} 或 saveProject {path}，否则 importImages / setStage / exportProject 都会被拒')
+      } else if (state.dirty) {
+        next.push('有未保存改动：做完这轮改完后 saveProject')
+      }
+      if (state.skeletons.length > 1) {
+        next.push(`多骨架工程（${state.skeletons.length} 个）：list* / key* 只作用于当前骨架「${state.document.armatureName}」，切换用 setActiveSkeleton`)
+      }
+      if (next.length === 0) {
+        next.push('用 listBones / listSlots / listImages / listAnimations 核对名字后再动手；批量改动用 POST /batch + transaction')
+      }
       return {
         projectName: state.projectName,
         projectPath: state.projectPath,
@@ -56,7 +69,8 @@ export function registerQueryCommands(): void {
         canRedo: state.canRedo,
         undoLabel: state.undoLabel,
         redoLabel: state.redoLabel,
-        warnings: state.warnings
+        warnings: state.warnings,
+        next
       }
     }
   )
@@ -430,7 +444,7 @@ export function registerQueryCommands(): void {
         '视口相机与可见范围：像素尺寸、缩放、平移量、当前可见的世界矩形、角色包围盒，以及当前模式 / 皮肤 / 动画 / 播放状态。AI 想「看屏幕」或做屏幕↔世界坐标换算时用它',
       args: {},
       returns:
-        'width / height / zoom / offset{x,y} / unitsPerPixel / worldView{minX,minY,maxX,maxY} / contentBounds / mode / activeSkin / animation / playing / time'
+        'width / height / zoom / offset{x,y} / unitsPerPixel / worldView{minX,minY,maxX,maxY} / contentBounds / mode / activeSkin / animation / playing / time / next（建议的下一步）'
     },
     () => {
       const scene = getActiveScene()
@@ -443,6 +457,19 @@ export function registerQueryCommands(): void {
       const xs = corners.map((corner) => corner.x)
       const ys = corners.map((corner) => corner.y)
       const bounds = scene.meshResult?.bounds ?? null
+      // 状态感知的下一步建议
+      const next: string[] = []
+      if (useTimelineStore.getState().playing) {
+        next.push('正在播放预览：打帧改的是文档里的姿势值，若要边看边调先 setPlaying {playing:false}')
+      }
+      if (!bounds) {
+        next.push('视口里还没有可框取的内容：importImages 进图后 addDisplay 挂图，或 focusNode 看已有节点')
+      } else {
+        next.push('focusNode {kind, name} 聚焦某节点；centerViewport / setViewportZoom 调整构图')
+      }
+      if (document.animations.length === 0) {
+        next.push('还没有动画：addAnimation {name, duration} 建一条后才能打帧')
+      }
       return {
         width: w,
         height: h,
@@ -458,7 +485,8 @@ export function registerQueryCommands(): void {
         activeSkin: document.editorMeta.activeSkin,
         animation: document.editorMeta.activeAnimation,
         playing: Boolean(useTimelineStore.getState().playing),
-        time: useTimelineStore.getState().time
+        time: useTimelineStore.getState().time,
+        next
       }
     }
   )

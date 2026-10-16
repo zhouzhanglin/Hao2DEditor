@@ -44,7 +44,8 @@ export function registerSkeletonCommands(): void {
         length: { type: 'number', description: '骨长，默认 0.4' },
         color: { type: 'string', description: '骨骼显示颜色，如 #ff8800' }
       },
-      returns: '{ name, parent } —— name 是最终落定的名字（可能带序号），后续命令都用它'
+      returns: '{ name, parent } —— name 是最终落定的名字（可能带序号），后续命令都用它',
+      example: { name: 'chest', parent: 'root', localPosition: { x: 0, y: 1.2 }, rotation: -8, length: 0.9 }
     },
     (draft, args) => {
       const result = addBone(
@@ -351,7 +352,8 @@ export function registerSkeletonCommands(): void {
         position: { type: 'object', description: '附件在骨骼局部空间的位置 {x,y}' },
         skin: { type: 'string', description: '目标皮肤；不传则用当前皮肤' }
       },
-      returns: '{ slot, attachment }'
+      returns: '{ slot, attachment }',
+      example: { slot: 'torso', image: 'body.png', name: 'body_art', position: { x: 0, y: 0.5 } }
     },
     (draft, args) => {
       const result = addDisplay(
@@ -439,7 +441,8 @@ export function registerSkeletonCommands(): void {
         duration: { type: 'number', description: '时长（秒），默认 1' },
         activate: { type: 'boolean', description: '是否切为当前编辑动画，默认 true' }
       },
-      returns: '{ name, duration }'
+      returns: '{ name, duration }',
+      example: { name: 'walk', duration: 1.5 }
     },
     (draft, args) => {
       const result = addAnimation(

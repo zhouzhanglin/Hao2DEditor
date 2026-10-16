@@ -125,6 +125,8 @@ POST /batch
 
 预览效果：在线预览（浏览器里用 Spine / Hao2D 运行时播放）**有意不开放**给 AI —— 那是给人看的成品展示。AI 想要可交付产物就 `exportProject` 落盘，再让用户打开。
 
+> 完整的「角色装配 + 动画制作」分阶段流程（含任务书模板、每步验收标准、网格蒙皮）见 [ai-rigging-playbook.md](./ai-rigging-playbook.md)。
+
 ## 6. 边界（有意不做的事）
 
 - **画笔式刷权重**不开放：那是需要人眼看着画的交互，给 `setVertexWeight` / `autoWeightMesh` 就够了

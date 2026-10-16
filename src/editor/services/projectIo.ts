@@ -284,9 +284,10 @@ export async function saveProject(saveAs: boolean): Promise<IoResult> {
   return { ok: true, message, warnings: copied.warnings.length > 0 ? copied.warnings : undefined }
 }
 
-export async function importSpineFlow(): Promise<IoResult> {
+export async function importSpineFlow(sourcePath?: string): Promise<IoResult> {
   const platform = getPlatform()
-  const picked = await platform.pickFiles({
+  // 调用方（AI 命令）直接给路径时不弹对话框；同目录的 .atlas 仍需存在（下面会找）
+  const picked = sourcePath ? [sourcePath] : await platform.pickFiles({
     filters: [{ name: 'Spine 骨骼 JSON', extensions: ['json'] }],
     multi: false
   })
@@ -329,9 +330,10 @@ export async function importSpineFlow(): Promise<IoResult> {
   }
 }
 
-export async function importDragonBonesFlow(): Promise<IoResult> {
+export async function importDragonBonesFlow(sourcePath?: string): Promise<IoResult> {
   const platform = getPlatform()
-  const picked = await platform.pickFiles({
+  // 调用方（AI 命令）直接给路径时不弹对话框；同目录的 texture_*.json 图集仍会被自动收集
+  const picked = sourcePath ? [sourcePath] : await platform.pickFiles({
     filters: [{ name: 'DragonBones 骨骼 JSON', extensions: ['json'] }],
     multi: false
   })

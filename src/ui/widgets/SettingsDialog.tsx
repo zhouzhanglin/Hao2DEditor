@@ -119,7 +119,7 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
               <button
                 type="button"
                 className="text-3xs text-content-lo hover:text-content-hi"
-                title={t('恢复成默认长相（改之前项目里用的那一档）')}
+                title={t('恢复成默认长相')}
                 onClick={resetBoneStyle}
               >
                 {t('恢复默认')}
@@ -133,7 +133,7 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
               <NumberRow
                 label={t('宽')}
                 suffix={t('% 长度')}
-                hint={t('骨骼本体的半宽占骨骼长度的比例（原来固定 5%）')}
+                hint={t('骨骼本体的半宽占骨骼长度的比例（默认 4%）')}
                 value={boneStyle.widthPercent}
                 min={0.5}
                 max={60}

@@ -1,6 +1,7 @@
 import { registerAnimCommands } from './animCommands'
 import { registerBindAllCommands } from './bindAll'
 import { registerMeshCommands } from './meshCommands'
+import { registerProjectCommands } from './projectCommands'
 import { registerQueryCommands } from './queryCommands'
 import { catalog, defineRead } from './registry'
 import { registerSkeletonCommands } from './skeletonCommands'
@@ -19,6 +20,7 @@ export function installCommands(): void {
   registerAnimCommands()
   registerMeshCommands()
   registerBindAllCommands()
+  registerProjectCommands()
   registerQueryCommands()
   // 本地服务的 GET /commands 用它拉命令自描述（AI 通常不必直接调用）
   defineRead(

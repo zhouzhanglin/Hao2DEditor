@@ -31,7 +31,7 @@ export interface BoneOverlayOptions {
   attachmentGizmo?: { boneIndex: number; position: { x: number; y: number }; rotation: number } | null
   /**
    * 骨骼本体 / 原点圈的外观（「全局设置 → 骨骼样式」，见 `boneStyle.ts`）。
-   * 不传 = 用默认值，也就是加设置之前的那一档。
+   * 不传 = 用默认值（见 `boneStyle.ts` 的 `DEFAULT_BONE_STYLE`）。
    */
   style?: BoneOverlayStyle
 }
@@ -359,8 +359,8 @@ export function drawBoneOverlay(
   const fillAlpha = boneStyleAlpha(style.fillAlpha)
   const strokeAlpha = boneStyleAlpha(style.strokeAlpha)
   const jointRadius = Number.isFinite(style.jointRadius) ? Math.max(1, style.jointRadius) : DEFAULT_BONE_STYLE.jointRadius
-  // 骨骼本体半宽：占长度的百分比（原来写死 5%），下限 2.2px 保证极短骨骼也看得见
-  const widthRatio = Number.isFinite(style.widthPercent) ? Math.max(0.1, style.widthPercent) / 100 : 0.05
+  // 骨骼本体半宽：占长度的百分比（默认 4%），下限 2.2px 保证极短骨骼也看得见
+  const widthRatio = Number.isFinite(style.widthPercent) ? Math.max(0.1, style.widthPercent) / 100 : 0.04
 
   // 骨骼体（四边形）+ 原点圈：「骨骼」开关关掉时整段跳过（约束手柄与骨骼是两个独立开关）
   for (let i = 0; options.showBones && i < boneCount; i++) {

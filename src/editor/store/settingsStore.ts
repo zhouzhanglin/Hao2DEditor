@@ -14,7 +14,7 @@ const SETTINGS_KEY = 'hao2d:settings'
 export interface GlobalSettings {
   /** Spine 导出时图集文件名追加 `.txt`（`xxx.atlas.txt`）；Spine 编辑器导出的形态，spine-unity 也认 */
   spineAtlasTxt: boolean
-  /** 骨骼叠加层样式（视口里骨骼的长相，默认值 = 加设置之前用的那一档） */
+  /** 骨骼叠加层样式（视口里骨骼的长相，默认值见 `DEFAULT_BONE_STYLE`） */
   boneStyle: BoneOverlayStyle
 }
 

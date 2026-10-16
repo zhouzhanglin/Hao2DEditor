@@ -7,16 +7,15 @@ import {
 } from '@render/overlays/boneStyle'
 
 /**
- * 「骨骼样式」设置放开之前，先把**项目现在用的那一档**固化成默认值 ——
- * 用户没动过设置时，视口必须和加设置前一模一样。这里锁的正是那几个魔法数。
+ * 骨骼样式默认值：没动过设置（或点了「恢复默认」）时，视口里骨骼用的就是这一档。
  */
-describe('骨骼样式默认值（= 加设置之前用的那一档）', () => {
-  it('默认值与 boneOverlay 里原来写死的常量一致', () => {
+describe('骨骼样式默认值', () => {
+  it('默认值与 boneStyle.ts 里的常量一致', () => {
     expect(DEFAULT_BONE_STYLE).toEqual({
-      widthPercent: 5,
+      widthPercent: 4,
       jointRadius: 6,
       fillColor: '#CCD2D8',
-      fillAlpha: 0.55,
+      fillAlpha: 0.8,
       strokeColor: '#CCD2D8',
       strokeAlpha: 0.9,
       selectedColor: '#4FE3F7'

@@ -788,7 +788,7 @@ export function registerBindAllCommands(): void {
       const store = useProjectStore.getState()
       const projectPath = store.projectPath
       if (!projectPath) {
-        throw new Error('请先保存或创建工程：导入的图片要落到工程目录的 images/ 下（可先调用 createProjectAt 或 saveProject）')
+        throw new Error('请先保存或创建工程：导入的图片要落到工程目录的 images/ 下（可先调用 createProject 或 saveProject）')
       }
       const data = optText(args, 'data')
       const sourcePath = optText(args, 'path')

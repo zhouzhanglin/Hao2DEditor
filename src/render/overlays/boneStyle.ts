@@ -1,18 +1,17 @@
 /**
  * 骨骼叠加层的样式（「全局设置 → 骨骼样式」里可调，落盘 localStorage，跨工程保留）。
  *
- * 这些字段的**默认值就是加设置之前项目里用的那一档**：没动过设置时，视口里的骨骼
- * 与原来一模一样。放开之后每一项都只影响叠加层的外观，不写进工程文件、不进运行期 ——
- * 导出的角色数据不受它影响。
+ * 默认值见下方 `DEFAULT_BONE_STYLE`（半宽 4% 长度、填充 80%）。每一项都只影响叠加层的
+ * 外观，不写进工程文件、不进运行期 —— 导出的角色数据不受它影响。
  */
 export interface BoneOverlayStyle {
-  /** 骨骼本体半宽：占骨骼长度的百分比（半宽 = length × 该值；原来写死 5%） */
+  /** 骨骼本体半宽：占骨骼长度的百分比（半宽 = length × 该值；默认 4） */
   widthPercent: number
   /** 骨骼原点圆圈半径（屏幕像素；原来写死 6，拾取容差跟着它走，见 scene.pickBoneHandleAt） */
   jointRadius: number
   /** 骨骼本体默认填充色 `#RRGGBB`（原来 #CCD2D8） */
   fillColor: string
-  /** 骨骼本体默认填充透明度（原来 0.55） */
+  /** 骨骼本体默认填充透明度（默认 0.8） */
   fillAlpha: number
   /** 描边色 `#RRGGBB`：骨骼本体轮廓与原点圆圈都用它（原来与填充同色 #CCD2D8） */
   strokeColor: string
@@ -23,10 +22,10 @@ export interface BoneOverlayStyle {
 }
 
 export const DEFAULT_BONE_STYLE: BoneOverlayStyle = {
-  widthPercent: 5,
+  widthPercent: 4,
   jointRadius: 6,
   fillColor: '#CCD2D8',
-  fillAlpha: 0.55,
+  fillAlpha: 0.8,
   strokeColor: '#CCD2D8',
   strokeAlpha: 0.9,
   selectedColor: '#4FE3F7'

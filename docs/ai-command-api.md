@@ -122,6 +122,7 @@ POST /batch
    - 工程重命名：`setProjectName`（窗口标题与导出标题用它；保存后写进工程文件，**不**重命名磁盘文件）
    - 相机（只移动视口、不改数据）：`focusNode`（聚焦骨骼 / 插槽 / 附件 / 约束，等同层级树双击）/ `panViewport`（按屏幕像素平移）/ `setViewportZoom`（缩放）/ `centerViewport`（把世界坐标点移到视口中心）
    - 舞台参考图（视口背景参照，存工程 `stage/`，**不参与导出**）：`setStage`（按路径设 / 换参考图）/ `updateStage`（改位置 / 大小 / 透明度）/ `removeStage`
+   - AI 操作指南：`getAiGuide`（返回使用手册 + 「角色装配 + 动画」完整流程）。打包安装后 docs/ 文件不在用户工程里，这是 AI 拿完整流程的唯一可靠途径
 
 预览效果：在线预览（浏览器里用 Spine / Hao2D 运行时播放）**有意不开放**给 AI —— 那是给人看的成品展示。AI 想要可交付产物就 `exportProject` 落盘，再让用户打开。
 

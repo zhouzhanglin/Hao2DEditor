@@ -68,6 +68,10 @@
       {
         "from": "docs/ai-command-api.md",
         "to": "ai-command-api.md"
+      },
+      {
+        "from": "docs/ai-rigging-playbook.md",
+        "to": "ai-rigging-playbook.md"
       }
     ],
     "artifactName": "Hao2D.Editor-${version}-${os}-${arch}.${ext}",

@@ -7,6 +7,7 @@ import { catalog, defineRead } from './registry'
 import { registerSkeletonCommands } from './skeletonCommands'
 import { registerViewCommands } from './viewCommands'
 import { AI_PLAYBOOK } from '@shared/aiPlaybook'
+import { AI_RIGGING_GUIDE } from '@shared/aiRiggingGuide'
 
 export { catalog, clearRegistry, executeCommand, hasCommand, registerCommand } from './registry'
 export type { Args, CommandOutcome } from './registry'
@@ -36,5 +37,19 @@ export function installCommands(): void {
       returns: '{ commands, playbook }'
     },
     () => ({ commands: catalog(), playbook: AI_PLAYBOOK })
+  )
+  // 完整操作指南走命令下发：打包安装到用户机器后，开发仓库的 docs/ 不在「工程里」，
+  // AI 的文件读取能力找不到（extraResources 副本也未必够得着）——编译进 bundle 的
+  // 命令是打包环境唯一可靠的通道（内容见 aiRiggingGuide.ts）
+  defineRead(
+    {
+      name: 'getAiGuide',
+      title: '获取 AI 操作指南',
+      description:
+        '返回 AI 使用手册与「角色装配 + 动画」完整分阶段流程：报备门、参考图对位（含像素→世界坐标换算公式）、网格蒙皮、打帧自查循环、每步验收标准。做装配 / 动画任务前先调它',
+      args: {},
+      returns: '{ playbook, rigging }'
+    },
+    () => ({ playbook: AI_PLAYBOOK, rigging: AI_RIGGING_GUIDE })
   )
 }

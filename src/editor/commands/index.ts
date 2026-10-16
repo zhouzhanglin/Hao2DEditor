@@ -6,8 +6,7 @@ import { registerQueryCommands } from './queryCommands'
 import { catalog, defineRead } from './registry'
 import { registerSkeletonCommands } from './skeletonCommands'
 import { registerViewCommands } from './viewCommands'
-import { AI_PLAYBOOK } from '@shared/aiPlaybook'
-import { AI_RIGGING_GUIDE } from '@shared/aiRiggingGuide'
+import { AI_PLAYBOOK, AI_RIGGING_GUIDE } from '@shared/aiGuides'
 
 export { catalog, clearRegistry, executeCommand, hasCommand, registerCommand } from './registry'
 export type { Args, CommandOutcome } from './registry'
@@ -27,7 +26,7 @@ export function installCommands(): void {
   registerViewCommands()
   registerQueryCommands()
   // 本地服务的 GET /commands 用它拉命令自描述（AI 通常不必直接调用）。
-  // playbook 随数据一起透传：AI 拿目录的同时就拿到「怎么用对」的手册（见 aiPlaybook.ts）
+  // playbook 随数据一起透传：AI 拿目录的同时就拿到「怎么用对」的手册（见 @shared/aiGuides）
   defineRead(
     {
       name: '__catalog',
@@ -38,9 +37,8 @@ export function installCommands(): void {
     },
     () => ({ commands: catalog(), playbook: AI_PLAYBOOK })
   )
-  // 完整操作指南走命令下发：打包安装到用户机器后，开发仓库的 docs/ 不在「工程里」，
-  // AI 的文件读取能力找不到（extraResources 副本也未必够得着）——编译进 bundle 的
-  // 命令是打包环境唯一可靠的通道（内容见 aiRiggingGuide.ts）
+  // 完整操作指南走命令下发：AI 可能没开文件系统权限读工程 ai/ 目录的离线副本，
+  // 命令是打包环境最可靠的通道（内容来自 docs/ai-rigging-playbook.md，见 @shared/aiGuides）
   defineRead(
     {
       name: 'getAiGuide',

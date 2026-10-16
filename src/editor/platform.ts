@@ -77,8 +77,6 @@ export interface Platform {
   aiMcpInfo(): Promise<IpcResult<{ running: boolean; mcpUrl: string; url: string; token: string }>>
   /** AI 接入：把 MCP URL 写进已识别的 AI 客户端配置（一键安装） */
   aiInstallMcp(): Promise<IpcResult<McpInstallReport>>
-  /** AI 接入：返回内置命令接口文档（docs/ai-command-api.md 内容），供写出到工程目录 */
-  aiCommandApiDoc(): Promise<IpcResult<{ text: string }>>
   /** 语言：系统语言标签（Electron 走主进程 `app.getLocale()`，浏览器读 `navigator.language`） */
   systemLocale(): Promise<string>
   /** 语言：把当前界面语言同步给主进程（重建菜单）；浏览器模式为空实现 */
@@ -241,14 +239,6 @@ class ElectronPlatform implements Platform {
 
   async aiInstallMcp(): Promise<IpcResult<McpInstallReport>> {
     const call = this.bridge.aiInstallMcp
-    if (typeof call !== 'function') {
-      return { ok: false, error: '命令服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）' }
-    }
-    return call.call(this.bridge)
-  }
-
-  async aiCommandApiDoc(): Promise<IpcResult<{ text: string }>> {
-    const call = this.bridge.aiCommandApiDoc
     if (typeof call !== 'function') {
       return { ok: false, error: '命令服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）' }
     }
@@ -458,10 +448,6 @@ class MemoryPlatform implements Platform {
   }
 
   async aiInstallMcp(): Promise<IpcResult<McpInstallReport>> {
-    return { ok: false, error: '浏览器模式没有命令服务，请在桌面版里使用' }
-  }
-
-  async aiCommandApiDoc(): Promise<IpcResult<{ text: string }>> {
     return { ok: false, error: '浏览器模式没有命令服务，请在桌面版里使用' }
   }
 

@@ -1,19 +1,9 @@
-/**
- * 随命令目录自动下发给 AI 的「使用手册」。
- *
- * 背景：命令自描述（CommandSpec）只说清**每条命令怎么调**，但 AI 想把动画做对，
- * 还需要**跨命令的知识** —— 坐标 / 单位约定、先查后改的工作循环、从零到导出的
- * 步骤顺序、以及最容易踩的坑。这些以前只存在于 docs/ai-command-api.md 第 7 节，
- * 要靠人肉粘贴系统提示词；现在随三个入口自动下发：
- *
- * - `GET /commands` 响应里的 `playbook` 字段（经 `__catalog` 透传）
- * - MCP `initialize` 的 `instructions`（MCP 客户端会注入 AI 上下文）
- * - WS 握手消息的 `instructions`
- *
- * 保持纯字符串、零依赖（main 与 renderer 都能 import）；内容必须与实际命令签名一致，
- * 改命令参数时同步改这里。控制在 ~5KB：太长会稀释 AI 的注意力。
- */
-export const AI_PLAYBOOK = `【Hao2DEditor 动画制作手册】随命令目录自动下发，照此执行可少走弯路。
+# Hao2DEditor 动画制作手册（AI 使用）
+
+> **本文件是唯一权威来源**：构建时内联进应用（MCP instructions / `GET /commands` 的
+> `playbook` 字段 / WS 握手 / `getAiGuide` 命令），并在保存 / 打开工程时写进工程
+> `ai/hao2d-ai-playbook.md`。改内容只改这里，代码里不做第二份。
+> 照此执行可少走弯路。
 
 ## 坐标与单位（最先记住，错了全盘错）
 - 世界坐标 y 轴向上；1 世界单位 = 100 像素（PPU=100），一张 512px 的图约 5.12 单位
@@ -50,6 +40,6 @@ addSkin {name} 建皮肤 → addDisplay {slot, image, skin} 往该皮肤放件 �
 - 撤销栈只有 80 条：大改动分批，不要把几十条命令拆成单发刷屏
 - setActiveSkeleton / setActiveSkin 会清空选中与时间轴状态，切完先重新查状态
 - 在线预览、画笔式刷权重是有意不开放的：预览给人看，权重用 autoWeightMesh
+- 有装配参考图时：setStage {imagePath, opacity:0.5} 铺成视口底图 → 部件一张一张挂，每挂一个用 getDisplayWorldBounds 读世界包围盒与底图目标框对比、setDisplayTransform 修到重合 → 全部对齐后 removeStage 删底图。**别在外部算好坐标一口气执行**——编辑器返回的包围盒才是权威几何
 - 别猜命令名：先 GET /commands（或 __catalog 命令）拿目录，每条命令的参数说明都在里面
-- 要做「角色装配 + 动画」：先调 getAiGuide 命令拿完整分阶段流程与验收标准（任务书 / 参考图对位公式 / 网格蒙皮 / 打帧自查）；docs/ai-rigging-playbook.md 是同内容的人读版，只有开发环境读得到
-- 有装配参考图时：setStage {imagePath, opacity:0.5} 铺成视口底图 → updateStage 调好底图位置/大小 → 部件一张一张放上视口，截图与底图对比大小/位置/层级并修正 → 全部对齐后 removeStage 删底图`
+- 要做「角色装配 + 动画」：先调 getAiGuide 命令拿完整分阶段流程与验收标准（任务书 / 参考图对位公式 / 网格蒙皮 / 打帧自查）；同样的内容也在工程 ai/ 目录（hao2d-ai-playbook.md / hao2d-ai-rigging-playbook.md），离线可读

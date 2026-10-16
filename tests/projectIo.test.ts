@@ -43,6 +43,8 @@ vi.mock('@editor/platform', async (importOriginal) => {
         env.assetRoots.push(dir)
       },
       pickFiles: async () => [],
+      /** AI 连接信息：openProjectAt / saveProject 写 server.json 前会问主进程（这里返回「没在跑」） */
+      aiMcpInfo: async () => ({ ok: true, data: { running: false } }),
       /** 新建项目 / 导入时会释放图片 URL 缓存（这里没有真的 URL 缓存，记个次数就够） */
       releaseImageCache: () => {
         env.imageCacheReleases++
@@ -115,6 +117,21 @@ describe('打开工程', () => {
     expect(useProjectStore.getState().projectPath).toBe('/proj/hero.hao2d.proj')
     expect(useProjectStore.getState().document.bones.length).toBe(sample.bones.length)
     expect(env.recents[0]).toBe('/proj/hero.hao2d.proj')
+  })
+
+  it('打开工程后把 AI 陪伴文件写进工程 ai/ 子目录（文档 + 两份手册；服务没跑则不写 server.json）', async () => {
+    const sample = createSampleDocument()
+    env.files.set('/proj/hero.hao2d.proj', serializeDocument(sample))
+
+    const result = await openProjectAt('/proj/hero.hao2d.proj')
+
+    expect(result.ok).toBe(true)
+    // 文档与手册来自 docs/*.md 的构建期内联（@shared/aiGuides），断言真实内容的特征串
+    expect(env.files.get('/proj/ai/hao2d-ai-command-api.md')).toContain('Hao2DEditor')
+    expect(env.files.get('/proj/ai/hao2d-ai-playbook.md')).toContain('动画制作手册')
+    expect(env.files.get('/proj/ai/hao2d-ai-rigging-playbook.md')).toContain('角色装配')
+    // 命令服务没在跑（aiMcpInfo running=false）：连接信息不写，避免留下失效 token
+    expect(env.files.has('/proj/ai/hao2d-ai-server.json')).toBe(false)
   })
 
   it('打开工程时登记工程目录与图片目录（资源面板缩略图靠它才能读文件）', async () => {

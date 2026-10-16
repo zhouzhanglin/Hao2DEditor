@@ -1,5 +1,6 @@
 import { getPlatform, baseName, dirName, joinPath, stripExtension } from '../platform'
 import { AI_TRANSPORT_NOTICE } from '@shared/commandTypes'
+import { AI_COMMAND_API_DOC, AI_PLAYBOOK, AI_RIGGING_GUIDE } from '@shared/aiGuides'
 import type { Platform } from '../platform'
 import { parseProject, projectNameFromPath, serializeProject, PROJECT_EXTENSION } from '@core/codec/projectJson'
 import { decompileAsset } from '@core/codec/decompile'
@@ -148,24 +149,31 @@ export async function openProject(): Promise<IoResult> {
  * 因此不需要回滚逻辑，也不会出现「打开失败但工程已被清空」的情况。
  */
 /**
- * 把 AI 接入所需的「说明书 + 连接信息」写出到工程目录：
+ * 把 AI 接入所需的「说明书 + 手册 + 连接信息」写出到工程目录的 **ai/ 子目录**：
  * - hao2d-ai-command-api.md：命令接口文档（让 AI 工具开箱即用地知道怎么调，免配置、免 MCP）
+ * - hao2d-ai-playbook.md：动画制作手册（坐标/单位约定、工作循环、食谱、常见坑）
+ * - hao2d-ai-rigging-playbook.md：角色装配 + 动画完整流程（与 getAiGuide 同内容）
  * - hao2d-ai-server.json：当前命令服务的 url + token（每次保存/打开刷新，因为 token 每次启动重新生成）
  *
+ * 收进 ai/ 子目录而不撒在工程根：AI 工具打开文件夹一眼锁定，不和工程文件 / 图片混放。
  * 这样 Codex / CodeBuddy 这类在本工程目录里干活的 AI 工具，打开文件夹就能直接上手，
- * 不用配 MCP、也不用手粘提示词。文档本身已说明「优先读工程目录下的 hao2d-ai-server.json」。
+ * 不用配 MCP、也不用手粘提示词。文档本身已说明「优先读工程 ai/ 目录下的 hao2d-ai-server.json」。
  */
+const AI_DIR_NAME = 'ai'
 const AI_API_DOC_NAME = 'hao2d-ai-command-api.md'
+const AI_PLAYBOOK_NAME = 'hao2d-ai-playbook.md'
+const AI_RIGGING_NAME = 'hao2d-ai-rigging-playbook.md'
 const AI_SERVER_INFO_NAME = 'hao2d-ai-server.json'
 
 async function exportAiCompanionFiles(projectDir: string): Promise<void> {
   if (!projectDir) return
   const platform = getPlatform()
-  // 文档：原样拷贝（文档第 7 节已说明优先读工程目录下的 hao2d-ai-server.json）
-  const doc = await platform.aiCommandApiDoc()
-  if (doc.ok && doc.data.text.length > 0) {
-    await platform.writeText(joinPath(projectDir, AI_API_DOC_NAME), doc.data.text)
-  }
+  // writeText 在主进程侧会自动建目录：ai/ 不存在也没关系
+  const aiDir = joinPath(projectDir, AI_DIR_NAME)
+  // 文档 + 两份手册：构建期内联进 bundle（见 @shared/aiGuides），保存 / 打开工程时随工程落一份离线副本
+  await platform.writeText(joinPath(aiDir, AI_API_DOC_NAME), AI_COMMAND_API_DOC)
+  await platform.writeText(joinPath(aiDir, AI_PLAYBOOK_NAME), AI_PLAYBOOK)
+  await platform.writeText(joinPath(aiDir, AI_RIGGING_NAME), AI_RIGGING_GUIDE)
   // 连接信息：命令服务在跑才写（拿得到当前有效、没过期的 url + token）
   const mcp = await platform.aiMcpInfo()
   if (mcp.ok && mcp.data.running) {
@@ -175,9 +183,9 @@ async function exportAiCompanionFiles(projectDir: string): Promise<void> {
       updatedAt: new Date().toISOString(),
       // 通信指引：AI 读连接信息时同步读到「别用 curl」（与 MCP instructions、GET /commands 顶层一致）
       instructions: AI_TRANSPORT_NOTICE,
-      note: '由 Hao2DEditor 在保存/打开工程时自动生成。编辑器关闭后命令服务停止、token 失效；重新打开编辑器并保存/打开工程即可刷新本文件。'
+      note: '由 Hao2DEditor 在保存/打开工程时自动生成（工程 ai/ 目录）。编辑器关闭后命令服务停止、token 失效；重新打开编辑器并保存/打开工程即可刷新本文件。'
     }
-    await platform.writeText(joinPath(projectDir, AI_SERVER_INFO_NAME), `${JSON.stringify(payload, null, 2)}\n`)
+    await platform.writeText(joinPath(aiDir, AI_SERVER_INFO_NAME), `${JSON.stringify(payload, null, 2)}\n`)
   }
 }
 

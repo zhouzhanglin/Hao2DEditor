@@ -214,7 +214,10 @@ export function registerViewCommands(): void {
       if (previous && previous.file !== fileName) {
         await platform.deleteFile(stageFilePath(dir, previous.file))
       }
-      return changed(init, previous ? `已更换舞台参考图「${fileName}」` : `已设置舞台参考图「${fileName}」`)
+      const next = [
+        '底图已铺好（默认 1:1、图片中心=世界原点）：接下来逐张挂部件——addSlot + addDisplay 后用 getDisplayWorldBounds 读世界包围盒与底图量出的目标框对比、setDisplayTransform 修到重合，对齐一个再挂下一个；captureViewport 截图做视觉复核；全部对齐后 removeStage 删底图'
+      ]
+      return changed({ ...init, next }, previous ? `已更换舞台参考图「${fileName}」` : `已设置舞台参考图「${fileName}」`)
     }
   )
 

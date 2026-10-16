@@ -1,6 +1,4 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
-import { readFile } from 'node:fs/promises'
-import path from 'node:path'
 import { FILE_SCHEME } from './protocol'
 import * as fs from './fileService'
 import {
@@ -110,15 +108,6 @@ export function registerIpcHandlers(): void {
   // AI 接入：把 MCP URL 写进已识别的 AI 客户端配置（一键安装）
   ipcMain.handle(IPC.aiInstallMcp, () => fs.safe(() => installMcpIntoClients(commandServerInfo())))
 
-  // AI 接入：返回内置命令接口文档（随包发布的 docs/ai-command-api.md）
-  // 让「保存/打开工程」时把它原样写到工程目录，AI 工具打开工程就能免配置上手。
-  ipcMain.handle(IPC.aiCommandApiDoc, () =>
-    fs.safe(async () => {
-      const text = await readCommandApiDoc()
-      return { text }
-    })
-  )
-
   // 语言：把系统语言标签交给渲染进程（首启判定界面语言用）
   ipcMain.handle(IPC.i18nSystemLocale, () => fs.safe(() => app.getLocale()))
 
@@ -129,26 +118,4 @@ export function registerIpcHandlers(): void {
       buildAppMenu()
     })
   )
-}
-
-/**
- * 读取随包发布的命令接口文档。
- *
- * 开发时位于仓库根 `docs/ai-command-api.md`；打包后由 electron-builder 的
- * extraResources 拷进 `Resources/ai-command-api.md`（运行时即 `process.resourcesPath`）。
- * 两个位置都试一遍，都读不到才报错（调用方据此跳过写出）。
- */
-async function readCommandApiDoc(): Promise<string> {
-  const candidates = [
-    path.join(process.resourcesPath, 'ai-command-api.md'),
-    path.join(app.getAppPath(), 'docs', 'ai-command-api.md')
-  ]
-  for (const candidate of candidates) {
-    try {
-      return await readFile(candidate, 'utf8')
-    } catch {
-      // 试下一个候选位置
-    }
-  }
-  throw new Error('找不到命令接口文档（ai-command-api.md）')
 }

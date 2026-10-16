@@ -10,7 +10,7 @@ import { WebSocketServer } from 'ws'
 import type { WebSocket } from 'ws'
 import { COMMAND_CHANNEL, AI_TRANSPORT_NOTICE } from '@shared/commandTypes'
 import type { CommandResponse, CommandServerInfo, CommandSpec } from '@shared/commandTypes'
-import { AI_PLAYBOOK } from '@shared/aiPlaybook'
+import { AI_PLAYBOOK } from '@shared/aiGuides'
 import { commandSpecToMcpTool } from '@shared/mcpSchema'
 import { createLogger } from './logger'
 
@@ -26,7 +26,7 @@ const log = createLogger('命令服务')
  * 端口不固定，启动后把 `{ port, token, url, file, instructions }` 写进 userData/command-server.json，
  * AI 读它即可发现服务（路径也会打进启动日志）。通信指引（AI_TRANSPORT_NOTICE）随每个
  * 「获取命令」的入口一同下发：GET /commands 顶层、MCP initialize、WS 握手消息、两份发现文件；
- * MCP initialize 与 WS 握手还会额外带上 AI 使用手册（AI_PLAYBOOK，见 aiPlaybook.ts）。
+ * MCP initialize 与 WS 握手还会额外带上 AI 使用手册（AI_PLAYBOOK，见 @shared/aiGuides）。
  */
 
 const CALL_TIMEOUT_MS = 20_000

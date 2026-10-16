@@ -366,7 +366,14 @@ export function registerSkeletonCommands(): void {
           skin: optText(args, 'skin')
         })
       )
-      return changed(result, `已给插槽 ${result.slot} 加上附件 ${result.attachment}`)
+      // 参考图装配中（工程里铺了底图）就把对位循环递到 AI 眼前：
+      // 不提示它就会倾向「外部算好坐标一口气挂完」，跳过与底图的对位
+      const next = draft.editorMeta.stage
+        ? [
+            `参考图装配中：调 getDisplayWorldBounds {slot:'${result.slot}', attachment:'${result.attachment}'} 读世界包围盒，与底图量出的目标框对比，不对就 setDisplayTransform 修到重合；对齐这个部件再挂下一个`
+          ]
+        : undefined
+      return changed({ ...result, next }, `已给插槽 ${result.slot} 加上附件 ${result.attachment}`)
     }
   )
 

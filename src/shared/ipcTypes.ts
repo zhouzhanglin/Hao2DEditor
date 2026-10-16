@@ -88,7 +88,6 @@ export const IPC = {
   openExternal: 'shell:openExternal',
   aiMcpInfo: 'ai:mcpInfo',
   aiInstallMcp: 'ai:installMcp',
-  aiCommandApiDoc: 'ai:commandApiDoc',
   i18nSystemLocale: 'i18n:systemLocale',
   i18nSetLocale: 'i18n:setLocale'
 } as const
@@ -236,8 +235,6 @@ export interface HaoBridge {
   aiMcpInfo(): Promise<IpcResult<{ running: boolean; mcpUrl: string; url: string; token: string }>>
   /** AI 接入：把 MCP URL 写进已识别的 AI 客户端配置（一键安装） */
   aiInstallMcp(): Promise<IpcResult<McpInstallReport>>
-  /** AI 接入：返回内置命令接口文档（随包发布的 docs/ai-command-api.md 内容），供写出到工程目录让 AI 免配置上手 */
-  aiCommandApiDoc(): Promise<IpcResult<{ text: string }>>
   /** 语言：主进程侧的系统语言标签（`app.getLocale()`，首次启动用它判定界面语言） */
   systemLocale(): Promise<IpcResult<string>>
   /** 语言：把当前界面语言同步给主进程，让它按该语言重建菜单 */

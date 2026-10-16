@@ -438,6 +438,76 @@ export function registerQueryCommands(): void {
 
   defineRead(
     {
+      name: 'getDisplayWorldBounds',
+      title: '查附件世界包围盒',
+      description:
+        '附件在视口世界坐标下的 AABB（当前 setup pose）。**参考图对位的主力命令**：挂上一个部件就读它，与参考图量出的目标框对比，再用 setDisplayTransform 修——数值闭环，不用截图也不用在外部自己算坐标。网格按绑定姿态顶点近似（蒙皮形变不含在内）',
+      args: {
+        slot: { type: 'string', description: '插槽名', required: true },
+        attachment: { type: 'string', description: '附件名', required: true },
+        skin: { type: 'string', description: '皮肤名（可选，默认当前皮肤）' }
+      },
+      returns: 'type / worldBounds{minX,minY,maxX,maxY} / center{x,y} / width / height'
+    },
+    (args) => {
+      const slotName = str(args, 'slot')
+      const attachmentName = str(args, 'attachment')
+      const document = doc()
+      const att = findAttachment(document, slotName, attachmentName, str(args, 'skin'))
+      const slot = document.slots.find((item) => item.name === slotName)
+      if (!slot) throw new Error(`找不到插槽：${slotName}（用 listSlots 查）`)
+      const matrix = getActiveScene()?.worldMatrixOf(slot.bone) ?? null
+      if (!matrix || matrix.length < 16) {
+        throw new Error('视口场景还没就绪，取不到世界坐标（窗口未打开或正在初始化时会这样）')
+      }
+      // 附件局部空间采样点：Mesh 用绑定姿态顶点；Region 用内容四角
+      // （局部 = position + R(rotation) · S(scale) · (contentOffset ± size/2)，与 setDisplayTransform 语义一致）
+      const locals: Array<{ x: number; y: number }> = []
+      if (att.type === 'mesh' && att.vertices.length > 0) {
+        for (const vertex of att.vertices) locals.push({ x: vertex.x, y: vertex.y })
+      } else {
+        const halfW = att.size.x / 2
+        const halfH = att.size.y / 2
+        const rad = (att.rotation * Math.PI) / 180
+        const cos = Math.cos(rad)
+        const sin = Math.sin(rad)
+        for (const sx of [-1, 1]) {
+          for (const sy of [-1, 1]) {
+            const cx = att.contentOffset.x + sx * halfW
+            const cy = att.contentOffset.y + sy * halfH
+            locals.push({
+              x: att.position.x + cx * att.scale.x * cos - cy * att.scale.y * sin,
+              y: att.position.y + cx * att.scale.x * sin + cy * att.scale.y * cos
+            })
+          }
+        }
+      }
+      let minX = Infinity
+      let minY = Infinity
+      let maxX = -Infinity
+      let maxY = -Infinity
+      for (const point of locals) {
+        const wx = matrix[0] * point.x + matrix[4] * point.y + matrix[12]
+        const wy = matrix[1] * point.x + matrix[5] * point.y + matrix[13]
+        if (wx < minX) minX = wx
+        if (wy < minY) minY = wy
+        if (wx > maxX) maxX = wx
+        if (wy > maxY) maxY = wy
+      }
+      return {
+        slot: slotName,
+        attachment: att.name,
+        type: att.type,
+        worldBounds: { minX, minY, maxX, maxY },
+        center: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 },
+        width: maxX - minX,
+        height: maxY - minY
+      }
+    }
+  )
+
+  defineRead(
+    {
       name: 'getViewport',
       title: '查视口',
       description:

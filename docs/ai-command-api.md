@@ -47,7 +47,7 @@
 > AI 工具请走 MCP（第 8 节）或用自己的 HTTP 请求能力（fetch / requests 等），
 > **不要经 shell 拼 curl**；curl 只留给人工调试。这条指引会随各入口主动交给 AI：
 > `GET /commands` 响应顶层、MCP `initialize`、WS 握手消息、以及两份发现文件
-> （工程目录 `hao2d-ai-server.json`、userData `command-server.json`）都带 `instructions`（见 8.4）。
+> （工程 `ai/` 目录 `hao2d-ai-server.json`、userData `command-server.json`）都带 `instructions`（见 8.4）。
 
 ```bash
 BASE=http://127.0.0.1:52741
@@ -122,7 +122,7 @@ POST /batch
    - 工程重命名：`setProjectName`（窗口标题与导出标题用它；保存后写进工程文件，**不**重命名磁盘文件）
    - 相机（只移动视口、不改数据）：`focusNode`（聚焦骨骼 / 插槽 / 附件 / 约束，等同层级树双击）/ `panViewport`（按屏幕像素平移）/ `setViewportZoom`（缩放）/ `centerViewport`（把世界坐标点移到视口中心）
    - 舞台参考图（视口背景参照，存工程 `stage/`，**不参与导出**）：`setStage`（按路径设 / 换参考图）/ `updateStage`（改位置 / 大小 / 透明度）/ `removeStage`
-   - AI 操作指南：`getAiGuide`（返回使用手册 + 「角色装配 + 动画」完整流程）。打包安装后 docs/ 文件不在用户工程里，这是 AI 拿完整流程的唯一可靠途径
+   - AI 操作指南：`getAiGuide`（返回使用手册 + 「角色装配 + 动画」完整流程，经命令通道在线下发；保存 / 打开工程时同内容也会写进工程 `ai/` 目录作离线副本）
 
 预览效果：在线预览（浏览器里用 Spine / Hao2D 运行时播放）**有意不开放**给 AI —— 那是给人看的成品展示。AI 想要可交付产物就 `exportProject` 落盘，再让用户打开。
 
@@ -142,7 +142,7 @@ POST /batch
 ## 7. 给 AI 的系统提示词（可直接粘贴）
 
 > **通常不用粘贴**：编辑器会自动把「使用手册」（坐标/单位约定、标准工作循环、从零到导出的
-> 食谱、常见坑，见 `src/shared/aiPlaybook.ts`）随服务发现一起下发 —— MCP 客户端在
+> 食谱、常见坑，见 `docs/ai-playbook.md`）随服务发现一起下发 —— MCP 客户端在
 > `initialize` 的 `instructions` 里收到，HTTP/WS 客户端在 `GET /commands` 响应的
 > `playbook` 字段与 WS 握手消息里收到。下面这份提示词留给**读不到上述字段的客户端**，
 > 内容与自动下发的手册一致且互不冲突。
@@ -150,7 +150,7 @@ POST /batch
 ```text
 你在操作一个叫 Hao2DEditor 的 2D 骨骼动画编辑器。它在本机跑了一个命令服务：
 
-- 先读本工程目录下的 `hao2d-ai-server.json`（和工程文件 *.hao2d.proj 放在一起，由编辑器在保存/创建工程时自动写出）
+- 先读本工程 `ai/` 目录下的 `hao2d-ai-server.json`（由编辑器在保存 / 打开 / 创建工程时自动写出；同目录还有本命令文档 `hao2d-ai-command-api.md` 与两份手册 `hao2d-ai-playbook.md` / `hao2d-ai-rigging-playbook.md`，离线可读）
   - 里面 url 是本机地址，token 是凭证；请求都带上 token（?token= 或 x-hao2d-token 头）
   - 找不到该文件时，才回退去用户目录读 command-server.json：
     macOS ~/Library/Application Support/hao2d-editor/、Windows %APPDATA%\hao2d-editor\、Linux ~/.config/hao2d-editor\；
@@ -225,7 +225,7 @@ AI 不管从哪个入口接入，拿到命令时都会同时收到同一条 `ins
 | MCP | `initialize` 返回的 `instructions`（支持该字段的客户端会注入 AI 上下文） |
 | HTTP | `GET /commands` 响应顶层的 `instructions` |
 | WebSocket | 连接建立即推送 `{ id: null, hello: "hao2d-command", instructions }`；另，WS 上请求 `__catalog` 的响应也带 |
-| 工程目录 | `hao2d-ai-server.json` 的 `instructions` |
+| 工程 `ai/` 目录 | `hao2d-ai-server.json` 的 `instructions` |
 | userData | `command-server.json` 的 `instructions`（发现服务时读到） |
 
 内容一致：**不要经 shell 执行 curl 拼命令** —— 已加载 MCP 就直接调工具（tools/call），

@@ -73,6 +73,7 @@
     "artifactName": "Hao2D.Editor-${version}-${os}-${arch}.${ext}",
     "mac": {
       "category": "public.app-category.graphics-design",
+      "icon": "build/icon.icns",
       "target": [
         {
           "target": "dmg",
@@ -94,6 +95,7 @@
       "title": "Hao2D Editor ${version}"
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",

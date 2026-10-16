@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import {
-  Bone,
   ChevronDown,
   FilePlus2,
   FolderOpen,
@@ -16,6 +15,12 @@ import type { EditorMode } from '@editor/store/modeStore'
 import { getPlatform } from '@editor/platform'
 import { recentProjects } from '@editor/services/projectIo'
 import { t } from '@i18n'
+
+/**
+ * 标题栏左上角的 logo：直接用应用图标素材（`src/public/app-icon.png`，与标签页图标同一张）。
+ * 用 `document.baseURI` 拼相对地址，dev（http 服务）与打包后（file://）都能取到。
+ */
+const APP_ICON = new URL('app-icon.png', document.baseURI).href
 
 export interface MenuBarProps {
   documentName: string
@@ -205,7 +210,8 @@ export default function MenuBar({
       className={`hao-window-drag flex h-[30px] items-center gap-2 border-b border-line bg-ink-800 ${leftInset} pr-2`}
     >
       <div className="flex items-center gap-1.5">
-        <Bone size={14} className="text-accent" />
+        {/* 应用图标本身是「深色圆角块 + 骨骼拼成的橙色 H」，直接当 logo 用；禁止拖拽，免得抢掉窗口拖动 */}
+        <img src={APP_ICON} alt="" width={18} height={18} draggable={false} className="shrink-0" />
         <span className="text-panel font-semibold tracking-wide text-content-hi">Hao2D</span>
         <span className="text-3xs text-content-lo">Editor</span>
       </div>

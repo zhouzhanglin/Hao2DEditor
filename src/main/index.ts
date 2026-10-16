@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, nativeImage, shell } from 'electron'
 import path from 'node:path'
 import { createLogger } from './logger'
 import { registerSchemes, registerProtocolHandlers } from './protocol'
@@ -11,6 +11,16 @@ const log = createLogger('main')
 
 let mainWindow: BrowserWindow | null = null
 
+/**
+ * 开发期的应用图标（打包后由 electron-builder 注入的 icon.icns / icon.ico 接管）。
+ * dev 下 `app.getAppPath()` 就是工程根目录，图标在 `build/` 里；
+ * 打包产物只含 `out/**`，所以这里在 isPackaged 时直接返回 undefined，不指向不存在的路径。
+ */
+function devIconPath(): string | undefined {
+  if (app.isPackaged) return undefined
+  return path.join(app.getAppPath(), 'build', 'icon.png')
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -19,6 +29,8 @@ function createWindow(): void {
     minHeight: 800,
     show: false,
     backgroundColor: '#101018',
+    // macOS 忽略此项（Dock 图标另设，见下面的 setIcon）；Windows / Linux 用它给任务栏图标
+    icon: devIconPath(),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     // 交通灯与顶部 30px 高的菜单栏（MenuBar）垂直居中：按钮直径 12pt → y = (30 − 12) / 2 = 9
     trafficLightPosition: { x: 14, y: 9 },
@@ -64,6 +76,12 @@ app.whenReady().then(() => {
   registerIpcHandlers()
   // 首次构建菜单先按系统语言（渲染进程读到存档后会再同步一次，见 ipc.ts 的 i18n:setLocale）
   setLocale(systemLocale())
+  // macOS 的 Dock 图标：dev 下默认显示 Electron 自带图标，换成应用图标
+  const iconPath = devIconPath()
+  if (process.platform === 'darwin' && iconPath) {
+    const icon = nativeImage.createFromPath(iconPath)
+    if (!icon.isEmpty()) app.dock?.setIcon(icon)
+  }
   buildAppMenu()
   createWindow()
 

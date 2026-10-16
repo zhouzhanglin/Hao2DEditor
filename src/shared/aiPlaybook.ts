@@ -52,4 +52,4 @@ addSkin {name} 建皮肤 → addDisplay {slot, image, skin} 往该皮肤放件 �
 - 在线预览、画笔式刷权重是有意不开放的：预览给人看，权重用 autoWeightMesh
 - 别猜命令名：先 GET /commands（或 __catalog 命令）拿目录，每条命令的参数说明都在里面
 - 要做「角色装配 + 动画」的完整分阶段流程（任务书模板、每步验收标准），读工程里的 docs/ai-rigging-playbook.md
-- 有装配参考图时：setStage {imagePath, opacity:0.5} 铺底图（默认 1:1、图片中心在世界原点），像素→世界坐标换算与叠影验收循环见该文档 2.0 节`
+- 有装配参考图时：setStage {imagePath, opacity:0.5} 铺成视口底图 → updateStage 调好底图位置/大小 → 部件一张一张放上视口，截图与底图对比大小/位置/层级并修正 → 全部对齐后 removeStage 删底图；像素→世界坐标换算见 docs/ai-rigging-playbook.md 2.0 节`

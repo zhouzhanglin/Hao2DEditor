@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import type { Socket } from 'node:net'
 import { randomBytes } from 'node:crypto'
-import { rm, writeFile } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { app, ipcMain } from 'electron'
 import type { BrowserWindow } from 'electron'
@@ -19,11 +19,12 @@ const log = createLogger('命令服务')
 /**
  * 本地命令服务：让 AI 工具用 HTTP / WebSocket 直接操作编辑器。
  *
- * 与预览服务同一套路，方向相反：服务在主进程（监听 127.0.0.1 随机端口，强制 token），
+ * 与预览服务同一套路，方向相反：服务在主进程（只监听 127.0.0.1，强制 token），
  * **执行在渲染进程**（命令请求走 IPC 转给窗口，文档状态只在那里）。
  *
  * 端点：GET /health、GET /commands（命令自描述）、POST /command、POST /batch、WS /ws。
- * 端口不固定，启动后把 `{ port, token, url, file, instructions }` 写进 userData/command-server.json，
+ * 地址**跨重启保持稳定**（固定端口 + 持久化 token），AI 客户端配置填一次即可长期使用；
+ * 启动后仍把 `{ port, token, url, file, instructions }` 写进 userData/command-server.json，
  * AI 读它即可发现服务（路径也会打进启动日志）。通信指引（AI_TRANSPORT_NOTICE）随每个
  * 「获取命令」的入口一同下发：GET /commands 顶层、MCP initialize、WS 握手消息、两份发现文件；
  * MCP initialize 与 WS 握手还会额外带上 AI 使用手册（AI_PLAYBOOK，见 @shared/aiGuides）。
@@ -31,6 +32,14 @@ const log = createLogger('命令服务')
 
 const CALL_TIMEOUT_MS = 20_000
 const BODY_LIMIT = 4 * 1024 * 1024
+
+/**
+ * 固定端口：让 MCP 地址跨重启保持稳定，AI 客户端配置填一次即可长期有效。
+ * 被占用时顺延试后面几个端口，仍不行才退回系统随机（地址可用，只是那一次不再稳定）。
+ * 取在「注册端口段」（1024–49151），避开系统临时端口段（49152+）与出站连接撞号。
+ */
+const PREFERRED_PORT = 37241
+const PORT_FALLBACK_SPAN = 10
 
 /**
  * 下发给 AI 的完整指引 = 通信方式 + 使用手册。
@@ -452,6 +461,72 @@ function discoveryFile(): string {
 }
 
 /**
+ * token 持久化文件：与发现文件同目录。发现文件在停服务时会被删（避免留下失效地址），
+ * 这份保留下来，于是重启后 token 不变，AI 客户端配置可长期复用。
+ */
+function tokenFile(): string {
+  return path.join(app.getPath('userData'), 'command-server-token.txt')
+}
+
+/** 读持久化的 token；没有就生成一次并落盘。token 是凭证，按 0600 写（仅本机用户可读） */
+async function loadOrCreateToken(): Promise<string> {
+  const file = tokenFile()
+  try {
+    const saved = (await readFile(file, 'utf8')).trim()
+    if (saved) return saved
+  } catch {
+    // 首次运行 / 文件被删：往下重新生成
+  }
+  const created = randomBytes(18).toString('base64url')
+  try {
+    await writeFile(file, `${created}\n`, { encoding: 'utf8', mode: 0o600 })
+  } catch (err) {
+    log.warn(`写 token 文件失败（${file}）：${err instanceof Error ? err.message : String(err)}`)
+  }
+  return created
+}
+
+/** 在指定端口上监听一次：失败即 reject（监听器用完即摘，便于换端口重试） */
+function listenOn(server: Server, listenPort: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onError = (err: Error): void => {
+      server.off('listening', onListening)
+      reject(err)
+    }
+    const onListening = (): void => {
+      server.off('error', onError)
+      resolve()
+    }
+    server.once('error', onError)
+    server.once('listening', onListening)
+    // 只认本机回环：AI 与本机工具用 127.0.0.1 就够，不暴露到局域网
+    server.listen(listenPort, '127.0.0.1')
+  })
+}
+
+/**
+ * 优先绑固定端口，被占用则依次顺延，全被占才退回系统随机（listen 0）。
+ * 只对「端口被占用」继续换下一个，其它错误（权限等）直接抛出。返回真正绑上的端口。
+ */
+async function listenPreferredPort(server: Server): Promise<number> {
+  const span = Array.from({ length: PORT_FALLBACK_SPAN }, (_, i) => PREFERRED_PORT + i + 1)
+  let lastError: unknown = null
+  for (const candidate of [PREFERRED_PORT, ...span, 0]) {
+    try {
+      await listenOn(server, candidate)
+      const address = server.address()
+      const bound = typeof address === 'object' && address !== null ? address.port : 0
+      if (bound !== PREFERRED_PORT) log.warn(`固定端口 ${PREFERRED_PORT} 被占用，本次改用 ${bound}`)
+      return bound
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw err
+      lastError = err
+    }
+  }
+  throw lastError ?? new Error('命令服务绑定端口失败')
+}
+
+/**
  * 启动命令服务。已在跑就直接返回现有信息。
  * 返回的 `url` / `token` 就是 AI 要用的；同时写入发现文件。
  */
@@ -466,19 +541,8 @@ export async function startCommandServer(getWindow: () => BrowserWindow | null):
     sockets.add(socket)
     socket.on('close', () => sockets.delete(socket))
   })
-  await new Promise<void>((resolve, reject) => {
-    const onError = (err: Error): void => reject(err)
-    created.once('error', onError)
-    // 只认本机回环：AI 与本机工具用 127.0.0.1 就够，不暴露到局域网
-    created.listen(0, '127.0.0.1', () => {
-      created.off('error', onError)
-      resolve()
-    })
-  })
-
-  const address = created.address()
-  port = typeof address === 'object' && address !== null ? address.port : 0
-  token = randomBytes(18).toString('base64url')
+  port = await listenPreferredPort(created)
+  token = await loadOrCreateToken()
   server = created
 
   const socketServer = new WebSocketServer({ server: created, path: '/ws' })

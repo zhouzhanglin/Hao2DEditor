@@ -152,7 +152,8 @@ export async function openProject(): Promise<IoResult> {
  * 把 AI 接入所需的「说明书 + 手册 + 连接信息」写出到工程目录的 **ai/ 子目录**：
  * - hao2d-ai-command-api.md：命令接口文档（让 AI 工具开箱即用地知道怎么调，免配置、免 MCP）
  * - hao2d-ai-playbook.md：动画制作手册（坐标/单位约定、工作循环、食谱、常见坑）
- * - hao2d-ai-server.json：当前命令服务的 url + token（每次保存/打开刷新，因为 token 每次启动重新生成）
+ * - hao2d-ai-server.json：当前命令服务的 url + token（每次保存/打开刷新，保证与服务实况一致；
+ *   url 本身跨重启已稳定，见 main/commandServer.ts 的固定端口 + 持久化 token）
  *
  * 收进 ai/ 子目录而不撒在工程根：AI 工具打开文件夹一眼锁定，不和工程文件 / 图片混放。
  * 这样 Codex / CodeBuddy 这类在本工程目录里干活的 AI 工具，打开文件夹就能直接上手，

@@ -85,11 +85,12 @@ export const AI_TRANSPORT_NOTICE =
  * 本地服务的握手信息，启动后写到 userData 目录下的文件里。
  *
  * AI 不需要预先知道端口：读这个文件就能拿到地址与 token（见 `commandServer.ts`）。
+ * 端口固定、token 持久化，地址跨重启不变，AI 客户端配置填一次即可长期复用。
  */
 export interface CommandServerInfo {
   port: number
   token: string
-  /** 直接可用的基地址，如 http://127.0.0.1:5274 */
+  /** 直接可用的基地址，如 http://127.0.0.1:37241 */
   url: string
   /** 握手文件自身的路径 */
   file: string

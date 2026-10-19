@@ -2,13 +2,17 @@
 
 给 AI 工具（codex / workbuddy / 脚本）用的命令通道：**编辑器自己起一个只监听本机的服务**，AI 发 JSON 就能读写当前打开的工程 —— 不做 CLI，不需要在编辑器里点任何东西。
 
-- 服务在**主进程**：`127.0.0.1` 随机端口 + 强制 token（不暴露局域网）
+- 服务在**主进程**：`127.0.0.1` 固定端口 + 持久化 token（不暴露局域网）；**地址跨重启保持不变**，AI 客户端配置填一次即可长期复用
 - 命令在**渲染进程执行**：文档状态只在那里；主进程只负责转发，不碰工程数据
 - 返回结构化结果：`{ ok, changed, data, message, error, label }`，参数写错也用同一形状回话，AI 可以照着 `error` 自纠后重试
 
 ## 1. 发现服务
 
 编辑器启动时把地址与 token 写进 **userData 目录下的 `command-server.json`**，同时打进启动日志（搜索「命令服务已启动」）。
+
+> 地址是**稳定的**：端口固定（默认 `37241`，被占用时顺延，极端情况才回退随机），
+> token 首次生成后持久保存在同目录的 `command-server-token.txt`。所以每次重启编辑器，
+> 地址与 token 都不变 —— AI 客户端里填过一次就不用再改。
 
 文件位置（按平台）：
 
@@ -22,9 +26,9 @@
 
 ```json
 {
-  "port": 52741,
-  "token": "8Yk…（一段随机串）",
-  "url": "http://127.0.0.1:52741",
+  "port": 37241,
+  "token": "8Yk…（首次生成后持久保存，重启不变）",
+  "url": "http://127.0.0.1:37241",
   "file": "/Users/you/Library/Application Support/hao2d-editor/command-server.json",
   "instructions": "与 Hao2DEditor 通信请勿经 shell 执行 curl 拼命令：…（通信指引，见 8.4）"
 }
@@ -50,7 +54,7 @@
 > （工程 `ai/` 目录 `hao2d-ai-server.json`、userData `command-server.json`）都带 `instructions`（见 8.4）。
 
 ```bash
-BASE=http://127.0.0.1:52741
+BASE=http://127.0.0.1:37241
 TOKEN=8Yk…
 
 # 能连上吗
@@ -205,13 +209,14 @@ POST /batch
 ```json
 {
   "mcpServers": {
-    "hao2d-editor": { "url": "http://127.0.0.1:52741/mcp?token=8Yk…" }
+    "hao2d-editor": { "url": "http://127.0.0.1:37241/mcp?token=8Yk…" }
   }
 }
 ```
 
-> 端口随机、token 每次启动重新生成；以面板显示的地址为准（或读 `command-server.json`）。
-> 关掉编辑器后服务停止、发现文件被删，客户端会提示连接失败 —— 重新打开编辑器即可。
+> 端口与 token 跨重启保持不变（固定端口 + 持久化 token），所以填进客户端的地址可长期复用，不必每次重启都改。
+> 唯一例外：固定端口被别的程序占用时会顺延到附近端口，这时以面板显示的地址为准（或读 `command-server.json`）。
+> 关掉编辑器后服务停止、发现文件被删，客户端会提示连接失败 —— 重新打开编辑器即可（地址不变）。
 
 ### 8.4 内建的「不要用 curl」指引
 

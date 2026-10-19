@@ -122,11 +122,8 @@ POST /batch
    - 工程重命名：`setProjectName`（窗口标题与导出标题用它；保存后写进工程文件，**不**重命名磁盘文件）
    - 相机（只移动视口、不改数据）：`focusNode`（聚焦骨骼 / 插槽 / 附件 / 约束，等同层级树双击）/ `panViewport`（按屏幕像素平移）/ `setViewportZoom`（缩放）/ `centerViewport`（把世界坐标点移到视口中心）
    - 舞台参考图（视口背景参照，存工程 `stage/`，**不参与导出**）：`setStage`（按路径设 / 换参考图）/ `updateStage`（改位置 / 大小 / 透明度）/ `removeStage`
-   - AI 操作指南：`getAiGuide`（返回使用手册 + 「角色装配 + 动画」完整流程，经命令通道在线下发；保存 / 打开工程时同内容也会写进工程 `ai/` 目录作离线副本）
 
 预览效果：在线预览（浏览器里用 Spine / Hao2D 运行时播放）**有意不开放**给 AI —— 那是给人看的成品展示。AI 想要可交付产物就 `exportProject` 落盘，再让用户打开。
-
-> 完整的「角色装配 + 动画制作」分阶段流程（含任务书模板、每步验收标准、网格蒙皮）见 [ai-rigging-playbook.md](./ai-rigging-playbook.md)。
 
 ## 6. 边界（有意不做的事）
 
@@ -150,7 +147,7 @@ POST /batch
 ```text
 你在操作一个叫 Hao2DEditor 的 2D 骨骼动画编辑器。它在本机跑了一个命令服务：
 
-- 先读本工程 `ai/` 目录下的 `hao2d-ai-server.json`（由编辑器在保存 / 打开 / 创建工程时自动写出；同目录还有本命令文档 `hao2d-ai-command-api.md` 与两份手册 `hao2d-ai-playbook.md` / `hao2d-ai-rigging-playbook.md`，离线可读）
+- 先读本工程 `ai/` 目录下的 `hao2d-ai-server.json`（由编辑器在保存 / 打开 / 创建工程时自动写出；同目录还有本命令文档 `hao2d-ai-command-api.md` 与手册 `hao2d-ai-playbook.md`，离线可读）
   - 里面 url 是本机地址，token 是凭证；请求都带上 token（?token= 或 x-hao2d-token 头）
   - 找不到该文件时，才回退去用户目录读 command-server.json：
     macOS ~/Library/Application Support/hao2d-editor/、Windows %APPDATA%\hao2d-editor\、Linux ~/.config/hao2d-editor\；

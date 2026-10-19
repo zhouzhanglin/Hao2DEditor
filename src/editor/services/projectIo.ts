@@ -1,6 +1,6 @@
 import { getPlatform, baseName, dirName, joinPath, stripExtension } from '../platform'
 import { AI_TRANSPORT_NOTICE } from '@shared/commandTypes'
-import { AI_COMMAND_API_DOC, AI_PLAYBOOK, AI_RIGGING_GUIDE } from '@shared/aiGuides'
+import { AI_COMMAND_API_DOC, AI_PLAYBOOK } from '@shared/aiGuides'
 import type { Platform } from '../platform'
 import { parseProject, projectNameFromPath, serializeProject, PROJECT_EXTENSION } from '@core/codec/projectJson'
 import { decompileAsset } from '@core/codec/decompile'
@@ -152,7 +152,6 @@ export async function openProject(): Promise<IoResult> {
  * 把 AI 接入所需的「说明书 + 手册 + 连接信息」写出到工程目录的 **ai/ 子目录**：
  * - hao2d-ai-command-api.md：命令接口文档（让 AI 工具开箱即用地知道怎么调，免配置、免 MCP）
  * - hao2d-ai-playbook.md：动画制作手册（坐标/单位约定、工作循环、食谱、常见坑）
- * - hao2d-ai-rigging-playbook.md：角色装配 + 动画完整流程（与 getAiGuide 同内容）
  * - hao2d-ai-server.json：当前命令服务的 url + token（每次保存/打开刷新，因为 token 每次启动重新生成）
  *
  * 收进 ai/ 子目录而不撒在工程根：AI 工具打开文件夹一眼锁定，不和工程文件 / 图片混放。
@@ -162,7 +161,6 @@ export async function openProject(): Promise<IoResult> {
 const AI_DIR_NAME = 'ai'
 const AI_API_DOC_NAME = 'hao2d-ai-command-api.md'
 const AI_PLAYBOOK_NAME = 'hao2d-ai-playbook.md'
-const AI_RIGGING_NAME = 'hao2d-ai-rigging-playbook.md'
 const AI_SERVER_INFO_NAME = 'hao2d-ai-server.json'
 
 async function exportAiCompanionFiles(projectDir: string): Promise<void> {
@@ -170,10 +168,9 @@ async function exportAiCompanionFiles(projectDir: string): Promise<void> {
   const platform = getPlatform()
   // writeText 在主进程侧会自动建目录：ai/ 不存在也没关系
   const aiDir = joinPath(projectDir, AI_DIR_NAME)
-  // 文档 + 两份手册：构建期内联进 bundle（见 @shared/aiGuides），保存 / 打开工程时随工程落一份离线副本
+  // 文档 + 手册：构建期内联进 bundle（见 @shared/aiGuides），保存 / 打开工程时随工程落一份离线副本
   await platform.writeText(joinPath(aiDir, AI_API_DOC_NAME), AI_COMMAND_API_DOC)
   await platform.writeText(joinPath(aiDir, AI_PLAYBOOK_NAME), AI_PLAYBOOK)
-  await platform.writeText(joinPath(aiDir, AI_RIGGING_NAME), AI_RIGGING_GUIDE)
   // 连接信息：命令服务在跑才写（拿得到当前有效、没过期的 url + token）
   const mcp = await platform.aiMcpInfo()
   if (mcp.ok && mcp.data.running) {

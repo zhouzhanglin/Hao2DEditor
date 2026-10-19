@@ -102,14 +102,14 @@ export function registerProjectCommands(): void {
       const result = await createProjectAt(name, dir, frameRate)
       if (!result.ok) throw new Error(result.message)
       const store = useProjectStore.getState()
-      // 指南送达的最后一环：AI 多半不会主动调 getAiGuide / 读 docs——
+      // 手册送达的最后一环：AI 多半不会主动读 docs/ai-playbook.md——
       // 在它必经的建工程返回里把参考图流程直接递到眼前（与 getProjectState 的 next 同模式）
       return changed(
         {
           projectName: store.projectName,
           path: store.projectPath,
           next: [
-            '装配角色且手头有装配参考图（示例图）：先 setStage {imagePath, opacity:0.5} 把它铺成视口底图，部件一张一张挂上与底图对比大小/位置/层级，全部对齐后 removeStage 删底图；完整流程与验收标准调 getAiGuide'
+            '装配角色且手头有装配参考图（示例图）：先 setStage {imagePath, opacity:0.5} 把它铺成视口底图，部件一张一张挂上与底图对比大小/位置/层级，全部对齐后 removeStage 删底图'
           ]
         },
         result.message
@@ -254,7 +254,7 @@ export function registerProjectCommands(): void {
           next: hasStage
             ? undefined
             : [
-                '要装配角色且有装配参考图：先 setStage {imagePath, opacity:0.5} 铺成视口底图 → 用 listImages 对比标定底图大小（updateStage 设 width/height，使底图与部件在世界单位下 1:1）→ 底图定好后再对位：从图片池一张一张放、好一张再下一张（addSlot 不传 bone = 挂根骨骼 + addDisplay），setDisplayTransform 调位置/旋转、setDrawOrder 调层级，captureViewport 对比到与底图重合（要数值用 getDisplayWorldBounds）→ 全部放好后停手等用户确认，不要直接绑骨 → 用户确认后再 setSlotHost 逐个绑骨（保持全局位姿）→ removeStage 删底图；完整流程调 getAiGuide'
+                '要装配角色且有装配参考图：先 setStage {imagePath, opacity:0.5} 铺成视口底图 → 用 listImages 对比标定底图大小（updateStage 设 width/height，使底图与部件在世界单位下 1:1）→ 底图定好后再对位：从图片池一张一张放、好一张再下一张（addSlot 不传 bone = 挂根骨骼 + addDisplay），setDisplayTransform 调位置/旋转、setDrawOrder 调层级，captureViewport 对比到与底图重合（要数值用 getDisplayWorldBounds）→ 全部放好后停手等用户确认，不要直接绑骨 → 用户确认后再 setSlotHost 逐个绑骨（保持全局位姿）→ removeStage 删底图'
               ]
         },
         result.message

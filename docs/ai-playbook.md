@@ -1,7 +1,7 @@
 # Hao2DEditor 动画制作手册（AI 使用）
 
 > **本文件是唯一权威来源**：构建时内联进应用（MCP instructions / `GET /commands` 的
-> `playbook` 字段 / WS 握手 / `getAiGuide` 命令），并在保存 / 打开工程时写进工程
+> `playbook` 字段 / WS 握手），并在保存 / 打开工程时写进工程
 > `ai/hao2d-ai-playbook.md`。改内容只改这里，代码里不做第二份。
 > 照此执行可少走弯路。
 
@@ -15,7 +15,7 @@
 2) 一次搭多个东西走批量：POST /batch {"commands":[{"name","args"}...],"transaction":true,"label":"..."}（一次不超过 ~30 条；transaction 合并成一条撤销记录，失败整体回滚）
 3) 做完就复核：getAnimationKeys 查打帧明细，getProjectState 复述文档状态；ok=false 时按 error 提示修正参数再试，不要原样重发
 
-## 从零做一个动画（标准食谱）
+## 从零做一个动画（标准步骤）
 1) 没有工程时 createProject {name, dir} 一步建好并落盘（不弹对话框，路径必须在参数里给全）
 2) 素材进池：importImages {paths:[绝对路径...]}，或 importImage（base64/dataURL）；用 listImages 确认图片名
 3) 搭骨骼：addBone {name, parent, localPosition:{x,y}, rotation, length} —— 先根后叶，length 给真实骨长（世界单位）；返回值里的 name 是最终名字（重名会加序号）
@@ -28,7 +28,7 @@
 8) 调缓动：setKeyframeEasing；事件帧：keyEvent {time, name?, stringParam?, intParam?, floatParam?}（name 不传自动取 event/event2…）
 9) 复核 getAnimationKeys → saveProject → exportProject {mode:'runtime'|'unity'|'spine', dir}（导出也不弹对话框）
 
-## 换装动画
+## 皮肤
 addSkin {name} 建皮肤 → addDisplay {slot, image, skin} 往该皮肤放件 → keySlotDisplayFrame {slot, time, attachment, skin} 打显示帧完成切换；setActiveSkin 只影响编辑器当前预览
 
 ## 视口与检查
@@ -42,4 +42,4 @@ addSkin {name} 建皮肤 → addDisplay {slot, image, skin} 往该皮肤放件 �
 - 在线预览、画笔式刷权重是有意不开放的：预览给人看，权重用 autoWeightMesh
 - 有装配参考图时（顺序很重要）：setStage {imagePath, opacity:0.5} 铺底图 → **先标定底图大小**：量参考图里某部件的像素尺寸 h_ref，用 listImages 读该部件实际图片的像素尺寸 h_img，比例 k=h_img/h_ref，再 updateStage {width,height} 把底图设为「参考图像素×k÷100」世界单位，使其与部件 1:1 → 底图大小定好后再对位：从「图片/图集页」**一张一张放、好一张再下一张**——addSlot（**不传 bone = 挂根骨骼**）+ addDisplay 放进视口，用 setDisplayTransform 调位置/旋转、setDrawOrder 调层级，captureViewport 对比到与底图重合（要数值用 getDisplayWorldBounds）→ **全部放好后停手等用户确认，不要直接绑骨** → 用户说没问题后，再 setSlotHost 把每个 slot 绑到对应骨骼（绑骨保持全局位姿，画面不动）→ removeStage 删底图。**别在外部算好坐标一口气执行**——以编辑器返回的几何与截图为准
 - 别猜命令名：先 GET /commands（或 __catalog 命令）拿目录，每条命令的参数说明都在里面
-- 要做「角色装配 + 动画」：先调 getAiGuide 命令拿完整分阶段流程与验收标准（任务书 / 参考图对位公式 / 网格蒙皮 / 打帧自查）；同样的内容也在工程 ai/ 目录（hao2d-ai-playbook.md / hao2d-ai-rigging-playbook.md），离线可读
+- 本手册的离线副本在工程 ai/ 目录（hao2d-ai-playbook.md）；在线可从 MCP instructions / GET /commands 的 playbook 字段读到

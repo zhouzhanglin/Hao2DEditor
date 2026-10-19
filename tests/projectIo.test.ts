@@ -119,7 +119,7 @@ describe('打开工程', () => {
     expect(env.recents[0]).toBe('/proj/hero.hao2d.proj')
   })
 
-  it('打开工程后把 AI 陪伴文件写进工程 ai/ 子目录（文档 + 两份手册；服务没跑则不写 server.json）', async () => {
+  it('打开工程后把 AI 陪伴文件写进工程 ai/ 子目录（文档 + 手册；服务没跑则不写 server.json）', async () => {
     const sample = createSampleDocument()
     env.files.set('/proj/hero.hao2d.proj', serializeDocument(sample))
 
@@ -129,7 +129,6 @@ describe('打开工程', () => {
     // 文档与手册来自 docs/*.md 的构建期内联（@shared/aiGuides），断言真实内容的特征串
     expect(env.files.get('/proj/ai/hao2d-ai-command-api.md')).toContain('Hao2DEditor')
     expect(env.files.get('/proj/ai/hao2d-ai-playbook.md')).toContain('动画制作手册')
-    expect(env.files.get('/proj/ai/hao2d-ai-rigging-playbook.md')).toContain('角色装配')
     // 命令服务没在跑（aiMcpInfo running=false）：连接信息不写，避免留下失效 token
     expect(env.files.has('/proj/ai/hao2d-ai-server.json')).toBe(false)
   })

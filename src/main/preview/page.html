@@ -45,6 +45,9 @@
     padding: 8px 10px; min-height: 36px;
   }
   select:disabled { opacity: 0.5; }
+  /* 展开列表由系统绘制：Windows 上是浅色底，与继承来的浅色文字撞成看不清 —— 显式指定深底浅字 */
+  select option { background: #181b23; color: var(--text); }
+  select option:checked { background: #24509a; color: #fff; }
   button:active { background: #2a2f3c; }
   button.primary { background: var(--accent); border-color: transparent; color: #fff; }
   #panel {

@@ -40,6 +40,23 @@
   ::selection {
     background: rgba(10, 132, 255, 0.35);
   }
+
+  /*
+   * 原生下拉的**展开列表**由系统绘制，不吃 select 自身的 `bg-*`：
+   * Windows 上弹层是浅色底，而选项文字继承了 .hao-field 的近白色 → 白底浅字看不清。
+   * 显式给 option 指定深底 + 近白字，Chromium 会按这组配色绘制弹层，Windows / macOS 表现一致。
+   */
+  select option,
+  select optgroup {
+    background-color: var(--hao-bg-2);
+    color: var(--hao-text-hi);
+  }
+
+  /* 当前选中项：强调蓝实底 + 白字，避免系统高亮的浅蓝底配浅色文字 */
+  select option:checked {
+    background-color: var(--hao-accent-deep);
+    color: #fff;
+  }
 }
 
 @layer components {

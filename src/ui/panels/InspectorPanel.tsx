@@ -1409,19 +1409,32 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                   </button>
                 </>
               ) : null}
-              {attachment.type === 'region' || attachment.type === 'mesh' || attachment.type === 'linkedmesh' ? (
+              {mode === 'pose' &&
+              (attachment.type === 'region' || attachment.type === 'mesh' || attachment.type === 'linkedmesh') ? (
                 <button
                   type="button"
                   className="hao-btn h-[20px] px-2 text-3xs"
                   title={t('把当前显示转成多边形遮罩（保留附件名；加权网格暂不支持）')}
                   onClick={() => {
+                    // 转为遮罩改的是绑定数据：Animate 态不要偷偷写 setup
+                    if (mode !== 'pose') {
+                      onStatus(t('切到 Pose 状态才能把附件转为遮罩'))
+                      return
+                    }
                     let converted = false
                     update(t('转为遮罩'), (draft) => {
                       converted = convertAttachmentToClipping(draft, slot.name, attachment.name)
                     })
+                    if (converted) {
+                      // 转换后立即进入遮罩工具：接着就能点边线插点 / 拖控制点
+                      selection.selectAttachment(slot.name, attachment.name)
+                      tools.setTool('mask')
+                    }
                     onStatus(
                       converted
-                        ? t('已把「{0}」转为遮罩：可在视口里拖控制点，或在检查器设置结束插槽', attachment.name)
+                        ? t('已把「{0}」转为遮罩并切换到遮罩工具：点边线插点、拖点调整、Delete 删除', [
+                            attachment.name
+                          ])
                         : t('转换失败：加权网格暂不支持，请先解除权重或手工绘制遮罩')
                     )
                   }}
@@ -1455,7 +1468,11 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
 
           Animate 态整个右栏是收起的（见 App），所以不必再写「请切到 Pose 态」的提示。
         */}
-        {attachment && attachment.type !== 'mesh' ? (
+        {/*
+          遮罩不能用「转为网格 / 自动生成网格」：它的点是多边形控制点，不是可蒙皮的渲染网格。
+          遮罩的 FFD 直接走顶点工具（D）写 deform 轨道，不需要这一栏。
+        */}
+        {attachment && attachment.type !== 'mesh' && attachment.type !== 'clipping' ? (
           <FieldGroup title={t('网格 / FFD')}>
             <NumberField
               label={t('密度')}

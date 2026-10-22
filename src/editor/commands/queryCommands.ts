@@ -376,8 +376,9 @@ export function registerQueryCommands(): void {
   defineRead(
     {
       name: 'getAttachmentVertices',
-      title: '查网格顶点与权重',
-      description: '拉出某个网格附件的全部顶点：坐标 + 每根骨骼的权重。蒙皮调试或手写权重前读它',
+      title: '查网格/遮罩顶点与权重',
+      description:
+        '拉出某个网格或遮罩附件的全部顶点：坐标 + 每根骨骼的权重。蒙皮调试、手写权重或给遮罩打 FFD 前读它',
       args: {
         slot: { type: 'string', description: '插槽名', required: true },
         attachment: { type: 'string', description: '附件名', required: true },

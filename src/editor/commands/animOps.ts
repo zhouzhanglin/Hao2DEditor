@@ -234,14 +234,20 @@ export function keyDeformFrame(
   const slot = requireSlot(doc, options.slot)
   const time = requireTime(options.time)
   const attachment = findAttachmentOrThrow(doc, slot.name, options.attachment)
-  if (attachment.type !== 'mesh' && attachment.type !== 'linkedmesh') {
-    throw new Error(`附件「${options.attachment}」不是网格，打不了 FFD（先用 convertToMesh 转成网格）`)
+  if (
+    attachment.type !== 'mesh' &&
+    attachment.type !== 'linkedmesh' &&
+    attachment.type !== 'clipping'
+  ) {
+    throw new Error(
+      `附件「${options.attachment}」不是网格/遮罩，打不了 FFD（网格先用 convertToMesh；遮罩用 createMask / convertToMask）`
+    )
   }
   const vertexCount = attachment.vertices.length
   if (options.offsets.length !== vertexCount * 2) {
     // 长度对不上会写出一帧错位的 FFD，播放时网格直接变形错乱 —— 这里必须挡住
     throw new Error(
-      `offsets 长度必须是顶点数的 2 倍：该网格有 ${vertexCount} 个顶点，需要 ${vertexCount * 2} 个数字，收到 ${options.offsets.length}`
+      `offsets 长度必须是点数的 2 倍：该附件有 ${vertexCount} 个点（网格顶点 / 遮罩控制点），需要 ${vertexCount * 2} 个数字，收到 ${options.offsets.length}`
     )
   }
   keyDeform(anim, slot.name, options.attachment, time, options.offsets)

@@ -235,11 +235,12 @@ export function registerAnimCommands(): void {
     {
       name: 'keyDeformFrame',
       title: '打 FFD 帧',
-      description: '打一帧网格形变（FFD）。offsets 是每个顶点的偏移 [x0,y0,x1,y1,...]，长度必须是顶点数的 2 倍',
+      description:
+        '打一帧网格 / 遮罩形变（FFD）。offsets 是每个顶点的偏移 [x0,y0,x1,y1,...]，长度必须是顶点数的 2 倍；遮罩顶点用 getMask 读',
       args: {
         animation: { type: 'string', description: '动画名；不传则用当前编辑动画' },
         slot: { type: 'string', description: '插槽名', required: true },
-        attachment: { type: 'string', description: '网格附件名', required: true },
+        attachment: { type: 'string', description: '网格或遮罩附件名', required: true },
         time: { type: 'number', description: '时间点（秒）', required: true },
         offsets: { type: 'array', description: '顶点偏移数组，长度 = 顶点数 × 2（全 0 表示复位）', required: true }
       },
@@ -263,11 +264,11 @@ export function registerAnimCommands(): void {
     {
       name: 'removeDeformFrame',
       title: '删 FFD 帧',
-      description: '删掉某个网格附件在指定时间点的 FFD 帧',
+      description: '删掉某个网格或遮罩附件在指定时间点的 FFD 帧',
       args: {
         animation: { type: 'string', description: '动画名；不传则用当前编辑动画' },
         slot: { type: 'string', description: '插槽名', required: true },
-        attachment: { type: 'string', description: '网格附件名', required: true },
+        attachment: { type: 'string', description: '网格或遮罩附件名', required: true },
         time: { type: 'number', description: '时间点（秒）', required: true }
       },
       returns: '{ removed, animation }'

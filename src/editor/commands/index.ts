@@ -1,5 +1,6 @@
 import { registerAnimCommands } from './animCommands'
 import { registerBindAllCommands } from './bindAll'
+import { registerMaskCommands } from './maskCommands'
 import { registerMeshCommands } from './meshCommands'
 import { registerProjectCommands } from './projectCommands'
 import { registerQueryCommands } from './queryCommands'
@@ -21,6 +22,7 @@ export function installCommands(): void {
   registerSkeletonCommands()
   registerAnimCommands()
   registerMeshCommands()
+  registerMaskCommands()
   registerBindAllCommands()
   registerProjectCommands()
   registerViewCommands()

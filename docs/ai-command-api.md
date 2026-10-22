@@ -117,6 +117,7 @@ POST /batch
    - 关键帧 → `keyBoneFrame` `keySlotDisplayFrame` `keyDeformFrame`（网格变形帧）…（时间单位是**秒**）
    - 生成网格：**优先** `autoMeshFromImage`（按图片不透明轮廓自动贴合，省顶点）；规则栅格用 `convertToMesh`；蒙皮 → `autoWeightMesh`（按顶点到骨骼距离自动分权重，AI 蒙皮主力）；手工微调 → `setVertexWeight` `bindWeightBone`
    - 网格拓扑编辑 → `redrawMeshBoundary`（按点重绘外边界）/ `connectMeshVertices`（两顶点间自定义布线），坐标用附件局部坐标、顶点用 `getAttachmentVertices` 读到的下标
+   - 遮罩（Spine ClippingAttachment）→ `createMask`（新建，points 用**插槽骨骼局部坐标**）/ `convertToMask`（Region / 非加权 Mesh 转遮罩）/ `setMaskPoints` `setMaskPoint` `insertMaskPoint` `deleteMaskPoint`（改控制点）/ `setMaskOptions`（结束插槽、反向、凸形、是否显示）；查询用 `getMask` / `listMasks`。遮罩也能用 `keyDeformFrame` 做 FFD（offsets 长度 = 点数 × 2）
    - 工程文件：`newProject`（空白工程）/ `createProject`（具名并立刻落盘）/ `openProject` / `saveProject` —— **都不弹原生对话框**，保存位置靠参数 `dir` / `path` 显式给出
    - 多骨架：`addSkeleton` / `removeSkeleton` / `renameSkeleton` / `setActiveSkeleton`（图片池跨骨架共享）
    - 皮肤：`addSkin` / `renameSkin` / `removeSkin` / `setActiveSkin`（换装动画配合 `keySlotDisplayFrame`）

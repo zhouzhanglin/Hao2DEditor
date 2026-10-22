@@ -21,6 +21,7 @@
 3) 搭骨骼：addBone {name, parent, localPosition:{x,y}, rotation, length} —— 先根后叶，length 给真实骨长（世界单位）；返回值里的 name 是最终名字（重名会加序号）
 4) 建插槽并挂图：addSlot {name, bone, zOrder}（zOrder 越小越先画）→ addDisplay {slot, image}（附件尺寸自动取自图片池，不用自己算）
 5) 要网格变形动画：convertToMesh 或 autoMeshFromImage 按轮廓生成网格 → autoWeightMesh 自动蒙皮 → getAttachmentVertices 读顶点下标（redrawMeshBoundary 重绘边界、connectMeshVertices 自定义布线都用它）
+5b) 要遮罩裁剪：createMask {slot, points, endSlot?}（points 是**插槽骨骼局部坐标**，不是世界坐标；遮罩会裁绘制顺序中它之后、endSlot 之前的附件）→ 已有图片/网格用 convertToMask {slot, attachment, endSlot?, inverse?} → 改点用 setMaskPoints / setMaskPoint / insertMaskPoint / deleteMaskPoint，选项用 setMaskOptions；查询用 getMask / listMasks。遮罩的 FFD 直接 keyDeformFrame（offsets 长度 = 点数 × 2）
 6) 建动画：addAnimation {name, duration}（duration 秒，默认 1，建好自动切为当前编辑动画）
 7) 打帧（同一时间点重打即覆盖）：
    - 骨骼：keyBoneFrame {bone, channel, time, value}，channel 取 translate/rotate/scale/shear；rotate 的 value 是数字（度），其余是 {x,y}

@@ -534,6 +534,8 @@ export interface CreateClippingOptions {
   convex?: boolean
   /** 是否把该插槽的 setup 附件切成这个遮罩（默认 true） */
   display?: boolean
+  /** 目标皮肤；不传 = 当前激活皮肤（再回退第一个皮肤） */
+  skin?: string
 }
 
 /**
@@ -552,7 +554,8 @@ export function createClippingAttachment(
   const points = options.points.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
   if (points.length < 3) return null
 
-  const skin = doc.skins[0]
+  const skinName = options.skin ?? doc.editorMeta.activeSkin
+  const skin = (skinName ? doc.skins.find((item) => item.name === skinName) : undefined) ?? doc.skins[0]
   if (!skin) return null
   let skinSlot = findSkinSlot(skin, slotName)
   if (!skinSlot) {
@@ -591,8 +594,18 @@ export function createClippingAttachment(
  * - Region：用内容矩形四角（含裁剪偏移）换算到骨骼局部；
  * - Mesh：取顶点凸包（加权网格依赖 bindpose，第一版不自动转换，返回 false）。
  */
-export function convertAttachmentToClipping(doc: EditorDocument, slotName: string, attachmentName: string): boolean {
-  const attachment = findAttachment(doc, slotName, attachmentName)
+export function convertAttachmentToClipping(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  skinName?: string
+): boolean {
+  const attachment = skinName
+    ? doc.skins
+        .find((skin) => skin.name === skinName)
+        ?.slots.find((skinSlot) => skinSlot.slot === slotName)
+        ?.attachments.find((item) => item.name === attachmentName) ?? null
+    : findAttachment(doc, slotName, attachmentName)
   if (!attachment || attachment.type === 'clipping') return false
 
   let points: Vec2[] = []
@@ -645,15 +658,34 @@ export function convertAttachmentToClipping(doc: EditorDocument, slotName: strin
   return true
 }
 
+/** 在指定皮肤（不传 = 跨皮肤）里找遮罩附件 */
+function findClippingAttachment(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  skinName?: string
+): AuthoringAttachment | null {
+  if (!skinName) {
+    const found = findAttachment(doc, slotName, attachmentName)
+    return found?.type === 'clipping' ? found : null
+  }
+  const found = doc.skins
+    .find((skin) => skin.name === skinName)
+    ?.slots.find((skinSlot) => skinSlot.slot === slotName)
+    ?.attachments.find((item) => item.name === attachmentName)
+  return found?.type === 'clipping' ? found : null
+}
+
 /** 整体替换遮罩多边形（绘制工具闭合时用）；少于 3 点返回 false */
 export function setClippingVertices(
   doc: EditorDocument,
   slotName: string,
   attachmentName: string,
-  points: readonly Vec2[]
+  points: readonly Vec2[],
+  skinName?: string
 ): boolean {
-  const attachment = findAttachment(doc, slotName, attachmentName)
-  if (!attachment || attachment.type !== 'clipping' || points.length < 3) return false
+  const attachment = findClippingAttachment(doc, slotName, attachmentName, skinName)
+  if (!attachment || points.length < 3) return false
   const countChanged = attachment.vertices.length !== points.length
   attachment.vertices = points.map((point) => ({ x: point.x, y: point.y, weights: [] }))
   attachment.hull = points.length
@@ -667,10 +699,11 @@ export function setClippingPoint(
   slotName: string,
   attachmentName: string,
   index: number,
-  point: Vec2
+  point: Vec2,
+  skinName?: string
 ): boolean {
-  const attachment = findAttachment(doc, slotName, attachmentName)
-  if (!attachment || attachment.type !== 'clipping') return false
+  const attachment = findClippingAttachment(doc, slotName, attachmentName, skinName)
+  if (!attachment) return false
   if (index < 0 || index >= attachment.vertices.length) return false
   attachment.vertices[index] = { x: point.x, y: point.y, weights: [] }
   return true
@@ -694,10 +727,11 @@ export function insertClippingPoint(
   slotName: string,
   attachmentName: string,
   index: number,
-  point: Vec2
+  point: Vec2,
+  skinName?: string
 ): boolean {
-  const attachment = findAttachment(doc, slotName, attachmentName)
-  if (!attachment || attachment.type !== 'clipping') return false
+  const attachment = findClippingAttachment(doc, slotName, attachmentName, skinName)
+  if (!attachment) return false
   const at = Math.max(0, Math.min(attachment.vertices.length, index + 1))
   attachment.vertices.splice(at, 0, { x: point.x, y: point.y, weights: [] })
   attachment.hull = attachment.vertices.length
@@ -710,10 +744,11 @@ export function deleteClippingPoint(
   doc: EditorDocument,
   slotName: string,
   attachmentName: string,
-  index: number
+  index: number,
+  skinName?: string
 ): boolean {
-  const attachment = findAttachment(doc, slotName, attachmentName)
-  if (!attachment || attachment.type !== 'clipping') return false
+  const attachment = findClippingAttachment(doc, slotName, attachmentName, skinName)
+  if (!attachment) return false
   if (attachment.vertices.length <= 3) return false
   if (index < 0 || index >= attachment.vertices.length) return false
   attachment.vertices.splice(index, 1)

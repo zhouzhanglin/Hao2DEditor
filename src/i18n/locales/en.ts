@@ -183,7 +183,6 @@ export const en: Record<string, string> = {
 
   // ── 常量表：混合模式 / 缓动 / 时间轴分组（constants.ts） ──────────────
   'Erase（视口降级）': 'Erase (viewport fallback)',
-  'Mask（视口降级）': 'Mask (viewport fallback)',
   'Below（视口降级）': 'Below (viewport fallback)',
   'None（视口降级）': 'None (viewport fallback)',
   '变换': 'Transform',
@@ -257,6 +256,23 @@ export const en: Record<string, string> = {
   '网格工具': 'Mesh tool',
   '编辑网格顶点 / 三角面；网格内 Alt+点击插入顶点':
     'Edit mesh vertices / triangles; Alt-click inside the mesh to insert a vertex',
+  '遮罩工具': 'Mask tool',
+  '多边形遮罩：先选中插槽，单击加点、点回起点 / 右键闭合；拖控制点调整，Alt+点击删除（仅 Pose 态）':
+    'Polygon mask: select a slot first, click to add points, click the first point / right-click to close; drag points to adjust, Alt-click to delete (Pose mode only)',
+  '遮罩（多边形裁剪）': 'Mask (polygon clipping)',
+  '遮罩': 'Mask',
+  '结束插槽': 'End slot',
+  '到末尾': 'To end',
+  '反向遮罩': 'Inverse mask',
+  '只保留多边形外部；Spine 要求此时按凸形处理': 'Keeps only the outside of the polygon; Spine requires a convex polygon',
+  '凸多边形': 'Convex polygon',
+  '多边形是凸的时候打开可加速；凹多边形请关掉': 'Enable for convex polygons to speed up clipping; turn off for concave shapes',
+  '控制点 {0} 个 · 遮罩只影响绘制顺序中它之后、结束插槽之前的附件':
+    '{0} control points · the mask affects attachments after it and before the end slot in draw order',
+  '编辑遮罩点': 'Edit mask points',
+  '转为遮罩': 'Convert to mask',
+  '把当前显示转成多边形遮罩（保留附件名；加权网格暂不支持）':
+    'Convert the current attachment to a polygon mask (keeps the name; weighted meshes are not supported yet)',
   'FFD 顶点工具': 'FFD vertex tool',
   '拖顶点写当前时间点的 FFD 帧；网格内 Alt+点击插入顶点':
     'Drag vertices to write an FFD frame at the current time; Alt-click inside the mesh to insert a vertex',

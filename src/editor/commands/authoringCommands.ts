@@ -9,10 +9,11 @@ import type {
   AuthoringWeight,
   EditorDocument
 } from '@core/model/authoring'
+import { mulPoint, trs } from '@core/math/matrix'
 import type { Vec2 } from '@core/math/matrix'
 import { pageUvsToRegionRelative } from '@importers/uv'
 import type { AtlasRegion, PageSizes } from '@importers/uv'
-import { createGridMesh, refineAroundVertex, triangulatePolygon } from '@core/mesh/triangulate'
+import { convexHull, createGridMesh, refineAroundVertex, triangulatePolygon } from '@core/mesh/triangulate'
 import type { MeshGeometry } from '@core/mesh/triangulate'
 import { buildAutoMesh } from '@core/mesh/autoMesh'
 import type { AlphaMask } from '@core/mesh/autoMesh'
@@ -507,6 +508,201 @@ export function convertMeshToRegion(doc: EditorDocument, slotName: string, attac
       (track) => !(track.slot === slotName && track.attachment === attachmentName)
     )
   }
+  return true
+}
+
+/** 附件局部坐标 → 插槽骨骼局部坐标（遮罩顶点统一存后者，与 Spine 一致） */
+function attachmentToBone(attachment: AuthoringAttachment, point: Vec2): Vec2 {
+  const matrix = trs(
+    attachment.position.x,
+    attachment.position.y,
+    attachment.rotation,
+    attachment.scale.x,
+    attachment.scale.y
+  )
+  return mulPoint(matrix, point)
+}
+
+export interface CreateClippingOptions {
+  /** 遮罩名（缺省自动取 mask / mask2…） */
+  name?: string
+  /** 多边形控制点（**插槽骨骼局部坐标**） */
+  points: readonly Vec2[]
+  /** 结束插槽名，空串 = 裁到绘制顺序末尾 */
+  endSlot?: string
+  inverse?: boolean
+  convex?: boolean
+  /** 是否把该插槽的 setup 附件切成这个遮罩（默认 true） */
+  display?: boolean
+}
+
+/**
+ * 在指定插槽上创建遮罩附件。
+ *
+ * 遮罩本身不渲染，只对绘制顺序中它之后的附件生效；`points` 必须是**骨骼局部坐标**，
+ * 这样导出 Spine / .hao2d 时不需要再叠加附件 TRS。
+ */
+export function createClippingAttachment(
+  doc: EditorDocument,
+  slotName: string,
+  options: CreateClippingOptions
+): AuthoringAttachment | null {
+  const slot = doc.slots.find((item) => item.name === slotName)
+  if (!slot) return null
+  const points = options.points.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+  if (points.length < 3) return null
+
+  const skin = doc.skins[0]
+  if (!skin) return null
+  let skinSlot = findSkinSlot(skin, slotName)
+  if (!skinSlot) {
+    skinSlot = { slot: slotName, attachments: [] }
+    skin.slots.push(skinSlot)
+  }
+  const existing = skinSlot.attachments.map((item) => item.name)
+  const name = uniqueName(existing, options.name?.trim() || 'mask')
+  const attachment = createAuthoringAttachment({
+    name,
+    type: 'clipping',
+    image: '',
+    position: { x: 0, y: 0 },
+    rotation: 0,
+    scale: { x: 1, y: 1 },
+    size: { x: 0, y: 0 },
+    frameSize: { x: 0, y: 0 },
+    contentOffset: { x: 0, y: 0 },
+    vertices: points.map((point) => ({ x: point.x, y: point.y, weights: [] })),
+    uvs: [],
+    triangles: [],
+    edges: [],
+    hull: points.length,
+    clipEndSlot: options.endSlot ?? '',
+    clipInverse: options.inverse ?? false,
+    clipConvex: options.convex ?? false
+  })
+  skinSlot.attachments.push(attachment)
+  if (options.display !== false) slot.attachment = name
+  return attachment
+}
+
+/**
+ * 把 Region / Mesh 转成遮罩（保留附件名，动画里的 attachment 轨道继续有效）。
+ *
+ * - Region：用内容矩形四角（含裁剪偏移）换算到骨骼局部；
+ * - Mesh：取顶点凸包（加权网格依赖 bindpose，第一版不自动转换，返回 false）。
+ */
+export function convertAttachmentToClipping(doc: EditorDocument, slotName: string, attachmentName: string): boolean {
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment || attachment.type === 'clipping') return false
+
+  let points: Vec2[] = []
+  if (attachment.type === 'region') {
+    const halfWidth = attachment.size.x * 0.5
+    const halfHeight = attachment.size.y * 0.5
+    const ox = attachment.contentOffset.x
+    const oy = attachment.contentOffset.y
+    points = [
+      { x: -halfWidth + ox, y: -halfHeight + oy },
+      { x: halfWidth + ox, y: -halfHeight + oy },
+      { x: halfWidth + ox, y: halfHeight + oy },
+      { x: -halfWidth + ox, y: halfHeight + oy }
+    ].map((point) => attachmentToBone(attachment, point))
+  } else if (attachment.type === 'mesh' || attachment.type === 'linkedmesh') {
+    if (attachment.vertices.some((vertex) => vertex.weights.length > 0)) return false
+    const source = attachment.vertices.map((vertex) => attachmentToBone(attachment, { x: vertex.x, y: vertex.y }))
+    if (source.length < 3) return false
+    points = convexHull(source).map((index) => source[index])
+  }
+  if (points.length < 3) return false
+
+  attachment.type = 'clipping'
+  attachment.image = ''
+  attachment.regionName = undefined
+  attachment.position = { x: 0, y: 0 }
+  attachment.rotation = 0
+  attachment.scale = { x: 1, y: 1 }
+  attachment.size = { x: 0, y: 0 }
+  attachment.frameSize = { x: 0, y: 0 }
+  attachment.contentOffset = { x: 0, y: 0 }
+  attachment.vertices = points.map((point) => ({ x: point.x, y: point.y, weights: [] }))
+  attachment.uvs = []
+  attachment.triangles = []
+  attachment.edges = []
+  attachment.hull = points.length
+  attachment.ffdInBoneSpace = false
+  attachment.clipEndSlot = ''
+  attachment.clipInverse = false
+  attachment.clipConvex = true
+  delete attachment.regionSnapshot
+  delete attachment.bones
+
+  // 遮罩第一版不支持 FFD：把指向它的变形轨道清掉，避免顶点数对不上
+  for (const animation of doc.animations) {
+    animation.deforms = animation.deforms.filter(
+      (track) => !(track.slot === slotName && track.attachment === attachmentName)
+    )
+  }
+  return true
+}
+
+/** 整体替换遮罩多边形（绘制工具闭合时用）；少于 3 点返回 false */
+export function setClippingVertices(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  points: readonly Vec2[]
+): boolean {
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment || attachment.type !== 'clipping' || points.length < 3) return false
+  attachment.vertices = points.map((point) => ({ x: point.x, y: point.y, weights: [] }))
+  attachment.hull = points.length
+  return true
+}
+
+/** 更新遮罩控制点（拖点工具用）；index 越界返回 false */
+export function setClippingPoint(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  index: number,
+  point: Vec2
+): boolean {
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment || attachment.type !== 'clipping') return false
+  if (index < 0 || index >= attachment.vertices.length) return false
+  attachment.vertices[index] = { x: point.x, y: point.y, weights: [] }
+  return true
+}
+
+/** 在第 index 个点之后插入一个控制点（index = -1 表示插到最前） */
+export function insertClippingPoint(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  index: number,
+  point: Vec2
+): boolean {
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment || attachment.type !== 'clipping') return false
+  const at = Math.max(0, Math.min(attachment.vertices.length, index + 1))
+  attachment.vertices.splice(at, 0, { x: point.x, y: point.y, weights: [] })
+  attachment.hull = attachment.vertices.length
+  return true
+}
+
+/** 删除一个控制点；少于 3 个点时不删（遮罩会退化） */
+export function deleteClippingPoint(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  index: number
+): boolean {
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment || attachment.type !== 'clipping') return false
+  if (attachment.vertices.length <= 3) return false
+  if (index < 0 || index >= attachment.vertices.length) return false
+  attachment.vertices.splice(index, 1)
+  attachment.hull = attachment.vertices.length
   return true
 }
 
@@ -1347,6 +1543,14 @@ export function deleteSlot(doc: EditorDocument, slotName: string): boolean {
   if (doc.slots.length === before) return false
 
   for (const skin of doc.skins) skin.slots = skin.slots.filter((skinSlot) => skinSlot.slot !== slotName)
+  // 指向被删插槽的遮罩结束边界：清空 = 裁到绘制顺序末尾（比留下悬挂名字安全）
+  for (const skin of doc.skins) {
+    for (const skinSlot of skin.slots) {
+      for (const attachment of skinSlot.attachments) {
+        if (attachment.type === 'clipping' && attachment.clipEndSlot === slotName) attachment.clipEndSlot = ''
+      }
+    }
+  }
   for (const anim of doc.animations) {
     anim.slots = anim.slots.filter((track) => track.slot !== slotName)
     anim.deforms = anim.deforms.filter((track) => track.slot !== slotName)
@@ -1404,7 +1608,14 @@ export function deleteBone(doc: EditorDocument, boneName: string): boolean {
 }
 
 function renameSlotRefs(doc: EditorDocument, oldName: string, next: string): void {
-  for (const skin of doc.skins) for (const skinSlot of skin.slots) if (skinSlot.slot === oldName) skinSlot.slot = next
+  for (const skin of doc.skins) {
+    for (const skinSlot of skin.slots) {
+      if (skinSlot.slot === oldName) skinSlot.slot = next
+      for (const attachment of skinSlot.attachments) {
+        if (attachment.type === 'clipping' && attachment.clipEndSlot === oldName) attachment.clipEndSlot = next
+      }
+    }
+  }
   for (const anim of doc.animations) {
     for (const track of anim.slots) if (track.slot === oldName) track.slot = next
     for (const deform of anim.deforms) if (deform.slot === oldName) deform.slot = next

@@ -157,7 +157,7 @@ function normalizeSkins(json: SpineJson): Array<{ name: string; attachments: Rec
   }))
 }
 
-function blendOf(blend: string | undefined): BlendMode {
+function blendOf(blend: string | undefined, slotName: string, warnings: string[]): BlendMode {
   switch ((blend ?? '').toLowerCase()) {
     case 'add':
     case 'additive':
@@ -169,7 +169,9 @@ function blendOf(blend: string | undefined): BlendMode {
     case 'erase':
       return BlendMode.Erase
     case 'mask':
-      return BlendMode.Mask
+      // Spine 4.3 运行库没有 Mask 混合模式；遮罩由 clipping 附件承担
+      warnings.push(`插槽「${slotName}」的混合模式 mask 不受支持，已按 Normal 导入（遮罩请用 clipping 附件）`)
+      return BlendMode.Normal
     case 'below':
       return BlendMode.Below
     case 'none':
@@ -316,6 +318,36 @@ function convertAttachment(
     })
   }
 
+  if (type === 'clipping') {
+    const rawVertices = attachment.vertices ?? []
+    const vertexCount = Math.max(0, Math.round(attachment.vertexCount ?? rawVertices.length / 2))
+    // 与官方一致：vertices 长度等于 vertexCount*2 才是非加权；否则是 packed 权重
+    const weighted = rawVertices.length !== vertexCount * 2
+    const vertices = new Float32Array(vertexCount * 2)
+    if (!weighted) {
+      for (let i = 0; i < vertexCount * 2; i++) vertices[i] = pxToUnit(rawVertices[i] ?? 0)
+    }
+    return createAttachmentData({
+      ...base,
+      type: AttachmentType.Clipping,
+      /*
+       * 遮罩顶点与 Spine 一致，是**插槽骨骼局部坐标**；附件自身的 TRS 不参与
+       * （Spine 的 ClippingAttachment 也不读 x/y/rotation/scale）。
+       */
+      position: { x: 0, y: 0 },
+      rotation: 0,
+      scale: { x: 1, y: 1 },
+      vertices,
+      weights: weighted ? parseWeights(rawVertices, vertexCount, ctx) : [],
+      hull: vertexCount,
+      clipEndSlot: attachment.end ?? '',
+      clipInverse: attachment.inverse === true,
+      clipConvex: attachment.convex === true,
+      // Spine 的 deform 偏移是骨内坐标（不经 bindpose 方向变换）
+      ffdInBoneSpace: true
+    })
+  }
+
   if (type === 'mesh') {
     const region = resolveRegion(attachment, ctx, skinName)
     const meshUvs = attachment.uvs ?? []
@@ -362,7 +394,7 @@ function convertAttachment(
     })
   }
 
-  if (type === 'boundingbox' || type === 'clipping' || type === 'point' || type === 'path') {
+  if (type === 'boundingbox' || type === 'point' || type === 'path') {
     const rawVertices = attachment.vertices ?? []
     const vertices = new Float32Array(rawVertices.length)
     for (let i = 0; i < rawVertices.length; i++) vertices[i] = pxToUnit(rawVertices[i])
@@ -422,7 +454,7 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
       name: slot.name,
       boneIndex: bone ?? 0,
       color: parseHexColor(slot.color),
-      blendMode: blendOf(slot.blend),
+      blendMode: blendOf(slot.blend, slot.name, warnings),
       defaultDisplayIndex: -1,
       defaultZOrder: i,
       z: 0,

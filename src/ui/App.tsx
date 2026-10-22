@@ -55,7 +55,8 @@ const TOOL_KEYS: Record<string, EditorTool> = {
   b: 'bone',
   m: 'ffd',
   g: 'weight',
-  d: 'ffd'
+  d: 'ffd',
+  n: 'mask'
 }
 /** 编辑工具名与用途说明（随语言切换，故做成函数而非模块级常量表） */
 function toolLabel(tool: EditorTool): string {
@@ -65,7 +66,8 @@ function toolLabel(tool: EditorTool): string {
       pose: 'Pose（拖顶点改贴图 / 拖骨骼改绑定）',
       bone: '画骨骼（拖拽连续绑定）',
       weight: '权重刷',
-      ffd: '网格 / FFD 顶点'
+      ffd: '网格 / FFD 顶点',
+      mask: '遮罩（多边形裁剪）'
     }[tool]
   )
 }
@@ -119,7 +121,7 @@ import { importPsdLayers, pickAndParsePsd, setPsdDialogOpener } from '@editor/se
 import type { ParsedPsd } from '@importers/psdImport'
 import { deleteSelectedTrack, keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
 import { PPU, deleteMeshVertex } from '@editor/commands/authoringCommands'
-import { undoMeshBoundaryPoint } from '@editor/tools/authoringTools'
+import { deleteSelectedMaskPoint, undoMaskDraftPoint, undoMeshBoundaryPoint } from '@editor/tools/authoringTools'
 import { copySelection, pasteSelection, duplicateSelection } from '@editor/commands/clipboardCommands'
 
 export default function App() {
@@ -495,6 +497,8 @@ export default function App() {
            *（连点都没落下时也吃掉，只提示一句）。
            */
           const scene = getActiveScene()
+          // 遮罩草稿点 / 网格边界草稿点都只是视口预览，优先于文档撤销
+          if (scene && undoMaskDraftPoint(scene, flash)) return
           if (scene && undoMeshBoundaryPoint(scene, flash)) return
           useProjectStore.getState().undo()
           flash(t('已撤销'))
@@ -504,9 +508,13 @@ export default function App() {
           useProjectStore.getState().redo()
           flash(t('已重做'))
           return
-        case 'edit:delete':
+        case 'edit:delete': {
+          const scene = getActiveScene()
+          // 遮罩工具选中控制点时，Delete / Backspace 删除该点
+          if (scene && deleteSelectedMaskPoint(scene, flash)) return
           flash(t('删除操作请使用层级树里的删除按钮'))
           return
+        }
         case 'edit:copy': {
           // 焦点在输入框：交给浏览器原生文本复制，避免破坏文本编辑
           if (activeEditableElement()) {

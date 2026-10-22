@@ -128,7 +128,10 @@ function attachmentsOf(value: unknown): AttachmentData[] {
       weights: weightsOf(raw.weights),
       ffdInBoneSpace: bool(raw.ffdInBoneSpace),
       linkedMeshSkin: str(raw.linkedMeshSkin),
-      linkedMeshAttachment: str(raw.linkedMeshAttachment)
+      linkedMeshAttachment: str(raw.linkedMeshAttachment),
+      clipEndSlot: str(raw.clipEndSlot),
+      clipInverse: bool(raw.clipInverse),
+      clipConvex: bool(raw.clipConvex)
     })
   })
 }

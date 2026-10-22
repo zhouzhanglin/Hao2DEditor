@@ -4,6 +4,8 @@ import { AttachmentType } from '../model/types'
 import type { AttachmentData, RGBA } from '../model/types'
 import type { RuntimeAsset, RuntimeMaps } from '../model/asset'
 import { buildRuntimeMaps } from '../model/asset'
+import { barycentric, buildClipPolygon, TriangleClipper } from './clipping'
+import type { ClipPolygon } from './clipping'
 
 /**
  * 一个绘制分组。
@@ -34,6 +36,10 @@ export interface MeshBuildResult {
   vertexCount: number
   /** 按绘制顺序排列的分组，索引指向共享顶点缓冲 */
   groups: MeshGroup[]
+  /** 本帧激活过的遮罩（世界坐标），给视口叠加层 / 调试用 */
+  clipPolygons: ClipPolygon[]
+  /** 每个顶点属于哪个遮罩（-1 = 未被遮罩；裁剪产生的新顶点也是 -1） */
+  vertexClip: Int32Array
   bounds: { minX: number; minY: number; maxX: number; maxY: number }
 }
 
@@ -69,6 +75,8 @@ export class MeshBuilder {
     sourceVertex: new Int32Array(0),
     vertexCount: 0,
     groups: [],
+    clipPolygons: [],
+    vertexClip: new Int32Array(0),
     bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 }
   }
 
@@ -101,6 +109,13 @@ export class MeshBuilder {
   private readonly groupColors: RGBA[] = []
   private readonly groupIndices: Uint32Array[] = []
   private readonly groupIndexCount: number[] = []
+  /** 插槽名 → 运行期下标（遮罩 endSlot 用名字存，查找不依赖每帧遍历） */
+  private readonly slotIndexByName = new Map<string, number>()
+  private readonly clipper = new TriangleClipper()
+  /** 本帧激活的遮罩（世界坐标） */
+  private clipPolygons: ClipPolygon[] = []
+  /** 当前激活遮罩在 clipPolygons 里的下标；-1 = 无 */
+  private activeClip = -1
   private minX = 0
   private minY = 0
   private maxX = 0
@@ -108,6 +123,7 @@ export class MeshBuilder {
 
   constructor(asset: RuntimeAsset, skinName = '') {
     this.asset = asset
+    for (let i = 0; i < asset.slots.length; i++) this.slotIndexByName.set(asset.slots[i].name, i)
     this.setSkin(skinName)
     this.grow(256)
   }
@@ -151,6 +167,8 @@ export class MeshBuilder {
 
   build(skeleton: Skeleton): MeshBuildResult {
     const maps = this.maps
+    this.clipPolygons = []
+    this.activeClip = -1
     if (!maps) return this.finish()
 
     this.vertexCount = 0
@@ -163,9 +181,21 @@ export class MeshBuilder {
 
     const slots = this.asset.slots
     const order = skeleton.drawOrder
+    /*
+     * 网格隔离（网格工具只显示当前编辑的附件）时不做遮罩：隔离的目的就是看清整块网格，
+     * 被裁掉一半反而没法编辑。isolateSlot >= 0 时所有 clipId 都是 -1。
+     */
+    const clippingEnabled = this.isolateSlot < 0
     for (let oi = 0; oi < order.length; oi++) {
       const si = order[oi]
       if (si < 0 || si >= slots.length) continue
+
+      // 结束插槽判断必须在可见性之前：结束插槽即使被隐藏，也要结束当前裁剪
+      if (clippingEnabled && this.activeClip >= 0) {
+        const active = this.clipPolygons[this.activeClip]
+        if (active.endSlotIndex === si) this.activeClip = -1
+      }
+
       if (!skeleton.slotVisible[si]) continue
       // 插槽隔离：网格工具下只渲染当前编辑的那个网格，其余附件一概跳过
       if (this.isolateSlot >= 0 && si !== this.isolateSlot) continue
@@ -183,6 +213,18 @@ export class MeshBuilder {
       const override = maps.resolved[si]
       if (override && override[di]) attachment = override[di] as AttachmentData
 
+      // 遮罩附件自身不渲染：登记多边形，让后续附件走裁剪
+      if (clippingEnabled && attachment.type === AttachmentType.Clipping) {
+        if (this.activeClip < 0) {
+          const clip = this.makeClipPolygon(skeleton, si, attachment)
+          if (clip) {
+            this.clipPolygons.push(clip)
+            this.activeClip = this.clipPolygons.length - 1
+          }
+        }
+        continue
+      }
+
       const slotColor = skeleton.slotColors[si]
       const attColor = attachment.color
       const color: RGBA = {
@@ -194,17 +236,18 @@ export class MeshBuilder {
 
       const materialIndex = this.attMaterial[k]?.[di] ?? this.materialIndex(attachment.textureName)
       const group = this.groupFor(materialIndex, slots[si].blendMode, color)
+      const clipId = this.activeClip
 
       if (attachment.type === AttachmentType.Mesh && attachment.vertices.length > 0) {
         const count = Math.floor(attachment.vertices.length / 2)
         this.ensure(count)
         const base = this.vertexCount
-        this.emitMesh(skeleton, si, attachment, color)
+        this.emitMesh(skeleton, si, attachment, color, clipId)
         for (const index of attachment.triangles) this.pushIndex(group, base + index)
       } else if (attachment.type === AttachmentType.Region || attachment.type === AttachmentType.Mesh) {
         this.ensure(4)
         const base = this.vertexCount
-        this.emitRegion(skeleton, si, attachment, color)
+        this.emitRegion(skeleton, si, attachment, color, clipId)
         this.pushIndex(group, base)
         this.pushIndex(group, base + 1)
         this.pushIndex(group, base + 2)
@@ -219,6 +262,9 @@ export class MeshBuilder {
 
   private finish(): MeshBuildResult {
     const result = this.result
+    result.clipPolygons = this.clipPolygons
+    // 先裁三角形（会追加顶点 / 改写组索引），再固化顶点数与分组
+    this.applyClipping()
     result.vertexCount = this.vertexCount
     result.groups.length = this.usedGroups
     for (let i = 0; i < this.usedGroups; i++) {
@@ -238,6 +284,205 @@ export class MeshBuilder {
     return result
   }
 
+  // ---------------- 遮罩 ----------------
+
+  /** 供叠加层 / 拾取使用：遮罩附件当前姿态下的世界顶点 */
+  clippingWorldPoints(skeleton: Skeleton, slotIndex: number, attachment: AttachmentData): Float32Array | null {
+    return this.clipWorldPoints(skeleton, slotIndex, attachment)
+  }
+
+  /** 把 Clipping 附件解析成世界坐标多边形；无效（少于 3 点 / 退化）返回 null */
+  private makeClipPolygon(skeleton: Skeleton, slotIndex: number, attachment: AttachmentData): ClipPolygon | null {
+    const points = this.clipWorldPoints(skeleton, slotIndex, attachment)
+    if (!points) return null
+    const endSlotIndex = attachment.clipEndSlot ? (this.slotIndexByName.get(attachment.clipEndSlot) ?? -1) : -1
+    return buildClipPolygon(points, endSlotIndex, attachment.clipInverse, attachment.clipConvex)
+  }
+
+  /**
+   * 遮罩多边形的世界顶点。
+   *
+   * 与 `emitMesh` 的顶点路径同构：加权用 bindpose 累加、刚体乘附件世界矩阵、
+   * FFD 偏移在蒙皮之前叠加。遮罩不写 UV / 颜色，所以这里只算位置。
+   */
+  private clipWorldPoints(
+    skeleton: Skeleton,
+    slotIndex: number,
+    attachment: AttachmentData
+  ): Float32Array | null {
+    const vertices = attachment.vertices
+    const count = Math.floor(vertices.length / 2)
+    if (count < 3) return null
+    const weights = attachment.weights
+    const weighted = weights.length === count && count > 0
+
+    const bindposes = this.asset.bindposes
+    const hasBind = bindposes.length > 0
+    const deform = skeleton.deformOffsets[slotIndex]
+    const deformBase = skeleton.deformOffsetBase[slotIndex]
+    const rigid = this.attachmentWorld(skeleton, slotIndex, attachment)
+    const out = new Float32Array(count * 2)
+
+    for (let i = 0; i < count; i++) {
+      const vx = vertices[i * 2]
+      const vy = vertices[i * 2 + 1]
+      let ffdX = 0
+      let ffdY = 0
+      if (deform && deformBase >= 0) {
+        const li = i - deformBase
+        const idx = li * 2
+        if (li >= 0 && idx + 1 < deform.length) {
+          ffdX = deform[idx]
+          ffdY = deform[idx + 1]
+        }
+      }
+
+      let x: number
+      let y: number
+      if (weighted) {
+        const w = weights[i]
+        ACC_X = 0
+        ACC_Y = 0
+        accumulateWeighted(skeleton, bindposes, hasBind, attachment.ffdInBoneSpace, ffdX, ffdY, w.w0, w.b0, w.lx0, w.ly0)
+        accumulateWeighted(skeleton, bindposes, hasBind, attachment.ffdInBoneSpace, ffdX, ffdY, w.w1, w.b1, w.lx1, w.ly1)
+        accumulateWeighted(skeleton, bindposes, hasBind, attachment.ffdInBoneSpace, ffdX, ffdY, w.w2, w.b2, w.lx2, w.ly2)
+        accumulateWeighted(skeleton, bindposes, hasBind, attachment.ffdInBoneSpace, ffdX, ffdY, w.w3, w.b3, w.lx3, w.ly3)
+        const total = w.w0 + w.w1 + w.w2 + w.w3
+        if (total <= 1e-6) {
+          const px = vx + ffdX
+          const py = vy + ffdY
+          x = rigid[0] * px + rigid[4] * py + rigid[12]
+          y = rigid[1] * px + rigid[5] * py + rigid[13]
+        } else if (Math.abs(total - 1) > 1e-6) {
+          x = ACC_X / total
+          y = ACC_Y / total
+        } else {
+          x = ACC_X
+          y = ACC_Y
+        }
+      } else {
+        const px = vx + ffdX
+        const py = vy + ffdY
+        x = rigid[0] * px + rigid[4] * py + rigid[12]
+        y = rigid[1] * px + rigid[5] * py + rigid[13]
+      }
+      out[i * 2] = x
+      out[i * 2 + 1] = y
+    }
+    return out
+  }
+
+  /**
+   * 对每个分组的三角形做一次裁剪后处理。
+   *
+   * 没有遮罩 / 没有顶点落在遮罩里时直接返回（保持原来的零开销路径）。
+   * 被裁的三角形会追加新顶点（`sourceVertex = -1`，不参与顶点编辑），
+   * 未与遮罩相交的三角形原样保留。
+   */
+  private applyClipping(): void {
+    if (this.clipPolygons.length === 0 || this.vertexCount === 0) return
+    const result = this.result
+    let hasClipped = false
+    for (let i = 0; i < this.vertexCount; i++) {
+      if (result.vertexClip[i] >= 0) {
+        hasClipped = true
+        break
+      }
+    }
+    if (!hasClipped) return
+
+    const scratch: number[] = []
+    for (let g = 0; g < this.usedGroups; g++) {
+      const count = this.groupIndexCount[g]
+      if (count < 3) continue
+      const indices = this.groupIndices[g]
+      scratch.length = 0
+      for (let i = 0; i < count; i++) scratch.push(indices[i])
+      this.groupIndexCount[g] = 0
+
+      for (let i = 0; i + 2 < scratch.length; i += 3) {
+        const ia = scratch[i]
+        const ib = scratch[i + 1]
+        const ic = scratch[i + 2]
+        const clipId = result.vertexClip[ia]
+        if (clipId < 0) {
+          this.pushIndex(g, ia)
+          this.pushIndex(g, ib)
+          this.pushIndex(g, ic)
+          continue
+        }
+        this.clipTriangle(g, ia, ib, ic, this.clipPolygons[clipId])
+      }
+    }
+  }
+
+  private clipTriangle(group: number, ia: number, ib: number, ic: number, clip: ClipPolygon): void {
+    const result = this.result
+    const positions = result.positions
+    const uvs = result.uvs
+    const colors = result.colors
+    const ax = positions[ia * 2]
+    const ay = positions[ia * 2 + 1]
+    const bx = positions[ib * 2]
+    const by = positions[ib * 2 + 1]
+    const cx = positions[ic * 2]
+    const cy = positions[ic * 2 + 1]
+    const ua = uvs[ia * 2]
+    const va = uvs[ia * 2 + 1]
+    const ub = uvs[ib * 2]
+    const vb = uvs[ib * 2 + 1]
+    const uc = uvs[ic * 2]
+    const vc = uvs[ic * 2 + 1]
+    const ca = { r: colors[ia * 4], g: colors[ia * 4 + 1], b: colors[ia * 4 + 2], a: colors[ia * 4 + 3] }
+    const cb = { r: colors[ib * 4], g: colors[ib * 4 + 1], b: colors[ib * 4 + 2], a: colors[ib * 4 + 3] }
+    const cc = { r: colors[ic * 4], g: colors[ic * 4 + 1], b: colors[ic * 4 + 2], a: colors[ic * 4 + 3] }
+    const slotIndex = result.sourceSlot[ia]
+    const appended: number[] = []
+
+    this.clipper.clipTriangle(ax, ay, bx, by, cx, cy, clip, (points, count) => {
+      appended.length = 0
+      for (let i = 0; i < count; i += 2) {
+        const x = points[i]
+        const y = points[i + 1]
+        const [wa, wb, wc] = barycentric(x, y, ax, ay, bx, by, cx, cy)
+        const u = ua * wa + ub * wb + uc * wc
+        const v = va * wa + vb * wb + vc * wc
+        const color: RGBA = {
+          r: ca.r * wa + cb.r * wb + cc.r * wc,
+          g: ca.g * wa + cb.g * wb + cc.g * wc,
+          b: ca.b * wa + cb.b * wb + cc.b * wc,
+          a: ca.a * wa + cb.a * wb + cc.a * wc
+        }
+        appended.push(this.appendVertex(x, y, u, v, color, slotIndex))
+      }
+      for (let i = 1; i + 1 < appended.length; i++) {
+        this.pushIndex(group, appended[0])
+        this.pushIndex(group, appended[i])
+        this.pushIndex(group, appended[i + 1])
+      }
+    })
+  }
+
+  /** 追加一个裁剪产生的顶点（clipId = -1，sourceVertex = -1 表示不可编辑） */
+  private appendVertex(x: number, y: number, u: number, v: number, color: RGBA, slotIndex: number): number {
+    this.ensure(1)
+    const i = this.vertexCount++
+    const result = this.result
+    result.positions[i * 2] = x
+    result.positions[i * 2 + 1] = y
+    result.uvs[i * 2] = u
+    result.uvs[i * 2 + 1] = v
+    result.colors[i * 4] = color.r
+    result.colors[i * 4 + 1] = color.g
+    result.colors[i * 4 + 2] = color.b
+    result.colors[i * 4 + 3] = color.a
+    result.sourceSlot[i] = slotIndex
+    result.sourceVertex[i] = -1
+    result.vertexClip[i] = -1
+    this.trackBounds(x, y)
+    return i
+  }
+
   // ---------------- 缓冲管理 ----------------
 
   private materialIndex(textureName: string): number {
@@ -253,16 +498,20 @@ export class MeshBuilder {
     const colors = new Float32Array(capacity * 4)
     const sourceSlot = new Int32Array(capacity)
     const sourceVertex = new Int32Array(capacity)
+    // 新容量默认 -1（未遮罩）；0 会被误当成「第 0 个遮罩」
+    const vertexClip = new Int32Array(capacity).fill(-1)
     positions.set(this.result.positions.subarray(0, this.vertexCount * 2))
     uvs.set(this.result.uvs.subarray(0, this.vertexCount * 2))
     colors.set(this.result.colors.subarray(0, this.vertexCount * 4))
     sourceSlot.set(this.result.sourceSlot.subarray(0, this.vertexCount))
     sourceVertex.set(this.result.sourceVertex.subarray(0, this.vertexCount))
+    vertexClip.set(this.result.vertexClip.subarray(0, this.vertexCount))
     this.result.positions = positions
     this.result.uvs = uvs
     this.result.colors = colors
     this.result.sourceSlot = sourceSlot
     this.result.sourceVertex = sourceVertex
+    this.result.vertexClip = vertexClip
     this.capacity = capacity
   }
 
@@ -334,7 +583,8 @@ export class MeshBuilder {
     v: number,
     color: RGBA,
     slotIndex: number,
-    sourceVertex: number
+    sourceVertex: number,
+    clipId: number
   ): void {
     const i = this.vertexCount++
     const positions = this.result.positions
@@ -342,6 +592,7 @@ export class MeshBuilder {
     const colors = this.result.colors
     this.result.sourceSlot[i] = slotIndex
     this.result.sourceVertex[i] = sourceVertex
+    this.result.vertexClip[i] = clipId
     positions[i * 2] = x
     positions[i * 2 + 1] = y
     uvs[i * 2] = u
@@ -380,7 +631,8 @@ export class MeshBuilder {
     skeleton: Skeleton,
     slotIndex: number,
     attachment: AttachmentData,
-    color: RGBA
+    color: RGBA,
+    clipId: number
   ): void {
     const m = this.attachmentWorld(skeleton, slotIndex, attachment)
     const m0 = m[0]
@@ -405,7 +657,7 @@ export class MeshBuilder {
       const sy = (i >= 2 ? hh : -hh) + oy
       const u = uvs.length > i * 2 ? uvs[i * 2] : 0
       const v = uvs.length > i * 2 + 1 ? uvs[i * 2 + 1] : 0
-      this.writeVertex(m0 * sx + m4 * sy + m12, m1 * sx + m5 * sy + m13, u, v, color, slotIndex, i)
+      this.writeVertex(m0 * sx + m4 * sy + m12, m1 * sx + m5 * sy + m13, u, v, color, slotIndex, i, clipId)
     }
   }
 
@@ -413,7 +665,8 @@ export class MeshBuilder {
     skeleton: Skeleton,
     slotIndex: number,
     attachment: AttachmentData,
-    color: RGBA
+    color: RGBA,
+    clipId: number
   ): void {
     const vertices = attachment.vertices
     const count = Math.floor(vertices.length / 2)
@@ -489,7 +742,7 @@ export class MeshBuilder {
 
       const u = uvs.length > i * 2 ? uvs[i * 2] : 0
       const v = uvs.length > i * 2 + 1 ? uvs[i * 2 + 1] : 0
-      this.writeVertex(x, y, u, v, color, slotIndex, i)
+      this.writeVertex(x, y, u, v, color, slotIndex, i, clipId)
     }
   }
 }

@@ -17,6 +17,7 @@ import { keyBoneChannel, keySlotDisplay, keySlotVisible } from '@editor/commands
 import {
   applyRename,
   checkRename,
+  convertAttachmentToClipping,
   convertMeshToRegion,
   deleteAttachment,
   deleteMeshVertex,
@@ -976,41 +977,45 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                 })
               }
             />
-            <SelectField
-              label={t('图片')}
-              value={attachment.image}
-              options={[
-                { value: '', label: t('（纯色）') },
-                ...document.images.map((image) => ({ value: image.name, label: image.name }))
-              ]}
-              onChange={(value) =>
-                update(t('修改附件图片'), (draft) => {
-                  patchAttachment(draft, slot.name, attachment.name, (a) => {
-                    a.image = value
-                  })
-                })
-              }
-            />
-            {/* 同骨骼位置：按像素显示 / 输入（中键拖动 / 上下键按 10px 走），写回仍是世界单位 */}
-            <Vector2Field
-              label={t('位置')}
-              value={attachment.position}
-              unitScale={PX_PER_UNIT}
-              step={10}
-              onChange={(value) => update(t('修改附件位置'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.position = value }))}
-            />
-            <NumberField
-              label={t('旋转')}
-              value={attachment.rotation}
-              suffix="°"
-              onChange={(value) => update(t('修改附件旋转'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.rotation = value }))}
-            />
-            <Vector2Field
-              label={t('缩放')}
-              value={attachment.scale}
-              step={0.1}
-              onChange={(value) => update(t('修改附件缩放'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.scale = value }))}
-            />
+            {attachment.type !== 'clipping' ? (
+              <>
+                <SelectField
+                  label={t('图片')}
+                  value={attachment.image}
+                  options={[
+                    { value: '', label: t('（纯色）') },
+                    ...document.images.map((image) => ({ value: image.name, label: image.name }))
+                  ]}
+                  onChange={(value) =>
+                    update(t('修改附件图片'), (draft) => {
+                      patchAttachment(draft, slot.name, attachment.name, (a) => {
+                        a.image = value
+                      })
+                    })
+                  }
+                />
+                {/* 同骨骼位置：按像素显示 / 输入（中键拖动 / 上下键按 10px 走），写回仍是世界单位 */}
+                <Vector2Field
+                  label={t('位置')}
+                  value={attachment.position}
+                  unitScale={PX_PER_UNIT}
+                  step={10}
+                  onChange={(value) => update(t('修改附件位置'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.position = value }))}
+                />
+                <NumberField
+                  label={t('旋转')}
+                  value={attachment.rotation}
+                  suffix="°"
+                  onChange={(value) => update(t('修改附件旋转'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.rotation = value }))}
+                />
+                <Vector2Field
+                  label={t('缩放')}
+                  value={attachment.scale}
+                  step={0.1}
+                  onChange={(value) => update(t('修改附件缩放'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.scale = value }))}
+                />
+              </>
+            ) : null}
             {/*
               尺寸：**Region 的内容矩形**（图集里那块有像素的区域）—— 渲染的四边形与栅格网格按它走。
               被裁剪过的图，选中轮廓 / 变换手柄按**原图尺寸**走（下面那行只读提示），
@@ -1019,7 +1024,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
               改这个数在视口里看不出任何变化，只会在「自动生成网格」按它映射尺寸时
               产生看不出来的偏差。原值仍留在数据里（「还原为 Region」与重新生成都要用）。
             */}
-            {attachment.type !== 'mesh' ? (
+            {attachment.type !== 'mesh' && attachment.type !== 'clipping' ? (
               <Vector2Field
                 label={t('尺寸')}
                 value={attachment.size}
@@ -1053,13 +1058,15 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                 ])}
               </p>
             ) : null}
-            <ColorField
-              label={t('颜色')}
-              value={attachment.color}
-              onDragStart={() => useProjectStore.getState().beginTransaction(t('修改附件颜色'))}
-              onDragEnd={() => useProjectStore.getState().endTransaction()}
-              onChange={(value) => update(t('修改附件颜色'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.color = value }))}
-            />
+            {attachment.type !== 'clipping' ? (
+              <ColorField
+                label={t('颜色')}
+                value={attachment.color}
+                onDragStart={() => useProjectStore.getState().beginTransaction(t('修改附件颜色'))}
+                onDragEnd={() => useProjectStore.getState().endTransaction()}
+                onChange={(value) => update(t('修改附件颜色'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.color = value }))}
+              />
+            ) : null}
             {/*
               骨内FFD：**只在已经标成骨内空间时才出现**（正常流程不会产生 true）。
               导入器（spine / DragonBones）与编辑器的 FFD 工具写的都是显示空间，导出时
@@ -1266,6 +1273,73 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
               </FieldGroup>
             ) : null}
 
+            {attachment.type === 'clipping' ? (
+              <FieldGroup title={t('遮罩')}>
+                <SelectField
+                  label={t('结束插槽')}
+                  value={attachment.clipEndSlot}
+                  options={(() => {
+                    const order = [...document.slots].sort((a, b) => a.zOrder - b.zOrder)
+                    const at = order.findIndex((item) => item.name === slot.name)
+                    return [
+                      { value: '', label: t('到末尾') },
+                      ...order.slice(at + 1).map((item) => ({ value: item.name, label: item.name }))
+                    ]
+                  })()}
+                  onChange={(value) =>
+                    update(t('修改遮罩结束插槽'), (draft) => {
+                      patchAttachment(draft, slot.name, attachment.name, (item) => {
+                        item.clipEndSlot = value
+                      })
+                    })
+                  }
+                />
+                <ToggleField
+                  label={t('反向遮罩')}
+                  value={attachment.clipInverse}
+                  hint={t('只保留多边形外部；Spine 要求此时按凸形处理')}
+                  onChange={(value) =>
+                    update(t('修改遮罩反向'), (draft) => {
+                      patchAttachment(draft, slot.name, attachment.name, (item) => {
+                        item.clipInverse = value
+                        if (value) item.clipConvex = true
+                      })
+                    })
+                  }
+                />
+                <ToggleField
+                  label={t('凸多边形')}
+                  value={attachment.clipConvex}
+                  hint={t('多边形是凸的时候打开可加速；凹多边形请关掉')}
+                  onChange={(value) =>
+                    update(t('修改遮罩凸形'), (draft) => {
+                      patchAttachment(draft, slot.name, attachment.name, (item) => {
+                        item.clipConvex = value
+                      })
+                    })
+                  }
+                />
+                <p className="text-3xs leading-relaxed text-content-lo">
+                  {t('控制点 {0} 个 · 遮罩只影响绘制顺序中它之后、结束插槽之前的附件', [
+                    attachment.vertices.length
+                  ])}
+                </p>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    className="hao-btn h-[20px] flex-1 px-2 text-3xs"
+                    onClick={() => {
+                      tools.setTool('mask')
+                      selection.selectAttachment(slot.name, attachment.name)
+                      onStatus(t('遮罩工具：点边线插入点；拖点移动；Delete 删除；点空白取消选中'))
+                    }}
+                  >
+                    {t('编辑遮罩点')}
+                  </button>
+                </div>
+              </FieldGroup>
+            ) : null}
+
             <div className="flex flex-wrap gap-1 pt-0.5">
               {/* 这里只留网格编辑操作（删顶点 / 还原为 Region / 删附件）；
                   「转为网格 / 自动生成网格」在同一面板最下面的「网格 / FFD」那一栏 ——
@@ -1331,6 +1405,26 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                     {t('还原为 Region')}
                   </button>
                 </>
+              ) : null}
+              {attachment.type === 'region' || attachment.type === 'mesh' || attachment.type === 'linkedmesh' ? (
+                <button
+                  type="button"
+                  className="hao-btn h-[20px] px-2 text-3xs"
+                  title={t('把当前显示转成多边形遮罩（保留附件名；加权网格暂不支持）')}
+                  onClick={() => {
+                    let converted = false
+                    update(t('转为遮罩'), (draft) => {
+                      converted = convertAttachmentToClipping(draft, slot.name, attachment.name)
+                    })
+                    onStatus(
+                      converted
+                        ? t('已把「{0}」转为遮罩：可在视口里拖控制点，或在检查器设置结束插槽', attachment.name)
+                        : t('转换失败：加权网格暂不支持，请先解除权重或手工绘制遮罩')
+                    )
+                  }}
+                >
+                  {t('转为遮罩')}
+                </button>
               ) : null}
               <button
                 type="button"

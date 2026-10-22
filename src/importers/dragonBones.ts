@@ -83,7 +83,7 @@ function orderBones(bones: readonly DbBoneJson[], warnings: string[]): {
   return { ordered, index, origToNew: bones.map((b) => index.get(b.name) ?? 0) }
 }
 
-function blendOf(mode: number | string | undefined): BlendMode {
+function blendOf(mode: number | string | undefined, slotName: string, warnings: string[]): BlendMode {
   const value = typeof mode === 'number' ? mode : Number(mode ?? 0)
   switch (value) {
     case 1:
@@ -95,7 +95,9 @@ function blendOf(mode: number | string | undefined): BlendMode {
     case 4:
       return BlendMode.Erase
     case 5:
-      return BlendMode.Mask
+      // DB 的 5 在旧模型里对应 Mask；Mask 已移除，回退 Normal（DB 也没有 clipping 语义）
+      warnings.push(`插槽「${slotName}」的混合模式 5（原 Mask）不受支持，已按 Normal 导入`)
+      return BlendMode.Normal
     case 6:
       return BlendMode.Below
     case 7:
@@ -480,7 +482,7 @@ export function importDragonBones(input: DragonBonesImportInput): DragonBonesImp
     name: slot.name,
     boneIndex: boneIndex.get(slot.parent ?? '') ?? 0,
     color: dbColor(slot.color as DbBoneColorJson | undefined),
-    blendMode: blendOf(slot.blendMode),
+    blendMode: blendOf(slot.blendMode, slot.name, warnings),
     defaultDisplayIndex: -1,
     // 排序后的位次：compile 侧按它排序即恒等，层序在导入期就固化了
     defaultZOrder: i,

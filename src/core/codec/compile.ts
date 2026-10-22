@@ -173,8 +173,11 @@ function convertAttachment(att: AuthoringAttachment, ctx: AttachmentContext): Re
         ? AttachmentType.LinkedMesh
         : att.type === 'boundingbox'
           ? AttachmentType.BoundingBox
-          : AttachmentType.Region
+          : att.type === 'clipping'
+            ? AttachmentType.Clipping
+            : AttachmentType.Region
 
+  const isClipping = att.type === 'clipping'
   const uvs = att.uvs.length > 0 ? Float32Array.from(att.uvs) : Float32Array.from(DEFAULT_UVS)
   const hasWeights = att.vertices.some((v) => v.weights.length > 0)
   const vertices = new Float32Array(att.vertices.length * 2)
@@ -206,9 +209,10 @@ function convertAttachment(att: AuthoringAttachment, ctx: AttachmentContext): Re
   return createAttachmentData({
     name: att.name,
     type,
-    position: { ...att.position },
-    rotation: att.rotation,
-    scale: { ...att.scale },
+    // 遮罩顶点是插槽骨骼局部坐标（与 Spine 一致），附件自身 TRS 必须保持单位阵
+    position: isClipping ? { x: 0, y: 0 } : { ...att.position },
+    rotation: isClipping ? 0 : att.rotation,
+    scale: isClipping ? { x: 1, y: 1 } : { ...att.scale },
     size: { ...att.size },
     // 原图信息给编辑器画框用；内容偏移给渲染在附件局部坐标里叠加
     frameSize: { ...(att.frameSize ?? { x: 0, y: 0 }) },
@@ -224,7 +228,10 @@ function convertAttachment(att: AuthoringAttachment, ctx: AttachmentContext): Re
     weights,
     ffdInBoneSpace: att.ffdInBoneSpace,
     linkedMeshSkin: att.linkedMeshSkin,
-    linkedMeshAttachment: att.linkedMeshAttachment
+    linkedMeshAttachment: att.linkedMeshAttachment,
+    clipEndSlot: att.clipEndSlot ?? '',
+    clipInverse: att.clipInverse ?? false,
+    clipConvex: att.clipConvex ?? false
   })
 }
 
@@ -293,6 +300,31 @@ function buildSkins(
       )
     }))
   }))
+}
+
+/**
+ * 遮罩数据校验：结束插槽必须存在、多边形至少 3 点、反向必须按凸形处理。
+ * 这些错误不会让编译失败（宁可少裁也不要整只角色消失），但必须让用户看见。
+ */
+function validateClipping(skins: SkinData[], slotIndex: Record<string, number>, warnings: string[]): void {
+  for (const skin of skins) {
+    for (const skinSlot of skin.slots) {
+      for (const attachment of skinSlot.attachments) {
+        if (attachment.type !== AttachmentType.Clipping) continue
+        if (attachment.clipInverse && !attachment.clipConvex) {
+          // Spine 的反向裁剪只支持凸形；直接在编译产物里改正，渲染/导出用同一份数据
+          attachment.clipConvex = true
+        }
+        if (attachment.clipEndSlot && slotIndex[attachment.clipEndSlot] === undefined) {
+          warnings.push(`遮罩「${attachment.name}」的结束插槽「${attachment.clipEndSlot}」不存在，已改为裁到末尾`)
+          attachment.clipEndSlot = ''
+        }
+        if (attachment.vertices.length < 6) {
+          warnings.push(`遮罩「${attachment.name}」少于 3 个控制点，不会生效`)
+        }
+      }
+    }
+  }
 }
 
 function collectTextures(doc: EditorDocument, skins: SkinData[]): string[] {
@@ -514,6 +546,7 @@ export function compileDocument(doc: EditorDocument): CompileResult {
   const bindposes = computeBindposes(skeletonOnly)
 
   const skins = buildSkins(doc, index, slotBoneOfName, bindposes, setup.world, warnings)
+  validateClipping(skins, slotIndex, warnings)
   const textureNames = collectTextures(doc, skins)
   const images: ImageRef[] = doc.images.map((image) => ({
     name: image.name,

@@ -10,19 +10,32 @@ export enum AttachmentType {
   Region = 0,
   Mesh = 1,
   LinkedMesh = 2,
-  BoundingBox = 3
+  BoundingBox = 3,
+  /**
+   * 多边形遮罩（Spine 的 ClippingAttachment）。
+   *
+   * 它自身不渲染，只对**绘制顺序中位于它之后、结束插槽之前**的附件做裁剪。
+   * 多边形顶点存放在 `vertices`（插槽骨骼局部空间，与 Spine 一致），
+   * `clipEndSlot` 为空表示裁到绘制顺序末尾。
+   */
+  Clipping = 4
 }
 
-/** 混合模式并集（DragonBones 与 Spine）。不同 blend 不能合并到同一分组。 */
+/**
+ * 混合模式并集（DragonBones 与 Spine）。不同 blend 不能合并到同一分组。
+ *
+ * 没有 `Mask`：遮罩由 `AttachmentType.Clipping` 的多边形裁剪实现（Spine 的
+ * ClippingAttachment），混合模式里不存在“Mask”这种语义。旧工程里曾有
+ * `Mask = 5`，读取时由 projectJson 迁移成 Normal（见 schema v1→v2）。
+ */
 export enum BlendMode {
   Normal = 0,
   Additive = 1,
   Multiply = 2,
   Screen = 3,
   Erase = 4,
-  Mask = 5,
-  Below = 6,
-  None = 7
+  Below = 5,
+  None = 6
 }
 
 export const BLEND_MODE_NAMES: Record<BlendMode, string> = {
@@ -31,7 +44,6 @@ export const BLEND_MODE_NAMES: Record<BlendMode, string> = {
   [BlendMode.Multiply]: 'Multiply',
   [BlendMode.Screen]: 'Screen',
   [BlendMode.Erase]: 'Erase',
-  [BlendMode.Mask]: 'Mask',
   [BlendMode.Below]: 'Below',
   [BlendMode.None]: 'None'
 }
@@ -175,6 +187,18 @@ export interface AttachmentData {
 
   linkedMeshSkin: string
   linkedMeshAttachment: string
+
+  /**
+   * 遮罩结束插槽名（仅 Clipping 用）。空串 = 裁到绘制顺序末尾。
+   *
+   * 用名字而不是下标：插槽重排 / 新增不会让遮罩指向错误的插槽；重命名时由
+   * `applyRename` 级联更新。
+   */
+  clipEndSlot: string
+  /** 反向遮罩：只保留多边形外部（Spine 要求此时多边形为凸） */
+  clipInverse: boolean
+  /** 凸多边形标记（Spine 的 `convex`，仅影响裁剪算法的快慢与反向支持） */
+  clipConvex: boolean
 }
 
 export interface SkinSlotData {
@@ -266,6 +290,9 @@ export function createAttachmentData(partial?: Partial<AttachmentData>): Attachm
     ffdInBoneSpace: false,
     linkedMeshSkin: '',
     linkedMeshAttachment: '',
+    clipEndSlot: '',
+    clipInverse: false,
+    clipConvex: false,
     ...partial
   }
 }

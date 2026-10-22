@@ -230,6 +230,27 @@ function spineAttachment(att: AttachmentData, lookup?: SpineRegionLookup): Spine
     base.height = toPixels(Math.max(att.size.y, att.frameSize.y))
     return base
   }
+  if (att.type === AttachmentType.Clipping) {
+    /*
+     * Spine 4.x 的 clipping：顶点是**插槽骨骼局部坐标**，不读附件的 x/y/rotation/scale；
+     * `end` 为空 = 裁到绘制顺序末尾。加权时 vertices 与 mesh 一样是 packed 格式，
+     * 靠 `vertexCount` 判断；这里与导入侧用同一份点序列，往返不丢形状。
+     */
+    const weighted = att.weights.length > 0 && att.weights.length === Math.floor(att.vertices.length / 2)
+    const json: SpineAttachmentJson = {
+      name: att.name,
+      type: 'clipping',
+      vertexCount: Math.floor(att.vertices.length / 2),
+      vertices: weighted
+        ? meshWeightedVertices(att)
+        : Array.from(att.vertices).map((value) => value * RUNTIME_PPU),
+      color: rgbaToHex(att.color)
+    }
+    if (att.clipEndSlot) json.end = att.clipEndSlot
+    if (att.clipInverse) json.inverse = true
+    if (att.clipConvex) json.convex = true
+    return json
+  }
   if (att.type === AttachmentType.BoundingBox) {
     base.type = 'boundingbox'
     base.vertices = Array.from(att.vertices).map((v) => v * RUNTIME_PPU)

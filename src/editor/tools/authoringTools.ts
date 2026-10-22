@@ -12,6 +12,7 @@ import type { Selection } from '../store/selectionStore'
 import { isMeshEditTool } from '../store/toolStore'
 import type { ToolState } from '../store/toolStore'
 import type { EditorMode } from '../store/modeStore'
+import { useModeStore } from '../store/modeStore'
 import type { GizmoMode } from '../store/toolStore'
 import { useProjectStore } from '../store/projectStore'
 import { useSelectionStore } from '../store/selectionStore'
@@ -22,12 +23,17 @@ import { moveSlot, validateSlotMove } from '../commands/hierarchyCommands'
 import type { MoveResult } from '../commands/hierarchyCommands'
 import {
   autoWeights,
+  createClippingAttachment,
+  deleteClippingPoint,
   deleteMeshVertex,
   findAttachment,
+  insertClippingPoint,
   insertMeshVertex,
   meshVertexSamples,
   paintWeights,
   patchAttachment,
+  setClippingPoint,
+  setClippingVertices,
   uniqueName,
   weightBonesOf
 } from '../commands/authoringCommands'
@@ -62,6 +68,8 @@ type DragKind =
   | 'attachment'
   /** 网格子工具「自定义布线」：从一个顶点拖到另一个顶点，松手连线 */
   | 'mesh-rewire'
+  /** 遮罩控制点拖拽：`vertex` 存控制点下标，`slot` / `attachment` 指向遮罩 */
+  | 'mask-point'
   | 'none'
 
 /** 多骨骼拖拽：每根骨骼各自按下时的本地值（增量都按自己的起始值重算，避免累积误差） */
@@ -270,9 +278,368 @@ export const BRUSH_ACTION: Record<BrushMode, string> = {
 }
 
 /** 指针按下：返回 true 表示工具已接管（调用方不要再做默认选择逻辑） */
+/** 选中项对应的遮罩附件（插槽 / 附件两种选中都认） */
+function selectedMask(
+  host: ToolHost
+): { slot: string; attachment: string } | null {
+  const selection = useSelectionStore.getState()
+  if (!selection.slot) return null
+  const doc = useProjectStore.getState().document
+  const attachment = selection.attachment ? findAttachment(doc, selection.slot, selection.attachment) : null
+  if (attachment?.type !== 'clipping') return null
+  return { slot: selection.slot, attachment: attachment.name }
+}
+
+/** 光标附近的控制点下标（世界坐标阈值按屏幕像素换算，缩放后手感一致） */
+function maskPointNear(host: ToolHost, slot: string, attachment: string, world: Vec2): number {
+  const flat = host.scene.maskWorldPointsAt(slot, attachment)
+  if (!flat) return -1
+  const threshold = host.scene.viewport.pixelsToWorld(8)
+  let best = -1
+  let bestDistance = threshold
+  for (let i = 0; i + 1 < flat.length; i += 2) {
+    const distance = Math.hypot(flat[i] - world.x, flat[i + 1] - world.y)
+    if (distance <= bestDistance) {
+      bestDistance = distance
+      best = i / 2
+    }
+  }
+  return best
+}
+
+/**
+ * 光标附近的遮罩边：返回边起点下标（新点插在起点之后）和边上的投影点。
+ * 阈值同样按屏幕像素换算，缩放到很小的时候也点得中。
+ */
+function maskEdgeNear(
+  host: ToolHost,
+  slot: string,
+  attachment: string,
+  world: Vec2
+): { index: number; point: Vec2 } | null {
+  const flat = host.scene.maskWorldPointsAt(slot, attachment)
+  if (!flat || flat.length < 6) return null
+  const threshold = host.scene.viewport.pixelsToWorld(6)
+  const count = flat.length / 2
+  let best: { index: number; point: Vec2 } | null = null
+  let bestDistance = threshold
+
+  for (let i = 0; i < count; i++) {
+    const j = (i + 1) % count
+    const ax = flat[i * 2]
+    const ay = flat[i * 2 + 1]
+    const bx = flat[j * 2]
+    const by = flat[j * 2 + 1]
+    const dx = bx - ax
+    const dy = by - ay
+    const lengthSq = dx * dx + dy * dy
+    const t = lengthSq > 1e-9 ? Math.max(0, Math.min(1, ((world.x - ax) * dx + (world.y - ay) * dy) / lengthSq)) : 0
+    const x = ax + dx * t
+    const y = ay + dy * t
+    const distance = Math.hypot(world.x - x, world.y - y)
+    if (distance <= bestDistance) {
+      bestDistance = distance
+      best = { index: i, point: { x, y } }
+    }
+  }
+  return best
+}
+
+/** 把草稿多边形提交成 Clipping 附件 */
+function commitMaskDraft(host: ToolHost): boolean {
+  const draftPath = host.scene.state.pendingMaskPath
+  if (!draftPath || draftPath.points.length < 3) {
+    host.status('遮罩至少需要 3 个点')
+    return false
+  }
+  // 在已有遮罩上追加点时，若本次一个点都没加就闭合，别产生一次空的文档命令
+  if (draftPath.target && draftPath.points.length === draftPath.baseCount) {
+    host.scene.setViewState({ pendingMaskPath: null })
+    host.status('没有新增遮罩点，原多边形未修改')
+    return false
+  }
+  const local: Vec2[] = []
+  for (const point of draftPath.points) {
+    const converted = host.scene.worldToSlotBoneLocal(draftPath.slot, point)
+    if (!converted || !Number.isFinite(converted.x) || !Number.isFinite(converted.y)) {
+      host.status('遮罩点换算失败（插槽没有绑定骨骼，或骨骼缩放为 0）')
+      return false
+    }
+    local.push(converted)
+  }
+  let name = draftPath.target
+  const editing = Boolean(name)
+  const ok = useProjectStore.getState().runCommand(editing ? '修改遮罩多边形' : '创建遮罩', (draft) => {
+    if (editing) return setClippingVertices(draft, draftPath.slot, name, local)
+    const attachment = createClippingAttachment(draft, draftPath.slot, { points: local })
+    if (!attachment) return false
+    name = attachment.name
+    return true
+  })
+  if (!ok || !name) {
+    host.status(editing ? '修改遮罩失败' : '创建遮罩失败')
+    return false
+  }
+  host.scene.setViewState({ pendingMaskPath: null, maskPoint: null })
+  useSelectionStore.getState().selectAttachment(draftPath.slot, name)
+  host.scene.setDocument(useProjectStore.getState().document, host.selection.skin)
+  host.scene.refresh()
+  host.status(
+    editing
+      ? `已更新遮罩「${name}」：在检查器里设置结束插槽 / 反向，或继续拖控制点`
+      : `已创建遮罩「${name}」：在检查器里设置结束插槽 / 反向，或继续拖控制点`
+  )
+  return true
+}
+
+/** 右键 / Enter：闭合遮罩草稿（点数不足时提示并保留草稿） */
+export function maskDraftClose(host: ToolHost): boolean {
+  if (!host.scene.state.pendingMaskPath) return false
+  return commitMaskDraft(host)
+}
+
+/** Esc：放弃当前遮罩草稿 */
+export function maskDraftCancel(host: ToolHost): void {
+  if (!host.scene.state.pendingMaskPath) return
+  host.scene.setViewState({ pendingMaskPath: null })
+  host.scene.markDirty()
+  host.status('已取消遮罩绘制')
+}
+
+/**
+ * Ctrl+Z：画遮罩的过程中撤回「上一个点」。
+ *
+ * 草稿点只是视口预览，不进文档历史；如果直接走项目撤销，撤掉的是把遮罩造出来之前的
+ * 文档命令，正在画的多边形反而没依附。与「自己绘制边界」的撤销保持同一套行为：
+ * 有草稿时优先吃掉 Ctrl+Z，只回退草稿点。
+ *
+ * 返回 true 表示这次撤销已经被草稿消费（无论有没有点可退）。
+ */
+export function undoMaskDraftPoint(scene: EditorScene, status?: (text: string) => void): boolean {
+  const draft = scene.state.pendingMaskPath
+  if (!draft) return false
+
+  const base = draft.baseCount
+  if (draft.points.length <= base) {
+    status?.(
+      base > 0
+        ? '没有新增的遮罩点可撤销（原多边形未变）；按 Esc 取消本次绘制'
+        : '还没有落下遮罩点：单击继续，Esc 取消'
+    )
+    return true
+  }
+
+  const points = draft.points.slice(0, -1)
+  scene.setViewState({ pendingMaskPath: { ...draft, points } })
+  scene.markDirty()
+
+  const added = points.length - base
+  if (base > 0) {
+    status?.(`已撤回上一个新增遮罩点：还剩 ${added} 个新增点，原多边形未变`)
+  } else if (points.length > 0) {
+    status?.(`已撤回上一个遮罩点：还剩 ${points.length} 个（继续点 / 点回起点 / 右键收尾）`)
+  } else {
+    status?.('已撤回最后一个遮罩点：单击继续，Esc 取消')
+  }
+  return true
+}
+
+/**
+ * Delete / Backspace：删除当前选中的遮罩控制点。
+ * 与遮罩工具里 Alt+点击删除共用 `deleteClippingPoint`，走文档历史，可 Ctrl+Z。
+ * 返回 false 表示当前没有选中点（交还给 App 的其它 Delete 处理）。
+ */
+export function deleteSelectedMaskPoint(scene: EditorScene, status?: (text: string) => void): boolean {
+  const picked = scene.state.maskPoint
+  if (!picked) return false
+  if (useModeStore.getState().mode !== 'pose' || useToolStore.getState().tool !== 'mask') return false
+
+  // 选中点只在「当前选中就是这个遮罩附件」时有效；切到别的对象后 Delete 不应误删隐藏点
+  const selection = useSelectionStore.getState()
+  if (
+    selection.kind !== 'attachment' ||
+    selection.slot !== picked.slot ||
+    selection.attachment !== picked.attachment
+  ) {
+    scene.setViewState({ maskPoint: null })
+    return false
+  }
+
+  const doc = useProjectStore.getState().document
+  const attachment = findAttachment(doc, picked.slot, picked.attachment)
+  if (
+    !attachment ||
+    attachment.type !== 'clipping' ||
+    picked.index < 0 ||
+    picked.index >= attachment.vertices.length
+  ) {
+    scene.setViewState({ maskPoint: null })
+    return true
+  }
+  if (attachment.vertices.length <= 3) {
+    status?.('遮罩至少保留 3 个控制点')
+    return true
+  }
+
+  let removed = false
+  const ok = useProjectStore.getState().runCommand('删除遮罩控制点', (draft) => {
+    removed = deleteClippingPoint(draft, picked.slot, picked.attachment, picked.index)
+    return removed
+  })
+  if (!ok || !removed) {
+    status?.('删除遮罩控制点失败')
+    return true
+  }
+
+  scene.setViewState({ maskPoint: null })
+  scene.setDocument(useProjectStore.getState().document, useSelectionStore.getState().skin)
+  scene.refresh()
+  status?.('已删除遮罩控制点')
+  return true
+}
+
+function maskPointerDown(host: ToolHost, info: PointerInfo): boolean {
+  if (host.mode !== 'pose') {
+    host.status('遮罩属于绑定数据：切到 Pose 状态再画 / 编辑')
+    return true
+  }
+  const selection = useSelectionStore.getState()
+  const slot = selection.slot
+  if (!slot) {
+    host.status('先在层级树里选中一个插槽，再画遮罩')
+    return true
+  }
+  const draftPath = host.scene.state.pendingMaskPath
+  if (draftPath) {
+    if (draftPath.slot !== slot) {
+      host.status('正在给另一个插槽画遮罩：先点回起点 / 右键闭合，或 Esc 取消')
+      return true
+    }
+    const threshold = host.scene.viewport.pixelsToWorld(8)
+    const first = draftPath.points[0]
+    if (draftPath.points.length >= 3 && Math.hypot(first.x - info.world.x, first.y - info.world.y) <= threshold) {
+      commitMaskDraft(host)
+      return true
+    }
+    const points = [...draftPath.points, { ...info.world }]
+    host.scene.setViewState({
+      pendingMaskPath: {
+        slot,
+        target: draftPath.target,
+        points,
+        cursor: { ...info.world },
+        baseCount: draftPath.baseCount
+      }
+    })
+    host.scene.markDirty()
+    return true
+  }
+
+  const mask = selectedMask(host)
+  if (mask) {
+    const index = maskPointNear(host, mask.slot, mask.attachment, info.world)
+    if (index >= 0) {
+      host.scene.setViewState({
+        maskPoint: { slot: mask.slot, attachment: mask.attachment, index }
+      })
+      if (info.alt) {
+        let removed = false
+        useProjectStore.getState().runCommand('删除遮罩控制点', (draft) => {
+          removed = deleteClippingPoint(draft, mask.slot, mask.attachment, index)
+          return removed
+        })
+        if (removed) {
+          // 删除后修正选中下标：删掉的点取消选中，后面的点整体前移一位
+          const current = host.scene.state.maskPoint
+          const next =
+            current && current.slot === mask.slot && current.attachment === mask.attachment
+              ? current.index > index
+                ? { ...current, index: current.index - 1 }
+                : current.index === index
+                  ? null
+                  : current
+              : current
+          host.scene.setViewState({ maskPoint: next })
+          host.scene.setDocument(useProjectStore.getState().document, host.selection.skin)
+          host.scene.refresh()
+          host.status('已删除一个遮罩控制点')
+        } else {
+          host.status('遮罩至少保留 3 个控制点')
+        }
+        return true
+      }
+      drag = {
+        ...IDLE,
+        kind: 'mask-point',
+        slot: mask.slot,
+        attachment: mask.attachment,
+        vertex: index,
+        lastWorld: { ...info.world }
+      }
+      storeHandler.begin('移动遮罩控制点')
+      host.status(`已选中遮罩控制点 #${index + 1}：拖动移动，Delete 删除`)
+      return true
+    }
+
+    // 点在这条边上 = 在边上插入一个控制点（不是重新开始画多边形）
+    const edge = maskEdgeNear(host, mask.slot, mask.attachment, info.world)
+    if (edge) {
+      const local = host.scene.worldToSlotBoneLocal(mask.slot, edge.point)
+      if (!local || !Number.isFinite(local.x) || !Number.isFinite(local.y)) {
+        host.status('遮罩点换算失败（插槽没有绑定骨骼，或骨骼缩放为 0）')
+        return true
+      }
+      let inserted = false
+      const ok = useProjectStore.getState().runCommand('插入遮罩控制点', (draft) => {
+        inserted = insertClippingPoint(draft, mask.slot, mask.attachment, edge.index, local)
+        return inserted
+      })
+      if (!ok || !inserted) {
+        host.status('插入遮罩控制点失败')
+        return true
+      }
+      const indexAfterInsert = edge.index + 1
+      host.scene.setDocument(useProjectStore.getState().document, host.selection.skin)
+      host.scene.refresh()
+      host.scene.setViewState({
+        maskPoint: { slot: mask.slot, attachment: mask.attachment, index: indexAfterInsert }
+      })
+      // 插入后直接进入拖拽，手不用松开就能把新点挪到想要的位置
+      drag = {
+        ...IDLE,
+        kind: 'mask-point',
+        slot: mask.slot,
+        attachment: mask.attachment,
+        vertex: indexAfterInsert,
+        lastWorld: { ...info.world }
+      }
+      storeHandler.begin('移动遮罩控制点')
+      host.status('已在遮罩边上插入控制点：拖动调整，Delete 删除')
+      return true
+    }
+
+    // 点在空白处：取消选中，不自动重画一个新多边形
+    host.scene.setViewState({ maskPoint: null })
+    host.status('已取消选中遮罩点；点边线插入点，拖点移动，Delete 删除')
+    return true
+  }
+
+  // 没有选中遮罩 = 新建一个多边形草稿
+  host.scene.setViewState({
+    pendingMaskPath: { slot, target: '', points: [{ ...info.world }], cursor: { ...info.world }, baseCount: 0 },
+    hoveredDisplay: null,
+    maskPoint: null
+  })
+  host.scene.markDirty()
+  host.status('新建遮罩：单击加点；点回起点 / 右键闭合；Ctrl+Z 撤点；Esc 取消')
+  return true
+}
+
 export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   const { tools, scene } = host
   if (!scene.runtime) return false
+
+  if (tools.tool === 'mask') return maskPointerDown(host, info)
 
   if (tools.tool === 'weight') {
     /*
@@ -1288,6 +1655,18 @@ function moveActiveDrag(host: ToolHost, info: PointerInfo): void {
     return
   }
 
+  if (drag.kind === 'mask-point') {
+    const local = host.scene.worldToSlotBoneLocal(drag.slot, info.world)
+    if (!local) return
+    const store = useProjectStore.getState()
+    store.updateSilent((draft) => {
+      setClippingPoint(draft, drag.slot, drag.attachment, drag.vertex, local)
+    })
+    host.scene.setDocument(store.document, host.selection.skin)
+    host.scene.refresh()
+    return
+  }
+
   if (drag.kind === 'paint') {
     /*
      * 按**移动距离**节流：不足 2 屏幕像素就不再叠加。
@@ -1376,6 +1755,12 @@ function moveActiveDrag(host: ToolHost, info: PointerInfo): void {
 }
 
 export function toolPointerUp(host: ToolHost): void {
+  if (drag.kind === 'mask-point') {
+    drag = { ...IDLE }
+    storeHandler.end()
+    return
+  }
+
   // 自定义布线：松开即连线（落在同一个顶点上等于没连，会报一声）
   if (drag.kind === 'mesh-rewire') {
     const session = drag

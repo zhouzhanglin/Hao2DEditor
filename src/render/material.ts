@@ -13,7 +13,8 @@ export interface BlendModeResolution {
 
 /**
  * BlendMode → pixi 混合模式。
- * Erase / Mask / Below / None 需要遮罩或多 pass 流程，首版降级为 normal 并给出提示。
+ * Erase / Below / None 需要多 pass 或绘制顺序语义，首版降级为 normal 并给出提示。
+ * 遮罩不走混合模式，而是 `AttachmentType.Clipping` 的多边形裁剪。
  */
 export function resolveBlendMode(mode: BlendMode): BlendModeResolution {
   switch (mode) {
@@ -27,8 +28,6 @@ export function resolveBlendMode(mode: BlendMode): BlendModeResolution {
       return { mode: 'normal', warning: null }
     case BlendMode.Erase:
       return { mode: 'normal', warning: '混合模式 Erase 需要额外遮罩流程，视口中降级为 Normal' }
-    case BlendMode.Mask:
-      return { mode: 'normal', warning: '混合模式 Mask 需要额外遮罩流程，视口中降级为 Normal' }
     case BlendMode.Below:
       return { mode: 'normal', warning: '混合模式 Below 依赖绘制顺序语义，视口中降级为 Normal' }
     case BlendMode.None:

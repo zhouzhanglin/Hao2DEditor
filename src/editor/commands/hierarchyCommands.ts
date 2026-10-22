@@ -1,6 +1,6 @@
 import type { AuthoringAttachment, AuthoringBone, EditorDocument } from '@core/model/authoring'
 import { rootBoneName } from '@core/model/authoring'
-import { MAT4_LENGTH, decomposeTrs, invert, mul, trs } from '@core/math/matrix'
+import { MAT4_LENGTH, decomposeTrs, invert, mul, mulPoint, trs } from '@core/math/matrix'
 import { DEG2RAD } from '@core/math/utils'
 import { findSkinSlot } from './authoringCommands'
 
@@ -10,7 +10,8 @@ import { findSkinSlot } from './authoringCommands'
  * 规则（与编辑器里的说法一致）：
  * - 骨骼只能放到**骨骼**下面（inside = 成为子骨骼，above/below = 与目标同级并排）；放到空白处 = 挂到根骨骼下
  * - 层级根骨骼 `root` 是**唯一**的顶层骨骼：它自己不能移动，别的骨骼也不能被拖到它旁边与它平级
- * - 插槽只能放到**骨骼**下面（inside = 换宿主骨骼，贴骨骼行上下沿 = 排到该骨骼插槽列表的首/尾）
+ * - 插槽放到**骨骼**下面（inside = 换宿主骨骼，贴骨骼行上下沿 = 排到该骨骼插槽列表的首/尾）；
+ *   放到**另一条插槽**行的上/下沿 = 按绘制顺序插到它前/后（跨骨骼时一起换宿主）
  * - display 只能待在**插槽**下面（落到 display 行 = 在同一插槽内排序）
  *
  * 所有函数都直接改传入的文档（调用方负责放进 update / immer draft 里），
@@ -82,6 +83,28 @@ function attachmentLocalMatrix(att: AuthoringAttachment): Float32Array {
  * （画面会有一点点形变）。骨骼之间是刚体 + **均匀**缩放时（拖槽位的常见做法）则是精确的。
  */
 function rebindAttachment(att: AuthoringAttachment, oldBoneWorld: Float32Array, newBoneWorld: Float32Array): void {
+  /*
+   * 遮罩没有附件 TRS：多边形点本身就是**宿主骨骼局部坐标**（编译时还会强制 position=0 / scale=1）。
+   * 换骨骼时不能走下面的 decompose，否则会写进一个被编译丢掉的 position，遮罩直接跑位；
+   * 非加权遮罩直接把点从旧骨骼空间变换到新骨骼空间即可。
+   * 加权遮罩的位置来自骨骼权重，与宿主骨骼无关，保持点不动。
+   */
+  if (att.type === 'clipping') {
+    const weighted = att.vertices.some((vertex) => vertex.weights.length > 0)
+    if (!weighted) {
+      const local = mul(invert(newBoneWorld), oldBoneWorld)
+      for (const vertex of att.vertices) {
+        const point = mulPoint(local, vertex)
+        vertex.x = point.x
+        vertex.y = point.y
+      }
+    }
+    att.position = { x: 0, y: 0 }
+    att.rotation = 0
+    att.scale = { x: 1, y: 1 }
+    return
+  }
+
   const world = mul(oldBoneWorld, attachmentLocalMatrix(att))
   const parts = decomposeTrs(mul(invert(newBoneWorld), world))
   att.position = { x: parts.x, y: parts.y }
@@ -251,6 +274,20 @@ export function moveSlot(
     item.zOrder = order
   })
   return { ok: true, message: `插槽「${name}」已挂到骨骼「${targetBone}」下` }
+}
+
+/**
+ * 把插槽移到绘制顺序最底层（层级列表最下面）。
+ * zOrder 升序 = 先画 → 后画；层级列表是降序，所以「最底层」是升序数组的最前面。
+ */
+export function moveSlotToBottom(doc: EditorDocument, name: string, options?: MoveOptions): MoveResult {
+  const root = rootBoneName(doc.bones)
+  if (!root) return { ok: false, message: '工程里还没有骨骼：插槽必须挂在某根骨骼下' }
+  const ordered = [...doc.slots]
+    .sort((left, right) => left.zOrder - right.zOrder)
+    .filter((item) => item.name !== name)
+  const first = ordered[0]
+  return moveSlot(doc, name, root, first ? { name: first.name, side: 'before' } : null, options)
 }
 
 /** 目标骨骼插槽列表的首 / 尾，作为「贴在该骨骼行上下沿」时的排序锚点 */

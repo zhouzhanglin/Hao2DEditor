@@ -28,6 +28,7 @@ function attachmentTypeOf(type: AttachmentType): AuthoringAttachmentType {
   if (type === AttachmentType.Mesh) return 'mesh'
   if (type === AttachmentType.LinkedMesh) return 'linkedmesh'
   if (type === AttachmentType.BoundingBox) return 'boundingbox'
+  if (type === AttachmentType.Clipping) return 'clipping'
   return 'region'
 }
 
@@ -110,7 +111,10 @@ function decompileAttachment(
     hull: attachment.hull,
     ffdInBoneSpace: attachment.ffdInBoneSpace,
     linkedMeshSkin: attachment.linkedMeshSkin,
-    linkedMeshAttachment: attachment.linkedMeshAttachment
+    linkedMeshAttachment: attachment.linkedMeshAttachment,
+    clipEndSlot: attachment.clipEndSlot,
+    clipInverse: attachment.clipInverse,
+    clipConvex: attachment.clipConvex
   }
 }
 

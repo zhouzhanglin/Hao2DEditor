@@ -113,6 +113,16 @@ export interface SpineAttachmentJson {
   // boundingbox / path
   polygons?: number[]
 
+  // clipping / boundingbox / path
+  /** Spine 4.x 在这些“只有多边形”的附件上显式写顶点数（加权时 vertices 会更长） */
+  vertexCount?: number
+  /** clipping：结束插槽名（空/缺省 = 裁到绘制顺序末尾） */
+  end?: string
+  /** clipping：反向遮罩 */
+  inverse?: boolean
+  /** clipping：凸多边形标记 */
+  convex?: boolean
+
   // linkedmesh
   skin?: string
   parent?: string

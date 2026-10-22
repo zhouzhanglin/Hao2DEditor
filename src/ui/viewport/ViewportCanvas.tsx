@@ -19,6 +19,8 @@ import {
   baseBrushMode,
   brushModeFor,
   isDragging,
+  maskDraftCancel,
+  maskDraftClose,
   meshSubtoolCancel,
   meshSubtoolHover,
   slotLocked,
@@ -241,6 +243,27 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     }
     apply()
     return usePreviewStore.subscribe(apply)
+  }, [])
+
+  // 遮罩工具：Enter 闭合 / Esc 取消（只在焦点不在输入框时接管）
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (useToolStore.getState().tool !== 'mask') return
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      if (event.key !== 'Escape' && event.key !== 'Enter') return
+      const host = buildHost()
+      if (!host) return
+      if (event.key === 'Escape') {
+        maskDraftCancel(host)
+      } else {
+        maskDraftClose(host)
+      }
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [])
 
   // 选中 / 工具 / 时间轴 → 场景
@@ -631,6 +654,14 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       return
     }
 
+    // 遮罩工具：右键 = 闭合当前多边形（点数不足时由它自己提示）
+    if (event.button === 2 && useToolStore.getState().tool === 'mask') {
+      event.preventDefault()
+      const host = buildHost()
+      if (host) maskDraftClose(host)
+      return
+    }
+
     /*
      * 网格子工具（左下角图标条）：右键 = 收尾并回到「编辑顶点」。
      * 「自己绘制边界」正画到一半的话，右键先按规则把最后一个点连回起点闭合（见 meshSubtoolCancel）。
@@ -659,7 +690,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     // 所以 Alt 拖动依旧是平移，不会一按下去就多出一个顶点。
     //
     // 权重刷除外：那里 Alt = 减少权重（见 brushModeFor），必须落到工具手里，否则刷不了。
-    if (event.altKey && useToolStore.getState().tool !== 'weight') {
+    if (event.altKey && useToolStore.getState().tool !== 'weight' && useToolStore.getState().tool !== 'mask') {
       pointer.current = {
         panning: false,
         lastX: event.clientX,
@@ -792,6 +823,18 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     }
     const world = toWorld(event)
     if (!world) return
+
+    // 遮罩工具：画草稿时橡皮筋跟着鼠标；没有草稿也给十字光标
+    if (useToolStore.getState().tool === 'mask') {
+      const maskDraft = scene.state.pendingMaskPath
+      if (maskDraft) {
+        scene.setViewState({ pendingMaskPath: { ...maskDraft, cursor: { ...world } } })
+        scene.markDirty()
+        if (event.currentTarget.style.cursor !== 'crosshair') event.currentTarget.style.cursor = 'crosshair'
+        return
+      }
+      if (event.currentTarget.style.cursor !== 'crosshair') event.currentTarget.style.cursor = 'crosshair'
+    }
 
     /*
      * 权重刷：光标与「刷子半径圈」都跟着**模式**走 —— Alt=减少（红）、Shift=覆盖（蓝）、

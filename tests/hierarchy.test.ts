@@ -12,6 +12,7 @@ import {
   moveBone,
   moveDisplay,
   moveSlot,
+  moveSlotToBottom,
   validateBoneMove
 } from '@editor/commands/hierarchyCommands'
 import { keySlotDisplay } from '@editor/commands/animationCommands'
@@ -281,11 +282,49 @@ describe('层级拖动：插槽', () => {
     expect(doc.slots.find((item) => item.name === 'slotA')?.zOrder).toBe(1)
   })
 
+  it('可以用锚点插到指定兄弟的后面（层级树拖到目标行下方）', () => {
+    const doc = setup()
+    moveSlot(doc, 'slotA', 'boneA', { name: 'slotB', side: 'after' })
+    expect(doc.slots.find((item) => item.name === 'slotB')?.zOrder).toBe(0)
+    expect(doc.slots.find((item) => item.name === 'slotA')?.zOrder).toBe(1)
+  })
+
   it('目标骨骼不存在时拒绝，且不改数据', () => {
     const doc = setup()
     const result = moveSlot(doc, 'slotA', 'nope', null)
     expect(result.ok).toBe(false)
     expect(doc.slots.find((item) => item.name === 'slotA')?.bone).toBe('boneA')
+  })
+
+  it('拖到列表空白最下面 = 移到绘制顺序最底层', () => {
+    const doc = setup()
+    // setup 里 slotA z0（底）、slotB z1（顶）；把顶上的 slotB 拖到最底层
+    moveSlotToBottom(doc, 'slotB')
+    expect(doc.slots.find((item) => item.name === 'slotB')?.zOrder).toBe(0)
+    expect(doc.slots.find((item) => item.name === 'slotA')?.zOrder).toBe(1)
+  })
+
+  it('跨骨骼移动遮罩：换算多边形点，附件 TRS 保持单位阵', () => {
+    const doc = setup()
+    doc.bones.find((item) => item.name === 'boneB')!.localPosition = { x: 10, y: 0 }
+    const mask = attachment('mask')
+    mask.type = 'clipping'
+    mask.vertices = [
+      { x: 0, y: 0, weights: [] },
+      { x: 10, y: 0, weights: [] },
+      { x: 10, y: 10, weights: [] }
+    ]
+    doc.skins[0].slots.find((item) => item.slot === 'slotA')!.attachments.push(mask)
+
+    const moved = moveSlot(doc, 'slotA', 'boneB', null, {
+      worldMatrixOf: (name) => worldOf(doc.bones, name)
+    })
+    expect(moved.ok).toBe(true)
+    // 旧骨骼空间 → 新骨骼空间：整体 -10
+    expect(mask.vertices.map((point) => point.x)).toEqual([-10, 0, 0])
+    expect(mask.position).toEqual({ x: 0, y: 0 })
+    expect(mask.rotation).toBe(0)
+    expect(mask.scale).toEqual({ x: 1, y: 1 })
   })
 
   it('boneSlotAnchor 取该骨骼插槽列表的首 / 尾', () => {

@@ -62,7 +62,7 @@ export interface AuthoringVertex {
   weights: AuthoringWeight[]
 }
 
-export type AuthoringAttachmentType = 'region' | 'mesh' | 'linkedmesh' | 'boundingbox'
+export type AuthoringAttachmentType = 'region' | 'mesh' | 'linkedmesh' | 'boundingbox' | 'clipping'
 
 export interface AuthoringAttachment {
   name: string
@@ -107,6 +107,15 @@ export interface AuthoringAttachment {
   ffdInBoneSpace: boolean
   linkedMeshSkin: string
   linkedMeshAttachment: string
+  /**
+   * 遮罩结束插槽名（仅 `type === 'clipping'`）。空串 = 裁到绘制顺序末尾。
+   * 与 Spine 的 clipping.end 一致：结束插槽自身不被裁剪。
+   */
+  clipEndSlot: string
+  /** 反向遮罩（仅 clipping）；Spine 要求此时多边形为凸，UI 会联动勾选 convex */
+  clipInverse: boolean
+  /** 凸多边形标记（仅 clipping） */
+  clipConvex: boolean
   /**
    * 由 Region 转来的 Mesh 会保留源 Region 的显示信息，
    * 「还原为 Region」靠它恢复原尺寸与原 UV；没有快照（如导入的网格）只能按顶点包围盒近似。
@@ -273,7 +282,14 @@ export interface StageImage {
   opacity: number
 }
 
-export const CURRENT_SCHEMA_VERSION = 1
+/**
+ * 工程文件版本。
+ *
+ * - **1**：初始版本；
+ * - **2**：`BlendMode` 移除 `Mask` 并重排（Below 6→5、None 7→6）。
+ *   读取 v1 时把旧的 5（Mask）迁移成 Normal、6/7 映射到新值（见 projectJson 的迁移）。
+ */
+export const CURRENT_SCHEMA_VERSION = 2
 
 export interface EditorDocument {
   schemaVersion: number
@@ -381,6 +397,9 @@ export function createAuthoringAttachment(partial?: Partial<AuthoringAttachment>
     ffdInBoneSpace: false,
     linkedMeshSkin: '',
     linkedMeshAttachment: '',
+    clipEndSlot: '',
+    clipInverse: false,
+    clipConvex: false,
     ...partial
   }
 }

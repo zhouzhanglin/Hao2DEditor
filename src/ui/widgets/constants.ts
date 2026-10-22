@@ -14,7 +14,6 @@ export function blendOptions(): Array<{ value: string; label: string }> {
     { value: String(BlendMode.Multiply), label: 'Multiply' },
     { value: String(BlendMode.Screen), label: 'Screen' },
     { value: String(BlendMode.Erase), label: t('Erase（视口降级）') },
-    { value: String(BlendMode.Mask), label: t('Mask（视口降级）') },
     { value: String(BlendMode.Below), label: t('Below（视口降级）') },
     { value: String(BlendMode.None), label: t('None（视口降级）') }
   ]

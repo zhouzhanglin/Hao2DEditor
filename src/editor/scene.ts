@@ -159,6 +159,23 @@ export interface SceneViewState {
    * 干扰 —— 用户只需要知道「图片范围在哪、笔尖要落在里面」（点子工具的落点也会被夹进这个框）。
    */
   boundaryTarget: { slot: string; attachment: string } | null
+  /**
+   * 遮罩工具正在画的多边形（世界坐标）：`points` 已落点，`cursor` 是橡皮筋末端。
+   * 与 `pendingMeshPath` 分开：遮罩点存世界坐标，提交时才换算到骨骼局部空间。
+   */
+  pendingMaskPath: {
+    slot: string
+    target: string
+    points: Vec2[]
+    cursor: Vec2 | null
+    /**
+     * 草稿里属于「原多边形」的点数。
+     * 在已有遮罩上追加点时，Ctrl+Z 只应撤回本次新增的点，不能把原多边形也吃掉。
+     */
+    baseCount: number
+  } | null
+  /** 遮罩工具当前选中的控制点（用于高亮 / Delete 删除）；索引只在该附件内有效 */
+  maskPoint: { slot: string; attachment: string; index: number } | null
 }
 
 /**
@@ -216,6 +233,10 @@ export class EditorScene {
   private readonly regionFrame = new Graphics()
   /** 网格子工具正在画的折线（画边界 / 自定义布线）：同样画在最上层 */
   private readonly meshPath = new Graphics()
+  /** 遮罩：半透明填充 / 轮廓 / 控制点（画在角色之上、操作器之下） */
+  private readonly maskFill = new Graphics()
+  private readonly maskStroke = new Graphics()
+  private readonly maskPoints = new Graphics()
   /**
    * 舞台参考图（背景）：挂在 `viewport.stageLayer`（棋盘格之上、坐标轴与角色之下）。
    * 贴图由 ViewportCanvas 异步加载后经 `setStageTexture` 喂进来；配置每帧应用（改弹窗实时生效）。
@@ -258,7 +279,9 @@ export class EditorScene {
     hoveredDisplay: null,
     weightBones: [],
     pendingMeshPath: null,
-    boundaryTarget: null
+    boundaryTarget: null,
+    pendingMaskPath: null,
+    maskPoint: null
   }
 
   constructor(options: EditorSceneOptions) {
@@ -282,7 +305,10 @@ export class EditorScene {
       this.gizmoStroke,
       this.brushRing,
       this.regionFrame,
-      this.meshPath
+      this.meshPath,
+      this.maskFill,
+      this.maskStroke,
+      this.maskPoints
     )
     this.viewport.overlayLayer.addChild(this.overlay)
     this.viewport.axisLayer.addChild(this.axes)
@@ -996,6 +1022,53 @@ export class EditorScene {
     return this.view?.meshBuilder.attachmentAt(slotIndex, displayIndex) ?? null
   }
 
+  /** 按名字找附件（不要求它当前正在显示；遮罩选中 / 叠加层用） */
+  attachmentByName(slotName: string, attachmentName: string): AttachmentData | null {
+    const bundle = this.bundle
+    const view = this.view
+    if (!bundle || !view) return null
+    const slotIndex = bundle.asset.slots.findIndex((slot) => slot.name === slotName)
+    if (slotIndex < 0) return null
+    const displayIndex = view.meshBuilder.attachmentIndexOf(slotIndex, attachmentName)
+    return displayIndex >= 0 ? view.meshBuilder.attachmentAt(slotIndex, displayIndex) : null
+  }
+
+  /** 遮罩附件当前姿态的世界多边形（加权 / FFD 都按运行期同一套算法） */
+  maskWorldPointsAt(slotName: string, attachmentName: string): Float32Array | null {
+    const bundle = this.bundle
+    const view = this.view
+    if (!bundle || !view) return null
+    const slotIndex = bundle.asset.slots.findIndex((slot) => slot.name === slotName)
+    if (slotIndex < 0) return null
+    const attachment = this.attachmentByName(slotName, attachmentName)
+    if (!attachment || attachment.type !== AttachmentType.Clipping) return null
+    return view.meshBuilder.clippingWorldPoints(bundle.skeleton, slotIndex, attachment)
+  }
+
+  /** 插槽骨骼局部坐标 → 世界坐标（遮罩控制点存储 / 绘制用） */
+  slotBoneLocalToWorld(slotName: string, point: Vec2): Vec2 | null {
+    const bundle = this.bundle
+    if (!bundle) return null
+    const slotIndex = bundle.asset.slots.findIndex((slot) => slot.name === slotName)
+    if (slotIndex < 0) return null
+    const boneIndex = bundle.asset.slots[slotIndex].boneIndex
+    if (boneIndex < 0) return null
+    const world = bundle.skeleton.world.slice(boneIndex * MAT4_LENGTH, boneIndex * MAT4_LENGTH + MAT4_LENGTH)
+    return mulPoint(world, point)
+  }
+
+  /** 世界坐标 → 插槽骨骼局部坐标（提交遮罩时把画出来的点换算回存储空间） */
+  worldToSlotBoneLocal(slotName: string, point: Vec2): Vec2 | null {
+    const bundle = this.bundle
+    if (!bundle) return null
+    const slotIndex = bundle.asset.slots.findIndex((slot) => slot.name === slotName)
+    if (slotIndex < 0) return null
+    const boneIndex = bundle.asset.slots[slotIndex].boneIndex
+    if (boneIndex < 0) return null
+    const world = bundle.skeleton.world.slice(boneIndex * MAT4_LENGTH, boneIndex * MAT4_LENGTH + MAT4_LENGTH)
+    return mulPoint(invert(world), point)
+  }
+
   /**
    * 某插槽当前附件的世界矩阵（boneWorld × TRS(附件)）。
    * 网格顶点编辑 / FFD 拖拽需要把世界位移换算回附件空间。
@@ -1058,6 +1131,14 @@ export class EditorScene {
     const attachment = this.attachmentAt(slotIndex, displayIndex)
     // 选中的那个此刻没显示就别画，免得轮廓圈在别的对象上
     if (!attachment || attachment.name !== attachmentName) return null
+    if (attachment.type === AttachmentType.Clipping) {
+      const points = this.maskWorldPointsAt(slotName, attachmentName)
+      if (!points || points.length < 6) return null
+      const path: Array<{ x: number; y: number }> = []
+      for (let i = 0; i + 1 < points.length; i += 2) path.push({ x: points[i], y: points[i + 1] })
+      return [path]
+    }
+
     const world = this.attachmentWorldAt(slotIndex)
     if (!world) return null
 
@@ -1367,6 +1448,87 @@ export class EditorScene {
   }
 
   /**
+   * 遮罩叠加层：选中/正在绘制的多边形轮廓、半透明填充、控制点。
+   *
+   * 已存在的遮罩点存骨骼局部坐标，绘制时乘骨骼世界矩阵；绘制中的草稿点直接是世界坐标
+   * （提交时才换算），所以摆 Pose / 播动画都不会让草稿错位。
+   */
+  private drawMaskOverlay(unitPerPixel: number): void {
+    this.maskFill.clear()
+    this.maskStroke.clear()
+    this.maskPoints.clear()
+    let visible = false
+    const color = 0x22d3ee
+
+    const drawPolygon = (points: Vec2[], closed: boolean, selectedIndex = -1): void => {
+      if (points.length < 2) return
+      const draw = (g: Graphics): void => {
+        g.moveTo(points[0].x, points[0].y)
+        for (let i = 1; i < points.length; i++) g.lineTo(points[i].x, points[i].y)
+        if (closed) g.closePath()
+      }
+      draw(this.maskFill)
+      this.maskFill.fill({ color, alpha: 0.1 })
+      draw(this.maskStroke)
+      this.maskStroke.stroke({ width: unitPerPixel * 1.5, color, alpha: closed ? 0.95 : 0.8 })
+      for (let i = 0; i < points.length; i++) {
+        const selected = i === selectedIndex
+        const radius = unitPerPixel * (selected ? 6 : i === 0 ? 5 : 4)
+        this.maskPoints
+          .poly(circlePolygon(points[i].x, points[i].y, radius))
+          .fill({ color: selected ? 0xffffff : color, alpha: selected ? 1 : i === 0 ? 1 : 0.9 })
+        this.maskPoints
+          .poly(circlePolygon(points[i].x, points[i].y, radius))
+          .stroke({ width: unitPerPixel, color: selected ? color : 0xffffff, alpha: 0.95 })
+        if (selected) {
+          // 选中点外面再套一圈青色，缩小时也能一眼看出选的是哪个
+          this.maskPoints
+            .poly(circlePolygon(points[i].x, points[i].y, radius + unitPerPixel * 2))
+            .stroke({ width: unitPerPixel, color, alpha: 0.9 })
+        }
+      }
+    }
+
+    const selected = this.viewState.selectedDisplay
+    if (selected) {
+      const attachment = this.attachmentByName(selected.slot, selected.attachment)
+      if (attachment?.type === AttachmentType.Clipping) {
+        const flat = this.maskWorldPointsAt(selected.slot, selected.attachment)
+        if (flat && flat.length >= 6) {
+          const points: Vec2[] = []
+          for (let i = 0; i + 1 < flat.length; i += 2) points.push({ x: flat[i], y: flat[i + 1] })
+          const picked = this.viewState.maskPoint
+          const selectedIndex =
+            picked && picked.slot === selected.slot && picked.attachment === selected.attachment
+              ? picked.index
+              : -1
+          drawPolygon(points, true, selectedIndex >= 0 && selectedIndex < points.length ? selectedIndex : -1)
+          visible = true
+        }
+      }
+    }
+
+    const pending = this.viewState.pendingMaskPath
+    if (pending && pending.points.length > 0) {
+      drawPolygon(pending.points, false)
+      // 橡皮筋：最后一点 → 光标；已有两个点时再连回起点，提示可以闭合
+      if (pending.cursor) {
+        const last = pending.points[pending.points.length - 1]
+        this.maskStroke.moveTo(last.x, last.y).lineTo(pending.cursor.x, pending.cursor.y)
+        if (pending.points.length >= 2) {
+          this.maskStroke.moveTo(pending.cursor.x, pending.cursor.y).lineTo(pending.points[0].x, pending.points[0].y)
+        }
+        this.maskStroke.stroke({ width: unitPerPixel * 1.2, color, alpha: 0.45 })
+      }
+      visible = true
+    }
+
+    this.maskFill.visible = visible
+    this.maskStroke.visible = visible
+    this.maskPoints.visible = visible
+  }
+
+  /**
    * 「自己绘制边界」时画的**图片 region 框**：附件在文档里的原图框（没被裁剪就是内容框），
    * 用虚线围一圈当范围提示 —— 用户据此知道笔尖该落在哪，点子工具也会把落点夹进这个框里
    *（见 authoringTools 的 clampToFrame，两边用的是同一个 `attachmentFrameBox`）。
@@ -1539,6 +1701,8 @@ export class EditorScene {
         }
       }
     }
+
+    this.drawMaskOverlay(unitPerPixel)
 
     // 小坐标轴 / 斜切包围盒 / 附件操作器画在最上层（骨骼、网格之后），保证手柄始终可点可看
     this.gizmoStroke.clear()

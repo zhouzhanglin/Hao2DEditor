@@ -28,8 +28,9 @@ export interface Hao2dReadResult {
   warnings: string[]
 }
 
-/** 解析 `.hao2d`（支持 Version 5 / 6）。magic / version 不匹配时抛出可读错误。 */
+/** 解析 `.hao2d`（支持 Version 5 / 6 / 7）。magic / version 不匹配时抛出可读错误。 */
 export function readHao2d(bytes: Uint8Array): Hao2dReadResult {
+  const warnings: string[] = []
   const reader = new ByteReader(bytes)
   const magic = reader.readUint32()
   if (magic !== HAO2D_MAGIC) {
@@ -37,14 +38,14 @@ export function readHao2d(bytes: Uint8Array): Hao2dReadResult {
   }
   const version = reader.readUint16()
   // v5 的附件段没有 contentOffset，按 0 读 —— 等价于「没被裁剪过」
-  if (version !== 5 && version !== HAO2D_VERSION) {
-    throw new Error(`Hao2D: 不支持的数据版本 ${version}（支持 5 / ${HAO2D_VERSION}），请重新导出`)
+  if (version !== 5 && version !== 6 && version !== HAO2D_VERSION) {
+    throw new Error(`Hao2D: 不支持的数据版本 ${version}（支持 5 / 6 / ${HAO2D_VERSION}），请重新导出`)
   }
 
   const armatureName = reader.readString()
   const frameRate = reader.readFloat32()
   const bones = readBones(reader)
-  const slots = readSlots(reader)
+  const slots = readSlots(reader, version, warnings)
   const skins = readSkins(reader, version)
   const constraints = readIks(reader)
   const animations = readAnimations(reader)
@@ -69,7 +70,6 @@ export function readHao2d(bytes: Uint8Array): Hao2dReadResult {
     images: textureNames.map((name) => ({ name, path: name, width: 0, height: 0 }))
   })
 
-  const warnings: string[] = []
   if (constraints.length === 0 && animations.some((anim) => anim.iks.length > 0)) {
     warnings.push('动画包含 iks 轨道但资源没有 IK 约束，这些轨道会被忽略')
   }
@@ -97,7 +97,21 @@ function readBones(reader: ByteReader): BoneData[] {
   return bones
 }
 
-function readSlots(reader: ByteReader): SlotData[] {
+/**
+ * v6 及更早的 BlendMode：Normal 0 / Additive 1 / Multiply 2 / Screen 3 /
+ * Erase 4 / Mask 5 / Below 6 / None 7。v7 移除 Mask，Below / None 各前移一位。
+ */
+function migrateLegacyBlend(value: number, name: string, warnings: string[]): BlendMode {
+  if (value === 5) {
+    warnings.push(`插槽「${name}」使用了已移除的混合模式 Mask，已迁移为 Normal`)
+    return BlendMode.Normal
+  }
+  if (value === 6) return BlendMode.Below
+  if (value === 7) return BlendMode.None
+  return value >= BlendMode.Normal && value <= BlendMode.None ? (value as BlendMode) : BlendMode.Normal
+}
+
+function readSlots(reader: ByteReader, version: number, warnings: string[]): SlotData[] {
   const count = reader.readInt32()
   const slots: SlotData[] = []
   for (let i = 0; i < count; i++) {
@@ -110,11 +124,23 @@ function readSlots(reader: ByteReader): SlotData[] {
       b: reader.readFloat32(),
       a: reader.readFloat32()
     }
-    const blendMode = reader.readInt32() as BlendMode
+    const rawBlend = reader.readInt32()
+    const blendMode = version < 7 ? migrateLegacyBlend(rawBlend, name, warnings) : (rawBlend as BlendMode)
     const defaultDisplayIndex = reader.readInt32()
     const defaultZOrder = reader.readInt32()
     const z = reader.readFloat32()
-    slots.push({ name, setupAttachment, boneIndex, color, blendMode, defaultDisplayIndex, defaultZOrder, z })
+    slots.push({
+      name,
+      setupAttachment,
+      boneIndex,
+      color,
+      blendMode,
+      defaultDisplayIndex,
+      defaultZOrder,
+      z,
+      // .hao2d 二进制不携带插槽级可见性（只在工程 JSON 里），读回来一律按可见
+      visible: true
+    })
   }
   return slots
 }
@@ -182,6 +208,10 @@ function readAttachment(reader: ByteReader, version: number): AttachmentData {
   const linkedMeshSkin = reader.readString()
   const linkedMeshAttachment = reader.readString()
   const ffdInBoneSpace = reader.readBool()
+  // v7：遮罩信息。旧版本没有这三项，按「不是遮罩」读
+  const clipEndSlot = version >= 7 ? reader.readString() : ''
+  const clipInverse = version >= 7 ? reader.readBool() : false
+  const clipConvex = version >= 7 ? reader.readBool() : false
 
   return createAttachmentData({
     name,
@@ -202,7 +232,10 @@ function readAttachment(reader: ByteReader, version: number): AttachmentData {
     weights,
     ffdInBoneSpace,
     linkedMeshSkin,
-    linkedMeshAttachment
+    linkedMeshAttachment,
+    clipEndSlot,
+    clipInverse,
+    clipConvex
   })
 }
 

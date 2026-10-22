@@ -7,7 +7,7 @@ import { t } from '@i18n'
  * Animate 态是「FFD 顶点工具(D)」—— 两者本来就是同一段实现（见 authoringTools 的顶点拖拽分支），
  * 拆成两个按钮只会让人犹豫点哪个。
  */
-export type EditorTool = 'select' | 'bone' | 'weight' | 'ffd' | 'pose'
+export type EditorTool = 'select' | 'bone' | 'weight' | 'ffd' | 'pose' | 'mask'
 
 /**
  * 「网格类」编辑工具：顶点/UV 编辑、网格隔离、顶点显示都归它们。

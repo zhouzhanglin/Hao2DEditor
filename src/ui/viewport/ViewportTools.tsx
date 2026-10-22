@@ -6,6 +6,7 @@ import {
   MousePointer2,
   Move,
   MoveDiagonal2,
+  Pentagon,
   PersonStanding,
   RotateCw,
   Scaling
@@ -66,6 +67,13 @@ function editTools(): EditToolItem[] {
       key: 'D',
       icon: Grid3x3,
       hint: t('拖顶点：Pose 改绑定网格，Animate 写 FFD 帧；网格内 Alt+点击插入顶点')
+    },
+    {
+      id: 'mask',
+      label: t('遮罩工具'),
+      key: 'N',
+      icon: Pentagon,
+      hint: t('多边形遮罩：空白插槽单击加点、点回起点 / 右键闭合；已有遮罩时点边线插点、拖点移动、Delete 删除（仅 Pose 态）')
     }
   ]
 }

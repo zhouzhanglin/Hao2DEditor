@@ -27,12 +27,14 @@ export const HAO2D_MAGIC = 0x44324f48
  * - **6**：附件段补 `contentOffset`（内容中心相对原图中心的位移，**附件自身坐标轴**）。
  *   被裁剪的图（DragonBones 的 trim / Spine 的 offset）必须靠它才能落在正确位置：偏移不能加进
  *   `position` —— 那是骨骼坐标系，会被骨骼旋转带偏。未裁剪时为 0，与 v5 数据等价（读端兼容 v5）。
+ * - **7**：附件段末尾补遮罩三项 `clipEndSlot / clipInverse / clipConvex`；
+ *   同时 `BlendMode` 移除 Mask 并重排（Below 6→5、None 7→6），读端对旧版本做迁移。
  *
  * ⚠️ 附件段**只写 C# 参考库 `Hao2DCodec` 认识的字段**。编辑器内部还有 `frameSize`
  * （未裁剪原图尺寸，只用于检查器显示与选中框），它**不进二进制**：写进去会让 Unity 读端
  * 从附件段开始整体错位（EndOfStreamException）。展示用的 frameSize 请放工程 JSON。
  */
-export const HAO2D_VERSION = 6
+export const HAO2D_VERSION = 7
 
 export interface Hao2dInspectResult {
   magic: number
@@ -135,7 +137,8 @@ function writeAttachment(writer: ByteWriter, a: AttachmentData): void {
    * 渲染四边形时按它做局部偏移（`meshBuilder.emitRegion`）。不能并进 position：
    * position 在骨骼坐标系，会被骨骼旋转带着转。
    *
-   * 只写这一个（C# Hao2DCodec 的 v6 就是这个字段）；编辑器内部的 frameSize 不落盘。
+   * v7 起附件末尾再补遮罩三项（clipEndSlot / clipInverse / clipConvex），与 C# Hao2DCodec v7 一致；
+   * 编辑器内部的 frameSize 不落盘。
    */
   writer.writeFloat32(a.contentOffset.x)
   writer.writeFloat32(a.contentOffset.y)
@@ -166,6 +169,10 @@ function writeAttachment(writer: ByteWriter, a: AttachmentData): void {
   writer.writeString(a.linkedMeshSkin)
   writer.writeString(a.linkedMeshAttachment)
   writer.writeBool(a.ffdInBoneSpace)
+  // v7：遮罩信息。只有 Clipping 附件会用，但所有附件都写，保持记录定长好读
+  writer.writeString(a.clipEndSlot)
+  writer.writeBool(a.clipInverse)
+  writer.writeBool(a.clipConvex)
 }
 
 function writeWeights(writer: ByteWriter, weights: readonly VertexWeight[]): void {

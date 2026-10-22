@@ -219,7 +219,8 @@ function remapAsset(asset: RuntimeAsset, packed: PackedAtlas): void {
   for (const skin of asset.skins) {
     for (const skinSlot of skin.slots) {
       for (const attachment of skinSlot.attachments) {
-        if (attachment.type === AttachmentType.BoundingBox) continue
+        // 不参与渲染的附件（包围盒 / 遮罩）没有纹理与 UV，跳过重映射
+        if (attachment.type === AttachmentType.BoundingBox || attachment.type === AttachmentType.Clipping) continue
         const source = attachment.textureName
         if (!source) continue
         // 已经是图集的页：整页照搬，UV 不用动（本来就是按这一页归一化的），只换页名

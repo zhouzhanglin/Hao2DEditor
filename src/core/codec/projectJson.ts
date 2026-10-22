@@ -291,9 +291,13 @@ function normalizeVertex(raw: Record<string, unknown>): AuthoringVertex {
 
 function normalizeAttachment(raw: Record<string, unknown>): AuthoringAttachment {
   const type = str(raw.type, 'region')
+  const resolvedType: AuthoringAttachment['type'] =
+    type === 'mesh' || type === 'linkedmesh' || type === 'boundingbox' || type === 'clipping'
+      ? type
+      : 'region'
   return {
     name: str(raw.name, 'attachment'),
-    type: type === 'mesh' || type === 'linkedmesh' || type === 'boundingbox' ? type : 'region',
+    type: resolvedType,
     image: str(raw.image),
     // 导出 Spine 用：附件在图集里的区域名（= sprite 名）。老工程没有此字段 → undefined
     regionName: str(raw.regionName) || undefined,
@@ -316,7 +320,11 @@ function normalizeAttachment(raw: Record<string, unknown>): AuthoringAttachment 
     // 由 Region 转来的网格会带一份源 Region 快照，读回来才能「还原为 Region」
     regionSnapshot: normalizeRegionSnapshot(raw.regionSnapshot),
     // 权重骨骼列表（白名单逐字段还原，漏了这行落盘的绑定关系会被丢掉）
-    bones: strArray(raw.bones)
+    bones: strArray(raw.bones),
+    // 遮罩字段：老工程没有 → 空串/关闭（等价于「不是遮罩」）
+    clipEndSlot: str(raw.clipEndSlot),
+    clipInverse: bool(raw.clipInverse),
+    clipConvex: bool(raw.clipConvex)
   }
 }
 
@@ -341,13 +349,36 @@ function normalizeSkin(raw: Record<string, unknown>): AuthoringSkin {
   }
 }
 
-function normalizeSlot(raw: Record<string, unknown>): AuthoringSlot {
-  const blend = Math.round(num(raw.blendMode))
+/**
+ * 旧版本的混合模式数值 → 新枚举。
+ *
+ * v1 的取值是 Normal 0 / Additive 1 / Multiply 2 / Screen 3 / Erase 4 /
+ * Mask 5 / Below 6 / None 7；v2 移除了 Mask 并把 Below、None 各前移一位。
+ * 旧 Mask 插槽没有可恢复的遮罩多边形，只能回退 Normal（并提示用户改用遮罩附件）。
+ */
+function migrateBlendMode(value: unknown, version: number): { mode: BlendMode; legacyMask: boolean } {
+  const blend = Math.round(num(value))
+  if (version < 2) {
+    if (blend === 5) return { mode: BlendMode.Normal, legacyMask: true }
+    if (blend === 6) return { mode: BlendMode.Below, legacyMask: false }
+    if (blend === 7) return { mode: BlendMode.None, legacyMask: false }
+  }
+  if (blend >= BlendMode.Normal && blend <= BlendMode.None) {
+    return { mode: blend as BlendMode, legacyMask: false }
+  }
+  return { mode: BlendMode.Normal, legacyMask: false }
+}
+
+function normalizeSlot(raw: Record<string, unknown>, version: number, warnings: string[]): AuthoringSlot {
+  const blend = migrateBlendMode(raw.blendMode, version)
+  if (blend.legacyMask) {
+    warnings.push(`插槽「${str(raw.name, 'slot')}」使用了已移除的混合模式 Mask，已迁移为 Normal；遮罩请改用遮罩附件`)
+  }
   return {
     name: str(raw.name, 'slot'),
     bone: str(raw.bone),
     color: str(raw.color, '#FFFFFFFF'),
-    blendMode: (blend >= 0 && blend <= 7 ? blend : BlendMode.Normal) as BlendMode,
+    blendMode: blend.mode,
     zOrder: Math.round(num(raw.zOrder)),
     z: num(raw.z),
     attachment: str(raw.attachment),
@@ -617,7 +648,7 @@ export function normalizeDocument(raw: unknown): ParseDocumentResult {
   }
 
   const bones = arr(raw.bones).map((item) => normalizeBone(isRecord(item) ? item : {}))
-  const slots = arr(raw.slots).map((item) => normalizeSlot(isRecord(item) ? item : {}))
+  const slots = arr(raw.slots).map((item) => normalizeSlot(isRecord(item) ? item : {}, version, warnings))
   const skins = arr(raw.skins).map((item) => normalizeSkin(isRecord(item) ? item : {}))
   if (skins.length === 0) {
     skins.push({ name: 'default', slots: [] })

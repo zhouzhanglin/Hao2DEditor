@@ -44,9 +44,9 @@ const bridge: HaoBridge = {
   revealInFolder: (path: string) => invoke<void>(IPC.revealInFolder, path),
   setTitle: (title: string) => invoke<void>(IPC.setTitle, title),
 
-  startSpinePreview: (session, open) => invoke(IPC.spinePreviewStart, session, open),
+  startSpinePreview: (session) => invoke(IPC.spinePreviewStart, session),
   stopSpinePreview: () => invoke<void>(IPC.spinePreviewStop),
-  startHao2dPreview: (session, open) => invoke(IPC.hao2dPreviewStart, session, open),
+  startHao2dPreview: (session) => invoke(IPC.hao2dPreviewStart, session),
   stopHao2dPreview: () => invoke<void>(IPC.hao2dPreviewStop),
   openExternal: (url: string) => invoke<void>(IPC.openExternal, url),
 

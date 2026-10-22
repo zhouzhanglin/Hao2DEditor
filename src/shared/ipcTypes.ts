@@ -222,10 +222,15 @@ export interface HaoBridge {
   setTitle(title: string): Promise<IpcResult<void>>
   /** 把绝对路径转成渲染层可直接加载的 URL */
   fileUrl(path: string): string
-  /** 起本地在线预览服务（spine.js 运行时网页），open=true 时同时在浏览器打开；返回手机可扫码的地址 */
-  startSpinePreview(session: SpinePreviewSession, open: boolean): Promise<IpcResult<SpinePreviewInfo>>
-  /** 起「导出运行时」预览服务：用项目里的 hao2d 计算方式 + pixi.js 渲染，open=true 时同时在浏览器打开 */
-  startHao2dPreview(session: Hao2dPreviewSession, open: boolean): Promise<IpcResult<SpinePreviewInfo>>
+  /**
+   * 起本地在线预览服务（spine.js 运行时网页）；返回手机可扫码的地址。
+   *
+   * **这里不打开浏览器**：打开动作交给渲染层（`openExternal`，和「在浏览器打开」按钮同一条路径）。
+   * 主进程里那一路 `shell.openExternal` 在部分机器上会被系统静默丢弃，渲染层调用则稳定生效。
+   */
+  startSpinePreview(session: SpinePreviewSession): Promise<IpcResult<SpinePreviewInfo>>
+  /** 起「导出运行时」预览服务：用项目里的 hao2d 计算方式 + pixi.js 渲染（同样由渲染层打开浏览器） */
+  startHao2dPreview(session: Hao2dPreviewSession): Promise<IpcResult<SpinePreviewInfo>>
   /** 停止预览服务，释放端口与缓存 */
   stopSpinePreview(): Promise<IpcResult<void>>
   stopHao2dPreview(): Promise<IpcResult<void>>

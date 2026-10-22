@@ -64,13 +64,14 @@ export interface Platform {
    * 在线预览：主进程起一个本地网页服务（用 spine 官方 JS 运行时播放角色），返回本机与局域网地址。
    *
    * 这里**故意**不做 unwrap：失败原因（没有骨架 / 端口起不来）要原样显示给用户，不能吞成空值。
+   * 打开浏览器**不在这一层做**：调用方拿到 url 后用下面的 `openExternal`（与「在浏览器打开」同一路径）。
    */
-  startSpinePreview(session: SpinePreviewSession, open: boolean): Promise<IpcResult<SpinePreviewInfo>>
-  startHao2dPreview(session: Hao2dPreviewSession, open: boolean): Promise<IpcResult<SpinePreviewInfo>>
+  startSpinePreview(session: SpinePreviewSession): Promise<IpcResult<SpinePreviewInfo>>
+  startHao2dPreview(session: Hao2dPreviewSession): Promise<IpcResult<SpinePreviewInfo>>
   /** 停止预览服务：断开连接、释放端口与内存里的资源 */
   stopSpinePreview(): Promise<IpcResult<void>>
   stopHao2dPreview(): Promise<IpcResult<void>>
-  /** 用系统默认浏览器打开链接（在线预览面板的「在浏览器打开」） */
+  /** 用系统默认浏览器打开链接（在线预览面板的「在浏览器打开」；起预览后也走这一条） */
   openExternal(url: string): Promise<void>
   onMenuCommand(cb: (command: string) => void): () => void
   /** AI 接入：当前命令服务的 MCP 信息（是否在跑、带 token 的 MCP URL） */
@@ -188,33 +189,35 @@ class ElectronPlatform implements Platform {
     return this.bridge.getPathForFile(file)
   }
 
-  async startSpinePreview(session: SpinePreviewSession, open: boolean): Promise<IpcResult<SpinePreviewInfo>> {
+  async startSpinePreview(session: SpinePreviewSession): Promise<IpcResult<SpinePreviewInfo>> {
     /*
      * 开发时热更新只会换掉渲染层：主进程 / preload 还是上次启动的那份，通道根本不存在。
      * 这时若直接调下去只会抛一句看不懂的 TypeError，界面表现出来就是「点了没反应」，
      * 所以这里把它翻译成一句能照做的提示。
      */
     const call = this.bridge.startSpinePreview as
-      | ((s: SpinePreviewSession, o: boolean) => Promise<IpcResult<SpinePreviewInfo>>)
+      | ((s: SpinePreviewSession) => Promise<IpcResult<SpinePreviewInfo>>)
       | undefined
     if (typeof call !== 'function') {
       return { ok: false, error: '预览服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）' }
     }
-    return call.call(this.bridge, session, open)
+    // 旧版 preload 的签名是 (session, open)：这里少传一个参数也照常工作 ——
+    // 浏览器由本层（渲染层）用 openExternal 打开，不依赖主进程那一路
+    return call.call(this.bridge, session)
   }
 
   stopSpinePreview(): Promise<IpcResult<void>> {
     return this.bridge.stopSpinePreview()
   }
 
-  async startHao2dPreview(session: Hao2dPreviewSession, open: boolean): Promise<IpcResult<SpinePreviewInfo>> {
+  async startHao2dPreview(session: Hao2dPreviewSession): Promise<IpcResult<SpinePreviewInfo>> {
     const call = this.bridge.startHao2dPreview as
-      | ((s: Hao2dPreviewSession, o: boolean) => Promise<IpcResult<SpinePreviewInfo>>)
+      | ((s: Hao2dPreviewSession) => Promise<IpcResult<SpinePreviewInfo>>)
       | undefined
     if (typeof call !== 'function') {
       return { ok: false, error: '预览服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）' }
     }
-    return call.call(this.bridge, session, open)
+    return call.call(this.bridge, session)
   }
 
   stopHao2dPreview(): Promise<IpcResult<void>> {

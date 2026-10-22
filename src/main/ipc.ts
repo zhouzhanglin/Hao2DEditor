@@ -76,15 +76,16 @@ export function registerIpcHandlers(): void {
     fs.safe(() => fs.registerAssetRootFor(dir))
   )
 
-  // 在线预览：起本地网页服务（spine.js 运行时播放），地址不变、可反复替换资源
-  ipcMain.handle(IPC.spinePreviewStart, (_e, session: SpinePreviewSession, open: boolean) =>
-    fs.safe(() => startPreviewSession(session, Boolean(open)))
+  // 在线预览：起本地网页服务（spine.js 运行时播放），地址不变、可反复替换资源。
+  // 打不打开浏览器由渲染层决定（它拿 url 走 IPC.openExternal），服务端只管起服务。
+  ipcMain.handle(IPC.spinePreviewStart, (_e, session: SpinePreviewSession) =>
+    fs.safe(() => startPreviewSession(session))
   )
   ipcMain.handle(IPC.spinePreviewStop, () => fs.safe(() => stopPreviewSession()))
 
   // 在线预览：导出运行时预览（hao2d 计算方式 + pixi.js 渲染），地址不变、可反复替换资源
-  ipcMain.handle(IPC.hao2dPreviewStart, (_e, session: Hao2dPreviewSession, open: boolean) =>
-    fs.safe(() => startHao2dPreview(session, Boolean(open)))
+  ipcMain.handle(IPC.hao2dPreviewStart, (_e, session: Hao2dPreviewSession) =>
+    fs.safe(() => startHao2dPreview(session))
   )
   ipcMain.handle(IPC.hao2dPreviewStop, () => fs.safe(() => stopHao2dPreview()))
 

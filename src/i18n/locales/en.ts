@@ -786,6 +786,8 @@ export const en: Record<string, string> = {
     'Clicking "Update preview" here swaps in a new build of the assets; open pages reload automatically, no need to scan again.',
   '用系统默认浏览器打开本机预览地址': 'Open the local preview URL in the system default browser',
   '在浏览器打开': 'Open in browser',
+  '浏览器没能自动打开，点下面「在浏览器打开」即可（预览服务已经就绪）。':
+    'The browser could not be opened automatically — click "Open in browser" below (the preview server is already running).',
   '复制本机链接': 'Copy local link',
   '停掉本地服务并释放内存里的图集': 'Stop the local server and release the in-memory atlases',
   '停止预览': 'Stop preview',

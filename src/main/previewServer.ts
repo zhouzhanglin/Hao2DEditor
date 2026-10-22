@@ -3,7 +3,6 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import type { Socket } from 'node:net'
 import { randomBytes } from 'node:crypto'
 import { networkInterfaces } from 'node:os'
-import { shell } from 'electron'
 import type { SpinePreviewInfo, SpinePreviewSession, Hao2dPreviewSession } from '@shared/ipcTypes'
 import { createLogger } from './logger'
 import previewPage from './preview/page.html?raw'
@@ -35,6 +34,7 @@ let session: SpinePreviewSession | Hao2dPreviewSession | null = null
 let revision = 0
 /** 服务关闭时要一并断开的长连接（keep-alive 会让 close 迟迟不回调） */
 const sockets = new Set<Socket>()
+
 
 /** 局域网 IPv4（手机扫码用），常见私有网段排前面 */
 function lanHosts(): string[] {
@@ -273,10 +273,15 @@ async function ensureServer(): Promise<number> {
   return port
 }
 
-/** 起（或替换）预览会话；返回本机与局域网地址。open 为真时同时在系统浏览器里打开 */
-async function serveSession(next: SpinePreviewSession | Hao2dPreviewSession, open: boolean): Promise<SpinePreviewInfo> {
+/**
+ * 起（或替换）预览会话；返回本机与局域网地址。
+ *
+ * **这里不打开浏览器**：打开动作由渲染层拿 `url` 自己调 `openExternal`（和「在浏览器打开」按钮
+ * 同一条路径）。主进程这一路 `shell.openExternal` 在部分 macOS 环境下会被系统静默丢掉 ——
+ * 服务明明起好了、浏览器却没反应，用户只能手动点按钮，所以干脆不在这里开。
+ */
+async function serveSession(next: SpinePreviewSession | Hao2dPreviewSession): Promise<SpinePreviewInfo> {
   if (next.skeletons.length === 0) throw new Error('没有可预览的骨架')
-  const fresh = !server
   session = next
   revision += 1
   await ensureServer()
@@ -286,18 +291,16 @@ async function serveSession(next: SpinePreviewSession | Hao2dPreviewSession, ope
     lanUrls: lanHosts().map((host) => `http://${host}:${port}${base}`),
     token
   }
-  // 地址不变：已开着的页面会自己重载（manifest.rev），所以只在第一次预览时叫起浏览器
-  if (open && fresh) await shell.openExternal(info.url)
   log.info(`预览已就绪（第 ${revision} 版）：${info.url}（局域网 ${info.lanUrls.length} 个地址）`)
   return info
 }
 
-export async function startPreviewSession(next: SpinePreviewSession, open: boolean): Promise<SpinePreviewInfo> {
-  return serveSession(next, open)
+export async function startPreviewSession(next: SpinePreviewSession): Promise<SpinePreviewInfo> {
+  return serveSession(next)
 }
 
-export async function startHao2dPreview(next: Hao2dPreviewSession, open: boolean): Promise<SpinePreviewInfo> {
-  return serveSession(next, open)
+export async function startHao2dPreview(next: Hao2dPreviewSession): Promise<SpinePreviewInfo> {
+  return serveSession(next)
 }
 
 /** 停止预览：断开连接并释放端口与缓存 */

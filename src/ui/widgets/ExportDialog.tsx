@@ -118,6 +118,8 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   const [previewWarnings, setPreviewWarnings] = useState<string[]>([])
   /** 在线预览失败的原因：编译报错 / 服务起不来 / 通道不存在，都必须写在界面上 */
   const [previewError, setPreviewError] = useState('')
+  /** 自动打开浏览器的结果：非空 = 没打开成功，面板里提示用户自己点「在浏览器打开」 */
+  const [browserHint, setBrowserHint] = useState('')
   /** 二维码里放的地址：默认第一个局域网地址，多网卡时可切换 */
   const [qrUrl, setQrUrl] = useState('')
   /** 当前预览的运行库种类：spine（官方）或 hao2d（项目自带的 pixi 运行库），用于停止时调对通道 */
@@ -264,6 +266,22 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   }, [qrUrl])
 
   /**
+   * 起好预览后把浏览器叫起来。
+   *
+   * 走**渲染层**这条路（和「在浏览器打开」按钮完全同一条）：主进程里那一路 `shell.openExternal`
+   * 在部分 macOS 环境下会被系统静默丢弃 —— 服务明明起好了、浏览器却没反应，只能手动点按钮。
+   * 所以统一在这里打开；打不开就把「请点按钮」的提示摆到面板上，而不是静默失败。
+   */
+  const openPreviewInBrowser = async (url: string): Promise<void> => {
+    try {
+      await getPlatform().openExternal(url)
+      setBrowserHint('')
+    } catch {
+      setBrowserHint(t('浏览器没能自动打开，点下面「在浏览器打开」即可（预览服务已经就绪）。'))
+    }
+  }
+
+  /**
    * 起「在线预览」：把整份工程编译成 spine 产物，交给主进程的本地网页服务。
    *
    * 这里**不复用**导出计划：预览页要能切骨架，所以不管弹窗里勾了哪些，所有骨架都编进去
@@ -272,6 +290,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   const startPreview = async (): Promise<void> => {
     setPreviewBusy(true)
     setPreviewError('')
+    setBrowserHint('')
     try {
       if (mode === 'runtime') {
         await startHao2dPreviewInternal()
@@ -306,8 +325,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
             defaultAnimation: bundle.defaultAnimation,
             defaultSkin: bundle.defaultSkin
           }))
-        },
-        true
+        }
       )
       if (!result.ok) {
         setPreviewError(result.error)
@@ -318,6 +336,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
       setPreviewWarnings(warnings)
       setPreviewKind('spine')
       setQrUrl(result.data.lanUrls[0] ?? result.data.url)
+      await openPreviewInBrowser(result.data.url)
       onStatus?.(
         result.data.lanUrls.length > 0
           ? t('预览已启动：手机扫码，或访问 {0}', result.data.lanUrls[0])
@@ -363,8 +382,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
           defaultAnimation: skeleton.defaultAnimation,
           defaultSkin: skeleton.defaultSkin
         }))
-      },
-      true
+      }
     )
     if (!result.ok) {
       setPreviewError(result.error)
@@ -375,6 +393,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     setPreviewWarnings(pack.warnings)
     setPreviewKind('hao2d')
     setQrUrl(result.data.lanUrls[0] ?? result.data.url)
+    await openPreviewInBrowser(result.data.url)
     onStatus?.(
       result.data.lanUrls.length > 0
         ? t('预览已启动（hao2d 运行时）：手机扫码，或访问 {0}', result.data.lanUrls[0])
@@ -391,6 +410,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     setQrUrl('')
     setPreviewWarnings([])
     setPreviewError('')
+    setBrowserHint('')
     setPreviewKind('spine')
     onStatus?.(result.ok ? t('已停止在线预览') : t('停止预览失败：{0}', result.error))
   }
@@ -786,6 +806,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
                 {t('手机与电脑连同一个 Wi-Fi，用相机扫码即可；页面已适配手机（拖拽平移、双指缩放）。')}
                 {t('这里再点「更新预览」＝ 换一版资源，已开着的页面会自动重载，不用重新扫码。')}
               </div>
+              {browserHint ? <div className="text-3xs text-warn/90">{browserHint}</div> : null}
               <div
                 className="hao-field h-auto min-h-[22px] w-full select-text break-all py-[3px] text-3xs"
                 title={preview.url}

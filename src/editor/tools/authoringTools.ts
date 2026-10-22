@@ -500,7 +500,7 @@ export function deleteSelectedMaskPoint(scene: EditorScene, status?: (text: stri
 
 function maskPointerDown(host: ToolHost, info: PointerInfo): boolean {
   if (host.mode !== 'pose') {
-    host.status('遮罩属于绑定数据：切到 Pose 状态再画 / 编辑')
+    host.status('遮罩绑定数据在 Pose 编辑；Animate 态请用顶点工具（D）拖遮罩点写 FFD')
     return true
   }
   const selection = useSelectionStore.getState()
@@ -651,6 +651,14 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
      */
     const hit = scene.pickVertexAt(info.world.x, info.world.y)
     const ref = hit ? scene.vertexRefAt(hit.vertexIndex) : null
+    // 遮罩控制点现在也进顶点缓冲（供 FFD 用），但它没有权重可刷
+    if (ref) {
+      const picked = findAttachment(useProjectStore.getState().document, ref.slot, ref.attachment)
+      if (picked?.type === 'clipping') {
+        host.status('遮罩控制点不支持权重刷；遮罩的动画请用顶点工具（D）写 FFD')
+        return true
+      }
+    }
     if (hit && ref) {
       useSelectionStore.getState().select({
         kind: 'attachment',

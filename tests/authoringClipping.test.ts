@@ -95,6 +95,60 @@ describe('遮罩编辑命令', () => {
     expect(deleteClippingPoint(doc, 'mask', 'mask', 1)).toBe(false)
   })
 
+  it('插入 / 删除控制点会清掉旧的 FFD 轨道，避免 offsets 错位', () => {
+    const doc = createEmptyDocument('mask-ffd')
+    doc.bones.push({
+      name: 'root',
+      parent: '',
+      localPosition: { x: 0, y: 0 },
+      rotation: 0,
+      localScale: { x: 1, y: 1 },
+      localShear: { x: 0, y: 0 },
+      inheritRotation: true,
+      inheritScale: true,
+      length: 10,
+      color: '#F97316',
+      locked: false
+    })
+    doc.slots.push(createAuthoringSlot({ name: 'mask', bone: 'root', zOrder: 0 }))
+    createClippingAttachment(doc, 'mask', {
+      points: [
+        { x: 0, y: 0 },
+        { x: 10, y: 0 },
+        { x: 10, y: 10 },
+        { x: 0, y: 10 }
+      ]
+    })
+    doc.animations.push({
+      name: 'sway',
+      duration: 1,
+      bones: [],
+      slots: [],
+      deforms: [
+        {
+          slot: 'mask',
+          attachment: 'mask',
+          frames: [{ time: 0, offsets: [0, 0, 0, 0, 0, 0, 0, 0], vertexOffset: 0, easing: 0, curve: null }]
+        }
+      ],
+      drawOrder: [],
+      events: [],
+      constraints: []
+    })
+
+    insertClippingPoint(doc, 'mask', 'mask', 0, { x: 5, y: 0 })
+    expect(doc.animations[0]!.deforms).toHaveLength(0)
+
+    // 再建一条，删除点也应清掉
+    doc.animations[0]!.deforms.push({
+      slot: 'mask',
+      attachment: 'mask',
+      frames: [{ time: 0, offsets: [0, 0, 0, 0, 0, 0, 0, 0], vertexOffset: 0, easing: 0, curve: null }]
+    })
+    deleteClippingPoint(doc, 'mask', 'mask', 0)
+    expect(doc.animations[0]!.deforms).toHaveLength(0)
+  })
+
   it('Region 转遮罩会保留名字并换算到骨骼空间', () => {
     const doc = documentWithRegion()
     expect(convertAttachmentToClipping(doc, 'mask', 'mask')).toBe(true)

@@ -28,6 +28,11 @@ function clipping(name: string, points: number[], endSlot = '', inverse = false)
 }
 
 /** 所有分组三角形的面积之和（世界单位） */
+function pointOf(result: ReturnType<MeshBuilder['build']>, index: number): [number, number] {
+  const round = (value: number): number => Math.round(value * 1e5) / 1e5
+  return [round(result.positions[index * 2]), round(result.positions[index * 2 + 1])]
+}
+
 function totalArea(result: ReturnType<MeshBuilder['build']>): number {
   let area = 0
   const positions = result.positions
@@ -72,6 +77,38 @@ describe('MeshBuilder 遮罩裁剪', () => {
     let generated = 0
     for (let i = 0; i < result.vertexCount; i++) if (result.sourceVertex[i] === -1) generated++
     expect(generated).toBeGreaterThan(0)
+  })
+
+  it('遮罩控制点进入顶点缓冲，FFD 偏移同时作用于裁剪多边形', () => {
+    const { builder, skeleton } = setup(
+      [bone('root', -1)],
+      [
+        slot('mask', 0, { setupAttachment: 'mask', displayIndex: 0 }),
+        slot('body', 0, { setupAttachment: 'body', displayIndex: 0 })
+      ],
+      [
+        skin('default', [
+          { slotName: 'mask', attachments: [clipping('mask', [-25, -25, 25, -25, 25, 25, -25, 25])] },
+          { slotName: 'body', attachments: [body()] }
+        ])
+      ]
+    )
+    // 第 0 个控制点向右偏 10：遮罩与最终裁剪都跟着走
+    skeleton.deformOffsets[0] = [10, 0, 0, 0, 0, 0, 0, 0]
+    skeleton.deformOffsetBase[0] = 0
+
+    const result = builder.build(skeleton)
+    let clipPoint = -1
+    let clipVertices = 0
+    for (let i = 0; i < result.vertexCount; i++) {
+      if (result.sourceSlot[i] !== 0) continue
+      clipVertices++
+      if (result.sourceVertex[i] === 0) clipPoint = i
+    }
+    expect(clipVertices).toBe(4)
+    expect(clipPoint).toBeGreaterThanOrEqual(0)
+    expect(pointOf(result, clipPoint)).toEqual([-15, -25])
+    expect(result.clipPolygons[0]!.points[0]).toBeCloseTo(-15, 5)
   })
 
   it('结束插槽自身不被裁剪，遮罩之前的附件不受影响', () => {

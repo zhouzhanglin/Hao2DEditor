@@ -84,4 +84,34 @@ describe('Spine clipping 导入 / 导出', () => {
     expect(attachment.vertexCount).toBe(4)
     expect(attachment.vertices).toEqual([-50, -50, 50, -50, 50, 50, -50, 50])
   })
+
+  it('遮罩的 deform 轨道可以导入并原样导出', () => {
+    const json = source()
+    json.animations = {
+      sway: {
+        attachments: {
+          default: {
+            mask: {
+              mask: {
+                deform: [{ time: 0, offset: 0, vertices: [10, 0, 0, 0, 0, 0, 0, 0] }]
+              }
+            }
+          }
+        }
+      }
+    } as never
+    const imported = importSpine({
+      json,
+      regions: [REGION],
+      pageSizes: { 'atlas.png': { width: 128, height: 128 } }
+    })
+    const track = imported.asset.animations[0]!.deforms[0]!
+    expect(track.attachmentName).toBe('mask')
+    expect(track.frames[0]!.offsets).toHaveLength(8)
+    expect(track.frames[0]!.offsets[0]).toBeCloseTo(0.1, 5)
+
+    const out = buildSpineJson(imported.asset)
+    const deform = (out.animations!.sway as Record<string, unknown>).attachments as Record<string, any>
+    expect(deform.default.mask.mask.deform[0].vertices[0]).toBeCloseTo(10, 4)
+  })
 })

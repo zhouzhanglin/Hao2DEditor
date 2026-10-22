@@ -636,7 +636,7 @@ export function convertAttachmentToClipping(doc: EditorDocument, slotName: strin
   delete attachment.regionSnapshot
   delete attachment.bones
 
-  // 遮罩第一版不支持 FFD：把指向它的变形轨道清掉，避免顶点数对不上
+  // 转成遮罩后点数和原来的网格不同：清掉旧的 deform 轨道，避免 offsets 错位
   for (const animation of doc.animations) {
     animation.deforms = animation.deforms.filter(
       (track) => !(track.slot === slotName && track.attachment === attachmentName)
@@ -654,8 +654,10 @@ export function setClippingVertices(
 ): boolean {
   const attachment = findAttachment(doc, slotName, attachmentName)
   if (!attachment || attachment.type !== 'clipping' || points.length < 3) return false
+  const countChanged = attachment.vertices.length !== points.length
   attachment.vertices = points.map((point) => ({ x: point.x, y: point.y, weights: [] }))
   attachment.hull = points.length
+  if (countChanged) clearClippingDeformTracks(doc, slotName, attachmentName)
   return true
 }
 
@@ -674,6 +676,18 @@ export function setClippingPoint(
   return true
 }
 
+/**
+ * 遮罩控制点数量变化时清掉对应的 FFD 轨道。
+ * deform 偏移按顶点下标对齐，点一插一删，旧 offsets 会整体错位（表现是遮罩越播越歪）。
+ */
+function clearClippingDeformTracks(doc: EditorDocument, slotName: string, attachmentName: string): void {
+  for (const animation of doc.animations) {
+    animation.deforms = animation.deforms.filter(
+      (track) => !(track.slot === slotName && track.attachment === attachmentName)
+    )
+  }
+}
+
 /** 在第 index 个点之后插入一个控制点（index = -1 表示插到最前） */
 export function insertClippingPoint(
   doc: EditorDocument,
@@ -687,6 +701,7 @@ export function insertClippingPoint(
   const at = Math.max(0, Math.min(attachment.vertices.length, index + 1))
   attachment.vertices.splice(at, 0, { x: point.x, y: point.y, weights: [] })
   attachment.hull = attachment.vertices.length
+  clearClippingDeformTracks(doc, slotName, attachmentName)
   return true
 }
 
@@ -703,6 +718,7 @@ export function deleteClippingPoint(
   if (index < 0 || index >= attachment.vertices.length) return false
   attachment.vertices.splice(index, 1)
   attachment.hull = attachment.vertices.length
+  clearClippingDeformTracks(doc, slotName, attachmentName)
   return true
 }
 

@@ -622,7 +622,9 @@ function deformAttachmentName(asset: RuntimeAsset, slotName: string, track: Defo
   if (setupAttachment && findAttachment(asset, slotName, setupAttachment)) return setupAttachment
   for (const skin of asset.skins) {
     const slot = skin.slots.find((s) => s.slotName === slotName)
-    const att = slot?.attachments.find((a) => a.type === AttachmentType.Mesh)
+    const att = slot?.attachments.find(
+      (a) => a.type === AttachmentType.Mesh || a.type === AttachmentType.Clipping
+    )
     if (att) return att.name
   }
   return ''

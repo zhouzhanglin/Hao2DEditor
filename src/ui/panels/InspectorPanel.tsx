@@ -1324,6 +1324,9 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                     attachment.vertices.length
                   ])}
                 </p>
+                <p className="text-3xs leading-relaxed text-content-lo/80">
+                  {t('Animate 态用顶点工具（D）拖这些控制点写 FFD 关键帧')}
+                </p>
                 <div className="flex gap-1">
                   <button
                     type="button"

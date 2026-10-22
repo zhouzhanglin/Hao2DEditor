@@ -546,7 +546,8 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
   for (const skin of skins) {
     for (const skinSlot of skin.slots) {
       for (const attachment of skinSlot.attachments) {
-        if (attachment.type !== AttachmentType.Mesh) continue
+        // 遮罩的 deform 轨道同样需要按多边形点数对齐；否则短数组会让后续帧错位
+        if (attachment.type !== AttachmentType.Mesh && attachment.type !== AttachmentType.Clipping) continue
         const count = Math.floor(attachment.vertices.length / 2)
         deformBase.set(`${skinSlot.slotName}\u0000${attachment.name}`, {
           vertices: attachment.vertices,

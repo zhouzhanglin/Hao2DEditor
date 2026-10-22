@@ -213,9 +213,11 @@ export class MeshBuilder {
       const override = maps.resolved[si]
       if (override && override[di]) attachment = override[di] as AttachmentData
 
-      // 遮罩附件自身不渲染：登记多边形，让后续附件走裁剪
-      if (clippingEnabled && attachment.type === AttachmentType.Clipping) {
-        if (this.activeClip < 0) {
+      // 遮罩附件自身不渲染，但它的控制点要进顶点缓冲：
+      // 顶点工具（D）在 Animate 态靠这些点写 FFD 轨道，选择 / 叠加层也要能显示它们。
+      if (attachment.type === AttachmentType.Clipping) {
+        this.emitClipPoints(skeleton, si, attachment)
+        if (clippingEnabled && this.activeClip < 0) {
           const clip = this.makeClipPolygon(skeleton, si, attachment)
           if (clip) {
             this.clipPolygons.push(clip)
@@ -276,7 +278,8 @@ export class MeshBuilder {
         indexCount: this.groupIndexCount[i]
       }
     }
-    const empty = this.vertexCount === 0
+    // 遮罩控制点不参与包围盒：只有遮罩时 minX > maxX，按空场景处理
+    const empty = this.minX > this.maxX
     result.bounds.minX = empty ? 0 : this.minX
     result.bounds.minY = empty ? 0 : this.minY
     result.bounds.maxX = empty ? 0 : this.maxX
@@ -289,6 +292,26 @@ export class MeshBuilder {
   /** 供叠加层 / 拾取使用：遮罩附件当前姿态下的世界顶点 */
   clippingWorldPoints(skeleton: Skeleton, slotIndex: number, attachment: AttachmentData): Float32Array | null {
     return this.clipWorldPoints(skeleton, slotIndex, attachment)
+  }
+
+  /**
+   * 把遮罩控制点写进顶点缓冲（不产生三角形）。
+   *
+   * 这些点不是渲染几何，但 FFD 工具 / 顶点拾取 / 叠加层都从 `MeshBuildResult` 取顶点：
+   * 写进去之后，Animate 态拖遮罩点就能直接复用现有的 deform 关键帧流程。
+   * `sourceVertex` 存附件内的点下标，`vertexClip = -1`（不再参与裁剪后处理）。
+   */
+  private emitClipPoints(skeleton: Skeleton, slotIndex: number, attachment: AttachmentData): void {
+    const count = Math.floor(attachment.vertices.length / 2)
+    if (count < 3) return
+    const points = this.clipWorldPoints(skeleton, slotIndex, attachment)
+    if (!points) return
+    this.ensure(count)
+    const white: RGBA = { r: 1, g: 1, b: 1, a: 1 }
+    for (let i = 0; i < count; i++) {
+      // 遮罩只是编辑手柄，不参与画面包围盒（否则大范围遮罩会把 fit 拉得很远）
+      this.writeVertex(points[i * 2], points[i * 2 + 1], 0, 0, white, slotIndex, i, -1, false)
+    }
   }
 
   /** 把 Clipping 附件解析成世界坐标多边形；无效（少于 3 点 / 退化）返回 null */
@@ -584,7 +607,8 @@ export class MeshBuilder {
     color: RGBA,
     slotIndex: number,
     sourceVertex: number,
-    clipId: number
+    clipId: number,
+    trackBounds = true
   ): void {
     const i = this.vertexCount++
     const positions = this.result.positions
@@ -603,7 +627,7 @@ export class MeshBuilder {
     colors[i * 4 + 1] = color.g
     colors[i * 4 + 2] = color.b
     colors[i * 4 + 3] = color.a
-    this.trackBounds(x, y)
+    if (trackBounds) this.trackBounds(x, y)
   }
 
   // ---------------- 顶点产出 ----------------

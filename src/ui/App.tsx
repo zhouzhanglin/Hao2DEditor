@@ -250,7 +250,11 @@ export default function App() {
    * 不清掉会出现「选中的骨骼已经不存在」这类幽灵状态。
    */
   const resetForSkeletonChange = useCallback(() => {
+    // 皮肤是**每个骨架各记一套**的（`editorMeta.activeSkin`）：`clear` 会保留上一套皮肤名，
+    // 切过来得换成新骨架自己的，否则切骨架后视口显示的还是旧骨架的皮肤
+    const skin = useProjectStore.getState().document.editorMeta.activeSkin
     useSelectionStore.getState().clear()
+    useSelectionStore.getState().select({ skin })
     useToolStore.getState().setPendingWeightBone(null)
     useTimelineStore.getState().setAnimation(null)
     resetSceneView()

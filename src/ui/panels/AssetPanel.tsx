@@ -209,7 +209,12 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
               <button
                 key={skin.name}
                 type="button"
-                onClick={() => selection.select({ kind: 'slot', skin: skin.name === 'default' ? '' : skin.name })}
+                onClick={() => {
+                  // 走 store 的统一入口：除了选中态，还要把皮肤写进 `editorMeta.activeSkin`，
+                  // 下次打开工程才能恢复（只改选中态等于没存，重开就回 default）
+                  useProjectStore.getState().setActiveSkin(skin.name)
+                  selection.select({ kind: 'slot', skin: skin.name === 'default' ? '' : skin.name })
+                }}
                 className={[
                   'h-[20px] rounded border px-1.5 text-3xs transition-colors duration-panel cursor-pointer',
                   active

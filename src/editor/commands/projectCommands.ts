@@ -38,7 +38,10 @@ import type { EventKeyframe } from '@core/model/animation'
  * 不清会留下「选中的骨骼已经不存在」这类幽灵状态（与 App 的 resetForSkeletonChange 一致）。
  */
 function resetForSkeletonChange(): void {
+  // 皮肤按骨架各记一套：`clear` 保留皮肤名，切过来要换成新骨架自己的（与 App 一致）
+  const skin = useProjectStore.getState().document.editorMeta.activeSkin
   useSelectionStore.getState().clear()
+  useSelectionStore.getState().select({ skin })
   useToolStore.getState().setPendingWeightBone(null)
   useTimelineStore.getState().setAnimation(null)
   getActiveScene()?.fit()
@@ -441,10 +444,7 @@ export function registerProjectCommands(): void {
       if (skin && !useProjectStore.getState().document.skins.some((item) => item.name === skin)) {
         throw new Error(`皮肤不存在：${skin}（用 listSkins 查现有皮肤名）`)
       }
-      useProjectStore.getState().updateSilent((draft) => {
-        draft.editorMeta.activeSkin = skin
-      })
-      useSelectionStore.getState().select({ skin })
+      useProjectStore.getState().setActiveSkin(skin)
       return {
         changed: false,
         data: { skin },

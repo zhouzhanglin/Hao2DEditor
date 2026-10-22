@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { PROJECT_EXTENSION, projectNameFromPath, serializeDocument } from '@core/codec/projectJson'
+import { PROJECT_EXTENSION, projectNameFromPath, serializeDocument, serializeProject } from '@core/codec/projectJson'
 import { createEmptyDocument } from '@core/model/authoring'
 import { createSampleDocument } from '@core/sample'
 import { DEFAULT_PROJECT_NAME, useProjectStore } from '@editor/store/projectStore'
+import { useSelectionStore } from '@editor/store/selectionStore'
 
 /**
  * 假平台：只实现工程读写用到的部分。
@@ -248,6 +249,45 @@ describe('多骨架工程的保存 / 打开', () => {
     // 打开后图片池仍然只有一个（同一个数组）
     expect(after.skeletons[0].images).toBe(after.skeletons[1].images)
     expect(after.skeletons[0].images[0]?.name).toBe('tex')
+  })
+})
+
+describe('皮肤随工程文件走', () => {
+  beforeEach(() => {
+    env.files.clear()
+    env.recents = []
+    env.savePath = null
+    env.saveOptions = null
+  })
+
+  it('切换皮肤 → 保存 → 重新打开，恢复上次的皮肤', async () => {
+    useProjectStore.getState().setDocument(createEmptyDocument('角色'), '/proj/skin.hao2d.proj', false)
+    useProjectStore.getState().update('新建皮肤', (draft) => {
+      draft.skins.push({ name: 'skin1', slots: draft.slots.map((slot) => ({ slot: slot.name, attachments: [] })) })
+    })
+    useProjectStore.getState().setActiveSkin('skin1')
+    expect(useSelectionStore.getState().skin).toBe('skin1')
+
+    expect((await saveProject(false)).ok).toBe(true)
+    // 单骨架工程：骨架字段平铺在顶层，`editorMeta.activeSkin` 直接写在文件里
+    const raw = JSON.parse(env.files.get('/proj/skin.hao2d.proj') ?? '{}') as {
+      editorMeta: { activeSkin: string }
+    }
+    expect(raw.editorMeta.activeSkin).toBe('skin1')
+
+    // 模拟重开工程：先把选中态改回默认，打开后必须回到工程里记的那个皮肤
+    useSelectionStore.getState().select({ skin: '' })
+    expect((await openProjectAt('/proj/skin.hao2d.proj')).ok).toBe(true)
+    expect(useSelectionStore.getState().skin).toBe('skin1')
+  })
+
+  it('文件里的皮肤已经不存在（被删 / 改名）时退回默认皮肤', async () => {
+    const doc = createEmptyDocument('角色')
+    doc.editorMeta.activeSkin = 'gone'
+    env.files.set('/proj/stale.hao2d.proj', serializeProject([doc], 0, 'stale'))
+
+    expect((await openProjectAt('/proj/stale.hao2d.proj')).ok).toBe(true)
+    expect(useSelectionStore.getState().skin).toBe('')
   })
 })
 

@@ -6,6 +6,7 @@ import type { ProjectSnapshot } from '../history'
 import { applyAtlasSplit, deleteImage, replaceImage } from '../commands/authoringCommands'
 import type { AtlasSplitPlan } from '../commands/authoringCommands'
 import { repairAnimationDurations, repairDisplayNames } from '../timeline/model'
+import { useSelectionStore } from './selectionStore'
 
 export interface ProjectState {
   /**
@@ -71,6 +72,16 @@ export interface ProjectState {
   setProjectInfo: (info: { projectName?: string; projectPath?: string | null }) => void
   /** 写入导出图集缩放（静默，不进历史、不标脏：纯偏好，由导出时另存工程文件落地） */
   setExportScale: (scale: number) => void
+  /**
+   * 切换当前皮肤（空串 / `default` 都是默认皮肤）。
+   *
+   * 必须**同时**维护两个口径，缺一个就会「切了皮肤、重开工程又回到 default」：
+   * - `editorMeta.activeSkin`：随工程文件落盘，打开工程时回填（见 `projectIo`）；
+   * - `selectionStore.skin`：视口 / 资源面板当下真正渲染用的那个。
+   *
+   * 与 `setExportScale` 同属「编辑器状态」：不进撤销记录、不把工程标脏。
+   */
+  setActiveSkin: (skin: string) => void
   /** 可撤销的编辑：mutate 在深拷贝的草稿上执行 */
   update: (label: string, mutate: (draft: EditorDocument) => void) => void
   /**
@@ -381,6 +392,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       editorMeta: { ...skeleton.editorMeta, exportScale: scale }
     }))
     set({ skeletons: list, document: list[state.activeSkeleton] })
+  },
+
+  setActiveSkin: (raw) => {
+    // `default` 在工程文件里就写成空串（`editorMeta.activeSkin` 的既有约定，见 createDefaultMeta）
+    const skin = raw === 'default' ? '' : raw
+    // 文档没变就别白克隆一份（点同一个皮肤不产生任何写入）
+    if (get().document.editorMeta.activeSkin !== skin) {
+      get().updateSilent((draft) => {
+        draft.editorMeta.activeSkin = skin
+      })
+    }
+    useSelectionStore.getState().select({ skin })
   },
 
   update: (label, mutate) => {

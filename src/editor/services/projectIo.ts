@@ -16,6 +16,7 @@ import { openPsdDialog, parsePsdAt } from './psdImport'
 import type { AtlasRegion, PageSizes } from '@importers/uv'
 import { DEFAULT_PROJECT_NAME, useProjectStore } from '../store/projectStore'
 import { useModeStore } from '../store/modeStore'
+import { useSelectionStore } from '../store/selectionStore'
 import { useTimelineStore } from '../store/timelineStore'
 import { getActiveScene } from '../activeScene'
 import { releaseDocumentAssets } from './assetCache'
@@ -86,6 +87,8 @@ export function newProject(): IoResult {
   // 先丢掉上个项目的图片 / 图集内存，再换文档（顺序原因见 releaseDocumentAssets）
   releaseDocumentAssets()
   useProjectStore.getState().reset()
+  // 选中态里的皮肤名属于**上个工程**：不清掉会带着一个本工程里不存在的皮肤往下走
+  useSelectionStore.getState().select({ skin: '' })
   return { ok: true, message: '已新建项目（含根骨骼 root）' }
 }
 
@@ -114,6 +117,8 @@ export async function createProjectAt(name: string, dir: string, frameRate?: num
   releaseDocumentAssets()
   const store = useProjectStore.getState()
   store.reset()
+  // 同 newProject：皮肤选中态是上个工程的，别带进新工程
+  useSelectionStore.getState().select({ skin: '' })
   // 帧率：用户选的（24/30/60）优先，否则退回默认的 30（与 createEmptyDocument 一致）
   const fps = frameRate && frameRate > 0 ? frameRate : 30
   if (fps !== useProjectStore.getState().document.frameRate) {
@@ -230,6 +235,17 @@ export async function openProjectAt(path: string): Promise<IoResult> {
   useProjectStore.getState().setProjectInfo({
     projectName: parsed.projectName || projectNameFromPath(path)
   })
+  /*
+   * 上次用的皮肤跟着工程文件走（`editorMeta.activeSkin`）：打开后回填给选中态，
+   * 否则视口和资源面板永远退回 default —— 用户切了皮肤、重开工程就丢，缺的就是这一步。
+   * 老工程 / 已被删掉或改名的皮肤（文件里留着的旧名字）一律退回默认皮肤。
+   */
+  const opened = parsed.skeletons[parsed.activeSkeleton]
+  const restoredSkin =
+    opened && opened.editorMeta.activeSkin !== 'default' && opened.skins.some((skin) => skin.name === opened.editorMeta.activeSkin)
+      ? opened.editorMeta.activeSkin
+      : ''
+  useSelectionStore.getState().select({ skin: restoredSkin })
   await platform.recentAdd(path)
   const suffix = parsed.skeletons.length > 1 ? `（${parsed.skeletons.length} 个骨架）` : ''
   // 命令服务的 token 可能已变：刷新工程目录里的连接信息，让 AI 工具拿到有效凭证
@@ -270,8 +286,19 @@ export async function saveProject(saveAs: boolean): Promise<IoResult> {
   const plan = planAssetCopies(store.document.images, dirName(path))
   const copied = await copyAssets(plan.copies, platform, platform)
 
+  /*
+   * 当前皮肤以**选中态**为准落盘：切皮肤是静默改（不进撤销记录），而撤销 / 重做会把文档里的
+   * `editorMeta.activeSkin` 带回旧快照的值 —— 保存时统一对齐一次，保证「视口里看到的皮肤
+   * = 下次打开工程时显示的皮肤」。骨架里已不存在的皮肤名（被删 / 改名）退回默认。
+   */
+  const currentSkin = useSelectionStore.getState().skin
+  const activeSkin = store.document.skins.some((skin) => skin.name === currentSkin) ? currentSkin : ''
   // 一个项目可以有多个骨架：全部写进去；图片池只写顶层那一份（工程内相对路径）
-  const skeletons = store.skeletons.map((skeleton) => ({ ...skeleton, images: plan.images }))
+  const skeletons = store.skeletons.map((skeleton, index) => ({
+    ...skeleton,
+    images: plan.images,
+    editorMeta: index === store.activeSkeleton ? { ...skeleton.editorMeta, activeSkin } : skeleton.editorMeta
+  }))
   await platform.writeText(path, serializeProject(skeletons, store.activeSkeleton, store.projectName))
   store.markSaved(path)
   await platform.recentAdd(path)

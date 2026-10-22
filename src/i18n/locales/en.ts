@@ -491,13 +491,6 @@ export const en: Record<string, string> = {
   'IK {0} 骨': 'IK {0} bone(s)',
 
   // ── 层级树：右键菜单与操作反馈 ──────────────────────────────────────
-  '右键骨骼行 / 空白处：添加骨骼、插槽、约束（IK 寄宿在目标骨、变换 / 路径寄宿在第一根驱动骨，参数在属性面板；物理约束单独成行）\n拖动行调整层级：骨骼 → 骨骼下（拖到空白处挂到根骨骼 root 下）、插槽 → 骨骼下（拖到空白处挂到根骨骼 root 下）、display → 插槽下\n根骨骼 root 是层级结构的根：它自己不能拖动 / 删除，其他骨骼也不能被拖到它旁边与它平级\n拖到行的上 / 下沿 = 排到那一行的前 / 后（骨骼会一起换到它所在的父级下）\n资源面板的图片：拖到插槽行（含它下面的 display 行）= 给该插槽加一个 display；拖到骨骼行 = 在该骨骼下新建插槽；拖到空白处 = 在根骨骼 root 下新建插槽\n改绑定数据（拖动行 / 拖图片 / 新建 / 删除）只在 Pose 态可用':
-    'Right-click a bone row / empty space: add bones, slots, constraints (IK is hosted on the target bone; transform / path are hosted on the first driving bone, with parameters in the inspector; physics constraints get their own row)\n' +
-    'Drag rows to change the hierarchy: bone → under a bone (drop on empty space to attach under the root bone), slot → under a bone (drop on empty space to attach under the root bone), display → under a slot\n' +
-    'The root bone is the root of the hierarchy: it cannot be dragged / deleted, and other bones cannot be dropped beside it to become its sibling\n' +
-    'Drop on the top / bottom edge of a row = place it before / after that row (bones also move under that row\u2019s parent)\n' +
-    'Images in the assets panel: drop on a slot row (including its display rows) = add a display to that slot; drop on a bone row = create a slot under that bone; drop on empty space = create a slot under the root bone\n' +
-    'Editing binding data (dragging rows / images, creating / deleting) is only available in Pose mode',
   '场景里还没有骨骼：先用工具栏的「骨骼」新建一根骨骼，再把图片拖进来':
     'No bones in the scene yet: create one with the "Bones" tool first, then drag an image in',
   '删除「{0}」': 'Delete "{0}"',

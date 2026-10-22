@@ -257,8 +257,8 @@ export const en: Record<string, string> = {
   '编辑网格顶点 / 三角面；网格内 Alt+点击插入顶点':
     'Edit mesh vertices / triangles; Alt-click inside the mesh to insert a vertex',
   '遮罩工具': 'Mask tool',
-  '多边形遮罩：先选中插槽，单击加点、点回起点 / 右键闭合；拖控制点调整，Alt+点击删除（仅 Pose 态）':
-    'Polygon mask: select a slot first, click to add points, click the first point / right-click to close; drag points to adjust, Alt-click to delete (Pose mode only)',
+  '多边形遮罩：空白插槽单击加点、点回起点 / 右键闭合；已有遮罩时点边线插点、拖点移动、Delete 删除（仅 Pose 态）':
+    'Polygon mask: click an empty slot to add points, click the first point / right-click to close; on an existing mask click an edge to insert a point, drag points to move, Delete to remove (Pose mode only)',
   '遮罩（多边形裁剪）': 'Mask (polygon clipping)',
   '遮罩': 'Mask',
   '结束插槽': 'End slot',

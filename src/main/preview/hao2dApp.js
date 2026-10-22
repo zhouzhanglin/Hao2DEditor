@@ -192,9 +192,11 @@
         fillSelect(skinSelect, created.skins, created.defaultSkin)
         created.setLoop(loopCheck.checked)
         created.setSpeed(Number(speed.value) / 100)
+        // 与 spine 预览的加载顺序一致：先按 setup pose 取景，再启动动画
+        //（反过来会让动画第 0 帧的姿势把取景带偏，和 spine 预览对不上）
+        created.fit()
         created.play(created.defaultAnimation, loopCheck.checked)
         playBtn.textContent = '暂停'
-        created.fit()
       })
     }).catch(function (err) {
       fail('加载失败：' + (err && err.message ? err.message : String(err)))

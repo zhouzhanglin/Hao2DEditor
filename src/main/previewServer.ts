@@ -54,6 +54,51 @@ function lanHosts(): string[] {
   return hosts.sort((a, b) => rank(a) - rank(b))
 }
 
+/**
+ * 内容指纹（FNV-1a，够用即可）：给 `<script src>` 拼一个 `?v=` 用。
+ *
+ * 为什么需要：预览地址里的 token 在服务存活期间**不变**，所以运行库的 URL 也不变。
+ * 之前这些文件带 `max-age=86400`，浏览器会把**旧版本**的运行库缓存一整天 ——
+ * 重新构建了预览运行库（hao2d-runtime.js）后，页面上看到的还是旧代码，
+ * 表现成「改了没生效 / 预览还是老样子」。URL 里带上内容指纹后，内容一变 URL 就变，
+ * 既能让浏览器立刻取到新代码，又能继续安心长缓存。
+ */
+function fingerprint(text: string, seed = 0x811c9dc5): string {
+  let hash = seed >>> 0
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+/** 每个内联资源的指纹只算一次（主进程启动时不付大文件扫描的代价） */
+const versions = new Map<string, string>()
+
+function versionOf(key: string, source: string): string {
+  const cached = versions.get(key)
+  if (cached) return cached
+  const value = fingerprint(source)
+  versions.set(key, value)
+  return value
+}
+
+/** 把页面里的 `__XXX_V__` 占位符换成对应资源的内容指纹（结果同样缓存） */
+const pageHtmlCache = new Map<string, string>()
+
+function pageHtml(kind: 'spine' | 'hao2d'): string {
+  const cached = pageHtmlCache.get(kind)
+  if (cached) return cached
+  const html =
+    kind === 'hao2d'
+      ? previewPageHao2d
+          .replace('__PIXI_V__', versionOf('pixi', pixiSource))
+          .replace('__HAO2D_RUNTIME_V__', versionOf('hao2d', hao2dRuntimeSource))
+      : previewPage.replace('__SPINE_CORE_V__', versionOf('spine', spineCoreSource))
+  pageHtmlCache.set(kind, html)
+  return html
+}
+
 function send(res: ServerResponse, code: number, type: string, body: string | Uint8Array, cache = 'no-store'): void {
   const data = typeof body === 'string' ? Buffer.from(body, 'utf8') : Buffer.from(body)
   res.writeHead(code, {
@@ -106,7 +151,8 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   // spine 与 hao2d 共享同一份资源（页面 + ske/atlas 文本 + 图集页），只是渲染运行库不同
   const isHao2d = active.kind === 'hao2d'
   if (rest === '' || rest === 'index.html') {
-    send(res, 200, 'text/html; charset=utf-8', isHao2d ? previewPageHao2d : previewPage)
+    // 页面本身不缓存，里面的运行库 URL 带内容指纹（见 pageHtml / fingerprint）
+    send(res, 200, 'text/html; charset=utf-8', pageHtml(isHao2d ? 'hao2d' : 'spine'))
     return
   }
   if (rest === 'spine-core.js') {
@@ -114,7 +160,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       notFound(res, 'hao2d 预览不需要 spine 运行库')
       return
     }
-    // 运行库内容由构建期内联，可长期缓存
+    // 运行库内容由构建期内联；URL 带内容指纹，可长期缓存
     send(res, 200, 'text/javascript; charset=utf-8', spineCoreSource, 'public, max-age=86400')
     return
   }
@@ -123,7 +169,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       notFound(res, 'spine 预览不需要 hao2d 运行库')
       return
     }
-    // 运行库内容由构建期内联，可长期缓存
+    // 运行库内容由构建期内联；URL 带内容指纹，可长期缓存
     send(res, 200, 'text/javascript; charset=utf-8', hao2dRuntimeSource, 'public, max-age=86400')
     return
   }
@@ -132,7 +178,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       notFound(res, 'spine 预览不需要 pixi 运行库')
       return
     }
-    // pixi 单独提供（不在运行库里）；内容由构建期内联，可长期缓存
+    // pixi 单独提供（不在运行库里）；URL 带内容指纹，可长期缓存
     send(res, 200, 'text/javascript; charset=utf-8', pixiSource, 'public, max-age=86400')
     return
   }

@@ -116,10 +116,6 @@ export class MeshBuilder {
   private clipPolygons: ClipPolygon[] = []
   /** 当前激活遮罩在 clipPolygons 里的下标；-1 = 无 */
   private activeClip = -1
-  private minX = 0
-  private minY = 0
-  private maxX = 0
-  private maxY = 0
 
   constructor(asset: RuntimeAsset, skinName = '') {
     this.asset = asset
@@ -174,10 +170,6 @@ export class MeshBuilder {
     this.vertexCount = 0
     this.usedGroups = 0
     this.lastBuildHadWeightedMesh = false
-    this.minX = Number.POSITIVE_INFINITY
-    this.minY = Number.POSITIVE_INFINITY
-    this.maxX = Number.NEGATIVE_INFINITY
-    this.maxY = Number.NEGATIVE_INFINITY
 
     const slots = this.asset.slots
     const order = skeleton.drawOrder
@@ -278,12 +270,37 @@ export class MeshBuilder {
         indexCount: this.groupIndexCount[i]
       }
     }
-    // 遮罩控制点不参与包围盒：只有遮罩时 minX > maxX，按空场景处理
-    const empty = this.minX > this.maxX
-    result.bounds.minX = empty ? 0 : this.minX
-    result.bounds.minY = empty ? 0 : this.minY
-    result.bounds.maxX = empty ? 0 : this.maxX
-    result.bounds.maxY = empty ? 0 : this.maxY
+    /*
+     * 包围盒只统计**真正被索引引用（= 会画出来）**的顶点。
+     *
+     * 只按写入顺序统计是错的：遮罩裁剪时，原始三角形顶点仍留在顶点缓冲里当裁剪源，
+     * 但它们不会被任何索引引用（`applyClipping` 只把裁剪后的三角形写进索引）。
+     * 把这些「看不见的顶点」算进包围盒，取景就会按未裁剪的大范围去缩放 ——
+     * 表现为角色比实际画面小一圈、缩放也涨不上去（spine 预览按裁剪后的几何取景，
+     * 两边因此对不上）。遮罩控制点同理：它们也没有索引，自然被排除。
+     */
+    let minX = Number.POSITIVE_INFINITY
+    let minY = Number.POSITIVE_INFINITY
+    let maxX = Number.NEGATIVE_INFINITY
+    let maxY = Number.NEGATIVE_INFINITY
+    for (let g = 0; g < this.usedGroups; g++) {
+      const indices = this.groupIndices[g]
+      const count = this.groupIndexCount[g]
+      for (let i = 0; i < count; i++) {
+        const v = indices[i]
+        const x = result.positions[v * 2]
+        const y = result.positions[v * 2 + 1]
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+        if (y < minY) minY = y
+        if (y > maxY) maxY = y
+      }
+    }
+    const empty = minX > maxX
+    result.bounds.minX = empty ? 0 : minX
+    result.bounds.minY = empty ? 0 : minY
+    result.bounds.maxX = empty ? 0 : maxX
+    result.bounds.maxY = empty ? 0 : maxY
     return result
   }
 
@@ -309,8 +326,8 @@ export class MeshBuilder {
     this.ensure(count)
     const white: RGBA = { r: 1, g: 1, b: 1, a: 1 }
     for (let i = 0; i < count; i++) {
-      // 遮罩只是编辑手柄，不参与画面包围盒（否则大范围遮罩会把 fit 拉得很远）
-      this.writeVertex(points[i * 2], points[i * 2 + 1], 0, 0, white, slotIndex, i, -1, false)
+      // 遮罩只是编辑手柄：它没有索引、不会画出三角形，因此天然不参与包围盒（见 finish）
+      this.writeVertex(points[i * 2], points[i * 2 + 1], 0, 0, white, slotIndex, i, -1)
     }
   }
 
@@ -502,7 +519,6 @@ export class MeshBuilder {
     result.sourceSlot[i] = slotIndex
     result.sourceVertex[i] = -1
     result.vertexClip[i] = -1
-    this.trackBounds(x, y)
     return i
   }
 
@@ -544,13 +560,6 @@ export class MeshBuilder {
     let next = this.capacity > 0 ? this.capacity : 256
     while (next < need) next *= 2
     this.grow(next)
-  }
-
-  private trackBounds(x: number, y: number): void {
-    if (x < this.minX) this.minX = x
-    if (x > this.maxX) this.maxX = x
-    if (y < this.minY) this.minY = y
-    if (y > this.maxY) this.maxY = y
   }
 
   /**
@@ -607,8 +616,7 @@ export class MeshBuilder {
     color: RGBA,
     slotIndex: number,
     sourceVertex: number,
-    clipId: number,
-    trackBounds = true
+    clipId: number
   ): void {
     const i = this.vertexCount++
     const positions = this.result.positions
@@ -627,7 +635,6 @@ export class MeshBuilder {
     colors[i * 4 + 1] = color.g
     colors[i * 4 + 2] = color.b
     colors[i * 4 + 3] = color.a
-    if (trackBounds) this.trackBounds(x, y)
   }
 
   // ---------------- 顶点产出 ----------------

@@ -3,6 +3,7 @@ import { loadRuntime } from '@core/runtime/loader'
 import { buildRuntimeMaps } from '@core/model/asset'
 import { Skeleton } from '@core/model/skeleton'
 import { AnimationPlayer } from '@core/anim/player'
+import { RUNTIME_PPU } from '@core/codec/runtimeSkeJson'
 import { TextureStore } from '@render/material'
 import { SkeletonView } from '@render/skeletonView'
 
@@ -17,6 +18,12 @@ import { SkeletonView } from '@render/skeletonView'
  *
  * 相机变换完全复刻编辑器 `render/viewport.ts`：世界容器 `scale.set(zoom, -zoom)`（y 轴向上），
  * 世界原点落在视口中心 + 偏移。
+ *
+ * **世界尺度与 spine 预览页（app.js）严格一致**：spine 预览吃的是导出的 spine JSON，
+ * 那边的坐标全部乘过 `RUNTIME_PPU`（见 spineExport.ts 的 `x * RUNTIME_PPU`），即世界单位 = 像素；
+ * 而这里用的 MeshBuilder 输出的是**内部单位**（1 单位 = ppu 像素）。所以网格容器要额外乘 ppu，
+ * 否则取景 zoom 会小 ppu 倍（表现为角色比 spine 预览小一大截、滚轮放大到顶也涨不上去、
+ * 棋盘格疏密对不上）——见 createStage 里 `view.container.scale.set(ppu, ppu)`。
  */
 
 export interface PageInput {
@@ -65,10 +72,22 @@ export interface Hao2dStage {
   destroy(): void
 }
 
-const EMPTY_ZOOM = 100
+/** 与 spine 预览页 app.js 的 zoomLimits() 完全一致：两边的滚轮 / 双指缩放手感必须一模一样 */
+const MIN_ZOOM = 0.02
+const MAX_ZOOM = 40
 
 function clampZoom(zoom: number): number {
-  return Math.max(0.01, Math.min(64, zoom))
+  return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom))
+}
+
+/** 读 ske 里的 ppu（1 单位 = ppu 像素）；缺省回落到运行时默认值 */
+function readPpu(skeText: string): number {
+  try {
+    const value = (JSON.parse(skeText) as { ppu?: unknown }).ppu
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : RUNTIME_PPU
+  } catch {
+    return RUNTIME_PPU
+  }
 }
 
 export async function createStage(input: StageInput): Promise<Hao2dStage> {
@@ -102,8 +121,12 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
     preference: 'webgl'
   })
 
+  const ppu = readPpu(input.skeText)
   const world = new Container()
   const view = new SkeletonView(asset, textures, '')
+  // 内部单位 → 像素：补上这层缩放后，世界坐标的数值才和导出的 spine JSON 一致
+  // （spine 预览的取景 zoom、棋盘格、缩放限位都是按「世界单位 = 像素」算的）
+  view.container.scale.set(ppu, ppu)
   world.addChild(view.container)
   app.stage.addChild(world)
 
@@ -169,29 +192,30 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
     dirty = true
   }
 
+  /** 当前几何的包围盒，换算成像素单位的世界坐标（与 spine 预览同一把尺子） */
+  function worldBounds(): { minX: number; minY: number; maxX: number; maxY: number } | null {
+    // 直接用 MeshBuilder 算出来的真实顶点包围盒（skeleton 世界坐标系，y 轴向上，单位是内部单位），
+    // 这是编辑器视口取景用的同一份数据，比 pixi 的 getLocalBounds 对自定义 Mesh 更可靠。
+    const b = view.result?.bounds
+    if (!b) return null
+    return { minX: b.minX * ppu, minY: b.minY * ppu, maxX: b.maxX * ppu, maxY: b.maxY * ppu }
+  }
+
   function fit(): void {
     // 适配 = 把相机交还给自动取景：之后视口尺寸变化会重新按内容取景（与 spine 预览一致）
     touched = false
-    offsetX = 0
-    offsetY = 0
-    // 直接用 MeshBuilder 算出来的真实顶点包围盒（skeleton 世界坐标系，y 轴向上），
-    // 这是编辑器视口取景用的同一份数据，比 pixi 的 getLocalBounds 对自定义 Mesh 更可靠。
-    const b = view.result?.bounds
-    if (!b || b.maxX - b.minX < 1e-6 || b.maxY - b.minY < 1e-6) {
-      zoom = EMPTY_ZOOM
-      applyCamera()
-      dirty = true
-      // 这次没按内容取景成功：保留 autoFit，等几何变有效后由首帧兜底补一次
-      return
-    }
+    const b = worldBounds()
+    // 包围盒无效时**什么都不改**（spine 预览的 fitView 也是直接 return），留着让首帧兜底再取景一次
+    if (!b || b.maxX - b.minX < 1e-6 || b.maxY - b.minY < 1e-6) return
     autoFit = false
-    // 与 spine 预览一致：以角色包围盒中心取景、四周留 1.12 倍边距
+    // 与 spine 预览一致：以角色包围盒中心取景、四周留 1.12 倍边距，且**不做缩放限位**
+    //（spine 的 fitView 也不限位，限位只作用于滚轮 / 双指）
     const pad = 1.12
     const width = Math.max(1, b.maxX - b.minX)
     const height = Math.max(1, b.maxY - b.minY)
     const cx = (b.minX + b.maxX) / 2
     const cy = (b.minY + b.maxY) / 2
-    zoom = clampZoom(Math.min(viewWidth() / (width * pad), viewHeight() / (height * pad)))
+    zoom = Math.min(viewWidth() / (width * pad), viewHeight() / (height * pad))
     offsetX = -cx * zoom
     offsetY = cy * zoom
     applyCamera()
@@ -200,7 +224,8 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
 
   function resize(width: number, height: number): void {
     if (destroyed || width <= 0 || height <= 0) return
-    app.renderer.resize(width, height)
+    // 与 spine 预览一样按**当前** devicePixelRatio 出图：跨屏拖动 / 系统缩放变了也不会发虚
+    app.renderer.resize(width, height, Math.min(2, globalThis.devicePixelRatio || 1))
     // 视口尺寸变了（含手机横竖屏切换）：用户没手动调过相机就重新取景，
     // 免得按旧视口算出来的缩放让角色跑出视野
     if (touched) applyCamera()
@@ -220,7 +245,7 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
     // 首帧兜底：挂载时包围盒退化（空骨架 / 几何未就绪）就等有效几何再取景一次。
     // 用户碰过相机（touched）后不再兜底，避免把调好的视角冲掉
     if (autoFit && !touched) {
-      const b = view.result?.bounds
+      const b = worldBounds()
       if (b && b.maxX - b.minX > 1e-6 && b.maxY - b.minY > 1e-6) fit()
     }
     if (playing || dirty) {
@@ -231,12 +256,17 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
   }
 
   applyCamera()
-  if (defaultAnimation) player.play(defaultAnimation, true)
-  // 先把骨架摆到动画第 0 帧并算出世界矩阵，再构建一次几何 —— 这样 mount() 里同步调用的
-  // fit() 就能拿到有效的包围盒、立刻把角色居中，不再等到首帧（首帧若包围盒退化会退化成原点居中）。
-  player.refresh()
+  /*
+   * 首次几何在 **setup pose** 上构建，顺序与 spine 预览页的加载流程一致：
+   * 那边是 setupPose() → updateWorldTransform() → fitView() 取景，然后才 play() 动画。
+   * 这里同样先算几何再启动动画（player.play 只改姿势，几何要等下一帧才重建），
+   * 于是 mount() 里紧接着调用的 fit() 拿到的是 setup pose 的包围盒 ——
+   * 初始缩放与角色初始位置因此和 spine 预览完全重合，不会再出现「动画第 0 帧的外扩/位移
+   * 把取景带偏」。
+   */
   skeleton.updateFk()
   view.update(skeleton)
+  if (defaultAnimation) player.play(defaultAnimation, true)
   requestAnimationFrame(frame)
 
   return {

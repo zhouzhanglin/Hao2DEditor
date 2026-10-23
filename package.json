@@ -65,6 +65,7 @@
       "package.json"
     ],
     "artifactName": "Hao2D.Editor-${version}-${os}-${arch}.${ext}",
+    "afterPack": "./scripts/afterPack.cjs",
     "mac": {
       "category": "public.app-category.graphics-design",
       "icon": "build/icon.icns",

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, Filter, Flag, Lock, Minus, Plus, Zap, ZoomIn } from 'lucide-react'
+import { ChevronDown, ChevronRight, Filter, Flag, Lock, Minus, Plus, Trash2, Zap, ZoomIn } from 'lucide-react'
 import { TIMELINE_ZOOM_MAX, TIMELINE_ZOOM_MIN } from '@editor/store/timelineStore'
 import { revealTrackFor, sameSelector } from '@editor/timeline/model'
 import type { KeyKind, KeySelector, TimelineTrack } from '@editor/timeline/model'
@@ -45,6 +45,8 @@ export interface DopeSheetProps {
   onStatus?: (text: string) => void
   /** 「子骨架」通道行上的打帧按钮：用当前嵌套骨架的 setup 值在当前时间打一帧 */
   onKeySubArmature?: (slot: string) => void
+  /** 行尾垃圾桶：删除这条通道的全部关键帧（悬停才显示） */
+  onDeleteTrack?: (track: TimelineTrack) => void
 }
 
 /** 时间→像素的映射（拖拽期间冻结，保证关键帧 1:1 跟随指针） */
@@ -977,7 +979,7 @@ export default function DopeSheet(props: DopeSheetProps) {
                 type="button"
                 data-track-id={track.id}
                 className={[
-                  'relative flex w-full items-center gap-1 border-b border-line/40 pr-1.5 text-left text-3xs cursor-pointer transition-colors duration-200',
+                  'group relative flex w-full items-center gap-1 border-b border-line/40 pr-1.5 text-left text-3xs cursor-pointer transition-colors duration-200',
                   track.isGroup
                     ? 'bg-ink-900/50 font-semibold text-content-hi hover:bg-ink-700'
                     : trackActive
@@ -1058,6 +1060,33 @@ export default function DopeSheet(props: DopeSheetProps) {
                 <span className="shrink-0 rounded bg-ink-600 px-1 text-content-lo">
                   {track.isGroup ? track.keyCount ?? 0 : track.keys.length}
                 </span>
+                {props.onDeleteTrack ? (
+                  <span
+                    role="button"
+                    title={
+                      track.isGroup
+                        ? (track.keyCount ?? 0) > 0
+                          ? t('删除「{0}」的全部通道（{1} 个关键帧）', [track.label, track.keyCount ?? 0])
+                          : t('「{0}」还没有关键帧', track.label)
+                        : track.keys.length > 0
+                          ? t('删除整条通道（{0} 个关键帧）', track.keys.length)
+                          : t('没有关键帧可删（显示 / 子骨架 是常驻入口行）')
+                    }
+                    // 与层级树的结构行同一个样式：悬停才出现、16px 热区、红色垃圾桶
+                    className={[
+                      'hidden h-[16px] w-[16px] shrink-0 items-center justify-center rounded group-hover:flex',
+                      (track.isGroup ? (track.keyCount ?? 0) : track.keys.length) > 0
+                        ? 'text-danger/80 hover:bg-danger/15'
+                        : 'cursor-not-allowed text-content-lo/30'
+                    ].join(' ')}
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      props.onDeleteTrack?.(track)
+                    }}
+                  >
+                    <Trash2 size={11} />
+                  </span>
+                ) : null}
               </button>
               )
             })}

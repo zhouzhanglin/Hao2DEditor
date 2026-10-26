@@ -5,7 +5,12 @@ import { useTimelineStore } from '../store/timelineStore'
 import type { Selection } from '../store/selectionStore'
 import type { RuntimeBundle } from '../runtime'
 import { buildTimeline, deleteKeys, keyframeTargets, syncDuration } from './model'
-import { keyBoneChannel, keySlotDisplay, keySlotSubArmature } from '../commands/animationCommands'
+import {
+  keyBoneChannel,
+  keySlotDisplay,
+  keySlotSubArmature,
+  pruneEmptyTracks
+} from '../commands/animationCommands'
 import { sampleSubArmature } from '@core/nesting/nest'
 import { AttachmentType } from '@core/model/types'
 import type { BoneChannel } from '../commands/animationCommands'
@@ -354,7 +359,9 @@ function selectorsOfFocus(animation: AuthoringAnimData | null, focus: KeySelecto
       (key) =>
         key.kind === focus.kind &&
         key.target === focus.target &&
-        key.attachment === focus.attachment &&
+        // 通道行本身不带附件名（display 的关键帧却带每帧的 display 名、deform 带附件名）：
+        // focus.attachment 为空时按「整条通道」匹配；只有 deform 这类行才用它精确到某个附件
+        (!focus.attachment || key.attachment === focus.attachment) &&
         (!focus.channel || key.channel === focus.channel)
     )
     .map((key) => ({
@@ -376,15 +383,32 @@ export function deleteSelectedTrack(): ActionResult {
   const timeline = useTimelineStore.getState()
   const focus = timeline.selectedTrack
   if (!focus) return { ok: false, message: '先在时间轴上点选一条通道，再按 Delete 删除它' }
+  return deleteTrack(focus as KeySelector)
+}
 
+/**
+ * 删除**指定通道**的全部关键帧（时间轴行尾的垃圾桶图标 / 键盘 Delete 共用）。
+ *
+ * 与 `deleteSelectedTrack` 的区别只是入口：图标点的是「这一行」，不需要先选中它。
+ */
+export function deleteTrack(focus: KeySelector): ActionResult {
+  const timeline = useTimelineStore.getState()
   const animation =
     useProjectStore.getState().document.animations.find((item) => item.name === timeline.currentAnimation) ?? null
-  const selectors = selectorsOfFocus(animation, focus as KeySelector)
-  if (selectors.length === 0) return { ok: false, message: `通道「${trackLabelOf(focus)}」还没有关键帧` }
+  const selectors = selectorsOfFocus(animation, focus)
+  if (selectors.length === 0) {
+    // 分组行（骨骼 / 插槽）传进来的 channel 为空：说「这个对象还没有帧」，别说成常驻入口行
+    if (!focus.channel) return { ok: false, message: `「${trackLabelOf(focus)}」还没有关键帧` }
+    // 显示 / 子骨架 在「有入口、没帧」时也会常驻一行：这里要说清楚不是删除失败
+    return { ok: false, message: `通道「${trackLabelOf(focus)}」没有关键帧可删（显示 / 子骨架 是常驻入口行）` }
+  }
 
   let removed = 0
   useProjectStore.getState().update('删除动画通道', (draft) => {
     removed = deleteKeys(draft, timeline.currentAnimation, selectors)
+    // 删光后把空轨道也清掉：否则工程文件里会留下一条「0 帧但存在」的插槽/骨骼轨道
+    const animation = draft.animations.find((item) => item.name === timeline.currentAnimation)
+    if (animation) pruneEmptyTracks(animation)
   })
   timeline.setSelectedKeys([])
   return removed > 0
@@ -430,8 +454,8 @@ function trackLabelOf(focus: { kind: string; target: string; channel: string }):
   const channel = CHANNEL_LABEL[focus.channel] ?? focus.channel
   if (focus.kind === 'drawOrder') return '插槽层级'
   if (focus.kind === 'event') return `事件 ${focus.target}`
-  if (focus.kind === 'bone') return `${focus.target} · ${channel}`
-  if (focus.kind === 'slot') return `${focus.target} · ${channel}`
+  // 分组行没有通道名：只报对象名，别留一个「 · 」尾巴
+  if (focus.kind === 'bone' || focus.kind === 'slot') return channel ? `${focus.target} · ${channel}` : focus.target
   if (focus.kind === 'deform') return `${focus.target} · FFD`
   return focus.target || channel
 }

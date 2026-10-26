@@ -10,7 +10,13 @@ import { animationDuration } from '@editor/runtime'
 import { getActiveScene } from '@editor/activeScene'
 import { buildTimeline, lastKeyTime, setKeysTimes } from '@editor/timeline/model'
 import { uniqueName } from '@editor/commands/authoringCommands'
-import { keyEventNow, keyframeNow, keySlotSubArmatureNow, removeSelectedKeys } from '@editor/timeline/actions'
+import {
+  deleteTrack,
+  keyEventNow,
+  keyframeNow,
+  keySlotSubArmatureNow,
+  removeSelectedKeys
+} from '@editor/timeline/actions'
 import type { KeyKind, KeySelector, TimelineTrack } from '@editor/timeline/model'
 import DopeSheet, { markTimelineSelection } from './DopeSheet'
 import { CommitTextField } from '@ui/widgets/fields'
@@ -462,6 +468,17 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         selectedKeys={selectedKeys}
         onSelectKeys={timeline.setSelectedKeys}
         onKeySubArmature={(slot) => onStatus(keySlotSubArmatureNow(slot).message)}
+        onDeleteTrack={(track) =>
+          onStatus(
+            deleteTrack({
+              kind: track.kind,
+              target: track.target,
+              attachment: track.attachment,
+              channel: track.channel ?? '',
+              time: 0
+            }).message
+          )
+        }
         onScrub={(value) => {
           timeline.setPlaying(false)
           timeline.setTime(value)

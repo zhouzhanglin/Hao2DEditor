@@ -1158,6 +1158,11 @@ export const en: Record<string, string> = {
   '修改子骨架起始偏移': 'Edit sub-armature start offset',
   '修改子骨架倍速': 'Edit sub-armature speed',
   '修改子骨架动画': 'Edit sub-armature animation',
+  '删除整条通道（{0} 个关键帧）': 'Delete this channel ({0} keys)',
+  '删除「{0}」的全部通道（{1} 个关键帧）': 'Delete all channels of "{0}" ({1} keys)',
+  '「{0}」还没有关键帧': '"{0}" has no keys yet',
+  '没有关键帧可删（显示 / 子骨架 是常驻入口行）':
+    'No keys to delete (Display / Sub-armature rows are always-visible entry rows)',
   子骨架动画: 'Sub-armature animation',
   '打子骨架控制帧': 'Key sub-armature',
   '骨架名不能为空': 'Armature name cannot be empty',

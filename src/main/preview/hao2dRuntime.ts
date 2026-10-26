@@ -171,7 +171,7 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
         nestedAssets.size > 0
           ? new NestRuntime((name) => {
               const target = nestedAssets.get(name)
-              return target ? { asset: target, skinName: '' } : null
+              return target ? { asset: target, skinName: skin } : null
             }, skin)
           : null,
       views: new Map()
@@ -208,7 +208,7 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
         entry = {
           view: new SkeletonView(instance.asset, textures, activeSkin),
           time: Number.NaN,
-          child: createNestLayer('')
+          child: createNestLayer(activeSkin)
         }
         layer.views.set(instance.key, entry)
       }
@@ -262,7 +262,12 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
   let last = 0
   let destroyed = false
 
-  if (defaultSkin) view.setSkin(defaultSkin)
+  if (defaultSkin) {
+    view.setSkin(defaultSkin)
+    // 皮肤不只影响 mesh 分组：`slotDisplayIndex` / `slotAttIndex` 也要按合并后的皮肤重建，
+    // 否则只在当前皮肤里存在的 display（例如 goblin 皮肤里的嵌套骨架）会保持 -1 而不渲染
+    skeleton.applyRuntimeMaps(buildRuntimeMaps(asset, defaultSkin))
+  }
 
   function viewWidth(): number {
     return app.renderer.screen.width
@@ -423,6 +428,9 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
     },
     setSkin(name: string) {
       view.setSkin(name)
+      // 与编辑器同一套：换肤后重建运行期映射（基底皮肤 + 叠加皮肤），再按当前时间重采样显示通道
+      skeleton.applyRuntimeMaps(buildRuntimeMaps(asset, name))
+      player.seek(player.time)
       view.markDirty()
       /*
        * 子骨架视图按「当前皮肤」建自己的运行期映射（基底皮肤 + 叠加皮肤）：

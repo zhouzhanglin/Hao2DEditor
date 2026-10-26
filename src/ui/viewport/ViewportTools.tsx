@@ -88,13 +88,14 @@ function vertexToolViews(): Record<'pose' | 'animate', { label: string; key: str
       label: t('网格工具'),
       key: 'M',
       icon: Grid3x3,
-      hint: t('编辑网格顶点 / 三角面；网格内 Alt+点击插入顶点')
+      hint: t('编辑网格顶点 / 三角面；Shift+点击多选顶点（拖动整组移动）；网格内 Alt+点击插入顶点')
     },
     animate: {
       label: t('FFD 顶点工具'),
       key: 'D',
       icon: Grid3x3,
-      hint: t('拖顶点写当前时间点的 FFD 帧；网格内 Alt+点击插入顶点')
+      // Animate 态没有插入 / 删除顶点（改的是绑定网格拓扑），提示里只说拖动与多选
+      hint: t('拖顶点写当前时间点的 FFD 帧；Shift+点击多选顶点（拖动整组移动）；插入 / 删除顶点需切到 Pose')
     }
   }
 }

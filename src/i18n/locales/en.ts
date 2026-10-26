@@ -1180,4 +1180,8 @@ export const en: Record<string, string> = {
     'Includes nested sub-armatures: {0} (exported together; the runtime loads them from the ske "nested" list)',
   '骨架「{0}」有 {1} 个嵌套骨架 display：Spine 不支持骨架嵌套，已跳过这些 display':
     'Armature "{0}" has {1} nested-armature display(s): Spine cannot express armature nesting, so they were skipped',
+  '编辑网格顶点 / 三角面；Shift+点击多选顶点（拖动整组移动）；网格内 Alt+点击插入顶点':
+    'Edit mesh vertices / triangles; Shift+click to multi-select vertices (drag to move them together); Alt+click inside the mesh to insert a vertex',
+  '拖顶点写当前时间点的 FFD 帧；Shift+点击多选顶点（拖动整组移动）；插入 / 删除顶点需切到 Pose':
+    'Drag vertices to key FFD frames at the current time; Shift+click to multi-select (drag to move them together); switch to Pose to insert / delete vertices',
 }

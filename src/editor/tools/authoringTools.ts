@@ -134,7 +134,13 @@ interface DragSession {
   /** 顶点拖拽 */
   slot: string
   attachment: string
+  /** 主顶点（附件内下标）：属性面板 / 状态栏显示它 */
   vertex: number
+  /**
+   * 本次一起拖的顶点（附件内下标，含主顶点）。
+   * Shift 多选后拖任意一个即整组平移 —— 位移按**世界→附件空间**换算后统一加在每个点上。
+   */
+  vertices: number[]
   startWorld: Vec2
   /**
    * 指针的当前世界坐标（按下时先记成起点）。
@@ -149,6 +155,8 @@ interface DragSession {
    * 边缘顶点 / Animate 态（写的是 FFD 帧）为 null，UV 保持原样。
    */
   uvField: ((x: number, y: number) => { u: number; v: number }) | null
+  /** 多选顶点各自的 UV 重算场（单点时就是 `uvField`；空 = 不重算 UV） */
+  uvFields: Array<{ index: number; field: (x: number, y: number) => { u: number; v: number } }>
   paintMode: BrushMode
   moved: boolean
   /**
@@ -209,10 +217,12 @@ const IDLE: DragSession = {
   slot: '',
   attachment: '',
   vertex: -1,
+  vertices: [],
   startWorld: { x: 0, y: 0 },
   lastWorld: { x: 0, y: 0 },
   totalDelta: { x: 0, y: 0 },
   uvField: null,
+  uvFields: [],
   paintMode: 'replace',
   moved: false,
   paintStarted: false,
@@ -783,31 +793,90 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
         host.status('该顶点不支持编辑（Region 请先转为网格）')
         return true
       }
+      const current = useSelectionStore.getState()
+      const sameTarget =
+        current.kind === 'attachment' &&
+        current.slot === resolved.slot &&
+        current.attachment === resolved.attachment
+
+      /*
+       * Shift + 点顶点 = 加选 / 减选，**不开始拖拽**（拖拽留给普通点击）。
+       * 选中集存在 `selection.vertices`（共享顶点下标），拖动时整组一起平移。
+       */
+      if (info.shift) {
+        const set = new Set(sameTarget ? current.vertices : [])
+        if (set.has(vertex.vertexIndex)) set.delete(vertex.vertexIndex)
+        else set.add(vertex.vertexIndex)
+        const list = [...set]
+        useSelectionStore.getState().select({
+          kind: 'attachment',
+          slot: resolved.slot,
+          attachment: resolved.attachment,
+          vertices: list,
+          vertex: list.length > 0 ? resolved.vertex : -1
+        })
+        host.status(
+          list.length > 0
+            ? `已选中 ${list.length} 个顶点（Shift+点击加选 / 减选；拖任意一个即整组移动）`
+            : '已取消顶点选择'
+        )
+        return true
+      }
+
       const poseEdit = tools.tool === 'pose'
+      /*
+       * 多选整组拖：点中已经在多选里的顶点 → 这一组一起走；
+       * 点中多选之外的顶点 / 不在多选状态 → 只拖它一个（与以前的单选行为一致）。
+       */
+      const group =
+        sameTarget && current.vertices.length > 1 && current.vertices.includes(vertex.vertexIndex)
+          ? current.vertices
+          : [vertex.vertexIndex]
+      const localIndices: number[] = []
+      const sharedIndices: number[] = []
+      for (const shared of group) {
+        const ref = scene.vertexRefAt(shared)
+        if (!ref || ref.slot !== resolved.slot || ref.attachment !== resolved.attachment) continue
+        if (localIndices.includes(ref.vertex)) continue
+        localIndices.push(ref.vertex)
+        sharedIndices.push(shared)
+      }
+      if (localIndices.length === 0) {
+        localIndices.push(resolved.vertex)
+        sharedIndices.push(vertex.vertexIndex)
+      }
+      // 顶点工具在 Pose 态先按邻居拟合 UV 场，拖动时把 UV 反算回原映射（贴图留在原地）；
+      // Pose 工具**只移动顶点**、不碰 UV，所以不给场。
+      const fieldFor = (index: number): ((x: number, y: number) => { u: number; v: number }) | null =>
+        host.mode === 'animate' || poseEdit ? null : prepareUvField(resolved.slot, resolved.attachment, index)
+      const uvFields = localIndices
+        .map((index) => ({ index, field: fieldFor(index) }))
+        .filter((item): item is { index: number; field: (x: number, y: number) => { u: number; v: number } } => item.field !== null)
       drag = {
         ...IDLE,
         kind: 'vertex',
         slot: resolved.slot,
         attachment: resolved.attachment,
         vertex: resolved.vertex,
+        vertices: localIndices,
         startWorld: { ...info.world },
-        // 顶点工具在 Pose 态先按邻居拟合 UV 场，拖动时把 UV 反算回原映射（贴图留在原地）；
-        // Pose 工具**只移动顶点**、不碰 UV，所以不给场。
-        uvField:
-          host.mode === 'animate' || poseEdit
-            ? null
-            : prepareUvField(resolved.slot, resolved.attachment, resolved.vertex)
+        uvField: uvFields.find((item) => item.index === resolved.vertex)?.field ?? null,
+        uvFields
       }
       storeHandler.begin(host.mode === 'animate' ? '编辑 FFD' : poseEdit ? '移动顶点' : '编辑网格顶点')
       useSelectionStore.getState().select({
         kind: 'attachment',
         slot: resolved.slot,
         attachment: resolved.attachment,
-        vertices: [vertex.vertexIndex],
+        vertices: sharedIndices,
         // 附件内下标：属性检查器靠它显示这个顶点的权重（共享下标只能给叠加层画标记）
         vertex: resolved.vertex
       })
-      host.status(`顶点 #${resolved.vertex}（${resolved.slot} / ${resolved.attachment}）`)
+      host.status(
+        localIndices.length > 1
+          ? `顶点 #${resolved.vertex} 等 ${localIndices.length} 个（${resolved.slot} / ${resolved.attachment}）：拖动整组移动`
+          : `顶点 #${resolved.vertex}（${resolved.slot} / ${resolved.attachment}）`
+      )
       return true
     }
     /*
@@ -2164,30 +2233,40 @@ function dragVertex(host: ToolHost, world: Vec2): void {
    * 拟合出 UV 场，拖动时把 UV 反算回原映射（贴图留在原地，不跟着顶点跑）；
    * Pose 工具的 `uvField` 是 null —— 顶点挪到哪就是哪，UV 一个分量都不改。
    */
+  // 这一帧相对上一帧的位移（多选时同一份增量加到每个点上）
+  const step = { x: delta.x - drag.totalDelta.x, y: delta.y - drag.totalDelta.y }
+  const targets = drag.vertices.length > 0 ? drag.vertices : [drag.vertex]
   if (editBind) {
+    const fields = new Map(drag.uvFields.map((item) => [item.index, item.field]))
     store.updateSilent((draft) => {
       const attachment = findAttachment(draft, drag.slot, drag.attachment)
-      const vertex = attachment?.vertices[drag.vertex]
-      if (!vertex || !attachment) return
-      vertex.x += delta.x - drag.totalDelta.x
-      vertex.y += delta.y - drag.totalDelta.y
-      // 内部顶点：UV 跟着新位置重算。网格顶点只要满足「UV = 原映射在该位置的值」，
-      // 贴图整块就不变形 —— 所以拖到哪就把那里的 UV 算出来（贴图原地不动）；
-      // 否则 UV 留在原处，会把贴图从拖动点「拽」出尖角
-      if (drag.uvField && attachment.uvs.length >= drag.vertex * 2 + 2) {
-        const uv = drag.uvField(vertex.x, vertex.y)
-        attachment.uvs[drag.vertex * 2] = uv.u
-        attachment.uvs[drag.vertex * 2 + 1] = uv.v
+      if (!attachment) return
+      for (const index of targets) {
+        const vertex = attachment.vertices[index]
+        if (!vertex) continue
+        vertex.x += step.x
+        vertex.y += step.y
+        // 内部顶点：UV 跟着新位置重算。网格顶点只要满足「UV = 原映射在该位置的值」，
+        // 贴图整块就不变形 —— 所以拖到哪就把那里的 UV 算出来（贴图原地不动）；
+        // 否则 UV 留在原处，会把贴图从拖动点「拽」出尖角
+        const field = fields.get(index)
+        if (field && attachment.uvs.length >= index * 2 + 2) {
+          const uv = field(vertex.x, vertex.y)
+          attachment.uvs[index * 2] = uv.u
+          attachment.uvs[index * 2 + 1] = uv.v
+        }
       }
     })
   } else {
     const base = currentOffsets(store.document, scene.currentAnimation, drag.slot, drag.attachment, host.time, vertexCount)
     store.updateSilent((draft) => {
       const offsets = [...base]
-      const index = drag.vertex * 2
-      if (index + 1 >= offsets.length) return
-      offsets[index] += delta.x - drag.totalDelta.x
-      offsets[index + 1] += delta.y - drag.totalDelta.y
+      for (const index of targets) {
+        const at = index * 2
+        if (at + 1 >= offsets.length) continue
+        offsets[at] += step.x
+        offsets[at + 1] += step.y
+      }
       const animation = draft.animations.find((item) => item.name === scene.currentAnimation)
       if (animation) keyDeform(animation, drag.slot, drag.attachment, host.time, offsets)
     })

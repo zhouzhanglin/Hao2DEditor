@@ -521,15 +521,17 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     return scene.viewport.screenToWorld(event.clientX - rect.left, event.clientY - rect.top)
   }
 
-  /** 网格 / FFD 工具 + 选中附件，才谈得上插顶点（模式不对时给出提示并返回 false） */
+  /**
+   * 网格 / FFD 工具 + 选中附件，才谈得上插顶点。
+   *
+   * **Animate 态直接返回 false 且不提示**：插点改的是绑定网格拓扑，动画态根本不该有这条捷径
+   *（拖顶点写的是 FFD 帧）。这里若提示一句，双击会先报「请切到 Pose」再落到「已适配视野」，
+   * 看起来就像「快捷键没停用、还顺手把视野重置了」。
+   */
   const canInsertMeshVertex = (): boolean => {
     const selection = useSelectionStore.getState()
     if (useToolStore.getState().tool !== 'ffd' || selection.kind !== 'attachment') return false
-    if (useModeStore.getState().mode !== 'pose') {
-      onStatus(t('插入顶点改的是绑定网格：请切到 Pose 状态'))
-      return false
-    }
-    return true
+    return useModeStore.getState().mode === 'pose'
   }
 
   /** 在指定屏幕位置插一个顶点（UV 与蒙皮权重按所在三角形插值）；返回是否插入成功 */
@@ -690,7 +692,12 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     // 所以 Alt 拖动依旧是平移，不会一按下去就多出一个顶点。
     //
     // 权重刷除外：那里 Alt = 减少权重（见 brushModeFor），必须落到工具手里，否则刷不了。
-    if (event.altKey && useToolStore.getState().tool !== 'weight' && useToolStore.getState().tool !== 'mask') {
+    if (
+      event.altKey &&
+      useModeStore.getState().mode === 'pose' &&
+      useToolStore.getState().tool !== 'weight' &&
+      useToolStore.getState().tool !== 'mask'
+    ) {
       pointer.current = {
         panning: false,
         lastX: event.clientX,
@@ -927,9 +934,11 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       scene.markDirty()
     }
 
-    // 按住 Alt（网格 / FFD 工具 + 已选网格附件）：光标变「复制」——提示这里点一下会插顶点
+    // 按住 Alt（**Pose 态**的网格 / FFD 工具 + 已选网格附件）：光标变「复制」——提示这里点一下会插顶点。
+    // Animate 态没有插点这回事（改的是 FFD 帧），不给这个光标暗示。
     if (
       event.altKey &&
+      useModeStore.getState().mode === 'pose' &&
       useToolStore.getState().tool === 'ffd' &&
       useSelectionStore.getState().kind === 'attachment'
     ) {

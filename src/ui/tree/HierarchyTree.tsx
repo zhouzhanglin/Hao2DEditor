@@ -72,6 +72,7 @@ import type { MoveAnchor, MoveResult } from '@editor/commands/hierarchyCommands'
 import ContextMenu from '@ui/widgets/ContextMenu'
 import type { ContextMenuItem } from '@ui/widgets/ContextMenu'
 import {
+  getActiveTreeDrag,
   hasImageDrag,
   hasTreeDrag,
   readImageDrag,
@@ -169,8 +170,8 @@ function canDropTreePayload(
   if (!payload) return true
   if (payload.kind === 'bone') return targetKind === 'bone'
   if (payload.kind === 'slot') return targetKind === 'bone' || targetKind === 'slot'
-  // 嵌套骨架只能落到插槽行（骨架列表拖出来 = 新建一个 armature display）
-  if (payload.kind === 'armature') return targetKind === 'slot'
+  // 嵌套骨架：落到插槽行 = 加一个 armature display；落到骨骼行 = 先在这根骨骼下建插槽再挂
+  if (payload.kind === 'armature') return targetKind === 'slot' || targetKind === 'bone'
   return targetKind === 'slot' || targetKind === 'display'
 }
 
@@ -181,8 +182,9 @@ function dropPositionOf(
 ): TreeDropPosition {
   const rect = event.currentTarget.getBoundingClientRect()
   const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5
-  // 骨架拖进插槽只有「放进插槽」一种语义：不需要上/下沿排序
-  if (activeTreeDrag?.kind === 'armature') return 'inside'
+  // 骨架拖进骨骼 / 插槽只有「放进这一行」一种语义：不需要上/下沿排序。
+  // 骨架栏拖出来的负载不在树内 `activeTreeDrag` 里，用共享的 active payload 兜底。
+  if ((getActiveTreeDrag() ?? activeTreeDrag)?.kind === 'armature') return 'inside'
   if (targetKind === 'slot' && activeTreeDrag?.kind === 'slot') {
     return ratio < 0.5 ? 'above' : 'below'
   }
@@ -303,13 +305,16 @@ function TreeRow({
         acceptsDrop
           ? (event) => {
               // 某些 Chromium/Electron 组合在 dragover 后段会读不到自定义 MIME，
-              // 用 dragstart 记下的 activeTreeDrag 兜底，避免拖到一半突然变成「不可放置」
-              const tree = hasTreeDrag(event.dataTransfer) || activeTreeDrag !== null
+              // 用 dragstart 记下的 activeTreeDrag 兜底，避免拖到一半突然变成「不可放置」。
+              // 骨架栏拖出来的负载不在树内 activeTreeDrag 里，必须用共享 payload 兜底。
+              // 优先用共享的 active payload：骨架栏拖出来的负载不在树内 activeTreeDrag 里
+              const payload = getActiveTreeDrag() ?? activeTreeDrag
+              const tree = hasTreeDrag(event.dataTransfer) || payload !== null
               const image = hasImageDrag(event.dataTransfer)
               if (!image && !tree) return
               if (tree) {
                 if (!onDropNode) return
-                if (!canDropTreePayload(activeTreeDrag, targetKind)) {
+                if (!canDropTreePayload(payload, targetKind)) {
                   // 骨骼拖到插槽行 / 插槽拖到 display 行等：不给插入线，显示禁止光标 + 红框
                   // 必须 stopPropagation：否则会冒泡到列表空白处，被当成「拖到最下面」处理
                   event.stopPropagation()
@@ -320,7 +325,13 @@ function TreeRow({
                 }
                 event.preventDefault()
                 event.stopPropagation()
-                event.dataTransfer.dropEffect = 'move'
+                /*
+                 * dropEffect 必须落在 effectAllowed 里：骨架栏拖出来是 `copy`（新建引用，
+                 * 子骨架还留在列表里），树内移动是 `move`。这里若一律写 `move`，
+                 * 浏览器会认为「不允许放置」，`drop` 事件根本不会派发 ——
+                 * 表现就是「视口能放、大纲里怎么拖都没反应」。
+                 */
+                event.dataTransfer.dropEffect = payload?.kind === 'armature' ? 'copy' : 'move'
                 const hint = dropPositionOf(event, targetKind)
                 if (nodeHint !== hint) setNodeHint(hint)
                 return
@@ -354,7 +365,8 @@ function TreeRow({
               if (tree) {
                 if (!onDropNode) return
                 const position = dropPositionOf(event, targetKind)
-                const payload = readTreeDrag(event.dataTransfer) ?? activeTreeDrag
+                const payload =
+                  readTreeDrag(event.dataTransfer) ?? getActiveTreeDrag() ?? activeTreeDrag
                 activeTreeDrag = null
                 if (payload) onDropNode(payload, position)
                 return
@@ -1051,8 +1063,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
      * 也可能带着「拖自己」的请求进来。
      */
     if (payload.kind === 'armature') {
-      if (target.kind !== 'slot') {
-        onStatus?.(t('骨架只能拖到插槽上（对着插槽行中间松手）'))
+      if (target.kind !== 'slot' && target.kind !== 'bone') {
+        onStatus?.(t('骨架只能拖到骨骼或插槽上（拖到骨骼行 = 自动新建插槽）'))
         return
       }
       const parent = document.armatureName
@@ -1067,8 +1079,21 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       }
       const created: Array<{ slot: string; attachment: string }> = []
       update(t('嵌套骨架「{0}」', payload.name), (draft) => {
+        let slotName = target.name
+        if (target.kind === 'bone') {
+          /*
+           * 拖到骨骼行：先在这根骨骼下建一个插槽，再把骨架作为 display 挂上去 ——
+           * 与「拖图片到骨骼行」完全一致的规则（图片也是自动建插槽）。
+           * 插槽名默认取骨架名，重名自动加序号。
+           */
+          slotName = uniqueName(draft.slots.map((item) => item.name), payload.name)
+          draft.slots.push(
+            createAuthoringSlot({ name: slotName, bone: target.name, zOrder: draft.slots.length })
+          )
+          draft.skins[0]?.slots.push({ slot: slotName, attachments: [] })
+        }
         const result = addArmatureDisplay(draft, {
-          slot: target.name,
+          slot: slotName,
           armature: payload.name,
           skin: selection.skin
         })
@@ -1077,7 +1102,17 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       const last = created[created.length - 1]
       if (!last) return
       selection.selectAttachment(last.slot, last.attachment)
-      expandBone(boneOfSlot(target.name))
+      // 新建的插槽挂在哪根骨骼上就展开哪根：否则新 display 藏起来看不见
+      expandBone(target.kind === 'bone' ? target.name : boneOfSlot(target.name))
+      onStatus?.(
+        target.kind === 'bone'
+          ? t('已在骨骼「{0}」下新建插槽「{1}」，并挂上嵌套骨架「{2}」', [
+              target.name,
+              last.slot,
+              payload.name
+            ])
+          : t('已把骨架「{0}」挂到插槽「{1}」', [payload.name, last.slot])
+      )
       return
     }
 
@@ -2125,7 +2160,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           // 行本身没接住时（列表空白处）在这里兜底，同时别冒泡去触发整窗导入覆盖层
           event.preventDefault()
           event.stopPropagation()
-          event.dataTransfer.dropEffect = tree ? 'move' : 'copy'
+          const armatureDrag = (getActiveTreeDrag() ?? activeTreeDrag)?.kind === 'armature'
+          event.dataTransfer.dropEffect = armatureDrag ? 'copy' : tree ? 'move' : 'copy'
         }}
         onDragLeave={(event) => {
           const rect = event.currentTarget.getBoundingClientRect()
@@ -2149,9 +2185,15 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           if (tree) {
             if (!canEditBinding()) return
             // 落到列表空白处：骨骼 / 插槽都挂到层级根骨骼 root 下；display 不在这里收
-            const payload = readTreeDrag(event.dataTransfer) ?? activeTreeDrag
+            const payload =
+              readTreeDrag(event.dataTransfer) ?? getActiveTreeDrag() ?? activeTreeDrag
             activeTreeDrag = null
             if (!payload) return
+            // 骨架必须落到骨骼 / 插槽行（空白处没有宿主可挂）
+            if (payload.kind === 'armature') {
+              onStatus?.(t('骨架只能拖到骨骼或插槽上（拖到骨骼行 = 自动新建插槽）'))
+              return
+            }
             if (payload.kind === 'bone') {
               let result: MoveResult = { ok: false, message: '' }
               let movedToEnd = false

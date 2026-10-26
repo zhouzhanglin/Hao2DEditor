@@ -76,6 +76,19 @@ export type TreeDropPosition = 'inside' | 'above' | 'below'
  * `effect`：树内移动用 'move'；从骨架栏拖出来是**新建**引用（子骨架仍然留在列表里），
  * 因此用 'copy'，光标也显示成「+」。
  */
+/**
+ * 当前正在拖的树节点。
+ *
+ * `dragover` 阶段浏览器不允许读 `getData`（只有 `types` 可读），而视口需要用
+ * 「拖的是不是骨架」来决定是否接受放置 —— 所以在 dragstart 时记一份，
+ * 由 `dragend` 清掉（放完 / 取消都会触发）。
+ */
+let activeTreeDrag: TreeDragPayload | null = null
+
+export function getActiveTreeDrag(): TreeDragPayload | null {
+  return activeTreeDrag
+}
+
 export function setTreeDragData(
   transfer: DataTransfer,
   payload: TreeDragPayload,
@@ -83,6 +96,10 @@ export function setTreeDragData(
 ): void {
   transfer.setData(TREE_MIME, JSON.stringify(payload))
   transfer.effectAllowed = effect
+  activeTreeDrag = payload
+  if (typeof window !== 'undefined') {
+    window.addEventListener('dragend', () => { activeTreeDrag = null }, { once: true })
+  }
 }
 
 export function hasTreeDrag(transfer: DataTransfer | null): boolean {

@@ -33,14 +33,18 @@ import type { ToolHost } from '@editor/tools/authoringTools'
 import { BRUSH_MODE_COLORS } from '@core/weightPalette'
 import type { BrushMode } from '@editor/commands/authoringCommands'
 import {
+  addArmatureDisplay,
   addWeightBone,
   createRegionFromImage,
   insertMeshVertex,
   PPU,
   resolveAttachment,
+  uniqueName,
   weightBonesOf
 } from '@editor/commands/authoringCommands'
-import { hasImageDrag, readImageDrag } from '@ui/widgets/dragDrop'
+import { checkNestDrop } from '@core/nesting/nest'
+import { createAuthoringSlot } from '@core/model/authoring'
+import { getActiveTreeDrag, hasImageDrag, hasTreeDrag, readImageDrag } from '@ui/widgets/dragDrop'
 import { gridDropLayout } from '@ui/viewport/dropLayout'
 import type { AuthoringImage, EditorDocument } from '@core/model/authoring'
 import { rootBoneName } from '@core/model/authoring'
@@ -1140,6 +1144,73 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     }
   }
 
+  /**
+   * 骨架栏拖进视口：在落点建「插槽 + 嵌套骨架 display」。
+   *
+   * 规则与「拖图片」完全一致（子骨架也就是一个 displayObject）：
+   * 宿主骨骼 = 鼠标下压着的那根，否则 root；Animate 态拒绝（插槽 / 附件属于绑定数据）。
+   * 自引用 / 循环引用 / 超深同样在这里挡掉，与层级树拖放共用 `checkNestDrop`。
+   */
+  const onArmatureDrop = (event: React.DragEvent<HTMLDivElement>): void => {
+    const scene = sceneRef.current
+    const payload = getActiveTreeDrag()
+    if (!scene || !payload || payload.kind !== 'armature') return
+
+    if (useModeStore.getState().mode !== 'pose') {
+      onStatus(t('切到 Pose 状态才能把骨架放进场景：插槽 / 附件属于绑定数据'))
+      return
+    }
+
+    const store = useProjectStore.getState()
+    const parent = store.document.armatureName
+    if (parent === payload.name) {
+      onStatus(t('不能把骨架拖到它自己的层级里'))
+      return
+    }
+    const reason = checkNestDrop(store.skeletons, parent, payload.name)
+    if (reason) {
+      onStatus(t(reason))
+      return
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect()
+    const world = scene.viewport.screenToWorld(event.clientX - rect.left, event.clientY - rect.top)
+    const hit = scene.pickBoneAt(world.x, world.y)
+    let host = (hit && scene.runtime ? scene.runtime.asset.bones[hit.boneIndex]?.name : '') ?? ''
+    if (!host) host = rootBoneName(store.document.bones)
+    if (!host) {
+      onStatus(t('场景里还没有骨骼：先用「绑骨骼 (B)」画一根骨骼，再把骨架拖进来'))
+      return
+    }
+
+    // 落点 → 宿主骨骼局部坐标（display 的位置就是这个偏移）
+    const local = scene.worldToBoneLocal(host, world.x, world.y) ?? world
+    const created: Array<{ slot: string; attachment: string }> = []
+    store.update(t('嵌套骨架「{0}」', payload.name), (draft) => {
+      const slotName = uniqueName(draft.slots.map((item) => item.name), payload.name)
+      draft.slots.push(createAuthoringSlot({ name: slotName, bone: host, zOrder: draft.slots.length }))
+      draft.skins[0]?.slots.push({ slot: slotName, attachments: [] })
+      const result = addArmatureDisplay(draft, {
+        slot: slotName,
+        armature: payload.name,
+        skin: useSelectionStore.getState().skin,
+        position: local
+      })
+      if (result) created.push(result)
+    })
+
+    const first = created[0]
+    if (!first) {
+      onStatus(t('无法把骨架「{0}」放进场景', payload.name))
+      return
+    }
+    useSelectionStore.getState().selectAttachment(first.slot, first.attachment)
+    // 子骨架的包围盒要等下一帧网格建好才知道：留给渲染循环的自动适配（空场景时本来就会 fit）
+    onStatus(
+      t('已在骨骼「{0}」下新建插槽「{1}」，并挂上嵌套骨架「{2}」', [host, first.slot, payload.name])
+    )
+  }
+
   return (
     <div
       ref={hostRef}
@@ -1170,18 +1241,28 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       }}
       onDragOver={(event) => {
         if (!isOwnEvent(event)) return
-        if (!hasImageDrag(event.dataTransfer)) return
-        // 内部图片拖拽在视口里处理完就停下，别冒泡去触发整窗的拖放兜底处理
+        // 接受：资源面板的图片 / 骨架栏拖出的骨架（树内移动其它节点不能落到视口）
+        const treeDrag = hasTreeDrag(event.dataTransfer) ? getActiveTreeDrag() : null
+        const armature = treeDrag?.kind === 'armature'
+        if (!hasImageDrag(event.dataTransfer) && !armature) return
+        // 内部拖拽在视口里处理完就停下，别冒泡去触发整窗的拖放兜底处理
         event.preventDefault()
         event.stopPropagation()
         event.dataTransfer.dropEffect = 'copy'
       }}
       onDrop={(event) => {
         if (!isOwnEvent(event)) return
-        if (!hasImageDrag(event.dataTransfer)) return
+        if (hasImageDrag(event.dataTransfer)) {
+          event.preventDefault()
+          event.stopPropagation()
+          onImageDrop(event)
+          return
+        }
+        const treeDrag = hasTreeDrag(event.dataTransfer) ? getActiveTreeDrag() : null
+        if (treeDrag?.kind !== 'armature') return
         event.preventDefault()
         event.stopPropagation()
-        onImageDrop(event)
+        onArmatureDrop(event)
       }}
       onContextMenu={(event) => {
         if (!isOwnEvent(event)) return

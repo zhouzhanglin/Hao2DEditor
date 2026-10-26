@@ -95,8 +95,17 @@ const SLOT = 'w-[220px] shrink-0'
  * 这 4 个值都很短（动画名除外），把槽压窄、标签列也压窄，就能在面板里一行放下。
  */
 const SLOT_NEST_SELECT = 'w-[150px] shrink-0 [&>label]:w-full [&_.hao-label]:w-[30px] [&_select]:min-w-0'
+/** 偏移带「秒」后缀，留得稍宽 */
 const SLOT_NEST_NUMBER =
-  'w-[104px] shrink-0 [&>label]:w-full [&_.hao-label]:w-[26px] [&_input]:min-w-0 [&_input]:px-1'
+  'w-[112px] shrink-0 [&>label]:w-full [&_.hao-label]:w-[34px] [&_input]:min-w-0 [&_input]:px-1'
+/**
+ * 次数 / 倍速：值只有 `0` / `1` / `0.5` 这种 1~4 个字符，输入框再压一档（约 32px）。
+ *
+ * 用**显式输入框宽度**而不是只压外层槽：`.hao-field` 是 `w-full`，只改外层时
+ * 只要有一处父级 flex 没约束住宽度，输入框就会按内容撑回去 —— 这里直接钉死 input。
+ */
+const SLOT_NEST_TINY =
+  'w-[76px] shrink-0 [&>label]:w-full [&_.hao-label]:w-[34px] [&_input]:w-[32px] [&_input]:flex-none [&_input]:min-w-0 [&_input]:px-1 [&_input]:text-center'
 
 /**
  * 颜色行要更宽：`ColorField` 一行摆了四件**固定宽**的东西 —— 色块 30 + 透明度滑杆 64 + 百分比 46，
@@ -361,7 +370,7 @@ function FrameValueEditor({
             onChange={(name) => nested?.onChange(name)}
           />
         </div>
-        <div className={SLOT_NEST_NUMBER}>
+        <div className={SLOT_NEST_TINY}>
           <NumberField
             label={t('次数')}
             value={frame?.playTimes ?? 0}
@@ -382,7 +391,7 @@ function FrameValueEditor({
             onChange={(next) => onEdit(t('修改子骨架起始偏移'), (item) => { item.offset = next })}
           />
         </div>
-        <div className={SLOT_NEST_NUMBER}>
+        <div className={SLOT_NEST_TINY}>
           <NumberField
             label={t('倍速')}
             value={frame?.speed ?? 1}

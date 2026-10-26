@@ -1184,4 +1184,18 @@ export const en: Record<string, string> = {
     'Edit mesh vertices / triangles; Shift+click to multi-select vertices (drag to move them together); Alt+click inside the mesh to insert a vertex',
   '拖顶点写当前时间点的 FFD 帧；Shift+点击多选顶点（拖动整组移动）；插入 / 删除顶点需切到 Pose':
     'Drag vertices to key FFD frames at the current time; Shift+click to multi-select (drag to move them together); switch to Pose to insert / delete vertices',
+  '{0}（拖到骨骼行 / 插槽行 / 视口 = 嵌套；双击重命名；右键重命名 / 删除）':
+    '{0} (drop on a bone row / slot row / the viewport to nest it; double-click to rename; right-click to rename / delete)',
+  '骨架只能拖到骨骼或插槽上（拖到骨骼行 = 自动新建插槽）':
+    'Armatures can only be dropped on a bone or a slot (dropping on a bone creates a slot automatically)',
+  '已在骨骼「{0}」下新建插槽「{1}」，并挂上嵌套骨架「{2}」':
+    'Created slot "{1}" under bone "{0}" and nested armature "{2}" into it',
+  '已把骨架「{0}」挂到插槽「{1}」': 'Nested armature "{0}" into slot "{1}"',
+  '切到 Pose 状态才能把骨架放进场景：插槽 / 附件属于绑定数据':
+    'Switch to Pose to drop an armature into the scene: slots / attachments are bind-pose data',
+  '场景里还没有骨骼：先用「绑骨骼 (B)」画一根骨骼，再把骨架拖进来':
+    'The scene has no bones yet: draw one with the Bone tool (B) before dropping an armature',
+  '无法把骨架「{0}」放进场景': 'Could not place armature "{0}" into the scene',
+  '已取消选择（左键在空白处拖动可框选顶点）':
+    'Selection cleared (left-drag on empty space to box-select vertices)',
 }

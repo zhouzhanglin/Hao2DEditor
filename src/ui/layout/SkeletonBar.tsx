@@ -82,7 +82,7 @@ export default function SkeletonBar({ onSwitch, onAdd, onRename, onRemove, onSta
             title={
               isActive
                 ? t('{0}（当前骨架；双击重命名；右键重命名 / 删除）', name)
-                : t('{0}（拖到另一个骨架的插槽行 = 嵌套；双击重命名；右键重命名 / 删除）', name)
+                : t('{0}（拖到骨骼行 / 插槽行 / 视口 = 嵌套；双击重命名；右键重命名 / 删除）', name)
             }
             onDragStart={(event) => {
               if (isActive) {

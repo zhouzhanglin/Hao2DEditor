@@ -35,6 +35,7 @@ addSkin {name} 建皮肤 → addDisplay {slot, image, skin} 往该皮肤放件 �
 ## 骨架嵌套（把一个骨架挂到另一个骨架的插槽上）
 - 多骨架工程：`getProjectState` 的 `skeletons[]` 里有每个骨架的名字与 `animationNames`（子骨架动画名直接在这里看，不必先切换）；切当前编辑骨架用 `setActiveSkeleton`
 - 挂上去：`nestArmature {slot, armature}` —— 在**当前编辑骨架**里，把工程内另一个骨架作为 display 挂到该插槽；会拒绝自引用 / 循环引用 / 超深
+- 手工路径（与拖图片一致）：把骨架栏里的骨架拖到**骨骼行**（自动在该骨骼下新建插槽，插槽名取骨架名）/ **插槽行**（直接加 display）/ **视口**（按落点建插槽 + display，宿主骨骼=鼠标下压着的那根，否则 root）。Animate 态会拒绝，需先切 Pose
 - 改引用或默认播放：`setNestedArmature {slot, attachment, armature?, animation?, playTimes?, offset?, speed?}`（`playTimes: 0` = 循环）
 - 动画里控制子骨架：`keySlotSubArmatureFrame {slot, time, clip, playTimes?, offset?, speed?}` —— `clip` 是**子骨架里**的动画名（空串 = 回 setup 姿态）；`offset` 用来做「挥刀时刀光晚 3 帧起播」
 - 换武器：同一插槽挂多个嵌套 display，用 `keySlotDisplayFrame` 切显示；`listDisplays` 的 `nested` 字段能看出每个 display 引用的是哪个骨架

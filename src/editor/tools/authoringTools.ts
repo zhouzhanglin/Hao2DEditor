@@ -364,20 +364,20 @@ function maskEdgeNear(
 function commitMaskDraft(host: ToolHost): boolean {
   const draftPath = host.scene.state.pendingMaskPath
   if (!draftPath || draftPath.points.length < 3) {
-    host.status('遮罩至少需要 3 个点')
+    host.status(t('遮罩至少需要 3 个点'))
     return false
   }
   // 在已有遮罩上追加点时，若本次一个点都没加就闭合，别产生一次空的文档命令
   if (draftPath.target && draftPath.points.length === draftPath.baseCount) {
     host.scene.setViewState({ pendingMaskPath: null })
-    host.status('没有新增遮罩点，原多边形未修改')
+    host.status(t('没有新增遮罩点，原多边形未修改'))
     return false
   }
   const local: Vec2[] = []
   for (const point of draftPath.points) {
     const converted = host.scene.worldToSlotBoneLocal(draftPath.slot, point)
     if (!converted || !Number.isFinite(converted.x) || !Number.isFinite(converted.y)) {
-      host.status('遮罩点换算失败（插槽没有绑定骨骼，或骨骼缩放为 0）')
+      host.status(t('遮罩点换算失败（插槽没有绑定骨骼，或骨骼缩放为 0）'))
       return false
     }
     local.push(converted)
@@ -401,8 +401,8 @@ function commitMaskDraft(host: ToolHost): boolean {
   host.scene.refresh()
   host.status(
     editing
-      ? `已更新遮罩「${name}」：在检查器里设置结束插槽 / 反向，或继续拖控制点`
-      : `已创建遮罩「${name}」：在检查器里设置结束插槽 / 反向，或继续拖控制点`
+      ? t('已更新遮罩「{0}」：在检查器里设置结束插槽 / 反向，或继续拖控制点', name)
+      : t('已创建遮罩「{0}」：在检查器里设置结束插槽 / 反向，或继续拖控制点', name)
   )
   return true
 }
@@ -418,7 +418,7 @@ export function maskDraftCancel(host: ToolHost): void {
   if (!host.scene.state.pendingMaskPath) return
   host.scene.setViewState({ pendingMaskPath: null })
   host.scene.markDirty()
-  host.status('已取消遮罩绘制')
+  host.status(t('已取消遮罩绘制'))
 }
 
 /**
@@ -450,11 +450,11 @@ export function undoMaskDraftPoint(scene: EditorScene, status?: (text: string) =
 
   const added = points.length - base
   if (base > 0) {
-    status?.(`已撤回上一个新增遮罩点：还剩 ${added} 个新增点，原多边形未变`)
+    status?.(t('已撤回上一个新增遮罩点：还剩 {0} 个新增点，原多边形未变', [added]))
   } else if (points.length > 0) {
-    status?.(`已撤回上一个遮罩点：还剩 ${points.length} 个（继续点 / 点回起点 / 右键收尾）`)
+    status?.(t('已撤回上一个遮罩点：还剩 {0} 个（继续点 / 点回起点 / 右键收尾）', [points.length]))
   } else {
-    status?.('已撤回最后一个遮罩点：单击继续，Esc 取消')
+    status?.(t('已撤回最后一个遮罩点：单击继续，Esc 取消'))
   }
   return true
 }
@@ -492,7 +492,7 @@ export function deleteSelectedMaskPoint(scene: EditorScene, status?: (text: stri
     return true
   }
   if (attachment.vertices.length <= 3) {
-    status?.('遮罩至少保留 3 个控制点')
+    status?.(t('遮罩至少保留 3 个控制点'))
     return true
   }
 
@@ -502,32 +502,32 @@ export function deleteSelectedMaskPoint(scene: EditorScene, status?: (text: stri
     return removed
   })
   if (!ok || !removed) {
-    status?.('删除遮罩控制点失败')
+    status?.(t('删除遮罩控制点失败'))
     return true
   }
 
   scene.setViewState({ maskPoint: null })
   scene.setDocument(useProjectStore.getState().document, useSelectionStore.getState().skin)
   scene.refresh()
-  status?.('已删除遮罩控制点')
+  status?.(t('已删除遮罩控制点'))
   return true
 }
 
 function maskPointerDown(host: ToolHost, info: PointerInfo): boolean {
   if (host.mode !== 'pose') {
-    host.status('遮罩绑定数据在 Pose 编辑；Animate 态请用顶点工具（D）拖遮罩点写 FFD')
+    host.status(t('遮罩绑定数据在 Pose 编辑；Animate 态请用顶点工具（D）拖遮罩点写 FFD'))
     return true
   }
   const selection = useSelectionStore.getState()
   const slot = selection.slot
   if (!slot) {
-    host.status('先在层级树里选中一个插槽，再画遮罩')
+    host.status(t('先在层级树里选中一个插槽，再画遮罩'))
     return true
   }
   const draftPath = host.scene.state.pendingMaskPath
   if (draftPath) {
     if (draftPath.slot !== slot) {
-      host.status('正在给另一个插槽画遮罩：先点回起点 / 右键闭合，或 Esc 取消')
+      host.status(t('正在给另一个插槽画遮罩：先点回起点 / 右键闭合，或 Esc 取消'))
       return true
     }
     const threshold = host.scene.viewport.pixelsToWorld(8)
@@ -577,9 +577,9 @@ function maskPointerDown(host: ToolHost, info: PointerInfo): boolean {
           host.scene.setViewState({ maskPoint: next })
           host.scene.setDocument(useProjectStore.getState().document, host.selection.skin)
           host.scene.refresh()
-          host.status('已删除一个遮罩控制点')
+          host.status(t('已删除一个遮罩控制点'))
         } else {
-          host.status('遮罩至少保留 3 个控制点')
+          host.status(t('遮罩至少保留 3 个控制点'))
         }
         return true
       }
@@ -592,7 +592,7 @@ function maskPointerDown(host: ToolHost, info: PointerInfo): boolean {
         lastWorld: { ...info.world }
       }
       storeHandler.begin('移动遮罩控制点')
-      host.status(`已选中遮罩控制点 #${index + 1}：拖动移动，Delete 删除`)
+      host.status(t('已选中遮罩控制点 #{0}：拖动移动，Delete 删除', [index + 1]))
       return true
     }
 
@@ -601,7 +601,7 @@ function maskPointerDown(host: ToolHost, info: PointerInfo): boolean {
     if (edge) {
       const local = host.scene.worldToSlotBoneLocal(mask.slot, edge.point)
       if (!local || !Number.isFinite(local.x) || !Number.isFinite(local.y)) {
-        host.status('遮罩点换算失败（插槽没有绑定骨骼，或骨骼缩放为 0）')
+        host.status(t('遮罩点换算失败（插槽没有绑定骨骼，或骨骼缩放为 0）'))
         return true
       }
       let inserted = false
@@ -610,7 +610,7 @@ function maskPointerDown(host: ToolHost, info: PointerInfo): boolean {
         return inserted
       })
       if (!ok || !inserted) {
-        host.status('插入遮罩控制点失败')
+        host.status(t('插入遮罩控制点失败'))
         return true
       }
       const indexAfterInsert = edge.index + 1
@@ -629,13 +629,13 @@ function maskPointerDown(host: ToolHost, info: PointerInfo): boolean {
         lastWorld: { ...info.world }
       }
       storeHandler.begin('移动遮罩控制点')
-      host.status('已在遮罩边上插入控制点：拖动调整，Delete 删除')
+      host.status(t('已在遮罩边上插入控制点：拖动调整，Delete 删除'))
       return true
     }
 
     // 点在空白处：取消选中，不自动重画一个新多边形
     host.scene.setViewState({ maskPoint: null })
-    host.status('已取消选中遮罩点；点边线插入点，拖点移动，Delete 删除')
+    host.status(t('已取消选中遮罩点；点边线插入点，拖点移动，Delete 删除'))
     return true
   }
 
@@ -646,7 +646,7 @@ function maskPointerDown(host: ToolHost, info: PointerInfo): boolean {
     maskPoint: null
   })
   host.scene.markDirty()
-  host.status('新建遮罩：单击加点；点回起点 / 右键闭合；Ctrl+Z 撤点；Esc 取消')
+  host.status(t('新建遮罩：单击加点；点回起点 / 右键闭合；Ctrl+Z 撤点；Esc 取消'))
   return true
 }
 
@@ -670,7 +670,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     if (ref) {
       const picked = findAttachment(useProjectStore.getState().document, ref.slot, ref.attachment)
       if (picked?.type === 'clipping') {
-        host.status('遮罩控制点不支持权重刷；遮罩的动画请用顶点工具（D）写 FFD')
+        host.status(t('遮罩控制点不支持权重刷；遮罩的动画请用顶点工具（D）写 FFD'))
         return true
       }
     }
@@ -701,7 +701,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       return true
     }
     if (host.mode !== 'pose') {
-      host.status('权重刷只在 Pose 状态可用（动画状态的角色姿态不是绑定姿态）')
+      host.status(t('权重刷只在 Pose 状态可用（动画状态的角色姿态不是绑定姿态）'))
       return true
     }
     /*
@@ -709,7 +709,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
      * 原来没选附件时会对整个角色的顶点生效 —— 那既不直观，也容易在别的部件上留下看不见的改动。
      */
     if (!useSelectionStore.getState().slot || !useSelectionStore.getState().attachment) {
-      host.status('先在层级树里选中要刷权重的网格附件（Region 请先转为网格）')
+      host.status(t('先在层级树里选中要刷权重的网格附件（Region 请先转为网格）'))
       return true
     }
     // 平滑平均的是全部骨骼的权重，说「刷某根骨骼」会误导
@@ -732,7 +732,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   // 落在空白处一律挂在层级根骨骼 root 下 —— 选中态不参与，避免误挂到上次选中的骨骼下面。
   if (tools.tool === 'bone') {
     if (host.mode !== 'pose') {
-      host.status('骨骼属于绑定数据：切到 Pose 状态再画')
+      host.status(t('骨骼属于绑定数据：切到 Pose 状态再画'))
       return true
     }
     // 端点吸附优先（「接着上一根画」）：精确接到末端 / 根端那个点上，并把该骨骼作为父级
@@ -795,7 +795,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     if (vertex) {
       const resolved = resolveVertex(host, vertex.vertexIndex)
       if (!resolved || resolved.vertex < 0) {
-        host.status('该顶点不支持编辑（Region 请先转为网格）')
+        host.status(t('该顶点不支持编辑（Region 请先转为网格）'))
         return true
       }
       const current = useSelectionStore.getState()
@@ -900,7 +900,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     const effectiveHit = hitBone ?? (constraintHit >= 0 ? { boneIndex: constraintHit, zone: 'origin' as const, distance: 0 } : null)
     const att = effectiveHit || onGizmo ? null : scene.pickAttachmentAt(info.world.x, info.world.y)
     if (att && slotLocked(att.slot)) {
-      host.status(`插槽「${att.slot}」已锁定：在层级树里解锁后才能选中`)
+      host.status(t('插槽「{0}」已锁定：在层级树里解锁后才能选中', [att.slot]))
       return true
     }
     if (att) {
@@ -914,7 +914,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       const isNew = sel.kind !== 'attachment' || att.slot !== sel.slot || att.attachment !== sel.attachment
       if (isNew) {
         useSelectionStore.getState().selectAttachment(att.slot, att.attachment)
-        host.status(`已选中附件「${att.attachment}」（${att.slot}）：可编辑其顶点`)
+        host.status(t('已选中附件「{0}」（{1}）：可编辑其顶点', [att.attachment, att.slot]))
         return true
       }
       /*
@@ -956,7 +956,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       if (beginShearBoxDrag(host, selectedName, edge, info.world)) return true
     }
     if (edge && selectedName && boneLocked(selectedName)) {
-      host.status(`骨骼「${selectedName}」已锁定，先解锁再编辑`)
+      host.status(t('骨骼「{0}」已锁定，先解锁再编辑', [selectedName]))
       return true
     }
   }
@@ -1004,7 +1004,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     const att = effectiveHit ? null : scene.pickAttachmentAt(info.world.x, info.world.y)
     // 锁定的插槽在视口里不响应点选（占位拦下并说明原因，别让人以为「点坏了」）
     if (att && slotLocked(att.slot)) {
-      host.status(`插槽「${att.slot}」已锁定：在层级树里解锁后才能选中`)
+      host.status(t('插槽「{0}」已锁定：在层级树里解锁后才能选中', [att.slot]))
       return true
     }
     if (att) {
@@ -1022,15 +1022,15 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
          */
         const mode = host.tools.gizmo
         if (mode === 'shear') {
-          host.status(`斜切不支持附件：「${att.attachment}」请用移动 / 旋转 / 缩放，或斜切它所在的骨骼`)
+          host.status(t('斜切不支持附件：「{0}」请用移动 / 旋转 / 缩放，或斜切它所在的骨骼', [att.attachment]))
         } else {
           beginAttachmentGizmoDrag(host, att.slot, att.attachment, 'center', mode, info.world)
-          if (isNew) host.status(`已选中附件「${att.attachment}」（${att.slot}）：拖动即可${GIZMO_LABEL[mode]}`)
+          if (isNew) host.status(t('已选中附件「{0}」（{1}）：拖动即可{2}', [att.attachment, att.slot, GIZMO_LABEL[mode]]))
         }
         return true
       }
       if (isNew) {
-        host.status(`已选中附件「${att.attachment}」（${att.slot}）：位置属于绑定数据，切到 Pose 态才能拖动`)
+        host.status(t('已选中附件「{0}」（{1}）：位置属于绑定数据，切到 Pose 态才能拖动', [att.attachment, att.slot]))
       }
       return true
     }
@@ -1045,7 +1045,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   // 锁定状态存在编辑期模型上（Runtime 模型没有该字段）
   const authoringBone = useProjectStore.getState().document.bones.find((item) => item.name === bone.name)
   if (authoringBone?.locked) {
-    host.status(`骨骼「${bone.name}」已锁定，先解锁再编辑`)
+    host.status(t('骨骼「{0}」已锁定，先解锁再编辑', [bone.name]))
     return true
   }
 
@@ -1063,7 +1063,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   // 约束准星命中时 zone 是 origin（见上面的兜底）→ 走下面的移动拖拽
   if (effectiveHit.zone !== 'origin') {
     if (tools.gizmo === 'shear') {
-      host.status(`斜切骨骼「${bone.name}」：拖动斜切包围盒的边（上下边横向拖 / 左右边纵向拖）`)
+      host.status(t('斜切骨骼「{0}」：拖动斜切包围盒的边（上下边横向拖 / 左右边纵向拖）', [bone.name]))
       return true
     }
     return beginGizmoDrag(host, effectiveHit.boneIndex, bone.name, 'center', info.world)
@@ -1082,7 +1082,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   }
   storeHandler.begin('移动骨骼')
   const suffix = host.mode === 'animate' ? '（写入关键帧）' : '（修改 setup）'
-  host.status(`移动骨骼「${bone.name}」${suffix} · 拖动骨骼原点圆圈`)
+  host.status(t('移动骨骼「{0}」{1} · 拖动骨骼原点圆圈', [bone.name, suffix]))
   return true
 }
 
@@ -1163,7 +1163,7 @@ function beginGizmoDrag(
   const bundle = scene.runtime
   if (!bundle) return true
   if (boneLocked(boneName)) {
-    host.status(`骨骼「${boneName}」已锁定，先解锁再编辑`)
+    host.status(t('骨骼「{0}」已锁定，先解锁再编辑', [boneName]))
     return true
   }
   const bone = bundle.asset.bones[boneIndex]
@@ -1222,7 +1222,7 @@ function beginGizmoDrag(
   const suffix = host.mode === 'animate' ? '（写入关键帧）' : '（修改 setup）'
   const partLabel = part === 'center' ? '整体' : `${part.toUpperCase()} 轴`
   const together = bones.length > 1 ? `（同时作用于 ${bones.length} 根选中骨骼）` : ''
-  host.status(`${label}骨骼「${boneName}」${suffix} · ${partLabel}${together}`)
+  host.status(t('{0}骨骼「{1}」{2} · {3}{4}', [label, boneName, suffix, partLabel, together]))
   return true
 }
 
@@ -1273,7 +1273,7 @@ function beginShearBoxDrag(host: ToolHost, boneName: string, edge: ShearEdge, wo
   const suffix = host.mode === 'animate' ? '（写入关键帧）' : '（修改 setup）'
   const edgeLabel = edge === 'top' ? '上边' : edge === 'bottom' ? '下边' : edge === 'left' ? '左边' : '右边'
   const together = bones.length > 1 ? `（同时作用于 ${bones.length} 根选中骨骼）` : ''
-  host.status(`斜切骨骼「${boneName}」${suffix} · 拖动包围盒${edgeLabel}${together}`)
+  host.status(t('斜切骨骼「{0}」{1} · 拖动包围盒{2}{3}', [boneName, suffix, edgeLabel, together]))
   return true
 }
 
@@ -1438,7 +1438,7 @@ function beginAttachmentGizmoDrag(
   if (!bundle) return false
   // 插槽锁定 = 视口里不可选中 / 不可拖（与骨骼锁一致：拦下并说明原因）
   if (slotLocked(slotName)) {
-    host.status(`插槽「${slotName}」已锁定：在层级树里解锁后才能拖动`)
+    host.status(t('插槽「{0}」已锁定：在层级树里解锁后才能拖动', [slotName]))
     return true
   }
   const doc = useProjectStore.getState().document
@@ -2023,7 +2023,7 @@ function createBoneFromDrag(
   const dy = end.y - start.y
   const distance = Math.hypot(dx, dy)
   if (distance < 1e-3) {
-    host.status('拖动距离太短，未生成骨骼')
+    host.status(t('拖动距离太短，未生成骨骼'))
     return
   }
 
@@ -2292,7 +2292,7 @@ function finishVertexBox(host: ToolHost, session: DragSession): void {
     hits.push({ shared: i, slot: ref.slot, attachment: ref.attachment })
   }
   if (hits.length === 0) {
-    host.status('框选：矩形里没有顶点（右键可取消当前选择）')
+    host.status(t('框选：矩形里没有顶点（右键可取消当前选择）'))
     return
   }
   const slot = lockedSlot || hits[0].slot
@@ -2304,7 +2304,7 @@ function finishVertexBox(host: ToolHost, session: DragSession): void {
   for (const index of picked) set.add(index)
   const list = [...set]
   useSelectionStore.getState().select({ kind: 'attachment', slot, attachment, vertices: list, vertex: -1 })
-  host.status(`框选到 ${picked.length} 个顶点（共选中 ${list.length} 个；拖动任意一个整组移动）`)
+  host.status(t('框选到 {0} 个顶点（共选中 {1} 个；拖动任意一个整组移动）', [picked.length, list.length]))
 }
 
 function dragVertex(host: ToolHost, world: Vec2): void {
@@ -2480,11 +2480,11 @@ export function meshSubtoolPointerDown(host: ToolHost, info: PointerInfo): boole
   if (subtool === 'edit') return false
   const target = meshTargetOf(host)
   if (!target) {
-    host.status(`「${meshSubtoolLabel(subtool)}」要先选中一个网格附件（Region 可右键「转为网格」再改）`)
+    host.status(t('「{0}」要先选中一个网格附件（Region 可右键「转为网格」再改）', [meshSubtoolLabel(subtool)]))
     return true
   }
   if (host.mode !== 'pose') {
-    host.status(`「${meshSubtoolLabel(subtool)}」改的是绑定网格：请切到 Pose 状态（Animate 态拖顶点写的是 FFD 帧）`)
+    host.status(t('「{0}」改的是绑定网格：请切到 Pose 状态（Animate 态拖顶点写的是 FFD 帧）', [meshSubtoolLabel(subtool)]))
     return true
   }
   switch (subtool) {
@@ -2544,7 +2544,7 @@ export function meshSubtoolCancel(host: ToolHost): boolean {
 function addMeshVertexByTool(host: ToolHost, target: MeshTarget, world: Vec2): boolean {
   const local = host.scene.worldToAttachmentLocal(target.slot, target.attachment, world.x, world.y)
   if (!local) {
-    host.status('插入位置不在附件上：点在网格覆盖的区域内')
+    host.status(t('插入位置不在附件上：点在网格覆盖的区域内'))
     return true
   }
   let created: number | null = null
@@ -2556,12 +2556,12 @@ function addMeshVertexByTool(host: ToolHost, target: MeshTarget, world: Vec2): b
   })
   const index = created as number | null
   if (index === null) {
-    host.status('该位置不在网格内部：点在网格覆盖的区域内才能插入顶点')
+    host.status(t('该位置不在网格内部：点在网格覆盖的区域内才能插入顶点'))
     return true
   }
   meshSubtoolSync(host)
   useSelectionStore.getState().selectVertices([index])
-  host.status(`已插入顶点 #${index}（UV 与权重按位置插值；落在网格线上会把那条边一分为二）`)
+  host.status(t('已插入顶点 #{0}（UV 与权重按位置插值；落在网格线上会把那条边一分为二）', [index]))
   return true
 }
 
@@ -2570,7 +2570,7 @@ function removeMeshVertexByTool(host: ToolHost, target: MeshTarget, world: Vec2)
   const hit = host.scene.pickVertexAt(world.x, world.y)
   const ref = hit ? resolveVertex(host, hit.vertexIndex) : null
   if (!ref || ref.slot !== target.slot || ref.attachment !== target.attachment) {
-    host.status('删除顶点：对准要删的顶点再点（网格至少得留 3 个顶点）')
+    host.status(t('删除顶点：对准要删的顶点再点（网格至少得留 3 个顶点）'))
     return true
   }
   let removed = false
@@ -2581,11 +2581,11 @@ function removeMeshVertexByTool(host: ToolHost, target: MeshTarget, world: Vec2)
     removed = true
   })
   if (!removed) {
-    host.status('删不掉：网格至少得保留 3 个顶点')
+    host.status(t('删不掉：网格至少得保留 3 个顶点'))
     return true
   }
   meshSubtoolSync(host)
-  host.status(`已删除顶点 #${ref.vertex}（引用它的三角形就地重新三角化补上）`)
+  host.status(t('已删除顶点 #{0}（引用它的三角形就地重新三角化补上）', [ref.vertex]))
   return true
 }
 
@@ -2601,7 +2601,7 @@ function boundaryPointerDown(host: ToolHost, target: MeshTarget, world: Vec2): b
   const scene = host.scene
   const local = scene.worldToAttachmentLocal(target.slot, target.attachment, world.x, world.y)
   if (!local) {
-    host.status('边界点要落在附件所在的插槽上')
+    host.status(t('边界点要落在附件所在的插槽上'))
     return true
   }
   const point = clampToFrame(meshFrameBox(target.data), local)
@@ -2619,7 +2619,7 @@ function boundaryPointerDown(host: ToolHost, target: MeshTarget, world: Vec2): b
    * 还会让收尾时的耳切切出退化三角形，这种一下直接丢掉。
    */
   if (mine.length > 0 && tooCloseToLast(scene, target.slot, mine[mine.length - 1], point)) {
-    host.status('这个点离上一个点太近，没有落下')
+    host.status(t('这个点离上一个点太近，没有落下'))
     return true
   }
 
@@ -2693,7 +2693,7 @@ export function closeMeshBoundaryOn(scene: EditorScene, status: (message: string
   const path = scene.state.pendingMeshPath
   scene.setViewState({ pendingMeshPath: null, hoveredVertex: -1 })
   if (!path || path.points.length < 3) {
-    if (path) status('绘制边界已取消：至少要 3 个点才围得成一个边界；已回到「编辑顶点」')
+    if (path) status(t('绘制边界已取消：至少要 3 个点才围得成一个边界；已回到「编辑顶点」'))
     return false
   }
   let built: { vertices: number; triangles: number } | null = null
@@ -2705,13 +2705,13 @@ export function closeMeshBoundaryOn(scene: EditorScene, status: (message: string
   })
   const result = built as { vertices: number; triangles: number } | null
   if (!result) {
-    status('边界重建失败：这 3 个点几乎共线，或附件已经不是网格了')
+    status(t('边界重建失败：这 3 个点几乎共线，或附件已经不是网格了'))
     return false
   }
   scene.setDocument(useProjectStore.getState().document, useSelectionStore.getState().skin)
   scene.refresh()
   status(
-    `已按新边界重建网格：${result.vertices} 个顶点 / ${result.triangles} 个三角面（贴图停在原位；原网格点、绑定权重与 FFD 关键帧已清除，要蒙皮请重新绑骨骼并算权重）；已回到「编辑顶点」`
+    t('已按新边界重建网格：{0} 个顶点 / {1} 个三角面（贴图停在原位；原网格点、绑定权重与 FFD 关键帧已清除，要蒙皮请重新绑骨骼并算权重）；已回到「编辑顶点」', [result.vertices, result.triangles])
   )
   return true
 }
@@ -2785,11 +2785,11 @@ export function undoMeshBoundaryPoint(scene: EditorScene, status?: (message: str
   // 点全部撤完就退回「还没开始画」：橡皮筋收掉（region 框会留着，接着点就行）
   scene.setViewState({ pendingMeshPath: points.length > 0 && path ? { ...path, points } : null })
   if (!path || path.points.length === 0) {
-    status?.('还没有落下边界点；要撤销文档命令，请先退出「自己绘制边界」')
+    status?.(t('还没有落下边界点；要撤销文档命令，请先退出「自己绘制边界」'))
   } else if (points.length === 0) {
-    status?.('已撤回最后一个边界点：重新开始点（点回起点或右键收尾）')
+    status?.(t('已撤回最后一个边界点：重新开始点（点回起点或右键收尾）'))
   } else {
-    status?.(`已撤回上一个边界点：还剩 ${points.length} 个（继续点 / 点回起点 / 右键收尾）`)
+    status?.(t('已撤回上一个边界点：还剩 {0} 个（继续点 / 点回起点 / 右键收尾）', [points.length]))
   }
   return true
 }
@@ -2848,7 +2848,7 @@ function rewirePointerDown(host: ToolHost, target: MeshTarget, world: Vec2): boo
   const hit = host.scene.pickVertexAt(world.x, world.y)
   const ref = hit ? resolveVertex(host, hit.vertexIndex) : null
   if (!ref || ref.slot !== target.slot || ref.attachment !== target.attachment) {
-    host.status('自定义布线：从网格的一个顶点上按住，拖到另一个顶点上松手')
+    host.status(t('自定义布线：从网格的一个顶点上按住，拖到另一个顶点上松手'))
     return true
   }
   const from = target.data.vertices[ref.vertex]
@@ -2868,7 +2868,7 @@ function rewirePointerDown(host: ToolHost, target: MeshTarget, world: Vec2): boo
   host.scene.setViewState({
     pendingMeshPath: { slot: target.slot, attachment: target.attachment, points: [start], cursor: start }
   })
-  host.status(`从顶点 #${ref.vertex} 拖到另一个顶点：松手即在这两点之间连一条线`)
+  host.status(t('从顶点 #{0} 拖到另一个顶点：松手即在这两点之间连一条线', [ref.vertex]))
   return true
 }
 
@@ -2890,7 +2890,7 @@ function rewireDragEnd(host: ToolHost, session: DragSession): void {
   const hit = scene.pickVertexAt(session.lastWorld.x, session.lastWorld.y)
   const ref = hit ? resolveVertex(host, hit.vertexIndex) : null
   if (!ref || ref.slot !== session.slot || ref.attachment !== session.attachment || ref.vertex === session.vertex) {
-    host.status('自定义布线：要落到**另一个**顶点上才会连线，这次什么都没改')
+    host.status(t('自定义布线：要落到**另一个**顶点上才会连线，这次什么都没改'))
     return
   }
   // runCommand：连线跑不通（已经连着 / 没横穿内部）时草稿直接丢掉，不留空的撤销记录
@@ -2900,11 +2900,11 @@ function rewireDragEnd(host: ToolHost, session: DragSession): void {
       connectMeshVertices(draft, session.slot, session.attachment, session.vertex, ref.vertex)
     )
   if (!committed) {
-    host.status('这两点之间连不上：已经连着线了，或这条线没有横穿网格内部')
+    host.status(t('这两点之间连不上：已经连着线了，或这条线没有横穿网格内部'))
     return
   }
   meshSubtoolSync(host)
-  host.status(`已在顶点 #${session.vertex} 与 #${ref.vertex} 之间连上线（只重排这条通道上的三角形）`)
+  host.status(t('已在顶点 #{0} 与 #{1} 之间连上线（只重排这条通道上的三角形）', [session.vertex, ref.vertex]))
 }
 
 /** 二维叉积（判点在直线哪一侧 / 求交点参数都用它） */

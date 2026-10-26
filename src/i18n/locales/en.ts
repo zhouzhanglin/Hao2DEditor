@@ -1454,4 +1454,117 @@ export const en: Record<string, string> = {
     'Hao2D: file header mismatch (0x{0}); this is not a .hao2d asset',
   'Hao2D: 不支持的数据版本 {0}（支持 5 / 6 / 7 / 8 / {1}），请重新导出':
     'Hao2D: unsupported data version {0} (supports 5 / 6 / 7 / 8 / {1}); please re-export',
+
+  // ── 遮罩绘制 / 编辑提示 ───────────────────────────────────────────────
+  '遮罩至少需要 3 个点': 'A mask needs at least 3 points',
+  '没有新增遮罩点，原多边形未修改': 'No new mask point added; the original polygon is unchanged',
+  '遮罩点换算失败（插槽没有绑定骨骼，或骨骼缩放为 0）':
+    'Failed to convert the mask point (the slot has no bound bone, or the bone scale is 0)',
+  '已更新遮罩「{0}」：在检查器里设置结束插槽 / 反向，或继续拖控制点':
+    'Updated mask "{0}": set the end slot / reverse in the inspector, or keep dragging control points',
+  '已创建遮罩「{0}」：在检查器里设置结束插槽 / 反向，或继续拖控制点':
+    'Created mask "{0}": set the end slot / reverse in the inspector, or keep dragging control points',
+  '已取消遮罩绘制': 'Mask drawing cancelled',
+  '已撤回上一个新增遮罩点：还剩 {0} 个新增点，原多边形未变':
+    'Undid the last new mask point: {0} new point(s) left; the original polygon is unchanged',
+  '已撤回上一个遮罩点：还剩 {0} 个（继续点 / 点回起点 / 右键收尾）':
+    'Removed the last mask point: {0} left (keep clicking / click the start point / right-click to finish)',
+  '已撤回最后一个遮罩点：单击继续，Esc 取消':
+    'Removed the last mask point: click to continue, Esc to cancel',
+  '遮罩至少保留 3 个控制点': 'A mask must keep at least 3 control points',
+  '删除遮罩控制点失败': 'Failed to delete the mask control point',
+  '已删除遮罩控制点': 'Mask control point deleted',
+  '遮罩绑定数据在 Pose 编辑；Animate 态请用顶点工具（D）拖遮罩点写 FFD':
+    'Mask binding data is edited in Pose; in Animate, use the vertex tool (D) to drag mask points and write FFD',
+  '先在层级树里选中一个插槽，再画遮罩': 'Select a slot in the hierarchy first, then draw the mask',
+  '正在给另一个插槽画遮罩：先点回起点 / 右键闭合，或 Esc 取消':
+    'A mask is being drawn for another slot: click back on the start point / right-click to close, or press Esc to cancel',
+  '已删除一个遮罩控制点': 'Deleted a mask control point',
+  '已选中遮罩控制点 #{0}：拖动移动，Delete 删除':
+    'Selected mask control point #{0}: drag to move, Delete to remove',
+  '插入遮罩控制点失败': 'Failed to insert the mask control point',
+  '已在遮罩边上插入控制点：拖动调整，Delete 删除':
+    'Inserted a control point on the mask edge: drag to adjust, Delete to remove',
+  '已取消选中遮罩点；点边线插入点，拖点移动，Delete 删除':
+    'Mask point deselected; click an edge to insert a point, drag a point to move it, Delete to remove',
+  '新建遮罩：单击加点；点回起点 / 右键闭合；Ctrl+Z 撤点；Esc 取消':
+    'New mask: click to add points; click the start point / right-click to close; Ctrl+Z to undo a point; Esc to cancel',
+  '遮罩控制点不支持权重刷；遮罩的动画请用顶点工具（D）写 FFD':
+    "Weight painting doesn't apply to mask control points; animate the mask with the vertex tool (D) to write FFD",
+
+  // ── 权重刷 / 顶点 / 边界 / 布线提示 ────────────────────────────────────
+  '权重刷只在 Pose 状态可用（动画状态的角色姿态不是绑定姿态）':
+    'Weight painting is only available in Pose (the character pose in Animate is not the setup pose)',
+  '先在层级树里选中要刷权重的网格附件（Region 请先转为网格）':
+    'Select the mesh attachment to weight paint in the hierarchy first (convert a Region to a mesh first)',
+  '骨骼属于绑定数据：切到 Pose 状态再画': 'Bones are setup data: switch to Pose to draw',
+  '该顶点不支持编辑（Region 请先转为网格）':
+    "This vertex can't be edited (convert a Region to a mesh first)",
+  '已插入顶点 #{0}（UV 与权重按位置插值；落在网格线上会把那条边一分为二）':
+    'Inserted vertex #{0} (UV and weights are interpolated by position; dropping it on a mesh edge splits that edge in two)',
+  '删除顶点：对准要删的顶点再点（网格至少得留 3 个顶点）':
+    'Delete vertex: aim at the vertex to remove, then click (a mesh must keep at least 3 vertices)',
+  '删不掉：网格至少得保留 3 个顶点': "Can't delete: a mesh must keep at least 3 vertices",
+  '已删除顶点 #{0}（引用它的三角形就地重新三角化补上）':
+    'Deleted vertex #{0} (triangles referencing it were re-triangulated in place)',
+  '插入位置不在附件上：点在网格覆盖的区域内':
+    "The insert position isn't on the attachment: click inside the area covered by the mesh",
+  '框选：矩形里没有顶点（右键可取消当前选择）':
+    'Marquee: no vertices inside the rectangle (right-click to cancel the current selection)',
+  '框选到 {0} 个顶点（共选中 {1} 个；拖动任意一个整组移动）':
+    'Marquee selected {0} vertices ({1} selected in total; drag any of them to move the whole group)',
+  '边界点要落在附件所在的插槽上':
+    'Boundary points must lie on the slot that owns the attachment',
+  '这个点离上一个点太近，没有落下':
+    'This point is too close to the previous one; it was not placed',
+  '绘制边界已取消：至少要 3 个点才围得成一个边界；已回到「编辑顶点」':
+    'Boundary drawing cancelled: you need at least 3 points to enclose a boundary; back to "Edit Vertices"',
+  '边界重建失败：这 3 个点几乎共线，或附件已经不是网格了':
+    'Failed to rebuild the boundary: these 3 points are almost collinear, or the attachment is no longer a mesh',
+  '已按新边界重建网格：{0} 个顶点 / {1} 个三角面（贴图停在原位；原网格点、绑定权重与 FFD 关键帧已清除，要蒙皮请重新绑骨骼并算权重）；已回到「编辑顶点」':
+    'Mesh rebuilt from the new boundary: {0} vertices / {1} triangles (the texture stays in place; the original mesh points, binding weights and FFD keyframes were cleared — re-bind bones and compute weights if you need skinning); back to "Edit Vertices"',
+  '还没有落下边界点；要撤销文档命令，请先退出「自己绘制边界」':
+    'No boundary points placed yet; to undo document commands, leave "Draw Boundary Yourself" first',
+  '已撤回最后一个边界点：重新开始点（点回起点或右键收尾）':
+    'Removed the last boundary point: start clicking again (click the start point or right-click to finish)',
+  '已撤回上一个边界点：还剩 {0} 个（继续点 / 点回起点 / 右键收尾）':
+    'Removed the last boundary point: {0} left (keep clicking / click the start point / right-click to finish)',
+  '自定义布线：从网格的一个顶点上按住，拖到另一个顶点上松手':
+    'Custom topology: press on one mesh vertex, drag to another vertex and release',
+  '从顶点 #{0} 拖到另一个顶点：松手即在这两点之间连一条线':
+    'Dragging from vertex #{0} to another vertex: release to connect a line between them',
+  '自定义布线：要落到**另一个**顶点上才会连线，这次什么都没改':
+    'Custom topology: you must drop on **another** vertex to connect; nothing changed this time',
+  '这两点之间连不上：已经连着线了，或这条线没有横穿网格内部':
+    "Can't connect these two points: they are already connected, or the line doesn't cross the mesh interior",
+  '已在顶点 #{0} 与 #{1} 之间连上线（只重排这条通道上的三角形）':
+    'Connected vertices #{0} and #{1} (only triangles along this channel were re-triangulated)',
+
+  // ── 选择 / 变换提示 ──────────────────────────────────────────────────
+  '插槽「{0}」已锁定：在层级树里解锁后才能选中':
+    'Slot "{0}" is locked: unlock it in the hierarchy to select it',
+  '插槽「{0}」已锁定：在层级树里解锁后才能拖动':
+    'Slot "{0}" is locked: unlock it in the hierarchy to drag it',
+  '骨骼「{0}」已锁定，先解锁再编辑': 'Bone "{0}" is locked; unlock it before editing',
+  '已选中附件「{0}」（{1}）：可编辑其顶点':
+    'Selected attachment "{0}" ({1}): its vertices can be edited',
+  '已选中附件「{0}」（{1}）：拖动即可{2}':
+    'Selected attachment "{0}" ({1}): drag to {2}',
+  '已选中附件「{0}」（{1}）：位置属于绑定数据，切到 Pose 态才能拖动':
+    'Selected attachment "{0}" ({1}): position is setup data, switch to Pose to drag it',
+  '斜切不支持附件：「{0}」请用移动 / 旋转 / 缩放，或斜切它所在的骨骼':
+    'Shear does not apply to attachments: use move / rotate / scale for "{0}", or shear its bone',
+  '斜切骨骼「{0}」：拖动斜切包围盒的边（上下边横向拖 / 左右边纵向拖）':
+    'Shear bone "{0}": drag the edges of the shear box (top/bottom edges drag horizontally, left/right edges drag vertically)',
+  '移动骨骼「{0}」{1} · 拖动骨骼原点圆圈':
+    'Move bone "{0}" {1} · drag the bone origin circle',
+  '{0}骨骼「{1}」{2} · {3}{4}': '{0} bone "{1}" {2} · {3}{4}',
+  '斜切骨骼「{0}」{1} · 拖动包围盒{2}{3}':
+    'Shear bone "{0}" {1} · drag the box{2}{3}',
+  '拖动距离太短，未生成骨骼': 'Drag distance too short; no bone was created',
+  '「{0}」要先选中一个网格附件（Region 可右键「转为网格」再改）':
+    '"{0}": select a mesh attachment first (right-click a Region and choose "Convert to Mesh")',
+  '「{0}」改的是绑定网格：请切到 Pose 状态（Animate 态拖顶点写的是 FFD 帧）':
+    '"{0}" edits the setup mesh: switch to Pose (dragging vertices in Animate writes FFD frames)',
+
 }

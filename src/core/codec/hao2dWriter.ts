@@ -29,12 +29,16 @@ export const HAO2D_MAGIC = 0x44324f48
  *   `position` —— 那是骨骼坐标系，会被骨骼旋转带偏。未裁剪时为 0，与 v5 数据等价（读端兼容 v5）。
  * - **7**：附件段末尾补遮罩三项 `clipEndSlot / clipInverse / clipConvex`；
  *   同时 `BlendMode` 移除 Mask 并重排（Below 6→5、None 7→6），读端对旧版本做迁移。
+ * - **8**：支持骨架嵌套。附件段末尾补 `subArmature / subAnimation / subPlayTimes / subOffset / subSpeed`，
+ *   `type = Armature(5)` 真正落盘；插槽动画段补「子骨架」控制帧。
+ * - **9**：文件尾补 `defaultSkin`（编辑器当前皮肤，作为叠加皮肤；基底仍是 `defaultSkinIndex` 那套），
+ *   否则只在非默认皮肤里的 display（例如挂在 goblin 皮肤上的嵌套骨架）导出后不显示。
  *
  * ⚠️ 附件段**只写 C# 参考库 `Hao2DCodec` 认识的字段**。编辑器内部还有 `frameSize`
  * （未裁剪原图尺寸，只用于检查器显示与选中框），它**不进二进制**：写进去会让 Unity 读端
  * 从附件段开始整体错位（EndOfStreamException）。展示用的 frameSize 请放工程 JSON。
  */
-export const HAO2D_VERSION = 7
+export const HAO2D_VERSION = 9
 
 export interface Hao2dInspectResult {
   magic: number
@@ -70,6 +74,8 @@ export function writeHao2d(asset: RuntimeAsset): Uint8Array {
   writer.writeStringArray(asset.textureNames)
   writer.writeInt32(asset.dataType)
   writer.writeInt32(asset.defaultSkinIndex)
+  // v9：叠加皮肤（编辑器当前皮肤）。空串 = 只用基底皮肤
+  writer.writeString(asset.defaultSkin ?? '')
 
   return writer.toUint8Array()
 }
@@ -117,32 +123,8 @@ function writeSkins(writer: ByteWriter, skins: readonly SkinData[]): void {
     for (const slot of skin.slots) {
       writer.writeString(slot.slotName)
       writer.writeInt32(slot.attachments.length)
-      for (const attachment of slot.attachments) writeAttachment(writer, hao2dAttachment(attachment))
+      for (const attachment of slot.attachments) writeAttachment(writer, attachment)
     }
-  }
-}
-
-/**
- * `.hao2d` 只认既有附件枚举（Unity 端 `Hao2DCodec` 逐字节读取，遇到未知枚举会整体错位）。
- *
- * 嵌套骨架写成**零尺寸 Region 占位**：附件数量与 `displayIndex` 下标保持不变 ——
- * 直接跳过会让后面所有动画的显示切换指到别的附件（换装错位），比少一个部件更难查。
- */
-function hao2dAttachment(a: AttachmentData): AttachmentData {
-  if (a.type !== AttachmentType.Armature) return a
-  return {
-    ...a,
-    type: AttachmentType.Region,
-    size: { x: 0, y: 0 },
-    frameSize: { x: 0, y: 0 },
-    contentOffset: { x: 0, y: 0 },
-    textureName: '',
-    uvs: new Float32Array(0),
-    vertices: new Float32Array(0),
-    triangles: [],
-    edges: [],
-    hull: 0,
-    weights: []
   }
 }
 
@@ -197,6 +179,12 @@ function writeAttachment(writer: ByteWriter, a: AttachmentData): void {
   writer.writeString(a.clipEndSlot)
   writer.writeBool(a.clipInverse)
   writer.writeBool(a.clipConvex)
+  // v8：嵌套骨架。所有附件都写，保持记录定长（非 Armature 附件写空串 / 0 / 1）
+  writer.writeString(a.subArmature ?? '')
+  writer.writeString(a.subAnimation ?? '')
+  writer.writeInt32(a.subPlayTimes ?? 0)
+  writer.writeFloat32(a.subOffset ?? 0)
+  writer.writeFloat32(a.subSpeed ?? 1)
 }
 
 function writeWeights(writer: ByteWriter, weights: readonly VertexWeight[]): void {
@@ -268,6 +256,16 @@ function writeSlotAnims(writer: ByteWriter, arr: readonly SlotAnim[]): void {
     writeIntKeyframes(writer, anim.displayIndex)
     writer.writeStringArray(anim.displayAttachment)
     writeIntKeyframes(writer, anim.visible)
+    // v8：「子骨架」控制帧（动画名 + 次数 / 偏移 / 倍速）
+    const sub = anim.subArmature ?? []
+    writer.writeInt32(sub.length)
+    for (const frame of sub) {
+      writer.writeFloat32(frame.time)
+      writer.writeString(frame.animation ?? '')
+      writer.writeInt32(Math.round(frame.playTimes ?? 0))
+      writer.writeFloat32(frame.offset ?? 0)
+      writer.writeFloat32(frame.speed ?? 1)
+    }
   }
 }
 
@@ -385,19 +383,25 @@ export function collectHao2dWarnings(asset: RuntimeAsset): string[] {
   if (!asset.runtimeIK) {
     warnings.push('该资源 runtimeIK = false：Unity 运行期不会再解算 IK（IK 已烘焙进骨骼轨道）')
   }
-  // 嵌套骨架：Unity 端 .hao2d 没有 armature display 概念，只能按空占位写
-  const nestedCount = asset.skins.reduce(
-    (total, skin) =>
-      total +
-      skin.slots.reduce(
-        (count, slot) => count + slot.attachments.filter((a) => a.type === AttachmentType.Armature).length,
-        0
-      ),
-    0
-  )
-  if (nestedCount > 0) {
+  /*
+   * 嵌套骨架：.hao2d v8 已能表达（Armature 附件 + 子骨架控制帧），但**子骨架资源要单独导出**：
+   * Unity 导入器按 .hao2d 同目录、按 armatureName 解析 nestedAssets。
+   * 少了文件不会报导入错误，只是运行期那个 display 不渲染 —— 所以这里点名提醒。
+   */
+  const nestedNames = new Set<string>()
+  for (const skin of asset.skins) {
+    for (const slot of skin.slots) {
+      for (const attachment of slot.attachments) {
+        if (attachment.type === AttachmentType.Armature && attachment.subArmature) {
+          nestedNames.add(attachment.subArmature)
+        }
+      }
+    }
+  }
+  if (nestedNames.size > 0) {
     warnings.push(
-      `有 ${nestedCount} 个嵌套骨架 display：.hao2d（Unity）不支持骨架嵌套，已按零尺寸空占位导出，Unity 侧看不到这些子骨架`
+      `包含嵌套骨架：${[...nestedNames].join('、')}。Unity 侧需要把它们的 .hao2d 一起导出到**同一目录**` +
+        '（导入器按 armatureName 自动关联；缺文件时该 display 不渲染）'
     )
   }
   // 插槽 setup 可见性（层级树眼睛）不在 .hao2d 二进制里：格式与 Unity 参考库

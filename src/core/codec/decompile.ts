@@ -244,7 +244,11 @@ export function decompileAsset(asset: RuntimeAsset, activeSkin = ''): EditorDocu
       loose: image.loose ?? false,
       regions: image.regions
     })),
-    editorMeta: { ...createDefaultMeta(), activeSkin }
+    editorMeta: {
+      ...createDefaultMeta(),
+      // 导出时编辑器正在编辑的皮肤（叠加皮肤）：重新导入时回到同一个皮肤
+      activeSkin: asset.defaultSkin ?? ''
+    }
   }
 }
 

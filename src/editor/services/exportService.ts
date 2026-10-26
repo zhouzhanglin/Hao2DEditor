@@ -453,6 +453,14 @@ export function prepareRuntimeExport(options: RuntimeExportOptions): RuntimeExpo
     warnings.push('本次导出的骨架没有使用任何图片，导出的图集将为空（角色会以纯色块渲染）')
   }
 
+  // 导出会带上「编辑器当前皮肤」作为叠加皮肤（基底 default 仍永远生效），这里明确告知
+  const activeSkin = list[0]?.editorMeta.activeSkin ?? ''
+  if (activeSkin && activeSkin !== 'default') {
+    warnings.push(
+      `当前皮肤：${activeSkin}（作为叠加皮肤导出：基底 default + ${activeSkin}；运行期仍可切换）`
+    )
+  }
+
   const nestedNames = [...new Set(skeletons.flatMap((entry) => entry.nested.map((item) => item.armatureName)))]
   if (nestedNames.length > 0) {
     warnings.push(
@@ -594,7 +602,9 @@ export async function writeHao2dExport(
   const doc = useProjectStore.getState().document
   // 每个骨架各自可能有能力差异提示：合并后去重
   const warnings = uniqueWarnings([
-    ...plan.warnings,
+    // 运行时那条「按 ske 的 nested 清单加载」提示不适用于 Unity：.hao2d 走同目录资源关联，
+    // 具体提示由 collectHao2dWarnings 给出（点名需要一起导出的子骨架）
+    ...plan.warnings.filter((warning) => !warning.includes('嵌套子骨架')),
     ...plan.skeletons.flatMap((entry) => collectHao2dWarnings(entry.asset))
   ])
   const outDir = joinPath(dir, plan.stem)
@@ -762,7 +772,8 @@ export async function buildHao2dPreviewBundles(plan: RuntimeExportPlan): Promise
     animations: entry.asset.animations.map((animation) => animation.name),
     skins: entry.asset.skins.map((skin) => skin.name),
     defaultAnimation: entry.asset.animations[0]?.name ?? '',
-    defaultSkin: entry.asset.skins[0]?.name ?? '',
+    // 叠加皮肤 = 导出时编辑器正在编辑的皮肤（基底皮肤由 asset.defaultSkinIndex 决定）
+    defaultSkin: entry.asset.defaultSkin,
     nested: entry.nested
       .map((item) => ({ armatureName: item.armatureName, id: idByFile.get(item.file) ?? '' }))
       .filter((item) => item.id.length > 0)

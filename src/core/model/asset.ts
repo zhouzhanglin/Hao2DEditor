@@ -24,7 +24,13 @@ export interface RuntimeAsset {
   bindposes: Float32Array
   /** 图集页 png 名，顺序 = 材质槽顺序 */
   textureNames: string[]
+  /** 合并基底皮肤（通常是名为 default 的那套） */
   defaultSkinIndex: number
+  /**
+   * 运行期默认**叠加**皮肤（= 导出时编辑器当前皮肤；空串 = 只显示基底皮肤）。
+   * 与 `defaultSkinIndex` 是两件事：基底永远生效，这个皮肤叠加在它上面（同名覆盖）。
+   */
+  defaultSkin: string
   runtimeIK: boolean
   /** 编辑器扩展：图集页尺寸与来源路径 */
   images: ImageRef[]
@@ -43,6 +49,7 @@ export function createRuntimeAsset(partial?: Partial<RuntimeAsset>): RuntimeAsse
     bindposes: new Float32Array(0),
     textureNames: [],
     defaultSkinIndex: 0,
+    defaultSkin: '',
     runtimeIK: true,
     images: [],
     ...partial

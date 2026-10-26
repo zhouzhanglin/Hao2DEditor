@@ -197,7 +197,14 @@ export function assetFromJson(ske: RuntimeSkeJson, atlas: RuntimeAtlasJson | nul
       loose: false
     }))
   })
-  asset.defaultSkinIndex = Math.max(0, asset.skins.findIndex((skin) => skin.name === 'default'))
+  // 导出时的「默认皮肤」：优先用文件里写的下标（= 编辑器当前皮肤），老文件回落到 default
+  const fallbackSkin = Math.max(0, asset.skins.findIndex((skin) => skin.name === 'default'))
+  asset.defaultSkinIndex =
+    typeof ske.defaultSkinIndex === 'number' && ske.defaultSkinIndex >= 0 && ske.defaultSkinIndex < asset.skins.length
+      ? ske.defaultSkinIndex
+      : fallbackSkin
+  // 叠加皮肤（编辑器当前皮肤）：与基底皮肤并存，不改 defaultSkinIndex
+  asset.defaultSkin = typeof ske.defaultSkin === 'string' ? ske.defaultSkin : ''
   return asset
 }
 

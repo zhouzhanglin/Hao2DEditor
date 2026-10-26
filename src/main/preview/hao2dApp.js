@@ -213,6 +213,7 @@
         pages: data.pages,
         skeText: data.skeText,
         atlasText: data.atlasText,
+        defaultSkin: entry.defaultSkin,
         nested: data.nested
       }).then(function (created) {
         stage = created

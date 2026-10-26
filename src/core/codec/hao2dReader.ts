@@ -19,7 +19,8 @@ import type {
   FloatKeyframe,
   IkAnim,
   IntKeyframe,
-  SlotAnim
+  SlotAnim,
+  SubArmatureKeyframe
 } from '../model/animation'
 import { Easing as EasingEnum } from '../model/animation'
 
@@ -28,7 +29,7 @@ export interface Hao2dReadResult {
   warnings: string[]
 }
 
-/** 解析 `.hao2d`（支持 Version 5 / 6 / 7）。magic / version 不匹配时抛出可读错误。 */
+/** 解析 `.hao2d`（支持 Version 5 / 6 / 7 / 8 / 9）。magic / version 不匹配时抛出可读错误。 */
 export function readHao2d(bytes: Uint8Array): Hao2dReadResult {
   const warnings: string[] = []
   const reader = new ByteReader(bytes)
@@ -38,8 +39,10 @@ export function readHao2d(bytes: Uint8Array): Hao2dReadResult {
   }
   const version = reader.readUint16()
   // v5 的附件段没有 contentOffset，按 0 读 —— 等价于「没被裁剪过」
-  if (version !== 5 && version !== 6 && version !== HAO2D_VERSION) {
-    throw new Error(`Hao2D: 不支持的数据版本 ${version}（支持 5 / 6 / ${HAO2D_VERSION}），请重新导出`)
+  // 5 / 6 / 7 是历史格式（字段更少，按默认值补齐）；8 = 当前格式（含骨架嵌套）
+  const supported = version === 5 || version === 6 || version === 7 || version === 8 || version === HAO2D_VERSION
+  if (!supported) {
+    throw new Error(`Hao2D: 不支持的数据版本 ${version}（支持 5 / 6 / 7 / 8 / ${HAO2D_VERSION}），请重新导出`)
   }
 
   const armatureName = reader.readString()
@@ -48,11 +51,13 @@ export function readHao2d(bytes: Uint8Array): Hao2dReadResult {
   const slots = readSlots(reader, version, warnings)
   const skins = readSkins(reader, version)
   const constraints = readIks(reader)
-  const animations = readAnimations(reader)
+  const animations = readAnimations(reader, version)
   const bindposes = readBindposes(reader)
   const textureNames = reader.readStringArray()
   const dataType = reader.readInt32() as AnimType
   const defaultSkinIndex = reader.readInt32()
+  // v9：叠加皮肤（编辑器当前皮肤）；旧文件没有 → 只显示基底皮肤
+  const defaultSkin = version >= 9 ? reader.readString() : ''
 
   const asset = createRuntimeAsset({
     dataType,
@@ -66,6 +71,7 @@ export function readHao2d(bytes: Uint8Array): Hao2dReadResult {
     bindposes,
     textureNames,
     defaultSkinIndex,
+    defaultSkin,
     runtimeIK: true,
     images: textureNames.map((name) => ({ name, path: name, width: 0, height: 0 }))
   })
@@ -212,6 +218,12 @@ function readAttachment(reader: ByteReader, version: number): AttachmentData {
   const clipEndSlot = version >= 7 ? reader.readString() : ''
   const clipInverse = version >= 7 ? reader.readBool() : false
   const clipConvex = version >= 7 ? reader.readBool() : false
+  // v8：嵌套骨架（旧版本没有这些字段，按「不是嵌套」补齐）
+  const subArmature = version >= 8 ? reader.readString() : ''
+  const subAnimation = version >= 8 ? reader.readString() : ''
+  const subPlayTimes = version >= 8 ? reader.readInt32() : 0
+  const subOffset = version >= 8 ? reader.readFloat32() : 0
+  const subSpeed = version >= 8 ? reader.readFloat32() : 1
 
   return createAttachmentData({
     name,
@@ -235,7 +247,12 @@ function readAttachment(reader: ByteReader, version: number): AttachmentData {
     linkedMeshAttachment,
     clipEndSlot,
     clipInverse,
-    clipConvex
+    clipConvex,
+    subArmature,
+    subAnimation,
+    subPlayTimes,
+    subOffset,
+    subSpeed
   })
 }
 
@@ -280,14 +297,14 @@ function readIks(reader: ByteReader): IkConstraint[] {
   return iks
 }
 
-function readAnimations(reader: ByteReader): AnimData[] {
+function readAnimations(reader: ByteReader, version: number): AnimData[] {
   const count = reader.readInt32()
   const animations: AnimData[] = []
   for (let i = 0; i < count; i++) {
     const name = reader.readString()
     const duration = reader.readFloat32()
     const bones = readBoneAnims(reader)
-    const slots = readSlotAnims(reader)
+    const slots = readSlotAnims(reader, version)
     const deforms = readDeformAnims(reader)
     const drawOrder = readDrawOrder(reader)
     const events = readEvents(reader)
@@ -397,7 +414,7 @@ function readBoneAnims(reader: ByteReader): BoneAnim[] {
   return out
 }
 
-function readSlotAnims(reader: ByteReader): SlotAnim[] {
+function readSlotAnims(reader: ByteReader, version: number): SlotAnim[] {
   const count = reader.readInt32()
   const out: SlotAnim[] = []
   for (let i = 0; i < count; i++) {
@@ -406,8 +423,23 @@ function readSlotAnims(reader: ByteReader): SlotAnim[] {
     const displayIndex = readIntKeyframes(reader)
     const displayAttachment = reader.readStringArray()
     const visible = readIntKeyframes(reader)
-    // `.hao2d` 二进制不承载编辑器扩展通道（Unity 端按固定字段读取），一律读成空轨道
-    out.push({ slotIndex, color, displayIndex, displayAttachment, visible, subArmature: [] })
+    // v8：「子骨架」控制帧（旧版本没有，读成空轨道）。离散量按阶跃处理
+    const subArmature: SubArmatureKeyframe[] = []
+    if (version >= 8) {
+      const keyCount = reader.readInt32()
+      for (let k = 0; k < keyCount; k++) {
+        subArmature.push({
+          time: reader.readFloat32(),
+          animation: reader.readString(),
+          playTimes: reader.readInt32(),
+          offset: reader.readFloat32(),
+          speed: reader.readFloat32(),
+          easing: EasingEnum.Stepped,
+          curve: null
+        })
+      }
+    }
+    out.push({ slotIndex, color, displayIndex, displayAttachment, visible, subArmature })
   }
   return out
 }

@@ -78,6 +78,16 @@ export interface RuntimeSkeJson {
   bindposes: number[]
   /** v2：子骨架清单（v1 文件没有这个字段，读成空数组） */
   nested?: RuntimeSkeNested[]
+  /**
+   * 运行期默认皮肤下标（= 导出时编辑器正在编辑的皮肤）。
+   * v1 / 缺省时加载端回落到名为 `default` 的皮肤。
+   */
+  defaultSkinIndex?: number
+  /**
+   * 运行期默认叠加皮肤（= 导出时编辑器当前皮肤）。基底皮肤由 `defaultSkinIndex` 决定，
+   * 两者叠加（同名覆盖）。缺省 = 只显示基底皮肤。
+   */
+  defaultSkin?: string
 }
 
 export const RUNTIME_PPU = 100
@@ -149,6 +159,8 @@ export function serializeRuntimeSke(
     constraints: asset.constraints.map((constraint) => ({ ...constraint })),
     animations: asset.animations.map((animation) => ({ ...animation })),
     bindposes: Array.from(asset.bindposes),
+    defaultSkinIndex: asset.defaultSkinIndex,
+    defaultSkin: asset.defaultSkin,
     nested: options.nested ? options.nested.map((item) => ({ ...item })) : []
   }
   return `${JSON.stringify(json, null, 2)}\n`
@@ -164,6 +176,8 @@ export function parseRuntimeSke(text: string): RuntimeSkeJson {
   if (raw.version !== 1 && raw.version !== 2) {
     throw new Error(`不支持的 hao2d-ske 版本 ${raw.version}`)
   }
+  if (typeof raw.defaultSkinIndex !== 'number' || raw.defaultSkinIndex < 0) delete raw.defaultSkinIndex
+  if (typeof raw.defaultSkin !== 'string') delete raw.defaultSkin
   raw.nested = Array.isArray(raw.nested)
     ? raw.nested.filter((item) => typeof item?.armatureName === 'string' && typeof item?.file === 'string')
     : []

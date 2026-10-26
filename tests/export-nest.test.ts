@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { parseRuntimeSke, serializeRuntimeSke } from '@core/codec/runtimeSkeJson'
-import { collectHao2dWarnings } from '@core/codec/hao2dWriter'
+import { collectHao2dWarnings, writeHao2d } from '@core/codec/hao2dWriter'
+import { readHao2d } from '@core/codec/hao2dReader'
+import { loadRuntime } from '@core/runtime/loader'
+import { AttachmentType } from '@core/model/types'
 import { buildSpineJson } from '@editor/services/spineExport'
 import { compileDocument } from '@core/codec/compile'
 import {
@@ -86,6 +89,64 @@ describe('运行时 ske v2', () => {
       bindposes: []
     })
     expect(parseRuntimeSke(legacy).nested).toEqual([])
+  })
+})
+
+describe('皮肤：基底 + 当前皮肤叠加', () => {
+  it('compile 把 activeSkin 写成叠加皮肤，基底仍是 default', () => {
+    const doc = heroDoc()
+    doc.editorMeta.activeSkin = 'alt'
+    // 只把嵌套 display 放进 alt 皮肤（真实工程里很常见）
+    doc.skins.push({
+      name: 'alt',
+      slots: [
+        {
+          slot: 'weapon',
+          attachments: [
+            createAuthoringAttachment({ name: 'Sword', type: 'armature', subArmature: 'Sword' })
+          ]
+        }
+      ]
+    })
+    const asset = compileDocument(doc).asset
+    // 基底皮肤不能改成 alt，否则只存在于 default 皮肤里的武器会整批消失
+    expect(asset.skins[asset.defaultSkinIndex].name).toBe('default')
+    expect(asset.defaultSkin).toBe('alt')
+
+    const parsed = parseRuntimeSke(serializeRuntimeSke(asset, { atlasFileName: 'a.json' }))
+    expect(parsed.defaultSkin).toBe('alt')
+    expect(parsed.defaultSkinIndex).toBe(asset.defaultSkinIndex)
+    const loaded = loadRuntime(
+      JSON.stringify(parsed),
+      JSON.stringify({ format: 'hao2d-atlas', version: 1, pages: [], regions: [] })
+    )
+    expect(loaded.asset.defaultSkin).toBe('alt')
+    expect(loaded.asset.skins[loaded.asset.defaultSkinIndex].name).toBe('default')
+  })
+})
+
+describe('.hao2d v8：Unity 侧嵌套支持', () => {
+  it('写读往返保留 Armature 附件与「子骨架」控制帧', () => {
+    const asset = compileDocument(heroDoc()).asset
+    const parsed = readHao2d(writeHao2d(asset))
+    const attachment = parsed.asset.skins[0].slots[0].attachments[0]
+    expect(attachment.type).toBe(AttachmentType.Armature)
+    expect(attachment.subArmature).toBe('Sword')
+    expect(attachment.subAnimation).toBe('idle')
+    expect(attachment.subPlayTimes).toBe(0)
+    expect(attachment.subSpeed).toBe(1)
+
+    const animation = parsed.asset.animations.find((item) => item.name === 'attack')
+    const track = animation?.slots.find((item) => item.subArmature.length > 0)
+    expect(track?.subArmature[0].animation).toBe('slash')
+    expect(track?.subArmature[0].playTimes).toBe(0)
+  })
+
+  it('告警改成「子骨架 .hao2d 要一起导出到同目录」', () => {
+    const asset = compileDocument(heroDoc()).asset
+    const warnings = collectHao2dWarnings(asset)
+    expect(warnings.some((warning) => warning.includes('包含嵌套骨架：Sword'))).toBe(true)
+    expect(warnings.some((warning) => warning.includes('同一目录'))).toBe(true)
   })
 })
 

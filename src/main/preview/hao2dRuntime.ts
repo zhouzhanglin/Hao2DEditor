@@ -40,6 +40,8 @@ export interface StageInput {
   skeText: string
   atlasText: string
   background?: string
+  /** 导出时的默认皮肤（= 编辑器当前皮肤）；缺省用第一个皮肤 */
+  defaultSkin?: string
   /** 被嵌套引用的子骨架文本（骨架名 → ske 文本）；共用父骨架的图集 */
   nested?: Array<{ armatureName: string; skeText: string }>
 }
@@ -204,7 +206,7 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
           destroyLayer(entry.child)
         }
         entry = {
-          view: new SkeletonView(instance.asset, textures, ''),
+          view: new SkeletonView(instance.asset, textures, activeSkin),
           time: Number.NaN,
           child: createNestLayer('')
         }
@@ -237,11 +239,15 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
     }
     host.setNestedViews(layers)
   }
-  const rootLayer = createNestLayer('')
   const animations = asset.animations.map((animation) => animation.name)
   const skins = asset.skins.map((skin) => skin.name)
   const defaultAnimation = animations[0] ?? ''
-  const defaultSkin = skins[0] ?? ''
+  // 导出包里带的是「导出时的默认皮肤」（可能不是 skins[0]，例如当前在 goblin 皮肤上编辑）
+  const defaultSkin =
+    input.defaultSkin && skins.includes(input.defaultSkin) ? input.defaultSkin : skins[0] ?? ''
+  /** 当前生效的叠加皮肤：子骨架视图与它们自己的皮肤合并都要跟着它走 */
+  let activeSkin = defaultSkin
+  let rootLayer = createNestLayer(activeSkin)
 
   let zoom = 1
   let offsetX = 0
@@ -418,6 +424,14 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
     setSkin(name: string) {
       view.setSkin(name)
       view.markDirty()
+      /*
+       * 子骨架视图按「当前皮肤」建自己的运行期映射（基底皮肤 + 叠加皮肤）：
+       * 换皮肤后必须重建，否则子骨架仍停在上一套皮肤的附件上（部件错位 / 消失）。
+       */
+      activeSkin = name || defaultSkin
+      destroyLayer(rootLayer)
+      view.setNestedViews([])
+      rootLayer = createNestLayer(activeSkin)
       dirty = true
     },
     setLoop(loop: boolean) {

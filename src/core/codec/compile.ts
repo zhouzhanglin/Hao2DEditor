@@ -572,10 +572,18 @@ export function compileDocument(doc: EditorDocument): CompileResult {
     compileAnimations(anim, index, slotIndex, slots.length, constraintIndex, constraints, ikIndices, warnings)
   )
 
+  /*
+   * 默认皮肤（合并基底）固定取名为 `default` 的皮肤：`buildRuntimeMaps` / Unity `MeshBuilder`
+   * 都是「默认皮肤永远生效 + 选中皮肤叠加（同名覆盖）」。
+   *
+   * 编辑器当前皮肤（`editorMeta.activeSkin`）单独写进 `defaultSkin`（叠加层），
+   * 否则把基底换成 goblin 之后，只存在于 default 皮肤里的武器会整批消失。
+   */
   const defaultSkinIndex = Math.max(
     0,
     skins.findIndex((s) => s.name === 'default')
   )
+  const defaultSkin = doc.editorMeta?.activeSkin ?? ''
 
   const asset = createRuntimeAsset({
     dataType: AnimType.Spine,
@@ -588,6 +596,7 @@ export function compileDocument(doc: EditorDocument): CompileResult {
     animations,
     textureNames,
     defaultSkinIndex,
+    defaultSkin,
     runtimeIK: doc.runtimeIK,
     images
   })

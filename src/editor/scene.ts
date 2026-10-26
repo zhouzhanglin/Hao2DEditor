@@ -103,6 +103,11 @@ export interface SceneViewState {
    * 颜色跟着模式变（增加绿 / 减少红 / 覆盖蓝）。
    */
   brushRing: { x: number; y: number; radius: number; mode: BrushMode } | null
+  /**
+   * 网格顶点的**框选矩形**（世界坐标）：顶点工具在空白处左键拖动时显示。
+   * null = 没在框选。松手后由工具按它算选中哪些顶点。
+   */
+  vertexBox: { x0: number; y0: number; x1: number; y1: number } | null
   playing: boolean
   speed: number
   loop: boolean
@@ -231,6 +236,8 @@ export class EditorScene {
   private readonly axes = new Graphics()
   /** 权重刷的刷子指示（软边圆 + 中心点）：画在最上层，它就是个「跟着鼠标的光标」 */
   private readonly brushRing = new Graphics()
+  /** 顶点框选矩形：与刷子圈同一层（跟着鼠标走的临时指示） */
+  private readonly vertexBox = new Graphics()
   /** 「自己绘制边界」时提示范围的图片 region 框（画在折线之下） */
   private readonly regionFrame = new Graphics()
   /** 网格子工具正在画的折线（画边界 / 自定义布线）：同样画在最上层 */
@@ -278,6 +285,7 @@ export class EditorScene {
     selectedVertices: [],
     hoveredVertex: -1,
     brushRing: null,
+    vertexBox: null,
     playing: false,
     speed: 1,
     loop: true,
@@ -316,6 +324,7 @@ export class EditorScene {
       this.gizmoFill,
       this.gizmoStroke,
       this.brushRing,
+      this.vertexBox,
       this.regionFrame,
       this.meshPath,
       this.maskFill,
@@ -503,6 +512,8 @@ export class EditorScene {
     if (patch.overlay || patch.selectedVertices || patch.hoveredVertex !== undefined) this.markDirty()
     // 刷子半径圈跟着鼠标走，每帧都可能变（拖动 / 修饰键切换模式）
     if (patch.brushRing !== undefined) this.markDirty()
+    // 顶点框选矩形同理：拖动中每一下都要重画
+    if (patch.vertexBox !== undefined) this.markDirty()
     // 网格子工具的折线同理：橡皮筋每动一下就要重画
     if (patch.pendingMeshPath !== undefined) this.markDirty()
     // 进出「自己绘制边界」要换一整帧的显示（藏网格 / 画 region 框）
@@ -2002,6 +2013,21 @@ export class EditorScene {
         .stroke({ width: unitPerPixel * 1.2, color, alpha: 0.8 })
       // 落点（鼠标精确位置）
       this.brushRing.poly(circlePolygon(ring.x, ring.y, unitPerPixel * 2)).fill({ color, alpha: 0.85 })
+    }
+
+    // 顶点框选矩形：半透明填充 + 细描边（画在最上层，别被网格线盖住）
+    const box = state.vertexBox
+    this.vertexBox.clear()
+    this.vertexBox.visible = box !== null
+    if (box) {
+      const x = Math.min(box.x0, box.x1)
+      const y = Math.min(box.y0, box.y1)
+      const width = Math.abs(box.x1 - box.x0)
+      const height = Math.abs(box.y1 - box.y0)
+      this.vertexBox
+        .rect(x, y, width, height)
+        .fill({ color: 0x38bdf8, alpha: 0.08 })
+        .stroke({ width: unitPerPixel * 1.2, color: 0x38bdf8, alpha: 0.85 })
     }
 
     // 网格子工具的折线（画边界 / 自定义布线）：同样是个「跟着鼠标走的光标」，画在最上层；

@@ -64,6 +64,8 @@ type DragKind =
   | 'gizmo'
   | 'shear-box'
   | 'vertex'
+  /** 顶点工具的框选：在空白处拖出一个矩形，松手选中框内顶点 */
+  | 'vertex-box'
   | 'paint'
   | 'attachment'
   /** 网格子工具「自定义布线」：从一个顶点拖到另一个顶点，松手连线 */
@@ -157,6 +159,8 @@ interface DragSession {
   uvField: ((x: number, y: number) => { u: number; v: number }) | null
   /** 多选顶点各自的 UV 重算场（单点时就是 `uvField`；空 = 不重算 UV） */
   uvFields: Array<{ index: number; field: (x: number, y: number) => { u: number; v: number } }>
+  /** 框选 / 点选时按住 Shift：把结果**加进**现有选择，而不是替换 */
+  additive: boolean
   paintMode: BrushMode
   moved: boolean
   /**
@@ -223,6 +227,7 @@ const IDLE: DragSession = {
   totalDelta: { x: 0, y: 0 },
   uvField: null,
   uvFields: [],
+  additive: false,
   paintMode: 'replace',
   moved: false,
   paintStarted: false,
@@ -910,11 +915,30 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       if (isNew) {
         useSelectionStore.getState().selectAttachment(att.slot, att.attachment)
         host.status(`已选中附件「${att.attachment}」（${att.slot}）：可编辑其顶点`)
+        return true
+      }
+      /*
+       * 顶点工具点在**已选中的网格**上（没压着顶点，也没压着其它 display）：
+       * 开始框选。网格图通常铺满整个可编辑区域，如果这里不接管，
+       * 「在网格内部空白处拖一个框选顶点」就永远做不了 —— 只能贴着图外的窄边拖。
+       */
+      if (tools.tool === 'ffd') {
+        startVertexBox(host, info)
+        return true
       }
       return true
     }
-    // 没抓到顶点也没点中 display：顶点工具到此为止；Pose 工具继续，让骨骼 / 操作器接管
-    if (tools.tool !== 'pose') return false
+    /*
+     * 没抓到顶点也没点中 display：顶点工具在空白处**开始框选顶点**（左键不再「点空白取消选择」）。
+     * 取消选择改成右键（见 ViewportCanvas 的 onContextMenu）—— 编网格时误点空白就把
+     * 选中丢掉、连网格线一起消失，是最容易打断手感的一种操作。
+     */
+    if (tools.tool === 'ffd') {
+      startVertexBox(host, info)
+      return true
+    }
+    // Pose 工具继续往下走，让骨骼 / 操作器接管
+    return false
   }
 
   // 斜切模式：包围盒优先。鼠标落在包围盒的边上拖动 → 沿该方向掰轴
@@ -1726,6 +1750,14 @@ export function toolPointerMove(host: ToolHost, info: PointerInfo): void {
 
 /** 拖拽分发（从 toolPointerMove 拆出来，好让「网格跟随」在前后统一处理） */
 function moveActiveDrag(host: ToolHost, info: PointerInfo): void {
+  // 顶点框选：只更新矩形，不动文档
+  if (drag.kind === 'vertex-box') {
+    host.scene.setViewState({
+      vertexBox: { x0: drag.startWorld.x, y0: drag.startWorld.y, x1: info.world.x, y1: info.world.y }
+    })
+    return
+  }
+
   // 自定义布线：只拖一条橡皮筋，不动任何几何
   if (drag.kind === 'mesh-rewire') {
     rewireDragMove(host, info.world)
@@ -1832,6 +1864,13 @@ function moveActiveDrag(host: ToolHost, info: PointerInfo): void {
 }
 
 export function toolPointerUp(host: ToolHost): void {
+  if (drag.kind === 'vertex-box') {
+    const session = drag
+    drag = { ...IDLE }
+    finishVertexBox(host, session)
+    return
+  }
+
   if (drag.kind === 'mask-point') {
     drag = { ...IDLE }
     storeHandler.end()
@@ -2197,6 +2236,71 @@ export function prepareUvField(
   )
 }
 
+/** 开始一次顶点框选（空白处 / 已选中网格的内部） */
+function startVertexBox(host: ToolHost, info: PointerInfo): void {
+  drag = { ...IDLE, kind: 'vertex-box', startWorld: { ...info.world }, additive: info.shift }
+  host.scene.setViewState({
+    vertexBox: { x0: info.world.x, y0: info.world.y, x1: info.world.x, y1: info.world.y }
+  })
+  host.scene.markDirty()
+  host.status(
+    info.shift
+      ? '框选顶点（Shift：加进当前选择）：拖出矩形，松手选中框内的顶点；右键取消选择'
+      : '框选顶点：拖出矩形，松手选中框内的顶点；右键取消选择'
+  )
+}
+
+/**
+ * 松手结算顶点框选：把矩形内的顶点加进 / 替换顶点选择。
+ *
+ * - 只点一下没拖出面积 → **不改选择**（取消选择请右键，见 ViewportCanvas 的 onContextMenu）；
+ * - 已选中某个附件时只框它的顶点（网格工具本来就把别的附件隔离掉了）；
+ * - Shift 拖框 = 并进现有选择。
+ */
+function finishVertexBox(host: ToolHost, session: DragSession): void {
+  const scene = host.scene
+  const mesh = scene.meshResult
+  const box = scene.state.vertexBox
+  scene.setViewState({ vertexBox: null })
+  scene.markDirty()
+  if (!mesh || !box) return
+  const minX = Math.min(box.x0, box.x1)
+  const maxX = Math.max(box.x0, box.x1)
+  const minY = Math.min(box.y0, box.y1)
+  const maxY = Math.max(box.y0, box.y1)
+  // 一次「点击」（没拖出面积，按屏幕 3px 判）：保持原选择不动 —— 这正是本条交互改动的目的
+  const minSize = scene.viewport.pixelsToWorld(3)
+  if (maxX - minX < minSize || maxY - minY < minSize) return
+
+  const current = useSelectionStore.getState()
+  const lockedSlot = current.kind === 'attachment' ? current.slot : ''
+  const lockedAttachment = current.kind === 'attachment' ? current.attachment : ''
+  const hits: Array<{ shared: number; slot: string; attachment: string }> = []
+  for (let i = 0; i < mesh.vertexCount; i++) {
+    const x = mesh.positions[i * 2]
+    const y = mesh.positions[i * 2 + 1]
+    if (x < minX || x > maxX || y < minY || y > maxY) continue
+    const ref = scene.vertexRefAt(i)
+    if (!ref) continue
+    if (lockedSlot && (ref.slot !== lockedSlot || ref.attachment !== lockedAttachment)) continue
+    hits.push({ shared: i, slot: ref.slot, attachment: ref.attachment })
+  }
+  if (hits.length === 0) {
+    host.status('框选：矩形里没有顶点（右键可取消当前选择）')
+    return
+  }
+  const slot = lockedSlot || hits[0].slot
+  const attachment = lockedAttachment || hits[0].attachment
+  const picked = hits
+    .filter((hit) => hit.slot === slot && hit.attachment === attachment)
+    .map((hit) => hit.shared)
+  const set = new Set<number>(session.additive ? current.vertices : [])
+  for (const index of picked) set.add(index)
+  const list = [...set]
+  useSelectionStore.getState().select({ kind: 'attachment', slot, attachment, vertices: list, vertex: -1 })
+  host.status(`框选到 ${picked.length} 个顶点（共选中 ${list.length} 个；拖动任意一个整组移动）`)
+}
+
 function dragVertex(host: ToolHost, world: Vec2): void {
   const scene = host.scene
   const bundle = scene.runtime
@@ -2426,7 +2530,7 @@ export function meshSubtoolHover(host: ToolHost, world: Vec2): void {
 export function meshSubtoolCancel(host: ToolHost): boolean {
   if (host.tools.meshSubtool === 'boundary' && host.scene.state.pendingMeshPath) return closeMeshBoundary(host)
   drag = { ...IDLE }
-  host.scene.setViewState({ pendingMeshPath: null, hoveredVertex: -1 })
+  host.scene.setViewState({ pendingMeshPath: null, hoveredVertex: -1, vertexBox: null })
   return false
 }
 

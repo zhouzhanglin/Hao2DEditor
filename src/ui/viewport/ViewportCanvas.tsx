@@ -1189,6 +1189,20 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         // 右键菜单只服务 Pose / Animate（选择 / Pose 工具）下对 slot / display 的操作：
         // 权重刷 / 网格 / 顶点这些工具有自己的右键语义（收尾、结束绑定），别抢
         const tools = useToolStore.getState()
+        /*
+         * 顶点（网格）工具：右键 = **取消选择**。
+         * 这个工具的左键已经改成「空白处拖动 = 框选顶点」，不点空白不再丢选中；
+         * 取消选择因此挪到右键。画边界 / 布线这些子工具有自己的右键收尾语义，不掺和。
+         */
+        if (tools.tool === 'ffd') {
+          if (tools.meshSubtool === 'edit') {
+            if (useSelectionStore.getState().kind !== 'none') {
+              useSelectionStore.getState().clear()
+              onStatus(t('已取消选择（左键在空白处拖动可框选顶点）'))
+            }
+          }
+          return
+        }
         if (tools.tool !== 'select' && tools.tool !== 'pose') return
         const mode = useModeStore.getState().mode
         if (mode !== 'pose' && mode !== 'animate') return

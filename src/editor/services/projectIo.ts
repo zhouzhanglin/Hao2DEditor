@@ -32,7 +32,9 @@ export interface IoResult {
  * 工程文件过滤器。除了新后缀 `.hao2d.proj`，也放开旧的 `.hao2dproj` 与 `.json`，
  * 这样早期存下来的工程仍然能在文件对话框里选到（解析只看内容，不看后缀）。
  */
-const PROJECT_FILTER = [{ name: 'Hao2D 工程', extensions: [PROJECT_EXTENSION, 'hao2dproj', 'json'] }]
+function projectFilter(): { name: string; extensions: string[] }[] {
+  return [{ name: t('Hao2D 工程'), extensions: [PROJECT_EXTENSION, 'hao2dproj', 'json'] }]
+}
 
 /** 保存对话框里的默认文件名：优先用骨架名，为空时用 project */
 function defaultFileName(armatureName: string): string {
@@ -90,7 +92,7 @@ export function newProject(): IoResult {
   useProjectStore.getState().reset()
   // 选中态里的皮肤名属于**上个工程**：不清掉会带着一个本工程里不存在的皮肤往下走
   useSelectionStore.getState().select({ skin: '' })
-  return { ok: true, message: '已新建项目（含根骨骼 root）' }
+  return { ok: true, message: t('已新建项目（含根骨骼 root）') }
 }
 
 /**
@@ -110,8 +112,8 @@ function safeFileName(name: string): string {
 export async function createProjectAt(name: string, dir: string, frameRate?: number): Promise<IoResult> {
   const platform = getPlatform()
   const trimmed = name.trim()
-  if (trimmed.length === 0) return fail('项目名不能为空')
-  if (!dir) return fail('请先选择保存位置')
+  if (trimmed.length === 0) return fail(t('项目名不能为空'))
+  if (!dir) return fail(t('请先选择保存位置'))
   const path = joinPath(dir, `${safeFileName(trimmed)}.${PROJECT_EXTENSION}`)
 
   // 新项目的图片池是空的：先把上个项目占着的图片 / 图集内存放掉，再换文档
@@ -131,7 +133,11 @@ export async function createProjectAt(name: string, dir: string, frameRate?: num
   store.setProjectInfo({ projectName: trimmed, projectPath: path })
   const saved = await saveProject(false)
   if (!saved.ok) return saved
-  return { ok: true, message: `已新建项目「${trimmed}」：${baseName(path)}`, warnings: saved.warnings }
+  return {
+    ok: true,
+    message: t('已新建项目「{0}」：{1}', [trimmed, baseName(path)]),
+    warnings: saved.warnings
+  }
 }
 
 export async function lastProject(): Promise<string | null> {
@@ -143,8 +149,8 @@ export async function lastProject(): Promise<string | null> {
 
 export async function openProject(): Promise<IoResult> {
   const platform = getPlatform()
-  const picked = await platform.pickFiles({ filters: PROJECT_FILTER, multi: false })
-  if (picked.length === 0) return { ok: false, message: '已取消' }
+  const picked = await platform.pickFiles({ filters: projectFilter(), multi: false })
+  if (picked.length === 0) return { ok: false, message: t('已取消') }
   return openProjectAt(picked[0])
 }
 
@@ -196,14 +202,14 @@ async function exportAiCompanionFiles(projectDir: string): Promise<void> {
 export async function openProjectAt(path: string): Promise<IoResult> {
   const platform = getPlatform()
   const text = await platform.readText(path)
-  if (!text) return fail(`无法读取工程文件：${path}`)
+  if (!text) return fail(t('无法读取工程文件：{0}', path))
 
   // 解析失败也要走 fail 分支：启动时自动打开上次工程，坏文件不能把启动流程带崩
   let parsed: ReturnType<typeof parseProject>
   try {
     parsed = parseProject(text)
   } catch (error) {
-    return fail(`工程文件解析失败：${error instanceof Error ? error.message : String(error)}`)
+    return fail(t('工程文件解析失败：{0}', error instanceof Error ? error.message : String(error)))
   }
   // 工程自带的图片存的是相对路径（images/xxx）：按工程文件所在目录解析成绝对路径，
   // 之后预览 / 渲染 / 导出都按绝对路径读文件，不用再关心工程被移到哪里
@@ -248,10 +254,10 @@ export async function openProjectAt(path: string): Promise<IoResult> {
       : ''
   useSelectionStore.getState().select({ skin: restoredSkin })
   await platform.recentAdd(path)
-  const suffix = parsed.skeletons.length > 1 ? `（${parsed.skeletons.length} 个骨架）` : ''
+  const suffix = parsed.skeletons.length > 1 ? t('（{0} 个骨架）', parsed.skeletons.length) : ''
   // 命令服务的 token 可能已变：刷新工程目录里的连接信息，让 AI 工具拿到有效凭证
   await exportAiCompanionFiles(projectDir)
-  return { ok: true, message: `已打开 ${baseName(path)}${suffix}`, warnings: parsed.warnings }
+  return { ok: true, message: t('已打开 {0}{1}', [baseName(path), suffix]), warnings: parsed.warnings }
 }
 
 /** 最近打开的工程列表（含存在性提示由主进程负责） */
@@ -273,10 +279,10 @@ export async function saveProject(saveAs: boolean): Promise<IoResult> {
   if (!path) {
     path = await platform.pickSavePath({
       defaultPath: defaultFileName(store.projectName || store.document.armatureName),
-      filters: PROJECT_FILTER
+      filters: projectFilter()
     })
   }
-  if (!path) return { ok: false, message: '已取消' }
+  if (!path) return { ok: false, message: t('已取消') }
   // 统一成 .hao2d.proj：没写后缀就补上，写了别的后缀（.json 除外，兼容老工程）就替换掉。
   // 复合后缀必须整串判断——`path.extname('a.hao2d.proj')` 只会给出 `.proj`。
   if (!new RegExp(`\\.(${PROJECT_EXTENSION.replace(/\./g, '\\.')}|json)$`, 'i').test(path)) {
@@ -306,12 +312,12 @@ export async function saveProject(saveAs: boolean): Promise<IoResult> {
 
   const total = store.document.images.length
   const parts: string[] = []
-  if (copied.copied > 0) parts.push(`${copied.copied} 张图片已复制到 ${ASSET_DIR}/`)
+  if (copied.copied > 0) parts.push(t('{0} 张图片已复制到 {1}/', [copied.copied, ASSET_DIR]))
   // 没有复制任务：图片本来就随工程（上次已复制过，或本身就是工程内联数据）
-  else if (total > 0 && copied.warnings.length === 0) parts.push(`${total} 张图片已在工程内`)
-  let message = `已保存到 ${baseName(path)}`
-  if (parts.length > 0) message += `（${parts.join('，')}）`
-  if (copied.warnings.length > 0) message += `；${copied.warnings[0]}`
+  else if (total > 0 && copied.warnings.length === 0) parts.push(t('{0} 张图片已在工程内', total))
+  let message = t('已保存到 {0}', baseName(path))
+  if (parts.length > 0) message += t('（{0}）', parts.join(t('，')))
+  if (copied.warnings.length > 0) message += t('；{0}', copied.warnings[0])
   if (copied.warnings.length > 0) console.warn('[hao2d] 图片复制告警：', copied.warnings)
   // 把 AI 接入的说明书 + 连接信息写到工程目录（免配置、免 MCP 让 AI 工具上手）
   await exportAiCompanionFiles(dirName(path))
@@ -322,25 +328,25 @@ export async function importSpineFlow(sourcePath?: string): Promise<IoResult> {
   const platform = getPlatform()
   // 调用方（AI 命令）直接给路径时不弹对话框；同目录的 .atlas 仍需存在（下面会找）
   const picked = sourcePath ? [sourcePath] : await platform.pickFiles({
-    filters: [{ name: 'Spine 骨骼 JSON', extensions: ['json'] }],
+    filters: [{ name: t('Spine 骨骼 JSON'), extensions: ['json'] }],
     multi: false
   })
-  if (picked.length === 0) return { ok: false, message: '已取消' }
+  if (picked.length === 0) return { ok: false, message: t('已取消') }
 
   const jsonPath = picked[0]
   const text = await platform.readText(jsonPath)
-  if (!text) return fail(`无法读取 ${baseName(jsonPath)}`)
+  if (!text) return fail(t('无法读取 {0}', baseName(jsonPath)))
 
   const json = JSON.parse(text) as unknown
   const format = detectSkeletonFormat(json)
   if (format !== 'spine') {
-    return fail(`不是 Spine 骨骼文件（检测到 ${format}），请选择含 "skeleton" 段的 JSON`)
+    return fail(t('不是 Spine 骨骼文件（检测到 {0}），请选择含 "skeleton" 段的 JSON', format))
   }
 
   const dir = dirName(jsonPath)
   const entries = await platform.listDir(dir, false)
   const atlasEntry = entries.find((entry) => /\.atlas(\.txt)?$/i.test(entry.name))
-  if (!atlasEntry) return fail(`同目录下没有找到 .atlas 图集文件：${dir}`)
+  if (!atlasEntry) return fail(t('同目录下没有找到 .atlas 图集文件：{0}', dir))
 
   const atlasText = await platform.readText(atlasEntry.path)
   const parsed = parseSpineAtlas(atlasText)
@@ -359,7 +365,11 @@ export async function importSpineFlow(sourcePath?: string): Promise<IoResult> {
   useProjectStore.getState().setWarnings(warnings)
   return {
     ok: true,
-    message: `已导入 Spine：${document.bones.length} 骨骼 / ${document.slots.length} 插槽 / ${document.animations.length} 动画`,
+    message: t('已导入 Spine：{0} 骨骼 / {1} 插槽 / {2} 动画', [
+      document.bones.length,
+      document.slots.length,
+      document.animations.length
+    ]),
     warnings
   }
 }
@@ -368,19 +378,19 @@ export async function importDragonBonesFlow(sourcePath?: string): Promise<IoResu
   const platform = getPlatform()
   // 调用方（AI 命令）直接给路径时不弹对话框；同目录的 texture_*.json 图集仍会被自动收集
   const picked = sourcePath ? [sourcePath] : await platform.pickFiles({
-    filters: [{ name: 'DragonBones 骨骼 JSON', extensions: ['json'] }],
+    filters: [{ name: t('DragonBones 骨骼 JSON'), extensions: ['json'] }],
     multi: false
   })
-  if (picked.length === 0) return { ok: false, message: '已取消' }
+  if (picked.length === 0) return { ok: false, message: t('已取消') }
 
   const jsonPath = picked[0]
   const text = await platform.readText(jsonPath)
-  if (!text) return fail(`无法读取 ${baseName(jsonPath)}`)
+  if (!text) return fail(t('无法读取 {0}', baseName(jsonPath)))
 
   const json = JSON.parse(text) as unknown
   const format = detectSkeletonFormat(json)
-  if (format === 'dbTexture') return fail('这是图集文件，请选择含 "armature" 段的骨骼 JSON')
-  if (format !== 'dragonbones') return fail(`不是 DragonBones 骨骼文件（检测到 ${format}）`)
+  if (format === 'dbTexture') return fail(t('这是图集文件，请选择含 "armature" 段的骨骼 JSON'))
+  if (format !== 'dragonbones') return fail(t('不是 DragonBones 骨骼文件（检测到 {0}）', format))
 
   const dir = dirName(jsonPath)
   const entries = await platform.listDir(dir, false)
@@ -416,7 +426,7 @@ export async function importDragonBonesFlow(sourcePath?: string): Promise<IoResu
     subTextures.push(...parseDbTextureJson(parsed, pageSizes))
     void textureJsons
   }
-  if (subTextures.length === 0) return fail(`同目录下没有找到图集（texture_*.json）：${dir}`)
+  if (subTextures.length === 0) return fail(t('同目录下没有找到图集（texture_*.json）：{0}', dir))
 
   // 一份 DB 骨骼 JSON 里可能有好几个 armature（父子骨架 + 被嵌套的子骨架）：
   // 全部导成工程内的骨架，嵌套 display 才按名字引用得到目标
@@ -434,11 +444,20 @@ export async function importDragonBonesFlow(sourcePath?: string): Promise<IoResu
   useProjectStore.getState().setWarnings(warnings)
   const summary =
     project.assets.length > 1
-      ? `${project.assets.length} 个骨架（${project.names.join('、')}），当前编辑「${project.names[0]}」`
-      : `「${document.armatureName}」`
+      ? t('{0} 个骨架（{1}），当前编辑「{2}」', [
+          project.assets.length,
+          project.names.join(t('、')),
+          project.names[0]
+        ])
+      : t('「{0}」', document.armatureName)
   return {
     ok: true,
-    message: `已导入 DragonBones：${summary} / ${document.bones.length} 骨骼 / ${document.slots.length} 插槽 / ${document.animations.length} 动画`,
+    message: t('已导入 DragonBones：{0} / {1} 骨骼 / {2} 插槽 / {3} 动画', [
+      summary,
+      document.bones.length,
+      document.slots.length,
+      document.animations.length
+    ]),
     warnings
   }
 }
@@ -540,10 +559,10 @@ export async function importImagesFlow(paths?: readonly string[]): Promise<IoRes
     ? [...paths]
     : await platform.pickFiles({
         // psd 也放进可选范围：选到它转入「导入 PSD」弹窗（按图层拆图），不走碎图登记
-        filters: [{ name: '图片 / PSD', extensions: ['png', 'jpg', 'jpeg', 'webp', 'psd'] }],
+        filters: [{ name: t('图片 / PSD'), extensions: ['png', 'jpg', 'jpeg', 'webp', 'psd'] }],
         multi: true
       })
-  if (picked.length === 0) return { ok: false, message: '已取消' }
+  if (picked.length === 0) return { ok: false, message: t('已取消') }
 
   // PSD 与碎图分开处理：PSD 要经弹窗勾选图层，碎图直接登记（见 parsePsdAt / openPsdDialog）
   const psdPaths = picked.filter((path) => /\.psd$/i.test(path))
@@ -555,13 +574,13 @@ export async function importImagesFlow(paths?: readonly string[]): Promise<IoRes
       openPsdDialog(parsed.parsed)
       psdNote =
         psdPaths.length > 1
-          ? `（选了 ${psdPaths.length} 个 PSD，已打开第一个的导入窗口）`
-          : '（PSD 已打开导入窗口，勾选要导入的图层）'
+          ? t('（选了 {0} 个 PSD，已打开第一个的导入窗口）', psdPaths.length)
+          : t('（PSD 已打开导入窗口，勾选要导入的图层）')
     } else {
-      psdNote = `（${parsed.message}）`
+      psdNote = t('（{0}）', parsed.message)
     }
     if (imagePaths.length === 0) {
-      return parsed.parsed ? { ok: true, message: 'PSD 已打开导入窗口，勾选要导入的图层' } : parsed
+      return parsed.parsed ? { ok: true, message: t('PSD 已打开导入窗口，勾选要导入的图层') } : parsed
     }
   }
 
@@ -583,7 +602,7 @@ export async function importImagesFlow(paths?: readonly string[]): Promise<IoRes
   })
   useProjectStore.getState().setWarnings(warnings)
   const added = images.length - existing.length
-  const message = added > 0 ? `已导入 ${added} 张图片` : '没有新增图片（可能已存在）'
+  const message = added > 0 ? t('已导入 {0} 张图片', added) : t('没有新增图片（可能已存在）')
   return {
     ok: true,
     message: psdNote ? `${message}${psdNote}` : message,
@@ -633,7 +652,7 @@ export async function importDroppedPaths(paths: readonly string[]): Promise<IoRe
     const parsed = await parsePsdAt(psdPath)
     if (parsed.parsed) {
       openPsdDialog(parsed.parsed)
-      psdNote = 'PSD 已打开导入窗口，勾选要导入的图层'
+      psdNote = t('PSD 已打开导入窗口，勾选要导入的图层')
     } else {
       psdNote = parsed.message
     }
@@ -650,7 +669,7 @@ export async function importDroppedPaths(paths: readonly string[]): Promise<IoRe
       ok: false,
       message: psdNote
         ? psdNote
-        : '拖入的文件夹里没有可导入的图片（支持 png / jpg / webp / gif / bmp / psd）'
+        : t('拖入的文件夹里没有可导入的图片（支持 png / jpg / webp / gif / bmp / psd）')
     }
   }
 
@@ -664,13 +683,13 @@ export async function importDroppedPaths(paths: readonly string[]): Promise<IoRe
 
   // 有 PSD 时把「已打开导入窗口」拼进结果提示（弹窗本身已经打开，这里只补一句说明）
   const withPsdNote = (result: IoResult): IoResult =>
-    psdNote ? { ...result, message: `${result.message}（${psdNote}）` } : result
+    psdNote ? { ...result, message: t('{0}（{1}）', [result.message, psdNote]) } : result
 
   if (images.length > 0 && jsons.length === 0) {
     const result = await importImagesFlow(images)
     return withPsdNote(
       folderImages > 0
-        ? { ...result, message: `${result.message}（文件夹里找到 ${folderImages} 张图片）` }
+        ? { ...result, message: t('{0}（文件夹里找到 {1} 张图片）', [result.message, folderImages]) }
         : result
     )
   }
@@ -698,11 +717,14 @@ export async function importDroppedPaths(paths: readonly string[]): Promise<IoRe
         const document = finishImport(result.asset, resolved.pageImages, resolved.pageSizes, jsons[0])
         return {
           ok: true,
-          message: `已导入 Spine（拖入）：${document.bones.length} 骨骼 / ${document.animations.length} 动画`,
+          message: t('已导入 Spine（拖入）：{0} 骨骼 / {1} 动画', [
+            document.bones.length,
+            document.animations.length
+          ]),
           warnings: [...atlas.warnings, ...result.warnings]
         }
       }
-      useProjectStore.getState().setWarnings([`请同时拖入同目录的 .atlas 图集文件（或使用「导入 Spine」菜单）`])
+      useProjectStore.getState().setWarnings([t('请同时拖入同目录的 .atlas 图集文件（或使用「导入 Spine」菜单）')])
       return importSpineFlow()
     }
     if (format === 'dragonbones') return importDragonBonesFlow()
@@ -712,13 +734,13 @@ export async function importDroppedPaths(paths: readonly string[]): Promise<IoRe
   if (leaves.length === 0) {
     return {
       ok: false,
-      message: '拖入的内容里没有可导入的图片（支持 png / jpg / webp / gif / bmp；文件夹会递归查找）'
+      message: t('拖入的内容里没有可导入的图片（支持 png / jpg / webp / gif / bmp；文件夹会递归查找）')
     }
   }
   const loose = await importImagesFlow(leaves)
   return withPsdNote(
     folderImages > 0
-      ? { ...loose, message: `${loose.message}（文件夹里找到 ${folderImages} 张图片）` }
+      ? { ...loose, message: t('{0}（文件夹里找到 {1} 张图片）', [loose.message, folderImages]) }
       : loose
   )
 }

@@ -1,3 +1,4 @@
+import { t } from '@i18n'
 import { baseName, dirName, getPlatform, joinPath } from '../platform'
 import { useProjectStore } from '../store/projectStore'
 import { createAuthoringBone, ROOT_BONE_NAME, rootBoneName } from '@core/model/authoring'
@@ -43,11 +44,11 @@ export async function parsePsdAt(path: string): Promise<IoResult & { parsed?: Pa
     const bytes = await platform.readBinary(path)
     const parsed = parsePsd(bytes, baseName(path))
     if (parsed.pixelCount === 0) {
-      return { ok: false, message: `「${parsed.fileName}」里没有带像素的图层（文本 / 调整层无法导入）` }
+      return { ok: false, message: t('「{0}」里没有带像素的图层（文本 / 调整层无法导入）', parsed.fileName) }
     }
     return { ok: true, message: '', parsed }
   } catch (error) {
-    return { ok: false, message: `解析 PSD 失败：${describe(error)}` }
+    return { ok: false, message: t('解析 PSD 失败：{0}', describe(error)) }
   }
 }
 
@@ -55,10 +56,10 @@ export async function parsePsdAt(path: string): Promise<IoResult & { parsed?: Pa
 export async function pickAndParsePsd(): Promise<IoResult> {
   const platform = getPlatform()
   const picked = await platform.pickFiles({
-    filters: [{ name: 'Photoshop 文档', extensions: ['psd'] }],
+    filters: [{ name: t('Photoshop 文档'), extensions: ['psd'] }],
     multi: false
   })
-  if (picked.length === 0) return { ok: false, message: '已取消' }
+  if (picked.length === 0) return { ok: false, message: t('已取消') }
   const result = await parsePsdAt(picked[0])
   if (result.parsed) openPsdDialog(result.parsed)
   return result.parsed ? { ok: true, message: '' } : { ok: false, message: result.message }
@@ -75,12 +76,12 @@ export async function importPsdLayers(
   if (!projectPath) {
     return {
       ok: false,
-      message: '请先保存或创建工程：PSD 的图层图片要落到工程目录的 images/ 下（与「导入图片」同一规则）'
+      message: t('请先保存或创建工程：PSD 的图层图片要落到工程目录的 images/ 下（与「导入图片」同一规则）')
     }
   }
 
   const selected = collectSelectedLayers(parsed.root, selectedIds)
-  if (selected.length === 0) return { ok: false, message: '没有勾选任何带像素的图层' }
+  if (selected.length === 0) return { ok: false, message: t('没有勾选任何带像素的图层') }
 
   // ---- ① 逐层导出 PNG 并写盘（先全部写成功，再动文档：中途失败不留半截工程状态） ----
   const platform = getPlatform()
@@ -99,9 +100,9 @@ export async function importPsdLayers(
       written.push({ node, name: fileName, path: target })
     }
   } catch (error) {
-    return { ok: false, message: `写入图层图片失败：${describe(error)}` }
+    return { ok: false, message: t('写入图层图片失败：{0}', describe(error)) }
   }
-  if (written.length === 0) return { ok: false, message: '没有可导出的图层（选中项都没有像素）' }
+  if (written.length === 0) return { ok: false, message: t('没有可导出的图层（选中项都没有像素）') }
 
   // ---- ② 一个撤销事务：登记图片 +（可选）按 PSD 位置建插槽 ----
   let slotCount = 0
@@ -153,9 +154,9 @@ export async function importPsdLayers(
     }
   })
 
-  const parts = [`已导入 ${written.length} 层图片`]
-  if (addToScene) parts.push(`按 PSD 位置添加了 ${slotCount} 个插槽（画布中心对齐根骨骼）`)
-  return { ok: true, message: `PSD「${parsed.fileName}」导入完成：${parts.join('，')}` }
+  const parts = [t('已导入 {0} 层图片', written.length)]
+  if (addToScene) parts.push(t('按 PSD 位置添加了 {0} 个插槽（画布中心对齐根骨骼）', slotCount))
+  return { ok: true, message: t('PSD「{0}」导入完成：{1}', [parsed.fileName, parts.join(t('，'))]) }
 }
 
 /** 图片文件名去重（同一批里图层重名 / 与已有图片重名都算），candidate.png → candidate_2.png */

@@ -4,6 +4,7 @@ import type { AttachmentData } from '../model/types'
 import { AttachmentType } from '../model/types'
 import type { SubArmatureKeyframe } from '../model/animation'
 import { lowerBoundByTime } from '../model/animation'
+import { t } from '@i18n'
 
 /**
  * 骨架嵌套的纯逻辑：这里不碰 pixi、不碰 store，只做「数据 → 数」的换算，
@@ -252,11 +253,11 @@ export function checkNestDrop(
   child: string,
   maxDepth = MAX_NEST_DEPTH
 ): string | null {
-  if (!parent || !child) return '骨架名不能为空'
-  if (parent === child) return '不能把骨架拖到它自己的层级里'
+  if (!parent || !child) return t('骨架名不能为空')
+  if (parent === child) return t('不能把骨架拖到它自己的层级里')
   const names = new Set(docs.map((doc) => doc.armatureName))
-  if (!names.has(parent)) return `父骨架「${parent}」不存在`
-  if (!names.has(child)) return `子骨架「${child}」不存在`
+  if (!names.has(parent)) return t('父骨架「{0}」不存在', parent)
+  if (!names.has(child)) return t('子骨架「{0}」不存在', child)
 
   // 从 child 出发能否回到 parent：能则新增这条边会成环
   const adjacency = new Map<string, string[]>()
@@ -277,13 +278,13 @@ export function checkNestDrop(
     const level = levels.get(name) ?? 0
     depth = Math.max(depth, level)
     for (const next of adjacency.get(name) ?? []) {
-      if (next === parent) return `会形成循环引用：${parent} → … → ${child} → ${parent}`
+      if (next === parent) return t('会形成循环引用：{0} → … → {1} → {0}', [parent, child])
       if (!visited.has(next)) {
         levels.set(next, level + 1)
         stack.push(next)
       }
     }
   }
-  if (depth + 1 > maxDepth) return `嵌套层数超过上限（${maxDepth} 层）`
+  if (depth + 1 > maxDepth) return t('嵌套层数超过上限（{0} 层）', maxDepth)
   return null
 }

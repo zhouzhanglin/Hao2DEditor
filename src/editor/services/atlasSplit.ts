@@ -1,6 +1,7 @@
 import type { AuthoringImage } from '@core/model/authoring'
 import type { BatchFile } from '@shared/ipcTypes'
 import type { AtlasSplitEntry, AtlasSplitPlan } from '../commands/authoringCommands'
+import { t } from '@i18n'
 import { baseName, dirName, getPlatform, joinPath, stripExtension } from '../platform'
 import { useProjectStore } from '../store/projectStore'
 import { cropRegionPngs, loadImageBitmap } from './pngEncoder'
@@ -29,15 +30,15 @@ const SPLIT_DIR_SUFFIX = '_split'
 export async function splitAtlasImage(name: string): Promise<AtlasSplitResult> {
   const store = useProjectStore.getState()
   const image = store.document.images.find((item) => item.name === name)
-  if (!image) return { ok: false, message: `图片「${name}」不存在` }
-  if (image.loose) return { ok: false, message: `「${name}」已经是碎图，不用再拆` }
+  if (!image) return { ok: false, message: t('图片「{0}」不存在', name) }
+  if (image.loose) return { ok: false, message: t('「{0}」已经是碎图，不用再拆', name) }
   if (!isRealFilePath(image.path)) {
-    return { ok: false, message: `「${name}」不是磁盘文件，拆出来的碎图没地方写` }
+    return { ok: false, message: t('「{0}」不是磁盘文件，拆出来的碎图没地方写', name) }
   }
 
   const platform = getPlatform()
   const bitmap = await loadImageBitmap(await platform.imageUrl(image.path))
-  if (!bitmap) return { ok: false, message: `读取「${name}」失败，无法拆分` }
+  if (!bitmap) return { ok: false, message: t('读取「{0}」失败，无法拆分', name) }
 
   try {
     // 页尺寸以**实际像素**为准：UV 是按它归一化的，导入时记的宽高万一对不上，以图为准
@@ -63,7 +64,7 @@ export async function splitAtlasImage(name: string): Promise<AtlasSplitResult> {
     )
 
     if (regions.length === 0 && !needWholePage) {
-      return { ok: false, message: `「${name}」里没有记录任何子区域，拆不出碎图` }
+      return { ok: false, message: t('「{0}」里没有记录任何子区域，拆不出碎图', name) }
     }
 
     const dir = await allocateOutputDir(image.path)
@@ -103,7 +104,7 @@ export async function splitAtlasImage(name: string): Promise<AtlasSplitResult> {
 
     const encoded = await cropRegionPngs(bitmap, crops)
     if (encoded.some((bytes) => bytes.length === 0)) {
-      return { ok: false, message: '碎图编码失败（当前环境没有可用的画布）' }
+      return { ok: false, message: t('碎图编码失败（当前环境没有可用的画布）') }
     }
 
     // 先落盘再改文档：写失败时工程保持原样，不会留下指向空文件的碎图
@@ -111,13 +112,13 @@ export async function splitAtlasImage(name: string): Promise<AtlasSplitResult> {
     try {
       await platform.writeBatch(batch)
     } catch (error) {
-      return { ok: false, message: `写入碎图失败：${describe(error)}` }
+      return { ok: false, message: t('写入碎图失败：{0}', describe(error)) }
     }
 
     // 异步期间工程可能被改过（换了图 / 拆了图集）：对不上就放弃，避免把新数据按旧区域改坏
     const latest = useProjectStore.getState().document.images.find((item) => item.name === name)
     if (!latest || latest.loose || latest.path !== image.path) {
-      return { ok: false, message: `「${name}」在拆分过程中被改动，已放弃（磁盘上的碎图文件可自行删除）` }
+      return { ok: false, message: t('「{0}」在拆分过程中被改动，已放弃（磁盘上的碎图文件可自行删除）', name) }
     }
 
     const splitPlan: AtlasSplitPlan = { atlas: name, pageWidth, pageHeight, entries }
@@ -174,10 +175,10 @@ function describeResult(
   skipped: number,
   needWholePage: boolean
 ): string {
-  const parts = [`「${atlas}」已拆成 ${count} 张碎图（${dir}），图集已从工程移除`]
-  if (needWholePage) parts.push('有附件对不上区域名，另拆了一张整页兜底')
-  if (skipped > 0) parts.push(`跳过 ${skipped} 个空区域`)
-  return parts.join('；')
+  const parts = [t('「{0}」已拆成 {1} 张碎图（{2}），图集已从工程移除', [atlas, count, dir])]
+  if (needWholePage) parts.push(t('有附件对不上区域名，另拆了一张整页兜底'))
+  if (skipped > 0) parts.push(t('跳过 {0} 个空区域', skipped))
+  return parts.join(t('；'))
 }
 
 function describe(error: unknown): string {

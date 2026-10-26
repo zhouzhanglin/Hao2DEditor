@@ -1,5 +1,6 @@
 import { AnimType } from '../model/types'
 import type { RuntimeAsset } from '../model/asset'
+import { t } from '@i18n'
 
 /**
  * 自定义运行时数据格式（与 Spine / DragonBones 格式**无关**，仅服务于本编辑器导出的游戏侧加载）。
@@ -170,11 +171,11 @@ export function serializeRuntimeSke(
 export function parseRuntimeSke(text: string): RuntimeSkeJson {
   const raw = JSON.parse(text) as RuntimeSkeJson
   if (!raw || raw.format !== 'hao2d-ske') {
-    throw new Error('不是 hao2d-ske 格式的骨骼数据')
+    throw new Error(t('不是 hao2d-ske 格式的骨骼数据'))
   }
   // v1 是「无嵌套」的老格式：继续可读，缺的字段读成空
   if (raw.version !== 1 && raw.version !== 2) {
-    throw new Error(`不支持的 hao2d-ske 版本 ${raw.version}`)
+    throw new Error(t('不支持的 hao2d-ske 版本 {0}', raw.version))
   }
   if (typeof raw.defaultSkinIndex !== 'number' || raw.defaultSkinIndex < 0) delete raw.defaultSkinIndex
   if (typeof raw.defaultSkin !== 'string') delete raw.defaultSkin
@@ -187,10 +188,10 @@ export function parseRuntimeSke(text: string): RuntimeSkeJson {
 export function parseRuntimeAtlas(text: string): RuntimeAtlasJson {
   const raw = JSON.parse(text) as RuntimeAtlasJson
   if (!raw || raw.format !== 'hao2d-atlas') {
-    throw new Error('不是 hao2d-atlas 格式的图集描述')
+    throw new Error(t('不是 hao2d-atlas 格式的图集描述'))
   }
   if (raw.version !== 1) {
-    throw new Error(`不支持的 hao2d-atlas 版本 ${raw.version}`)
+    throw new Error(t('不支持的 hao2d-atlas 版本 {0}', raw.version))
   }
   return raw
 }

@@ -1,4 +1,5 @@
 import { useProjectStore } from './store/projectStore'
+import { t } from '@i18n'
 import { useTimelineStore } from './store/timelineStore'
 import { useModeStore } from './store/modeStore'
 import { applySlotOrder } from './commands/hierarchyCommands'
@@ -68,12 +69,12 @@ export function moveSlotLayer(slotName: string, direction: LayerDirection): stri
       const track = draft.animations.find((item) => item.name === currentAnimation)
       if (track) keyDrawOrder(track, at, order)
     })
-    return `已在 ${at.toFixed(2)}s 写入「${slotName}」的层级关键帧`
+    return t('已在 {0}s 写入「{1}」的层级关键帧', [at.toFixed(2), slotName])
   }
   update('调整插槽层级', (draft) => {
     applySlotOrder(draft, names)
   })
-  return `已移动「${slotName}」（setup 绘制顺序）`
+  return t('已移动「{0}」（setup 绘制顺序）', slotName)
 }
 
 /** 删除插槽（只有 Pose 态给这个入口）：复用 deleteSlot，会一并清 skins / 动画轨道 / 层级帧里的名字 */

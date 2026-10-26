@@ -3,6 +3,7 @@ import type { BLEND_MODES } from 'pixi.js'
 import { BlendMode } from '@core/model/types'
 import type { RGBA } from '@core/model/types'
 import { loadImageElement } from '@render/imageLoader'
+import { t } from '@i18n'
 
 export interface BlendModeResolution {
   /** pixi 混合模式名 */
@@ -27,11 +28,20 @@ export function resolveBlendMode(mode: BlendMode): BlendModeResolution {
     case BlendMode.Normal:
       return { mode: 'normal', warning: null }
     case BlendMode.Erase:
-      return { mode: 'normal', warning: '混合模式 Erase 需要额外遮罩流程，视口中降级为 Normal' }
+      return {
+        mode: 'normal',
+        warning: t('混合模式 Erase 需要额外遮罩流程，视口中降级为 Normal')
+      }
     case BlendMode.Below:
-      return { mode: 'normal', warning: '混合模式 Below 依赖绘制顺序语义，视口中降级为 Normal' }
+      return {
+        mode: 'normal',
+        warning: t('混合模式 Below 依赖绘制顺序语义，视口中降级为 Normal')
+      }
     case BlendMode.None:
-      return { mode: 'normal', warning: '混合模式 None 的“不绘制”语义在视口中降级为 Normal' }
+      return {
+        mode: 'normal',
+        warning: t('混合模式 None 的“不绘制”语义在视口中降级为 Normal')
+      }
     default:
       return { mode: 'normal', warning: null }
   }

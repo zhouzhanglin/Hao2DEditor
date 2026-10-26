@@ -1,4 +1,5 @@
 import { useProjectStore } from './store/projectStore'
+import { t } from '@i18n'
 import { useTimelineStore } from './store/timelineStore'
 import { useModeStore } from './store/modeStore'
 import { keySlotColor } from './commands/animationCommands'
@@ -71,8 +72,8 @@ export function slotColorHexAt(doc: EditorDocument, target: SlotColorTarget, slo
 /** 颜色写入的状态栏文案（拖动收尾时用，免得只在「提交那一刻」才说一句） */
 export function slotColorMessage(slotName: string, target: SlotColorTarget): string {
   return target.animate
-    ? `已在 ${target.time.toFixed(3)}s 打关键帧：插槽「${slotName}」颜色 / 透明度`
-    : `已修改插槽「${slotName}」的 setup 颜色`
+    ? t('已在 {0}s 打关键帧：插槽「{1}」颜色 / 透明度', [target.time.toFixed(3), slotName])
+    : t('已修改插槽「{0}」的 setup 颜色', slotName)
 }
 
 /**
@@ -94,9 +95,9 @@ export function writeSlotColor(
 ): string {
   const store = useProjectStore.getState()
   const { document } = store
-  if (!document.slots.some((slot) => slot.name === slotName)) return `插槽「${slotName}」已不存在`
+  if (!document.slots.some((slot) => slot.name === slotName)) return t('插槽「{0}」已不存在', slotName)
   if (target.animate && !document.animations.some((item) => item.name === target.animation)) {
-    return `找不到动画「${target.animation ?? ''}」：先在时间轴选一个动画`
+    return t('找不到动画「{0}」：先在时间轴选一个动画', target.animation ?? '')
   }
   const color = hexToRgba(hex)
   const value = rgbaToHex(color)

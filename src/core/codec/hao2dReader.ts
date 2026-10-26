@@ -36,14 +36,16 @@ export function readHao2d(bytes: Uint8Array): Hao2dReadResult {
   const reader = new ByteReader(bytes)
   const magic = reader.readUint32()
   if (magic !== HAO2D_MAGIC) {
-    throw new Error(`Hao2D: 文件头不匹配（0x${magic.toString(16)}），不是 .hao2d 资源`)
+    throw new Error(t('Hao2D: 文件头不匹配（0x{0}），不是 .hao2d 资源', magic.toString(16)))
   }
   const version = reader.readUint16()
   // v5 的附件段没有 contentOffset，按 0 读 —— 等价于「没被裁剪过」
   // 5 / 6 / 7 是历史格式（字段更少，按默认值补齐）；8 = 当前格式（含骨架嵌套）
   const supported = version === 5 || version === 6 || version === 7 || version === 8 || version === HAO2D_VERSION
   if (!supported) {
-    throw new Error(`Hao2D: 不支持的数据版本 ${version}（支持 5 / 6 / 7 / 8 / ${HAO2D_VERSION}），请重新导出`)
+    throw new Error(
+      t('Hao2D: 不支持的数据版本 {0}（支持 5 / 6 / 7 / 8 / {1}），请重新导出', [version, HAO2D_VERSION])
+    )
   }
 
   const armatureName = reader.readString()

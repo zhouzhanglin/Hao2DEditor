@@ -331,7 +331,7 @@ export const en: Record<string, string> = {
     'Choose where to save the project (a <project name>.hao2d.proj will be created inside)',
   '项目名': 'Project name',
   '必填，不能含空格或 / \\ : * ? " < > |，例如 dragon_01 或 龙_01':
-    'Required; no spaces or / \\ : * ? " < > |, e.g. dragon_01',
+    'Required; no spaces or / \ : * ? " < > |, e.g. dragon_01',
   '保存位置': 'Location',
   '尚未选择': 'Not chosen yet',
   '尚未选择（点右侧按钮选一个目录）': 'Not chosen yet (click the button on the right to pick a folder)',
@@ -344,7 +344,7 @@ export const en: Record<string, string> = {
     'The project name is also the atlas name and output folder name on export; the skeleton name is edited separately in the skeleton bar.',
   '项目名不能为空': 'Project name cannot be empty',
   '项目名不能含空格或文件系统非法字符（/ \\ : * ? " < > |）':
-    'Project name cannot contain spaces or filesystem-illegal characters (/ \\ : * ? " < > |)',
+    'Project name cannot contain spaces or filesystem-illegal characters (/ \ : * ? " < > |)',
   '请选择保存位置': 'Please choose a location',
   '创建项目并立刻写出工程文件': 'Create the project and write the project file immediately',
   '项目名不能含空格 / 文件系统非法字符，且需选择保存位置':
@@ -1269,4 +1269,189 @@ export const en: Record<string, string> = {
   '复制图片到 {0}/ 失败：{1}': 'Failed to copy images into {0}/: {1}',
   '合并 {0} 张图集页': 'Merged {0} atlas page(s)',
   '动画「{0}」插槽「{1}」的 actions 里没有 gotoAndPlay / gotoAndStop，已忽略': 'Animation "{0}" slot "{1}" has actions without gotoAndPlay / gotoAndStop; ignored',
+
+  // —— 工程保存 / 打开 / 导入的提示（此前是硬编码中文）——
+  '保存到（内存路径）': 'Save to (in-memory path)',
+  '已新建项目（含根骨骼 root）': 'New project created (with root bone)',
+  '请先选择保存位置': 'Choose a save location first',
+  '已新建项目「{0}」：{1}': 'Created project "{0}": {1}',
+  '已取消': 'Cancelled',
+  '无法读取工程文件：{0}': 'Cannot read project file: {0}',
+  '工程文件解析失败：{0}': 'Failed to parse project file: {0}',
+  '（{0} 个骨架）': ' ({0} skeletons)',
+  '已打开 {0}{1}': 'Opened {0}{1}',
+  '{0} 张图片已复制到 {1}/': '{0} image(s) copied to {1}/',
+  '{0} 张图片已在工程内': '{0} image(s) already inside the project',
+  '已保存到 {0}': 'Saved to {0}',
+  '（{0}）': ' ({0})',
+  '，': ', ',
+  '；{0}': '; {0}',
+  'Spine 骨骼 JSON': 'Spine skeleton JSON',
+  'DragonBones 骨骼 JSON': 'DragonBones skeleton JSON',
+  '无法读取 {0}': 'Cannot read {0}',
+  '同目录下没有找到 .atlas 图集文件：{0}': 'No .atlas file found next to it: {0}',
+  '同目录下没有找到图集（texture_*.json）：{0}': 'No texture atlas (texture_*.json) found next to it: {0}',
+  '已导入 Spine：{0} 骨骼 / {1} 插槽 / {2} 动画': 'Imported Spine: {0} bones / {1} slots / {2} animations',
+  '不是 DragonBones 骨骼文件（检测到 {0}）': 'Not a DragonBones skeleton file (detected {0})',
+  '{0} 个骨架（{1}），当前编辑「{2}」': '{0} skeletons ({1}), now editing "{2}"',
+  '已导入 DragonBones：{0} / {1} 骨骼 / {2} 插槽 / {3} 动画':
+    'Imported DragonBones: {0} / {1} bones / {2} slots / {3} animations',
+  '图片 / PSD': 'Images / PSD',
+  '（选了 {0} 个 PSD，已打开第一个的导入窗口）':
+    ' ({0} PSDs selected; the first one is open in the import dialog)',
+  '（PSD 已打开导入窗口，勾选要导入的图层）': ' (PSD import dialog is open; pick the layers to import)',
+  'PSD 已打开导入窗口，勾选要导入的图层': 'PSD import dialog is open; pick the layers to import',
+  '已导入 {0} 张图片': 'Imported {0} image(s)',
+  '没有新增图片（可能已存在）': 'No new images (they may already exist)',
+  '拖入的文件夹里没有可导入的图片（支持 png / jpg / webp / gif / bmp / psd）':
+    'The dropped folder has no importable images (png / jpg / webp / gif / bmp / psd)',
+  '{0}（文件夹里找到 {1} 张图片）': '{0} ({1} image(s) found in the folder)',
+  '已导入 Spine（拖入）：{0} 骨骼 / {1} 动画': 'Imported Spine (dropped): {0} bones / {1} animations',
+  '请同时拖入同目录的 .atlas 图集文件（或使用「导入 Spine」菜单）':
+    'Also drop the .atlas file from the same folder (or use File > Import Spine)',
+  '拖入的内容里没有可导入的图片（支持 png / jpg / webp / gif / bmp；文件夹会递归查找）':
+    'Nothing importable was dropped (png / jpg / webp / gif / bmp; folders are scanned recursively)',
+
+  // —— 补齐此前遗漏的界面文案 ——
+  '修改遮罩结束插槽': 'Change mask end slot',
+  '修改遮罩反向': 'Toggle mask inverted',
+  '修改遮罩凸形': 'Toggle mask convex',
+  'Animate 态用顶点工具（D）拖这些控制点写 FFD 关键帧':
+    'In Animate mode, drag these control points with the vertex tool (D) to key FFD',
+  '遮罩工具：点边线插入点；拖点移动；Delete 删除；点空白取消选中':
+    'Mask tool: click an edge to insert a point, drag to move, Delete to remove, click empty space to deselect',
+  '切到 Pose 状态才能把附件转为遮罩': 'Switch to Pose mode to convert the attachment into a mask',
+  '已把「{0}」转为遮罩并切换到遮罩工具：点边线插点、拖点调整、Delete 删除':
+    'Converted "{0}" to a mask and switched to the mask tool: click edges to insert points, drag to adjust, Delete to remove',
+  '转换失败：加权网格暂不支持，请先解除权重或手工绘制遮罩':
+    'Conversion failed: weighted meshes are not supported yet; unrig the weights or draw the mask manually',
+  '左右拖动调整「轨道 / 对象」列的宽度': 'Drag to resize the "Track / Object" column',
+  '插槽「{0}」已经在这个位置': 'Slot "{0}" is already here',
+  '找不到插槽「{0}」': 'Slot "{0}" not found',
+  '插槽「{0}」已移到「{1}」{2}': 'Moved slot "{0}" {2} "{1}"',
+  '上方': 'above',
+  '下方': 'below',
+  '插槽只能放到骨骼或另一条插槽旁边': 'Slots can only be dropped next to a bone or another slot',
+  '显示中 · 遮罩': 'Visible · Mask',
+  '骨骼「{0}」已挂到根骨骼「{1}」下，并排到骨骼列表末尾（骨骼顺序不影响插槽绘制顺序）':
+    'Bone "{0}" parented to root bone "{1}" and moved to the end of the bone list (bone order does not affect slot draw order)',
+  '骨骼「{0}」已经在骨骼列表末尾；骨骼不能排到插槽行之间（插槽绘制顺序请拖 slot 行）':
+    'Bone "{0}" is already at the end of the bone list; bones cannot be placed between slot rows (drag slot rows to reorder draw order)',
+  '插槽「{0}」已移到最底层（root 下）': 'Slot "{0}" moved to the bottom (under root)',
+  '放到最底层': 'Move to bottom',
+
+  // —— 打帧 / 删帧 / 清理帧的状态栏提示 ——
+  '工程里还没有动画：先在时间轴点「+ 动画」建一个，再打关键帧':
+    'This project has no animations yet: create one from the timeline ("+ Animation") and then key',
+  '视口尚未就绪': 'Viewport is not ready yet',
+  '没有可打关键帧的骨架': 'No skeleton available for keying',
+  '没有可打关键帧的目标': 'Nothing to key on the selected object',
+  '已在 {0}s 为「{1}」打关键帧': 'Keyed "{1}" at {0}s',
+  '已在 {0}s 为选中对象打关键帧': 'Keyed the selection at {0}s',
+  '当前对象没有可打关键帧的数据（FFD 需要先编辑过顶点）':
+    'The current object has no keyable data (FFD needs edited vertices first)',
+  '当前皮肤里没有「{0}」': 'Attachment "{0}" is not in the current skin',
+  '已在 {0}s 打「{1}」的显示帧 → 「{2}」': 'Keyed display of "{1}" at {0}s → "{2}"',
+  '已在 {0}s 打「{1}」的显示帧 → 不显示': 'Keyed display of "{1}" at {0}s → hidden',
+  '插槽「{0}」上没有嵌套骨架': 'Slot "{0}" has no nested armature',
+  '已在 {0}s 打「{1}」的子骨架帧 → 「{2}」': 'Keyed sub-armature of "{1}" at {0}s → "{2}"',
+  '已在 {0}s 打「{1}」的子骨架帧（setup 姿态）':
+    'Keyed sub-armature of "{1}" at {0}s (setup pose)',
+  '找不到动画「{0}」': 'Animation "{0}" not found',
+  '已在 {0}s 添加事件帧「{1}」（在视口下方值栏改名 / 设参数）':
+    'Added event key "{1}" at {0}s (rename / set params in the value bar below the viewport)',
+  '请先选中骨骼、插槽、网格附件或约束': 'Select a bone, slot, mesh attachment or constraint first',
+  '已在 {0}s 为{1}打关键帧': 'Keyed {1} at {0}s',
+  '已在 {0}s 打了 {1} 处关键帧': 'Keyed {1} properties at {0}s',
+  '已删除 {0} 个关键帧': 'Removed {0} keyframe(s)',
+  '先在时间轴上点选一条通道，再按 Delete 删除它':
+    'Click a channel in the timeline first, then press Delete to remove it',
+  '已在 {0}s 打「{1}」关键帧': 'Keyed "{1}" at {0}s',
+  '事件 {0}': 'Event {0}',
+  '选择文件': 'Choose a file',
+  '预览服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）':
+    'Preview service is not ready: fully quit and restart the editor (the main process is still an old build)',
+  '命令服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）':
+    'Command service is not ready: fully quit and restart the editor (the main process is still an old build)',
+  '浏览器模式没有本地预览服务，请在桌面版里使用':
+    'Browser mode has no local preview service; use the desktop app',
+  '浏览器模式没有命令服务，请在桌面版里使用':
+    'Browser mode has no command service; use the desktop app',
+  '骨架「{0}」正在被引用，先删除这些嵌套 display：{1}':
+    'Armature "{0}" is still referenced; remove these nested displays first: {1}',
+  '已存在名为「{0}」的骨架，请换一个名字': 'An armature named "{0}" already exists; pick another name',
+  '已在 {0}s 写入「{1}」的层级关键帧': 'Keyed draw order of "{1}" at {0}s',
+  '已移动「{0}」（setup 绘制顺序）': 'Moved "{0}" (setup draw order)',
+  '已在 {0}s 打关键帧：插槽「{1}」颜色 / 透明度': 'Keyed color / alpha of slot "{1}" at {0}s',
+  '已修改插槽「{0}」的 setup 颜色': 'Changed the setup color of slot "{0}"',
+  '插槽「{0}」已不存在': 'Slot "{0}" no longer exists',
+  '找不到动画「{0}」：先在时间轴选一个动画':
+    'Animation "{0}" not found: pick an animation in the timeline first',
+  '已导出到 {0}/：{1} / {2} / {3} 张图集页': 'Exported to {0}/: {1} / {2} / {3} atlas page(s)',
+  '选择导出目录（.hao2d）': 'Choose an export folder (.hao2d)',
+  '已导出 {0}（有 {1} 条与 Unity 运行时的差异提示）':
+    'Exported {0} ({1} differences from the Unity runtime reported)',
+  '已导出 {0}': 'Exported {0}',
+  '{0} 个材质（Hao2D/Sprite）': '{0} material(s) (Hao2D/Sprite)',
+  '已导出到 {0}/：{1}': 'Exported to {0}/: {1}',
+  '；{0} 条与 Unity 运行时的差异提示': '; {0} differences from the Unity runtime reported',
+  '{0} 等 {1} 个': '{0} and {1} in total',
+  '没有可导出的骨架': 'No skeleton to export',
+  '已导出到 {0}/：{1}.json / {2} / {3} 张图集页':
+    'Exported to {0}/: {1}.json / {2} / {3} atlas page(s)',
+  '「{0}」里没有带像素的图层（文本 / 调整层无法导入）':
+    '"{0}" has no pixel layers (text / adjustment layers cannot be imported)',
+  '解析 PSD 失败：{0}': 'Failed to parse the PSD: {0}',
+  'Photoshop 文档': 'Photoshop document',
+  '请先保存或创建工程：PSD 的图层图片要落到工程目录的 images/ 下（与「导入图片」同一规则）':
+    'Save or create the project first: PSD layer images must be written into the project images/ folder (same rule as Import Images)',
+  '没有勾选任何带像素的图层': 'No pixel layers are selected',
+  '写入图层图片失败：{0}': 'Failed to write layer images: {0}',
+  '没有可导出的图层（选中项都没有像素）': 'No exportable layers (none of the selected layers have pixels)',
+  '已导入 {0} 层图片': 'Imported {0} layer image(s)',
+  '按 PSD 位置添加了 {0} 个插槽（画布中心对齐根骨骼）':
+    'Added {0} slot(s) at their PSD positions (canvas center aligned to the root bone)',
+  'PSD「{0}」导入完成：{1}': 'PSD "{0}" imported: {1}',
+  '「{0}」已拆成 {1} 张碎图（{2}），图集已从工程移除':
+    'Split "{0}" into {1} loose image(s) ({2}); the atlas was removed from the project',
+  '有附件对不上区域名，另拆了一张整页兜底':
+    'Some attachments did not match region names; also split one full page as a fallback',
+  '跳过 {0} 个空区域': 'Skipped {0} empty region(s)',
+  '图片「{0}」不存在': 'Image "{0}" does not exist',
+  '「{0}」已经是碎图，不用再拆': '"{0}" is already a loose image; no need to split it',
+  '「{0}」不是磁盘文件，拆出来的碎图没地方写':
+    '"{0}" is not a file on disk, so the split images have nowhere to be written',
+  '读取「{0}」失败，无法拆分': 'Failed to read "{0}", cannot split it',
+  '「{0}」里没有记录任何子区域，拆不出碎图': '"{0}" has no recorded sub-regions to split',
+  '碎图编码失败（当前环境没有可用的画布）':
+    'Failed to encode the loose image (no canvas available in this environment)',
+  '写入碎图失败：{0}': 'Failed to write loose images: {0}',
+  '「{0}」在拆分过程中被改动，已放弃（磁盘上的碎图文件可自行删除）':
+    '"{0}" changed while splitting; aborted (you can delete the written loose images manually)',
+  '不是 Spine 骨骼文件（检测到 {0}），请选择含 "skeleton" 段的 JSON':
+    'Not a Spine skeleton file (detected {0}); pick a JSON with a "skeleton" section',
+  '这是图集文件，请选择含 "armature" 段的骨骼 JSON':
+    'This is a texture atlas file; pick a skeleton JSON with an "armature" section',
+  'Hao2D 工程': 'Hao2D project',
+  '贴图': 'Image',
+  '包围盒': 'Bounding box',
+  '编组': 'Group',
+  '图层': 'Layer',
+  '未命名': 'Untitled',
+  '混合模式 Erase 需要额外遮罩流程，视口中降级为 Normal':
+    'Blend mode Erase needs an extra mask pass; downgraded to Normal in the viewport',
+  '混合模式 Below 依赖绘制顺序语义，视口中降级为 Normal':
+    'Blend mode Below depends on draw-order semantics; downgraded to Normal in the viewport',
+  '混合模式 None 的“不绘制”语义在视口中降级为 Normal':
+    'Blend mode None means "do not draw"; downgraded to Normal in the viewport',
+  '不是 hao2d-ske 格式的骨骼数据': 'Not hao2d-ske skeleton data',
+  '不是 hao2d-atlas 格式的图集描述': 'Not an hao2d-atlas description',
+  '不支持的 hao2d-ske 版本 {0}': 'Unsupported hao2d-ske version {0}',
+  '不支持的 hao2d-atlas 版本 {0}': 'Unsupported hao2d-atlas version {0}',
+  '图层「{0}」没有像素数据': 'Layer "{0}" has no pixel data',
+  '图层「{0}」导出 PNG 失败': 'Failed to export layer "{0}" as PNG',
+  'Hao2D: 文件头不匹配（0x{0}），不是 .hao2d 资源':
+    'Hao2D: file header mismatch (0x{0}); this is not a .hao2d asset',
+  'Hao2D: 不支持的数据版本 {0}（支持 5 / 6 / 7 / 8 / {1}），请重新导出':
+    'Hao2D: unsupported data version {0} (supports 5 / 6 / 7 / 8 / {1}); please re-export',
 }

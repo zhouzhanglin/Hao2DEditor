@@ -18,6 +18,7 @@ import type { KeyframeTarget, KeyKind, KeySelector, PoseSnapshot } from './model
 import type { AuthoringAnimData } from '@core/model/authoring'
 import type { EventKeyframe } from '@core/model/animation'
 import type { Vec2 } from '@core/math/matrix'
+import { t } from '@i18n'
 
 export interface ActionResult {
   ok: boolean
@@ -62,7 +63,9 @@ export function resolveAnimationName(): string {
 }
 
 /** 没有可用动画时的统一提示（视口属性打帧条也用它，避免同一件事两套说法） */
-export const NO_ANIMATION_MESSAGE = '工程里还没有动画：先在时间轴点「+ 动画」建一个，再打关键帧'
+export function noAnimationMessage(): string {
+  return t('工程里还没有动画：先在时间轴点「+ 动画」建一个，再打关键帧')
+}
 
 /**
  * 打帧目标 → 时间轴子轨道 id（与 `buildTimeline` 的 id 规则一致）：
@@ -107,14 +110,14 @@ function snapshotPose(bundle: RuntimeBundle): PoseSnapshot {
  */
 export function keyframeTargetsNow(targets: readonly KeyframeTarget[], label = ''): ActionResult {
   const scene = getActiveScene()
-  if (!scene) return { ok: false, message: '视口尚未就绪' }
+  if (!scene) return { ok: false, message: t('视口尚未就绪') }
   const bundle = scene.runtime
-  if (!bundle) return { ok: false, message: '没有可打关键帧的骨架' }
+  if (!bundle) return { ok: false, message: t('没有可打关键帧的骨架') }
   const animScope = resolveAnimationName()
-  if (!animScope) return { ok: false, message: NO_ANIMATION_MESSAGE }
+  if (!animScope) return { ok: false, message: noAnimationMessage() }
   const timeline = useTimelineStore.getState()
   const animationName = animScope
-  if (targets.length === 0) return { ok: false, message: '没有可打关键帧的目标' }
+  if (targets.length === 0) return { ok: false, message: t('没有可打关键帧的目标') }
 
   let count = 0
   useProjectStore.getState().update('打关键帧', (draft) => {
@@ -140,9 +143,11 @@ export function keyframeTargetsNow(targets: readonly KeyframeTarget[], label = '
   return count > 0
     ? {
         ok: true,
-        message: `已在 ${timeline.time.toFixed(2)}s 为${label ? `「${label}」` : '选中对象'}打关键帧`
+        message: label
+          ? t('已在 {0}s 为「{1}」打关键帧', [timeline.time.toFixed(2), label])
+          : t('已在 {0}s 为选中对象打关键帧', timeline.time.toFixed(2))
       }
-    : { ok: false, message: '当前对象没有可打关键帧的数据（FFD 需要先编辑过顶点）' }
+    : { ok: false, message: t('当前对象没有可打关键帧的数据（FFD 需要先编辑过顶点）') }
 }
 
 /**
@@ -154,20 +159,20 @@ export function keyframeTargetsNow(targets: readonly KeyframeTarget[], label = '
 export function keySlotDisplayNow(slotName: string, attachmentName: string): ActionResult {
   const scene = getActiveScene()
   const bundle = scene?.runtime
-  if (!bundle) return { ok: false, message: '没有可打关键帧的骨架' }
+  if (!bundle) return { ok: false, message: t('没有可打关键帧的骨架') }
   const animScope = resolveAnimationName()
-  if (!animScope) return { ok: false, message: NO_ANIMATION_MESSAGE }
+  if (!animScope) return { ok: false, message: noAnimationMessage() }
   const timeline = useTimelineStore.getState()
   const animationName = animScope
   const slotIndex = bundle.slotIndex[slotName]
-  if (slotIndex === undefined) return { ok: false, message: `找不到插槽「${slotName}」` }
+  if (slotIndex === undefined) return { ok: false, message: t('找不到插槽「{0}」', slotName) }
   const skin = bundle.maps.skinOfSlot[slotIndex]
   const attachments = skin >= 0 ? bundle.maps.skinArr[skin].attachments : []
   // 空名 = 这一个关键帧起不再显示任何 display（下标 -1），不需要校验附件是否存在
   const index = attachmentName
     ? attachments.findIndex((attachment) => attachment.name === attachmentName)
     : -1
-  if (attachmentName && index < 0) return { ok: false, message: `当前皮肤里没有「${attachmentName}」` }
+  if (attachmentName && index < 0) return { ok: false, message: t('当前皮肤里没有「{0}」', attachmentName) }
 
   const at = timeline.time
   useProjectStore.getState().update('打显示关键帧', (draft) => {
@@ -182,8 +187,8 @@ export function keySlotDisplayNow(slotName: string, attachmentName: string): Act
   return {
     ok: true,
     message: attachmentName
-      ? `已在 ${at.toFixed(2)}s 打「${slotName}」的显示帧 → 「${attachmentName}」`
-      : `已在 ${at.toFixed(2)}s 打「${slotName}」的显示帧 → 不显示`
+      ? t('已在 {0}s 打「{1}」的显示帧 → 「{2}」', [at.toFixed(2), slotName, attachmentName])
+      : t('已在 {0}s 打「{1}」的显示帧 → 不显示', [at.toFixed(2), slotName])
   }
 }
 
@@ -200,11 +205,11 @@ export function keySlotSubArmatureNow(
 ): ActionResult {
   const scene = getActiveScene()
   const bundle = scene?.runtime
-  if (!bundle) return { ok: false, message: '没有可打关键帧的骨架' }
+  if (!bundle) return { ok: false, message: t('没有可打关键帧的骨架') }
   const animationName = resolveAnimationName()
-  if (!animationName) return { ok: false, message: NO_ANIMATION_MESSAGE }
+  if (!animationName) return { ok: false, message: noAnimationMessage() }
   const slotIndex = bundle.slotIndex[slotName]
-  if (slotIndex === undefined) return { ok: false, message: `找不到插槽「${slotName}」` }
+  if (slotIndex === undefined) return { ok: false, message: t('找不到插槽「{0}」', slotName) }
 
   const skin = bundle.maps.skinOfSlot[slotIndex]
   const attachments = skin >= 0 ? bundle.maps.skinArr[skin].attachments : []
@@ -213,7 +218,7 @@ export function keySlotSubArmatureNow(
     display && display.type === AttachmentType.Armature
       ? display
       : attachments.find((item) => item.type === AttachmentType.Armature)
-  if (!armature) return { ok: false, message: `插槽「${slotName}」上没有嵌套骨架` }
+  if (!armature) return { ok: false, message: t('插槽「{0}」上没有嵌套骨架', slotName) }
 
   const at = useTimelineStore.getState().time
   // 未显式覆盖的参数：优先沿用**当前位置已生效的那一帧**（改动画名不该把次数/偏移/倍速重置回 setup）
@@ -240,8 +245,8 @@ export function keySlotSubArmatureNow(
   return {
     ok: true,
     message: params.animation
-      ? `已在 ${at.toFixed(2)}s 打「${slotName}」的子骨架帧 → 「${params.animation}」`
-      : `已在 ${at.toFixed(2)}s 打「${slotName}」的子骨架帧（setup 姿态）`
+      ? t('已在 {0}s 打「{1}」的子骨架帧 → 「{2}」', [at.toFixed(2), slotName, params.animation])
+      : t('已在 {0}s 打「{1}」的子骨架帧（setup 姿态）', [at.toFixed(2), slotName])
   }
 }
 
@@ -268,7 +273,7 @@ function nextEventName(events: readonly EventKeyframe[]): string {
  */
 export function keyEventNow(): ActionResult {
   const animScope = resolveAnimationName()
-  if (!animScope) return { ok: false, message: NO_ANIMATION_MESSAGE }
+  if (!animScope) return { ok: false, message: noAnimationMessage() }
   // 与 dope sheet 新建关键帧同一取整口径（4 位小数），保证键 id / 选中判定稳定
   const at = Math.round(useTimelineStore.getState().time * 1e4) / 1e4
   let name = ''
@@ -281,13 +286,16 @@ export function keyEventNow(): ActionResult {
     // 时长是「可编辑范围」：事件落在末尾之外时同步延长（只增不减）
     syncDuration(animation)
   })
-  if (!name) return { ok: false, message: `找不到动画「${animScope}」` }
+  if (!name) return { ok: false, message: t('找不到动画「{0}」', animScope) }
 
   const timeline = useTimelineStore.getState()
   // 事件轨固定在最上面，这里主要借高亮闪一下，确认「帧确实加上了」
   timeline.notifyKeyed('event', at)
   timeline.setSelectedKeys([{ kind: 'event', target: name, attachment: '', channel: name, time: at }])
-  return { ok: true, message: `已在 ${at.toFixed(2)}s 添加事件帧「${name}」（在视口下方值栏改名 / 设参数）` }
+  return {
+    ok: true,
+    message: t('已在 {0}s 添加事件帧「{1}」（在视口下方值栏改名 / 设参数）', [at.toFixed(2), name])
+  }
 }
 
 /**
@@ -296,11 +304,11 @@ export function keyEventNow(): ActionResult {
  */
 export function keyframeNow(): ActionResult {
   const scene = getActiveScene()
-  if (!scene) return { ok: false, message: '视口尚未就绪' }
+  if (!scene) return { ok: false, message: t('视口尚未就绪') }
   const bundle = scene.runtime
-  if (!bundle) return { ok: false, message: '没有可打关键帧的骨架' }
+  if (!bundle) return { ok: false, message: t('没有可打关键帧的骨架') }
   const animScope = resolveAnimationName()
-  if (!animScope) return { ok: false, message: NO_ANIMATION_MESSAGE }
+  if (!animScope) return { ok: false, message: noAnimationMessage() }
   const timeline = useTimelineStore.getState()
   const animationName = animScope
 
@@ -316,8 +324,10 @@ export function keyframeNow(): ActionResult {
         }
       ]
     : selectionTargets(useSelectionStore.getState())
-  if (targets.length === 0) return { ok: false, message: '请先选中骨骼、插槽、网格附件或约束' }
-  const trackLabel = focusedTrack ? `「${focusedTrack.target} · ${focusedTrack.channel}」` : ''
+  if (targets.length === 0) return { ok: false, message: t('请先选中骨骼、插槽、网格附件或约束') }
+  const trackLabel = focusedTrack
+    ? t('「{0}」', trackLabelOf({ kind: focusedTrack.kind, target: focusedTrack.target, channel: focusedTrack.channel }))
+    : ''
 
   let count = 0
   useProjectStore.getState().update('打关键帧', (draft) => {
@@ -332,22 +342,22 @@ export function keyframeNow(): ActionResult {
     ? {
         ok: true,
         message: focusedTrack
-          ? `已在 ${timeline.time.toFixed(2)}s 为${trackLabel}打关键帧`
-          : `已在 ${timeline.time.toFixed(2)}s 打了 ${count} 处关键帧`
+          ? t('已在 {0}s 为{1}打关键帧', [timeline.time.toFixed(2), trackLabel])
+          : t('已在 {0}s 打了 {1} 处关键帧', [timeline.time.toFixed(2), count])
       }
-    : { ok: false, message: '当前对象没有可打关键帧的数据（FFD 需要先编辑过顶点）' }
+    : { ok: false, message: t('当前对象没有可打关键帧的数据（FFD 需要先编辑过顶点）') }
 }
 
 /** 删除 dope sheet 里选中的关键帧 */
 export function removeSelectedKeys(): ActionResult {
   const timeline = useTimelineStore.getState()
-  if (timeline.selectedKeys.length === 0) return { ok: false, message: '先在 dope sheet 里选中关键帧' }
+  if (timeline.selectedKeys.length === 0) return { ok: false, message: t('先在 dope sheet 里选中关键帧') }
   let removed = 0
   useProjectStore.getState().update('删除关键帧', (draft) => {
     removed = deleteKeys(draft, timeline.currentAnimation, timeline.selectedKeys)
   })
   timeline.setSelectedKeys([])
-  return { ok: true, message: `已删除 ${removed} 个关键帧` }
+  return { ok: true, message: t('已删除 {0} 个关键帧', removed) }
 }
 
 /** 收集某条通道（轨道）当前的全部关键帧选择器：按 kind / target / attachment / channel 精确定位 */
@@ -382,7 +392,7 @@ function selectorsOfFocus(animation: AuthoringAnimData | null, focus: KeySelecto
 export function deleteSelectedTrack(): ActionResult {
   const timeline = useTimelineStore.getState()
   const focus = timeline.selectedTrack
-  if (!focus) return { ok: false, message: '先在时间轴上点选一条通道，再按 Delete 删除它' }
+  if (!focus) return { ok: false, message: t('先在时间轴上点选一条通道，再按 Delete 删除它') }
   return deleteTrack(focus as KeySelector)
 }
 
@@ -398,10 +408,10 @@ export function deleteTrack(focus: KeySelector): ActionResult {
   const timeline = useTimelineStore.getState()
   const animation =
     useProjectStore.getState().document.animations.find((item) => item.name === timeline.currentAnimation) ?? null
-  if (!animation) return { ok: false, message: NO_ANIMATION_MESSAGE }
+  if (!animation) return { ok: false, message: noAnimationMessage() }
   const label = trackLabelOf(focus)
   const selectors = selectorsOfFocus(animation, focus)
-  if (selectors.length === 0) return { ok: false, message: `通道「${label}」已经没有关键帧了` }
+  if (selectors.length === 0) return { ok: false, message: t('通道「{0}」已经没有关键帧了', label) }
 
   let removed = 0
   // runCommand：一帧都没删掉时不写撤销记录
@@ -414,8 +424,8 @@ export function deleteTrack(focus: KeySelector): ActionResult {
   })
   timeline.setSelectedKeys([])
   return removed > 0
-    ? { ok: true, message: `已删除通道「${label}」（${removed} 个关键帧）` }
-    : { ok: false, message: `通道「${label}」没有可删除的关键帧` }
+    ? { ok: true, message: t('已删除通道「{0}」（{1} 个关键帧）', [label, removed]) }
+    : { ok: false, message: t('通道「{0}」没有可删除的关键帧', label) }
 }
 
 /**
@@ -430,7 +440,7 @@ export function cleanupEmptyTracks(): ActionResult {
   const timeline = useTimelineStore.getState()
   const animation =
     useProjectStore.getState().document.animations.find((item) => item.name === timeline.currentAnimation) ?? null
-  if (!animation) return { ok: false, message: NO_ANIMATION_MESSAGE }
+  if (!animation) return { ok: false, message: noAnimationMessage() }
 
   let removed = 0
   useProjectStore.getState().runCommand('清理帧', (draft) => {
@@ -442,8 +452,8 @@ export function cleanupEmptyTracks(): ActionResult {
     return removed > 0
   })
   return removed > 0
-    ? { ok: true, message: `已清理 ${removed} 条没有关键帧的通道` }
-    : { ok: true, message: '当前动画没有空通道需要清理' }
+    ? { ok: true, message: t('已清理 {0} 条没有关键帧的通道', removed) }
+    : { ok: true, message: t('当前动画没有空通道需要清理') }
 }
 
 /** 轨道条目数（骨骼 / 插槽 / FFD / 约束）：清理前后对比，用来回报「清掉了几条」 */
@@ -465,7 +475,7 @@ function countTrackEntries(anim: AuthoringAnimData): number {
  */
 export function setBoneChannelNow(bone: string, channel: BoneChannel, value: number | Vec2): ActionResult {
   const animScope = resolveAnimationName()
-  if (!animScope) return { ok: false, message: NO_ANIMATION_MESSAGE }
+  if (!animScope) return { ok: false, message: noAnimationMessage() }
   const at = useTimelineStore.getState().time
   const label = trackLabelOf({ kind: 'bone', target: bone, channel })
   let written = false
@@ -477,32 +487,36 @@ export function setBoneChannelNow(bone: string, channel: BoneChannel, value: num
     syncDuration(animation)
     written = true
   })
-  if (!written) return { ok: false, message: `找不到动画「${animScope}」` }
+  if (!written) return { ok: false, message: t('找不到动画「{0}」', animScope) }
 
   useTimelineStore.getState().notifyKeyed(`bone:${bone}:${channel}`, at)
   useTimelineStore.getState().setSelectedKeys([{ kind: 'bone', target: bone, attachment: '', channel, time: at }])
-  return { ok: true, message: `已在 ${at.toFixed(2)}s 打「${label}」关键帧` }
+  return { ok: true, message: t('已在 {0}s 打「{1}」关键帧', [at.toFixed(2), label]) }
 }
 
-/** 通道名的中文label（提示文案用） */
+/** 通道名 → 当前语言下的 label（提示文案用） */
 function trackLabelOf(focus: { kind: string; target: string; channel: string }): string {
-  const channel = CHANNEL_LABEL[focus.channel] ?? focus.channel
-  if (focus.kind === 'drawOrder') return '插槽层级'
-  if (focus.kind === 'event') return `事件 ${focus.target}`
+  const channel = channelLabel(focus.channel)
+  if (focus.kind === 'drawOrder') return t('插槽层级')
+  if (focus.kind === 'event') return t('事件 {0}', focus.target)
   // 分组行没有通道名：只报对象名，别留一个「 · 」尾巴
-  if (focus.kind === 'bone' || focus.kind === 'slot') return channel ? `${focus.target} · ${channel}` : focus.target
+  if (focus.kind === 'bone' || focus.kind === 'slot') {
+    return channel ? `${focus.target} · ${channel}` : focus.target
+  }
   if (focus.kind === 'deform') return `${focus.target} · FFD`
   return focus.target || channel
 }
 
-const CHANNEL_LABEL: Record<string, string> = {
-  translate: '位置',
-  rotate: '旋转',
-  scale: '缩放',
-  shear: '斜切',
-  display: '显示',
-  color: '颜色',
-  visible: '可见性',
-  order: '绘制顺序',
-  offsets: 'FFD'
+/** 通道 key → 文案；未知通道原样返回（约束名之类） */
+function channelLabel(channel: string): string {
+  if (channel === 'translate') return t('位置')
+  if (channel === 'rotate') return t('旋转')
+  if (channel === 'scale') return t('缩放')
+  if (channel === 'shear') return t('斜切')
+  if (channel === 'display') return t('显示')
+  if (channel === 'color') return t('颜色')
+  if (channel === 'visible') return t('可见性')
+  if (channel === 'order') return t('绘制顺序')
+  if (channel === 'offsets') return 'FFD'
+  return channel
 }

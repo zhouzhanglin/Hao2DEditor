@@ -350,7 +350,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   addSkeleton: (name) => {
     const state = get()
     history.push('新建骨架', snapshotOf(state))
-    const created = withDefaultRoot(createEmptyDocument(name ?? `骨架 ${state.skeletons.length + 1}`))
+    const created = withDefaultRoot(
+      createEmptyDocument(name ?? t('骨架 {0}', state.skeletons.length + 1))
+    )
     // 新骨架沿用当前的帧率 / 视口 / 图片池：切过去时画面不跳，图片立刻可用
     created.frameRate = state.document.frameRate
     created.editorMeta.viewport = { ...state.document.editorMeta.viewport }
@@ -374,7 +376,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const target = state.skeletons[at]?.armatureName ?? ''
     const referencedBy = nestReferencesTo(state.skeletons, target)
     if (referencedBy.length > 0) {
-      set({ warnings: [`骨架「${target}」正在被引用，先删除这些嵌套 display：${referencedBy.join('、')}`] })
+      set({
+        warnings: [
+          t('骨架「{0}」正在被引用，先删除这些嵌套 display：{1}', [target, referencedBy.join(t('、'))])
+        ]
+      })
       return
     }
     history.push('删除骨架', snapshotOf(state))
@@ -397,7 +403,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!trimmed || trimmed === old) return
     // 名字是嵌套引用的唯一键：重名会让「引用谁」变得不确定，直接拒绝
     if (state.skeletons.some((skeleton, i) => i !== at && skeleton.armatureName === trimmed)) {
-      set({ warnings: [`已存在名为「${trimmed}」的骨架，请换一个名字`] })
+      set({ warnings: [t('已存在名为「{0}」的骨架，请换一个名字', trimmed)] })
       return
     }
     history.push('重命名骨架', snapshotOf(state))

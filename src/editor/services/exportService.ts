@@ -546,7 +546,12 @@ export async function writeRuntimeExport(
 
   return {
     ok: true,
-    message: `已导出到 ${baseName(outDir)}/：${listFiles(plan.skeletons.map((entry) => entry.fileName))} / ${plan.atlasName} / ${plan.pageFiles.length} 张图集页`,
+    message: t('已导出到 {0}/：{1} / {2} / {3} 张图集页', [
+      baseName(outDir),
+      listFiles(plan.skeletons.map((entry) => entry.fileName)),
+      plan.atlasName,
+      plan.pageFiles.length
+    ]),
     warnings,
     files: files.map((file) => baseName(file.path))
   }
@@ -560,8 +565,8 @@ export async function exportHao2d(): Promise<ExportResult> {
 
   const platform = getPlatform()
   const defaultPath = `${stem}.hao2d`
-  const dir = await pickOutputDir('选择导出目录（.hao2d）')
-  if (!dir) return { ok: false, message: '已取消', warnings: [], files: [] }
+  const dir = await pickOutputDir(t('选择导出目录（.hao2d）'))
+  if (!dir) return { ok: false, message: t('已取消'), warnings: [], files: [] }
 
   const compiled = compileDocument(doc)
   const warnings = [...compiled.warnings, ...collectHao2dWarnings(compiled.asset)]
@@ -572,8 +577,8 @@ export async function exportHao2d(): Promise<ExportResult> {
   return {
     ok: true,
     message: warnings.length > 0
-      ? `已导出 ${defaultPath}（有 ${warnings.length} 条与 Unity 运行时的差异提示）`
-      : `已导出 ${defaultPath}`,
+      ? t('已导出 {0}（有 {1} 条与 Unity 运行时的差异提示）', [defaultPath, warnings.length])
+      : t('已导出 {0}', defaultPath),
     warnings,
     files: [defaultPath]
   }
@@ -666,9 +671,13 @@ export async function writeHao2dExport(
   await platform.revealInFolder(joinPath(outDir, hao2dFiles[0] ?? `${plan.stem}.hao2d`))
   useProjectStore.getState().setWarnings(warnings)
 
-  const parts = [listFiles(hao2dFiles), `${sheetCount} 张图集页`, `${materialCount} 个材质（Hao2D/Sprite）`]
-  let message = `已导出到 ${baseName(outDir)}/：${parts.join(' / ')}`
-  if (warnings.length > 0) message += `；${warnings.length} 条与 Unity 运行时的差异提示`
+  const parts = [
+    listFiles(hao2dFiles),
+    t('{0} 张图集页', sheetCount),
+    t('{0} 个材质（Hao2D/Sprite）', materialCount)
+  ]
+  let message = t('已导出到 {0}/：{1}', [baseName(outDir), parts.join(' / ')])
+  if (warnings.length > 0) message += t('；{0} 条与 Unity 运行时的差异提示', warnings.length)
   if (warnings.length > 0) console.warn('[hao2d] Unity 导出告警：', warnings)
   return {
     ok: true,
@@ -806,7 +815,7 @@ async function resolveGuid(
 /** 文件清单的紧凑写法：不超过 3 个就全列出来，多了写「前 3 个 / 等 N 个」（导出面板也用） */
 export function listFiles(names: readonly string[]): string {
   if (names.length <= 3) return names.join(' / ')
-  return `${names.slice(0, 3).join(' / ')} 等 ${names.length} 个`
+  return t('{0} 等 {1} 个', [names.slice(0, 3).join(' / '), names.length])
 }
 
 /** 告警去重（多骨架会重复报同一类差异） */

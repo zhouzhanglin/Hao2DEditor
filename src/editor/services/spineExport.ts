@@ -1230,7 +1230,9 @@ export async function writeSpineExport(
   options: SpineExportOptions = {}
 ): Promise<ExportResult> {
   const platform = getPlatform()
-  if (plan.skeletons.length === 0) return { ok: false, message: '没有可导出的骨架', warnings: [], files: [] }
+  if (plan.skeletons.length === 0) {
+    return { ok: false, message: t('没有可导出的骨架'), warnings: [], files: [] }
+  }
   const { bundles, warnings } = await buildSpineBundles(plan)
   const bundle = bundles[0]
   const base = bundle.base
@@ -1251,7 +1253,12 @@ export async function writeSpineExport(
 
   return {
     ok: true,
-    message: `已导出到 ${base}/：${base}.json / ${atlasFile} / ${bundle.pages.length} 张图集页`,
+    message: t('已导出到 {0}/：{1}.json / {2} / {3} 张图集页', [
+      base,
+      base,
+      atlasFile,
+      bundle.pages.length
+    ]),
     warnings,
     files: files.map((file) => baseName(file.path))
   }

@@ -24,7 +24,7 @@ import { useTimelineStore } from '@editor/store/timelineStore'
 import {
   keySlotDisplayNow,
   keySlotSubArmatureNow,
-  NO_ANIMATION_MESSAGE,
+  noAnimationMessage,
   resolveAnimationName,
   setBoneChannelNow
 } from '@editor/timeline/actions'
@@ -646,7 +646,7 @@ function SlotRows({
   const writeColor = (hex: string): boolean => {
     const target = colorWriteTarget()
     if (target === null) {
-      onStatus(NO_ANIMATION_MESSAGE)
+      onStatus(noAnimationMessage())
       return false
     }
     const message = writeSlotColor(slot, hex, target)
@@ -690,7 +690,7 @@ function SlotRows({
     usePreviewStore.getState().clearSlotColors()
     const target = colorWriteTarget()
     if (target === null) {
-      onStatus(NO_ANIMATION_MESSAGE)
+      onStatus(noAnimationMessage())
       return
     }
     onStatus(slotColorMessage(slot, target))
@@ -705,7 +705,7 @@ function SlotRows({
     const target = colorWriteTarget()
     if (target === null) {
       // 拖动中不报，免得每动一下就刷一次状态栏；收尾时 onSettled 会报
-      if (!silent) onStatus(NO_ANIMATION_MESSAGE)
+      if (!silent) onStatus(noAnimationMessage())
       return false
     }
     const color = hexToRgba(slotColorHexAt(document, target, slot))

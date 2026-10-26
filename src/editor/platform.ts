@@ -1,3 +1,4 @@
+import { t } from '@i18n'
 import type {
   BatchFile,
   DirEntry,
@@ -101,7 +102,7 @@ class ElectronPlatform implements Platform {
   }
 
   async pickFiles(options?: PickFilesOptions): Promise<string[]> {
-    return unwrap(await this.bridge.openDialog({ ...options, title: options?.title ?? '选择文件' }), [])
+    return unwrap(await this.bridge.openDialog({ ...options, title: options?.title ?? t('选择文件') }), [])
   }
 
   async pickSavePath(options?: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null> {
@@ -199,7 +200,7 @@ class ElectronPlatform implements Platform {
       | ((s: SpinePreviewSession) => Promise<IpcResult<SpinePreviewInfo>>)
       | undefined
     if (typeof call !== 'function') {
-      return { ok: false, error: '预览服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）' }
+      return { ok: false, error: t('预览服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）') }
     }
     // 旧版 preload 的签名是 (session, open)：这里少传一个参数也照常工作 ——
     // 浏览器由本层（渲染层）用 openExternal 打开，不依赖主进程那一路
@@ -215,7 +216,7 @@ class ElectronPlatform implements Platform {
       | ((s: Hao2dPreviewSession) => Promise<IpcResult<SpinePreviewInfo>>)
       | undefined
     if (typeof call !== 'function') {
-      return { ok: false, error: '预览服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）' }
+      return { ok: false, error: t('预览服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）') }
     }
     return call.call(this.bridge, session)
   }
@@ -235,7 +236,7 @@ class ElectronPlatform implements Platform {
   async aiMcpInfo(): Promise<IpcResult<{ running: boolean; mcpUrl: string; url: string; token: string }>> {
     const call = this.bridge.aiMcpInfo
     if (typeof call !== 'function') {
-      return { ok: false, error: '命令服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）' }
+      return { ok: false, error: t('命令服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）') }
     }
     return call.call(this.bridge)
   }
@@ -243,7 +244,7 @@ class ElectronPlatform implements Platform {
   async aiInstallMcp(): Promise<IpcResult<McpInstallReport>> {
     const call = this.bridge.aiInstallMcp
     if (typeof call !== 'function') {
-      return { ok: false, error: '命令服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）' }
+      return { ok: false, error: t('命令服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）') }
     }
     return call.call(this.bridge)
   }
@@ -422,7 +423,7 @@ class MemoryPlatform implements Platform {
 
   /** 浏览器模式没有主进程，起不了本地服务（dev:web 里忽略这个功能） */
   async startSpinePreview(): Promise<IpcResult<SpinePreviewInfo>> {
-    return { ok: false, error: '浏览器模式没有本地预览服务，请在桌面版里使用' }
+    return { ok: false, error: t('浏览器模式没有本地预览服务，请在桌面版里使用') }
   }
 
   async stopSpinePreview(): Promise<IpcResult<void>> {
@@ -430,7 +431,7 @@ class MemoryPlatform implements Platform {
   }
 
   async startHao2dPreview(): Promise<IpcResult<SpinePreviewInfo>> {
-    return { ok: false, error: '浏览器模式没有本地预览服务，请在桌面版里使用' }
+    return { ok: false, error: t('浏览器模式没有本地预览服务，请在桌面版里使用') }
   }
 
   async stopHao2dPreview(): Promise<IpcResult<void>> {
@@ -447,11 +448,11 @@ class MemoryPlatform implements Platform {
   }
 
   async aiMcpInfo(): Promise<IpcResult<{ running: boolean; mcpUrl: string; url: string; token: string }>> {
-    return { ok: false, error: '浏览器模式没有命令服务，请在桌面版里使用' }
+    return { ok: false, error: t('浏览器模式没有命令服务，请在桌面版里使用') }
   }
 
   async aiInstallMcp(): Promise<IpcResult<McpInstallReport>> {
-    return { ok: false, error: '浏览器模式没有命令服务，请在桌面版里使用' }
+    return { ok: false, error: t('浏览器模式没有命令服务，请在桌面版里使用') }
   }
 
   /** 浏览器模式：直接读 navigator.language */

@@ -1,5 +1,6 @@
 import { readPsd } from 'ag-psd'
 import type { Layer } from 'ag-psd'
+import { t } from '@i18n'
 
 /**
  * PSD 导入的**解析层**（不碰工程 / 文件系统）：把 PSD 二进制解成「图层树 + 每层的像素画布」。
@@ -67,7 +68,7 @@ export function parsePsd(buffer: ArrayBuffer | Uint8Array, fileName: string): Pa
       }
       nodes.push({
         id,
-        name: layer.name || (isGroup ? '编组' : '图层'),
+        name: layer.name || (isGroup ? t('编组') : t('图层')),
         depth,
         isGroup,
         hidden: !!layer.hidden,
@@ -122,9 +123,9 @@ export function toPanelOrder(nodes: readonly PsdLayerNode[]): PsdLayerNode[] {
 /** 图层 canvas → PNG 字节（写进工程 images/ 用） */
 export async function layerPngBytes(layer: Layer): Promise<Uint8Array> {
   const canvas = layer.canvas
-  if (!canvas) throw new Error(`图层「${layer.name || '未命名'}」没有像素数据`)
+  if (!canvas) throw new Error(t('图层「{0}」没有像素数据', layer.name || t('未命名')))
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
-  if (!blob) throw new Error(`图层「${layer.name || '未命名'}」导出 PNG 失败`)
+  if (!blob) throw new Error(t('图层「{0}」导出 PNG 失败', layer.name || t('未命名')))
   return new Uint8Array(await blob.arrayBuffer())
 }
 

@@ -937,8 +937,14 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       startVertexBox(host, info)
       return true
     }
-    // Pose 工具继续往下走，让骨骼 / 操作器接管
-    return false
+    /*
+     * Pose 工具**继续往下走**（让斜切包围盒 / 小坐标轴 / 骨骼原点圈 / 骨骼体接管）。
+     *
+     * 这里不能 `return false`：那是从 `toolPointerDown` 整个函数返回，下面的
+     * `beginShearBoxDrag` / `beginGizmoDrag` / 骨骼拖拽分支全都走不到，ViewportCanvas 的兜底
+     * 又只做「选中骨骼」—— 表现出来就是「Pose 工具能选中骨骼，但移动 / 旋转 / 缩放 / 斜切
+     * 的坐标轴怎么拖都不动」。
+     */
   }
 
   // 斜切模式：包围盒优先。鼠标落在包围盒的边上拖动 → 沿该方向掰轴

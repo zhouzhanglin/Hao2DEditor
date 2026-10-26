@@ -1101,8 +1101,17 @@ export class EditorScene {
 
   pickVertexAt(worldX: number, worldY: number): VertexHit | null {
     if (!this.bundle) return null
-    // 只画选中的那一个时，也只让那一个的顶点可抓 —— 否则会拖到看不见（甚至没画出来）的顶点
-    return pickVertex(this.meshResult, worldX, worldY, this.viewport.pixelsToWorld(9), this.editingSlotIndex())
+    /*
+     * 只画选中的那一个时，也只让那一个的顶点可抓 —— 否则会拖到看不见（甚至没画出来）的顶点。
+     *
+     * **没有可编辑插槽时一律不命中**（`editingSlotIndex()` 为 -1）。早先把这个 -1 直接喂给
+     * `pickVertex`，而那里的 -1 表示「不限插槽」：Pose 工具选中骨骼后 `focusMeshSlot` 是空串
+     * （顶点一个都不画），拾取却放开成**整个角色所有网格**的顶点 —— 点骨骼体时被压在下面的
+     * 顶点抢走，表现就是「Pose 工具拖不动 / 转不动骨骼」，而选择工具没有这条抢占分支所以没事。
+     */
+    const slot = this.editingSlotIndex()
+    if (slot < 0) return null
+    return pickVertex(this.meshResult, worldX, worldY, this.viewport.pixelsToWorld(9), slot)
   }
 
   /**
@@ -1115,9 +1124,9 @@ export class EditorScene {
   }
 
   /**
-   * **在编辑谁**的插槽下标（-1 = 不限制）。覆盖层「画谁」与顶点拾取「抓谁」共用它，
-   * 两处必须一致 —— 否则会拖到根本没画出来的顶点：
-   * - 选择 / Pose 工具：选中项（`focusMeshSlot`）；
+   * **在编辑谁**的插槽下标（**-1 = 谁都不可编辑**，不是「不限」）。覆盖层「画谁」与顶点拾取「抓谁」
+   * 共用它，两处必须一致 —— 否则会拖到根本没画出来的顶点：
+   * - 选择 / Pose 工具：选中项（`focusMeshSlot`）；选中骨骼时为空 → 不画也不抓；
    * - 顶点工具：选中的附件（`isolateMeshSlot`）—— 即便它是 Region、不会真隔离
    *  （见 applyMeshIsolation），也只画它自己的顶点；否则整个角色的顶点会一起铺出来。
    */

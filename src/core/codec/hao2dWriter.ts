@@ -18,6 +18,7 @@ import type {
   SlotAnim
 } from '../model/animation'
 import type { IkConstraint } from '../model/constraints'
+import { t } from '@i18n'
 
 export const HAO2D_MAGIC = 0x44324f48
 /**
@@ -375,13 +376,14 @@ export function collectHao2dWarnings(asset: RuntimeAsset): string[] {
   const dropped = asset.constraints.filter((c) => c.type !== 'ik')
   if (dropped.length > 0) {
     warnings.push(
-      `.hao2d v5 的 iks 段只能表达 IK 约束：已丢弃 ${dropped.length} 个非 IK 约束（${dropped
-        .map((c) => `${c.name}(${c.type})`)
-        .join('、')}），Unity 侧不会有这些约束`
+      t('.hao2d 的 iks 段只能表达 IK 约束：已丢弃 {0} 个非 IK 约束（{1}），Unity 侧不会有这些约束', [
+        dropped.length,
+        dropped.map((c) => `${c.name}(${c.type})`).join('、')
+      ])
     )
   }
   if (!asset.runtimeIK) {
-    warnings.push('该资源 runtimeIK = false：Unity 运行期不会再解算 IK（IK 已烘焙进骨骼轨道）')
+    warnings.push(t('该资源 runtimeIK = false：Unity 运行期不会再解算 IK（IK 已烘焙进骨骼轨道）'))
   }
   /*
    * 嵌套骨架：.hao2d v8 已能表达（Armature 附件 + 子骨架控制帧），但**子骨架资源要单独导出**：
@@ -400,8 +402,9 @@ export function collectHao2dWarnings(asset: RuntimeAsset): string[] {
   }
   if (nestedNames.size > 0) {
     warnings.push(
-      `包含嵌套骨架：${[...nestedNames].join('、')}。Unity 侧需要把它们的 .hao2d 一起导出到**同一目录**` +
-        '（导入器按 armatureName 自动关联；缺文件时该 display 不渲染）'
+      t('包含嵌套骨架：{0}。Unity 侧需要把它们的 .hao2d 一起导出到同一目录（导入器按 armatureName 自动关联；缺文件时该 display 不渲染）', [
+        [...nestedNames].join('、')
+      ])
     )
   }
   // 插槽 setup 可见性（层级树眼睛）不在 .hao2d 二进制里：格式与 Unity 参考库
@@ -409,9 +412,10 @@ export function collectHao2dWarnings(asset: RuntimeAsset): string[] {
   const hiddenSlots = asset.slots.filter((slot) => !slot.visible)
   if (hiddenSlots.length > 0) {
     warnings.push(
-      `有 ${hiddenSlots.length} 个插槽被眼睛隐藏（${hiddenSlots
-        .map((slot) => slot.name)
-        .join('、')}）：.hao2d 二进制不携带该状态，Unity 侧这些插槽仍会显示`
+      t('有 {0} 个插槽被眼睛隐藏（{1}）：.hao2d 二进制不携带该状态，Unity 侧这些插槽仍会显示', [
+        hiddenSlots.length,
+        hiddenSlots.map((slot) => slot.name).join('、')
+      ])
     )
   }
 
@@ -431,7 +435,7 @@ export function collectHao2dWarnings(asset: RuntimeAsset): string[] {
     })
   )
   if (weightedWithFfd) {
-    warnings.push('存在「加权网格 + 骨内 FFD」的组合：参考库运行期会跳过该 FFD，编辑器会正常应用')
+    warnings.push(t('存在「加权网格 + 骨内 FFD」的组合：参考库运行期会跳过该 FFD，编辑器会正常应用'))
   }
 
   const hasConstraintAnim = asset.animations.some((anim) => anim.constraints.length > 0)
@@ -439,16 +443,16 @@ export function collectHao2dWarnings(asset: RuntimeAsset): string[] {
     anim.constraints.some((track) => asset.constraints[track.constraintIndex]?.type !== 'ik')
   )
   if (hasNonIkTrack) {
-    warnings.push('动画包含非 IK 约束的关键帧轨道，这些轨道无法写入 .hao2d')
+    warnings.push(t('动画包含非 IK 约束的关键帧轨道，这些轨道无法写入 .hao2d'))
   } else if (hasConstraintAnim) {
-    warnings.push('约束关键帧会写入 iks 段（仅 mix 生效），其余约束参数不会被导出')
+    warnings.push(t('约束关键帧会写入 iks 段（仅 mix 生效），其余约束参数不会被导出'))
   }
 
   const visibleTracks = asset.animations.some((anim) =>
     anim.slots.some((slotAnim) => slotAnim.visible.length > 0)
   )
   if (visibleTracks) {
-    warnings.push('存在插槽可见性轨道：参考库运行期不采样该轨道（编辑器会采样）')
+    warnings.push(t('存在插槽可见性轨道：参考库运行期不采样该轨道（编辑器会采样）'))
   }
 
   return warnings

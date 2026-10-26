@@ -3,6 +3,7 @@ import { createBoneData, createAttachmentData, AttachmentType, AnimType } from '
 import type { BoneData, ImageRef, SkinData, SlotData, VertexWeight } from '../model/types'
 import { createRuntimeAsset } from '../model/asset'
 import type { RuntimeAsset } from '../model/asset'
+import { t } from '@i18n'
 import { computeBindposes, createSetupPose } from '../model/setup'
 import type { AnimData, BoneAnim, ConstraintAnim, DeformAnim, DrawOrderKeyframe, IkAnim, SlotAnim } from '../model/animation'
 import { emptyConstraintAnim } from '../model/animation'
@@ -43,7 +44,7 @@ export function topologicalBones(doc: EditorDocument): {
   const warnings: string[] = []
   const byName = new Map<string, AuthoringBone>()
   for (const bone of doc.bones) {
-    if (byName.has(bone.name)) warnings.push(`存在重名骨骼「${bone.name}」，仅保留第一个`)
+    if (byName.has(bone.name)) warnings.push(t('存在重名骨骼「{0}」，仅保留第一个', bone.name))
     else byName.set(bone.name, bone)
   }
 
@@ -54,13 +55,13 @@ export function topologicalBones(doc: EditorDocument): {
   const visit = (bone: AuthoringBone): void => {
     if (visited.has(bone.name)) return
     if (visiting.has(bone.name)) {
-      warnings.push(`骨骼「${bone.name}」的父链存在环，已按原顺序处理`)
+      warnings.push(t('骨骼「{0}」的父链存在环，已按原顺序处理', bone.name))
       return
     }
     visiting.add(bone.name)
     if (bone.parent) {
       const parent = byName.get(bone.parent)
-      if (!parent) warnings.push(`骨骼「${bone.name}」的父骨骼「${bone.parent}」不存在，已作为根骨骼`)
+      if (!parent) warnings.push(t('骨骼「{0}」的父骨骼「{1}」不存在，已作为根骨骼', [bone.name, bone.parent]))
       else visit(parent)
     }
     visiting.delete(bone.name)
@@ -110,7 +111,7 @@ function toSlotData(
   const index: Record<string, number> = {}
   sorted.forEach(({ slot }, i) => {
     const bone = boneIndex.get(slot.bone)
-    if (bone === undefined) warnings.push(`插槽「${slot.name}」挂载的骨骼「${slot.bone}」不存在，已挂到根骨骼`)
+    if (bone === undefined) warnings.push(t('插槽「{0}」挂载的骨骼「{1}」不存在，已挂到根骨骼', [slot.name, slot.bone]))
     index[slot.name] = i
     slots.push({
       name: slot.name,
@@ -325,11 +326,11 @@ function validateClipping(skins: SkinData[], slotIndex: Record<string, number>, 
           attachment.clipConvex = true
         }
         if (attachment.clipEndSlot && slotIndex[attachment.clipEndSlot] === undefined) {
-          warnings.push(`遮罩「${attachment.name}」的结束插槽「${attachment.clipEndSlot}」不存在，已改为裁到末尾`)
+          warnings.push(t('遮罩「{0}」的结束插槽「{1}」不存在，已改为裁到末尾', [attachment.name, attachment.clipEndSlot]))
           attachment.clipEndSlot = ''
         }
         if (attachment.vertices.length < 6) {
-          warnings.push(`遮罩「${attachment.name}」少于 3 个控制点，不会生效`)
+          warnings.push(t('遮罩「{0}」少于 3 个控制点，不会生效', attachment.name))
         }
       }
     }
@@ -363,9 +364,9 @@ function compileConstraints(
 
   for (const item of doc.constraints) {
     const bones = item.bones.map((name) => boneIndex.get(name)).filter((v): v is number => v !== undefined)
-    if (bones.length !== item.bones.length) warnings.push(`约束「${item.name}」引用了不存在的骨骼，已忽略`)
+    if (bones.length !== item.bones.length) warnings.push(t('约束「{0}」引用了不存在的骨骼，已忽略', item.name))
     if (bones.length === 0) {
-      warnings.push(`约束「${item.name}」没有有效骨骼链，已跳过`)
+      warnings.push(t('约束「{0}」没有有效骨骼链，已跳过', item.name))
       continue
     }
     const target = item.target ? (boneIndex.get(item.target) ?? -1) : -1
@@ -374,8 +375,8 @@ function compileConstraints(
      * 而「配好链、忘了选目标」正是最容易踩的一步：这里明确告警，别让它静默失效。
      */
     if (item.type === 'ik') {
-      if (item.target && target === -1) warnings.push(`IK 约束「${item.name}」的目标骨骼不存在，不会生效`)
-      else if (!item.target) warnings.push(`IK 约束「${item.name}」没有目标骨骼，不会生效`)
+      if (item.target && target === -1) warnings.push(t('IK 约束「{0}」的目标骨骼不存在，不会生效', item.name))
+      else if (!item.target) warnings.push(t('IK 约束「{0}」没有目标骨骼，不会生效', item.name))
     }
     index[item.name] = constraints.length
 
@@ -406,7 +407,7 @@ function compileAnimations(
   const bones = anim.bones
     .filter((track) => {
       const ok = boneIndex.has(track.bone)
-      if (!ok) warnings.push(`动画「${anim.name}」的骨骼轨道「${track.bone}」不存在，已忽略`)
+      if (!ok) warnings.push(t('动画「{0}」的骨骼轨道「{1}」不存在，已忽略', [anim.name, track.bone]))
       return ok
     })
     .map<BoneAnim>((track) => ({
@@ -420,7 +421,7 @@ function compileAnimations(
   const slots = anim.slots
     .filter((track) => {
       const ok = slotIndex[track.slot] !== undefined
-      if (!ok) warnings.push(`动画「${anim.name}」的插槽轨道「${track.slot}」不存在，已忽略`)
+      if (!ok) warnings.push(t('动画「{0}」的插槽轨道「{1}」不存在，已忽略', [anim.name, track.slot]))
       return ok
     })
     .map<SlotAnim>((track) => ({
@@ -438,7 +439,7 @@ function compileAnimations(
   const deforms = anim.deforms
     .filter((track) => {
       const ok = slotIndex[track.slot] !== undefined
-      if (!ok) warnings.push(`动画「${anim.name}」的 FFD 轨道「${track.slot}」不存在，已忽略`)
+      if (!ok) warnings.push(t('动画「{0}」的 FFD 轨道「{1}」不存在，已忽略', [anim.name, track.slot]))
       return ok
     })
     .map<DeformAnim>((track) => ({
@@ -464,7 +465,7 @@ function compileAnimations(
   for (const track of anim.constraints) {
     const index = constraintIndex[track.constraint]
     if (index === undefined) {
-      warnings.push(`动画「${anim.name}」的约束轨道「${track.constraint}」不存在，已忽略`)
+      warnings.push(t('动画「{0}」的约束轨道「{1}」不存在，已忽略', [anim.name, track.constraint]))
       continue
     }
     constraintTracks.push({ ...emptyConstraintAnim(index), ...track, constraintIndex: index })
@@ -665,7 +666,7 @@ function normalizeBoneSpaceFfd(
         inverseOf.set(keyOf(index, attachment.name), list)
         attachment.ffdInBoneSpace = false
         if (degenerate) {
-          warnings.push(`网格「${attachment.name}」有顶点的 bindpose 退化，这部分 FFD 偏移按原值导出`)
+          warnings.push(t('网格「{0}」有顶点的 bindpose 退化，这部分 FFD 偏移按原值导出', attachment.name))
         }
       }
     }

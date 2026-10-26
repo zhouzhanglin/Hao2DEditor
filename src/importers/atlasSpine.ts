@@ -1,4 +1,5 @@
 import type { AtlasRegion } from './uv'
+import { t } from '@i18n'
 
 export interface SpineAtlasParseResult {
   regions: AtlasRegion[]
@@ -67,7 +68,7 @@ export function parseSpineAtlas(text: string): SpineAtlasParseResult {
       // 新的 region 名
       flush()
       if (!page) {
-        warnings.push(`图集区域「${line}」出现在任何图集页之前，已忽略`)
+        warnings.push(t('图集区域「{0}」出现在任何图集页之前，已忽略', line))
         continue
       }
       current = { name: line }
@@ -84,7 +85,7 @@ export function parseSpineAtlas(text: string): SpineAtlasParseResult {
       if (key === 'size' && page) {
         const size = parseNumbers(value)
         if (size.length >= 2) pageSizes[page] = { width: size[0], height: size[1] }
-        else warnings.push(`图集页「${page}」的 size 无法解析：${value}`)
+        else warnings.push(t('图集页「{0}」的 size 无法解析：{1}', [page, value]))
       }
       continue
     }
@@ -148,7 +149,7 @@ export function parseSpineAtlas(text: string): SpineAtlasParseResult {
   }
   flush()
 
-  if (regions.length === 0) warnings.push('图集中没有解析出任何区域')
+  if (regions.length === 0) warnings.push(t('图集中没有解析出任何区域'))
   return { regions, pageSizes, warnings }
 }
 

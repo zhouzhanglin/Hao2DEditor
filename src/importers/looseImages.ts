@@ -1,4 +1,5 @@
 import type { ImageRef } from '@core/model/types'
+import { t } from '@i18n'
 
 export interface LooseImageInput {
   path: string
@@ -30,7 +31,7 @@ export function registerLooseImages(
     if (images.some((image) => image.path === input.path)) continue
 
     if (input.width <= 0 || input.height <= 0) {
-      warnings.push(`图片「${input.name}」尺寸读取失败，可能不是有效的图片文件`)
+      warnings.push(t('图片「{0}」尺寸读取失败，可能不是有效的图片文件', input.name))
     }
 
     let name = input.name
@@ -41,7 +42,7 @@ export function registerLooseImages(
       let index = 2
       while (used.has(`${stem}_${index}${ext}`)) index++
       name = `${stem}_${index}${ext}`
-      warnings.push(`图片名「${input.name}」重复，已重命名为「${name}」`)
+      warnings.push(t('图片名「{0}」重复，已重命名为「{1}」', [input.name, name]))
     }
     used.add(name)
 

@@ -1,4 +1,5 @@
 import { AttachmentType, AnimType, BlendMode, createAttachmentData, createBoneData } from '@core/model/types'
+import { t } from '@i18n'
 import type { AttachmentData, BoneData, ImageRef, SkinData, SlotData, VertexWeight } from '@core/model/types'
 import { createRuntimeAsset } from '@core/model/asset'
 import type { RuntimeAsset } from '@core/model/asset'
@@ -111,12 +112,12 @@ function orderBones(bones: readonly DbBoneJson[], warnings: string[]): {
   const visit = (bone: DbBoneJson, depth: number): void => {
     if (visited.has(bone.name)) return
     if (depth > 512) {
-      warnings.push(`骨骼「${bone.name}」父链过深或存在环，已截断`)
+      warnings.push(t('骨骼「{0}」父链过深或存在环，已截断', bone.name))
       return
     }
     if (bone.parent) {
       const parent = byName.get(bone.parent)
-      if (!parent) warnings.push(`骨骼「${bone.name}」的父骨骼「${bone.parent}」不存在，已作为根骨骼`)
+      if (!parent) warnings.push(t('骨骼「{0}」的父骨骼「{1}」不存在，已作为根骨骼', [bone.name, bone.parent]))
       else visit(parent, depth + 1)
     }
     if (!visited.has(bone.name)) {
@@ -144,7 +145,7 @@ function blendOf(mode: number | string | undefined, slotName: string, warnings: 
       return BlendMode.Erase
     case 5:
       // DB 的 5 在旧模型里对应 Mask；Mask 已移除，回退 Normal（DB 也没有 clipping 语义）
-      warnings.push(`插槽「${slotName}」的混合模式 5（原 Mask）不受支持，已按 Normal 导入`)
+      warnings.push(t('插槽「{0}」的混合模式 5（原 Mask）不受支持，已按 Normal 导入', slotName))
       return BlendMode.Normal
     case 6:
       return BlendMode.Below
@@ -333,7 +334,9 @@ function convertDisplay(
     const rawName = (display.path ?? display.name ?? '').trim()
     const mapped = ctx.armatureNames.get(rawName) ?? ''
     if (!mapped) {
-      ctx.warnings.push(`嵌套骨架「${rawName || display.name || '未命名'}」引用的 armature 在文件里不存在，已留空`)
+      ctx.warnings.push(
+        t('嵌套骨架「{0}」引用的 armature 在文件里不存在，已留空', rawName || display.name || '未命名')
+      )
     }
     const setup = actionAnimation(actions)
     return createAttachmentData({
@@ -434,7 +437,7 @@ function convertDisplay(
 
   // image（Region）
   const subTexture = ctx.subTextures.get(display.path ?? display.name ?? '')
-  if (!subTexture) ctx.warnings.push(`附件「${display.name ?? ''}」的图集区域不存在`)
+  if (!subTexture) ctx.warnings.push(t('附件「{0}」的图集区域不存在', display.name ?? ''))
   const frameWidth = subTexture ? (subTexture.frameWidth || subTexture.width) : 0
   const frameHeight = subTexture ? (subTexture.frameHeight || subTexture.height) : 0
   const packedWidth = subTexture?.width ?? 0
@@ -526,7 +529,7 @@ export function importDragonBones(
   const warnings = options.warnings ?? []
   const armature = armatureAt(input.json, options.armatureIndex ?? 0)
   if (!armature) {
-    warnings.push('DragonBones 数据里没有 armature 段')
+    warnings.push(t('DragonBones 数据里没有 armature 段'))
     return { asset: createRuntimeAsset({ dataType: AnimType.DragonBone }), warnings }
   }
   const label = (options.label ?? (armature.name ?? '').trim()) || 'armature'
@@ -813,7 +816,7 @@ export function importDragonBoneProject(input: DragonBonesImportInput): DragonBo
   const warnings: string[] = []
   const list = input.json.armature ?? []
   if (list.length === 0) {
-    warnings.push('DragonBones 数据里没有 armature 段')
+    warnings.push(t('DragonBones 数据里没有 armature 段'))
     return {
       assets: [createRuntimeAsset({ dataType: AnimType.DragonBone })],
       names: ['armature'],
@@ -837,7 +840,15 @@ export function importDragonBoneProject(input: DragonBonesImportInput): DragonBo
     if (!raw) continue
     const mapped = nameMap.get(raw)
     if (mapped === undefined) nameMap.set(raw, final)
-    else warnings.push(`armature 名「${raw}」重复：第 ${i + 1} 个改名为「${final}」，其嵌套引用仍指向「${mapped}」`)
+    else
+      warnings.push(
+        t('armature 名「{0}」重复：第 {1} 个改名为「{2}」，其嵌套引用仍指向「{3}」', [
+          raw,
+          i + 1,
+          final,
+          mapped
+        ])
+      )
     nameMap.set(final, final)
   }
 
@@ -855,7 +866,10 @@ export function importDragonBoneProject(input: DragonBonesImportInput): DragonBo
     // 骨架级默认动作：只作为「打开时默认选中的动画」，不新增字段（避免双份真源）
     const setup = actionAnimation(armature.defaultActions)
     const exists = setup !== null && result.asset.animations.some((animation) => animation.name === setup.animation)
-    if (setup && !exists) warnings.push(`骨架「${names[index]}」的默认动画「${setup.animation}」不存在，已忽略`)
+    if (setup && !exists)
+      warnings.push(
+        t('骨架「{0}」的默认动画「{1}」不存在，已忽略', [names[index], setup.animation])
+      )
     defaultAnimations.push(exists && setup ? setup.animation : '')
   })
 
@@ -1068,7 +1082,10 @@ function importDbAnimation(animation: DbAnimationJson, ctx: DbAnimContext): Anim
           )
         } else {
           ctx.warnings.push(
-            `动画「${animation.name ?? ''}」插槽「${slotName}」的 actions 里没有 gotoAndPlay / gotoAndStop，已忽略`
+            t('动画「{0}」插槽「{1}」的 actions 里没有 gotoAndPlay / gotoAndStop，已忽略', [
+              animation.name ?? '',
+              slotName
+            ])
           )
         }
       }

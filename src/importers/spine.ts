@@ -1,4 +1,5 @@
 import { createAttachmentData, createBoneData, AttachmentType, AnimType, BlendMode } from '@core/model/types'
+import { t } from '@i18n'
 import type { AttachmentData, BoneData, ImageRef, SkinData, SkinSlotData, SlotData, VertexWeight } from '@core/model/types'
 import { createRuntimeAsset } from '@core/model/asset'
 import type { RuntimeAsset } from '@core/model/asset'
@@ -63,7 +64,7 @@ function orderBones(bones: readonly SpineBoneJson[], warnings: string[]): {
 } {
   const byName = new Map<string, SpineBoneJson>()
   for (const bone of bones) {
-    if (byName.has(bone.name)) warnings.push(`存在重名骨骼「${bone.name}」，仅保留第一个`)
+    if (byName.has(bone.name)) warnings.push(t('存在重名骨骼「{0}」，仅保留第一个', bone.name))
     else byName.set(bone.name, bone)
   }
 
@@ -72,12 +73,12 @@ function orderBones(bones: readonly SpineBoneJson[], warnings: string[]): {
   const visit = (bone: SpineBoneJson, depth: number): void => {
     if (visited.has(bone.name)) return
     if (depth > 512) {
-      warnings.push(`骨骼「${bone.name}」父链过深或存在环，已截断`)
+      warnings.push(t('骨骼「{0}」父链过深或存在环，已截断', bone.name))
       return
     }
     if (bone.parent) {
       const parent = byName.get(bone.parent)
-      if (!parent) warnings.push(`骨骼「${bone.name}」的父骨骼「${bone.parent}」不存在，已作为根骨骼`)
+      if (!parent) warnings.push(t('骨骼「{0}」的父骨骼「{1}」不存在，已作为根骨骼', [bone.name, bone.parent]))
       else visit(parent, depth + 1)
     }
     if (!visited.has(bone.name)) {
@@ -170,7 +171,9 @@ function blendOf(blend: string | undefined, slotName: string, warnings: string[]
       return BlendMode.Erase
     case 'mask':
       // Spine 4.3 运行库没有 Mask 混合模式；遮罩由 clipping 附件承担
-      warnings.push(`插槽「${slotName}」的混合模式 mask 不受支持，已按 Normal 导入（遮罩请用 clipping 附件）`)
+      warnings.push(
+        t('插槽「{0}」的混合模式 mask 不受支持，已按 Normal 导入（遮罩请用 clipping 附件）', slotName)
+      )
       return BlendMode.Normal
     case 'below':
       return BlendMode.Below
@@ -286,7 +289,7 @@ function resolveRegion(
     const region = ctx.regions.get(candidate)
     if (region) return region
   }
-  ctx.warnings.push(`附件的图集区域「${candidates[0]}」不存在，贴图可能显示异常`)
+  ctx.warnings.push(t('附件的图集区域「{0}」不存在，贴图可能显示异常', candidates[0]))
   return null
 }
 
@@ -448,7 +451,7 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
   const slotIndexByName = new Map<string, number>()
   slotJsons.forEach((slot: SpineSlotJson, i) => {
     const bone = boneIndex.get(slot.bone)
-    if (bone === undefined) warnings.push(`插槽「${slot.name}」挂载的骨骼「${slot.bone}」不存在，已挂到根骨骼`)
+    if (bone === undefined) warnings.push(t('插槽「{0}」挂载的骨骼「{1}」不存在，已挂到根骨骼', [slot.name, slot.bone]))
     slotIndexByName.set(slot.name, i)
     slots.push({
       name: slot.name,
@@ -606,7 +609,9 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
   const bakedApplied = baked ? applyBakedAnimations(animations, baked, slots, attIndexBySlot) : false
   if (input.atlasText && !baked) {
     // 原因见控制台（官方运行库读不了 / 采样出 NaN）；多为 3.3 及更早的老格式
-    warnings.push('官方运行库烘焙失败，动画改用内置解析（老版本格式常见：3.3 及更早；缓动 / IK 可能与官方有差异）')
+    warnings.push(
+        t('官方运行库烘焙失败，动画改用内置解析（老版本格式常见：3.3 及更早；缓动 / IK 可能与官方有差异）')
+      )
   }
 
   const regionsByPage = new Map<string, AtlasRegion[]>()
@@ -762,7 +767,7 @@ function buildConstraints(
     const bones = remapBones(ik.bones, boneIndex)
     const target = boneIndex.get(ik.target)
     if (bones.length === 0 || target === undefined) {
-      warnings.push(`IK「${ik.name}」的目标或骨骼链无效，已跳过`)
+      warnings.push(t('IK「{0}」的目标或骨骼链无效，已跳过', ik.name))
       continue
     }
     constraints.push(
@@ -788,7 +793,7 @@ function buildConstraints(
     const bones = remapBones(transform.bones, boneIndex)
     const target = boneIndex.get(transform.target)
     if (bones.length === 0 || target === undefined) {
-      warnings.push(`变换约束「${transform.name}」的目标或骨骼链无效，已跳过`)
+      warnings.push(t('变换约束「{0}」的目标或骨骼链无效，已跳过', transform.name))
       continue
     }
     constraints.push(
@@ -820,7 +825,7 @@ function buildConstraints(
   for (const path of legacyPath) {
     const bones = remapBones(path.bones, boneIndex)
     if (bones.length === 0 || path.target === undefined) {
-      warnings.push(`路径约束「${path.name}」信息不完整，已跳过`)
+      warnings.push(t('路径约束「{0}」信息不完整，已跳过', path.name))
       continue
     }
     constraints.push(

@@ -1,4 +1,5 @@
 import { Easing, emptyBoneAnim, emptyConstraintAnim, emptyDeformAnim, emptyIkAnim, emptySlotAnim } from '@core/model/animation'
+import { t } from '@i18n'
 import type {
   AnimData,
   BoneAnim,
@@ -69,7 +70,7 @@ export function importSpineAnimations(
   for (const [boneName, timeline] of Object.entries(animation.bones ?? {})) {
     const index = ctx.boneIndex.get(boneName)
     if (index === undefined) {
-      ctx.warnings.push(`动画「${name}」的骨骼轨道「${boneName}」不存在，已忽略`)
+      ctx.warnings.push(t('动画「{0}」的骨骼轨道「{1}」不存在，已忽略', [name, boneName]))
       continue
     }
     const bone = ctx.bones[index]
@@ -155,7 +156,7 @@ export function importSpineAnimations(
   for (const [slotName, timeline] of Object.entries(animation.slots ?? {})) {
     const slotIndex = ctx.slotIndex.get(slotName)
     if (slotIndex === undefined) {
-      ctx.warnings.push(`动画「${name}」的插槽轨道「${slotName}」不存在，已忽略`)
+      ctx.warnings.push(t('动画「{0}」的插槽轨道「{1}」不存在，已忽略', [name, slotName]))
       continue
     }
     const track: SlotAnim = emptySlotAnim(slotIndex)
@@ -213,7 +214,7 @@ export function importSpineAnimations(
   for (const [ikName, keys] of Object.entries(animation.ik ?? {})) {
     const constraintIndex = ctx.constraints.findIndex((c) => c.name === ikName && c.type === 'ik')
     if (constraintIndex < 0) {
-      ctx.warnings.push(`动画「${name}」的 IK 轨道「${ikName}」不存在，已忽略`)
+      ctx.warnings.push(t('动画「{0}」的 IK 轨道「{1}」不存在，已忽略', [name, ikName]))
       continue
     }
     const ikOrder = ikConstraintIndices.indexOf(constraintIndex)

@@ -93,17 +93,14 @@ function boneChannels(): Array<{ channel: 'translate' | 'rotate' | 'scale' | 'sh
 /**
  * 插槽子轨道：显示（切 display）在最前，它是做换装动画最常用的通道。
  *
- * `always`：没有关键帧时也把这一行留在时间轴上 —— 「显示」是换装动画的入口，
- * 藏起来用户就找不到在哪儿切 display 了（右键该行可以选要显示的 display 并打关键帧）。
+ * 行只在**有该通道的关键帧**时才出现（与骨骼通道一致）：没打过帧的通道不占位置，
+ * 时间轴上也不会出现删不掉的空行。显示帧从视口属性条 / 层级树的显示开关打，
+ * 打完这条通道才会随数据出现在这里。
  * 文案随语言切换，故是函数。
  */
-function slotChannels(): Array<{
-  channel: 'display' | 'color' | 'visible' | 'subArmature'
-  label: string
-  always?: boolean
-}> {
+function slotChannels(): Array<{ channel: 'display' | 'color' | 'visible' | 'subArmature'; label: string }> {
   return [
-    { channel: 'display', label: t('显示'), always: true },
+    { channel: 'display', label: t('显示') },
     { channel: 'color', label: t('颜色') },
     { channel: 'visible', label: t('可见性') },
     { channel: 'subArmature', label: t('子骨架') }
@@ -172,17 +169,14 @@ export function slotDisplayNameAt(
   return name
 }
 
-/** 从动画数据构建轨道 + 关键帧模型（供 dope sheet 渲染与编辑） */
-export function buildTimeline(
-  animation: AuthoringAnimData | null,
-  /**
-   * 当前骨架里「挂了嵌套骨架」的插槽名。
-   *
-   * 有它时这些插槽总是显示「子骨架」通道（哪怕一帧都还没打）—— 否则用户没有入口
-   * 打第一帧；没传时退化为「有帧才显示」，供不关心嵌套的旧调用点使用。
-   */
-  armatureSlots?: ReadonlySet<string>
-): TimelineTrack[] {
+/**
+ * 从动画数据构建轨道 + 关键帧模型（供 dope sheet 渲染与编辑）。
+ *
+ * 只反映**动画数据里真实存在的东西**：没打过关键帧的骨骼 / 插槽 / 子骨架通道不会凭空出现在
+ * 时间轴上（挂了嵌套骨架也不例外）。子骨架的第一帧从视口属性条的「子骨架」行打，
+ * 打完之后这条通道才随数据出现在这里。
+ */
+export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrack[] {
   if (!animation) return []
   const tracks: TimelineTrack[] = []
 
@@ -218,14 +212,14 @@ export function buildTimeline(
   }
 
   // 插槽：同样是「分组行 + 子轨」，显示通道的每个帧带上附件名，便于一眼看出切到了哪个 display
-  const pushSlotTracks = (slotName: string, track: AuthoringSlotAnim | null): void => {
-    const displayKeys: TimelineKey[] = (track?.displayIndex ?? []).map((frame, index) => ({
+  const pushSlotTracks = (slotName: string, track: AuthoringSlotAnim): void => {
+    const displayKeys: TimelineKey[] = track.displayIndex.map((frame, index) => ({
       id: `slot:${slotName}#display@${frame.time}`,
       trackId: `slot:${slotName}`,
       kind: 'slot' as const,
       channel: 'display',
       target: slotName,
-      attachment: track?.displayAttachment[index] ?? '',
+      attachment: track.displayAttachment[index] ?? '',
       time: frame.time,
       easing: frame.easing,
       curve: frame.curve
@@ -234,25 +228,16 @@ export function buildTimeline(
       tracks,
       'slot',
       slotName,
-      slotChannels().map(({ channel, label, always }) => {
-        // 只为「子骨架」通道冒出来的插槽（还没有任何轨道）不显示空的「显示」行
-        if (channel === 'display') return { channel, label, keys: displayKeys, always: track ? always : false }
+      slotChannels().map(({ channel, label }) => {
+        if (channel === 'display') return { channel, label, keys: displayKeys }
         const keys: TimelineKey[] = []
-        // 子骨架通道在没有关键帧时也要出现在「挂了嵌套骨架」的插槽上（打第一帧的入口）
-        const alwaysShow = always || (channel === 'subArmature' && Boolean(armatureSlots?.has(slotName)))
-        if (track) pushKeys(keys, slotName, '', 'slot', channel, track[channel] ?? [])
-        return { channel, label, keys, always: alwaysShow }
+        pushKeys(keys, slotName, '', 'slot', channel, track[channel] ?? [])
+        return { channel, label, keys }
       })
     )
   }
+  // 只有数据里真有轨道（有帧）的插槽才列出来：挂了嵌套骨架但一帧没打，不该凭空多出一行
   for (const track of animation.slots) pushSlotTracks(track.slot, track)
-  // 挂了嵌套骨架、但整个动画还没有该插槽的轨道：补一行「子骨架」，否则用户没有打第一帧的入口
-  if (armatureSlots) {
-    for (const slotName of armatureSlots) {
-      if (animation.slots.some((track) => track.slot === slotName)) continue
-      pushSlotTracks(slotName, null)
-    }
-  }
 
   // 插槽层级（绘制顺序）：每帧是一份完整顺序快照，在 slot 层级面板改完顺序后打帧产生。
   // 它不属于任何单个插槽，所以是一条独立顶层轨道，删除 / 移动帧都走通用编辑链路。
@@ -788,18 +773,19 @@ export { groupLabel }
 
 /**
  * 「分组行 + 通道子轨」两层的轨道结构（骨骼与插槽共用）：
- * 分组行只作标题与折叠入口，子轨各自持有自己的关键帧；没有任何子轨时整组不出现。
+ * 分组行只作标题与折叠入口，子轨各自持有自己的关键帧；
+ * **一帧都没有的通道不占行**，没有任何子轨时整组也不出现（时间轴上不存在空行）。
  */
 function pushGroupedTracks(
   tracks: TimelineTrack[],
   kind: KeyKind,
   target: string,
-  channels: Array<{ channel: string; label: string; keys: TimelineKey[]; always?: boolean }>
+  channels: Array<{ channel: string; label: string; keys: TimelineKey[] }>
 ): void {
   const children: TimelineTrack[] = []
   let total = 0
   for (const item of channels) {
-    if (item.keys.length === 0 && !item.always) continue
+    if (item.keys.length === 0) continue
     total += item.keys.length
     children.push({
       id: `${kind}:${target}:${item.channel}`,

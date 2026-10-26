@@ -1164,7 +1164,7 @@ export async function buildSpineBundles(
     const names = spineAtlasRegionNames(plan.atlas)
     const { trim, conflicts } = collectRegionTrim(skeleton.asset, plan.atlas)
     if (conflicts.length > 0) {
-      warnings.push(`区域 ${conflicts.join(' / ')} 被多个附件以不同裁剪引用，已按原样写出（不做裁剪换算）`)
+      warnings.push(t('区域 {0} 被多个附件以不同裁剪引用，已按原样写出（不做裁剪换算）', conflicts.join(' / ')))
     }
     // 嵌套骨架：Spine 无对应表达，display 会被跳过（子骨架本身仍可作为独立骨架单独导出）
     const nestedCount = skeleton.asset.skins.reduce(
@@ -1214,7 +1214,7 @@ export async function buildSpineBundles(
   }
 
   if (pageBytes.failed.length > 0) {
-    warnings.push(`图集页 ${pageBytes.failed.join(' / ')} 读不出内容（源图缺失或无法读取）`)
+    warnings.push(t('图集页 {0} 读不出内容（源图缺失或无法读取）', pageBytes.failed.join(' / ')))
   }
 
   return { bundles, warnings }

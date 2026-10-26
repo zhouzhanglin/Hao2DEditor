@@ -1,4 +1,5 @@
 import { ByteReader } from './binary'
+import { t } from '@i18n'
 import { HAO2D_MAGIC, HAO2D_VERSION } from './hao2dWriter'
 import { AnimType, AttachmentType, BlendMode, createAttachmentData, createBoneData } from '../model/types'
 import type { AttachmentData, BoneData, SkinData, SkinSlotData, SlotData, VertexWeight } from '../model/types'
@@ -77,7 +78,7 @@ export function readHao2d(bytes: Uint8Array): Hao2dReadResult {
   })
 
   if (constraints.length === 0 && animations.some((anim) => anim.iks.length > 0)) {
-    warnings.push('动画包含 iks 轨道但资源没有 IK 约束，这些轨道会被忽略')
+    warnings.push(t('动画包含 iks 轨道但资源没有 IK 约束，这些轨道会被忽略'))
   }
   return { asset, warnings }
 }
@@ -109,7 +110,7 @@ function readBones(reader: ByteReader): BoneData[] {
  */
 function migrateLegacyBlend(value: number, name: string, warnings: string[]): BlendMode {
   if (value === 5) {
-    warnings.push(`插槽「${name}」使用了已移除的混合模式 Mask，已迁移为 Normal`)
+    warnings.push(t('插槽「{0}」使用了已移除的混合模式 Mask，已迁移为 Normal', name))
     return BlendMode.Normal
   }
   if (value === 6) return BlendMode.Below

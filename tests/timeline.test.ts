@@ -155,7 +155,7 @@ describe('时间轴模型', () => {
     expect(buildTimeline(null)).toEqual([])
   })
 
-  it('「显示」通道在没有关键帧时也保留（换装动画的入口）', () => {
+  it('没打过帧的通道不占行：「显示」「可见性」只在有帧时出现', () => {
     const anim: AuthoringAnimData = {
       name: 'idle',
       duration: 2,
@@ -166,7 +166,7 @@ describe('时间轴模型', () => {
       events: [],
       constraints: []
     }
-    // 插槽只有颜色帧：没有「显示」帧，但「显示」这一行要留着
+    // 插槽只有颜色帧：没有「显示」帧 / 「可见性」帧，这两行都不该出现（否则就是删不掉的空行）
     anim.slots.push({
       slot: 'head',
       color: [{ time: 0, value: { r: 1, g: 1, b: 1, a: 1 }, easing: 1, curve: null }],
@@ -176,12 +176,11 @@ describe('时间轴模型', () => {
     })
 
     const tracks = buildTimeline(anim)
-    const displayTrack = tracks.find((track) => track.id === 'slot:head:display')
-    expect(displayTrack).toBeDefined()
-    expect(displayTrack?.keys).toHaveLength(0)
-    // 颜色有帧、可见性没帧也没 always：仍然只列有帧的通道
     expect(tracks.some((track) => track.id === 'slot:head:color')).toBe(true)
+    expect(tracks.some((track) => track.id === 'slot:head:display')).toBe(false)
     expect(tracks.some((track) => track.id === 'slot:head:visible')).toBe(false)
+    // 分组行只在真有子轨时出现，且帧数与子轨一致
+    expect(tracks.find((track) => track.id === 'slot:head')?.keyCount).toBe(1)
   })
 })
 

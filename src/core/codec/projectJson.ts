@@ -1,4 +1,5 @@
 import { BlendMode } from '../model/types'
+import { t } from '@i18n'
 import type { ConstraintType, InheritMode } from '../model/constraints'
 import {
   createIkConstraint,
@@ -396,7 +397,9 @@ function migrateBlendMode(value: unknown, version: number): { mode: BlendMode; l
 function normalizeSlot(raw: Record<string, unknown>, version: number, warnings: string[]): AuthoringSlot {
   const blend = migrateBlendMode(raw.blendMode, version)
   if (blend.legacyMask) {
-    warnings.push(`插槽「${str(raw.name, 'slot')}」使用了已移除的混合模式 Mask，已迁移为 Normal；遮罩请改用遮罩附件`)
+    warnings.push(
+        t('插槽「{0}」使用了已移除的混合模式 Mask，已迁移为 Normal；遮罩请改用遮罩附件', str(raw.name, 'slot'))
+      )
   }
   return {
     name: str(raw.name, 'slot'),
@@ -663,13 +666,15 @@ function normalizeStage(raw: unknown): StageImage | null {
 export function normalizeDocument(raw: unknown): ParseDocumentResult {
   const warnings: string[] = []
   if (!isRecord(raw)) {
-    warnings.push('工程文件内容不是对象，已创建空工程')
+    warnings.push(t('工程文件内容不是对象，已创建空工程'))
     return { document: createEmptyDocument(), warnings }
   }
 
   const version = Math.round(num(raw.schemaVersion, 1))
   if (version > CURRENT_SCHEMA_VERSION) {
-    warnings.push(`工程文件版本 ${version} 高于当前编辑器支持的 ${CURRENT_SCHEMA_VERSION}，可能丢失部分数据`)
+    warnings.push(
+        t('工程文件版本 {0} 高于当前编辑器支持的 {1}，可能丢失部分数据', [version, CURRENT_SCHEMA_VERSION])
+      )
   }
 
   const bones = arr(raw.bones).map((item) => normalizeBone(isRecord(item) ? item : {}))
@@ -677,7 +682,7 @@ export function normalizeDocument(raw: unknown): ParseDocumentResult {
   const skins = arr(raw.skins).map((item) => normalizeSkin(isRecord(item) ? item : {}))
   if (skins.length === 0) {
     skins.push({ name: 'default', slots: [] })
-    warnings.push('工程缺少皮肤，已补一个空的默认皮肤')
+    warnings.push(t('工程缺少皮肤，已补一个空的默认皮肤'))
   }
 
   const document: EditorDocument = {
@@ -697,7 +702,7 @@ export function normalizeDocument(raw: unknown): ParseDocumentResult {
   const boneNames = new Set(bones.map((bone) => bone.name))
   for (const bone of bones) {
     if (bone.parent && !boneNames.has(bone.parent)) {
-      warnings.push(`骨骼「${bone.name}」的父骨骼「${bone.parent}」不存在，已作为根骨骼`)
+      warnings.push(t('骨骼「{0}」的父骨骼「{1}」不存在，已作为根骨骼', [bone.name, bone.parent]))
     }
   }
   return { document, warnings }

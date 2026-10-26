@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, Filter, Flag, Lock, Minus, Plus, Trash2, Zap, ZoomIn } from 'lucide-react'
+import { ChevronDown, ChevronRight, Eraser, Filter, Flag, Lock, Minus, Plus, Trash2, Zap, ZoomIn } from 'lucide-react'
 import { TIMELINE_ZOOM_MAX, TIMELINE_ZOOM_MIN } from '@editor/store/timelineStore'
 import { revealTrackFor, sameSelector } from '@editor/timeline/model'
 import type { KeyKind, KeySelector, TimelineTrack } from '@editor/timeline/model'
@@ -47,6 +47,8 @@ export interface DopeSheetProps {
   onKeySubArmature?: (slot: string) => void
   /** 行尾垃圾桶：删除这条通道的全部关键帧（悬停才显示） */
   onDeleteTrack?: (track: TimelineTrack) => void
+  /** 底部工具栏「清理帧」：一键清掉当前动画里没有关键帧的通道 */
+  onCleanupFrames?: () => void
 }
 
 /** 时间→像素的映射（拖拽期间冻结，保证关键帧 1:1 跟随指针） */
@@ -83,7 +85,10 @@ interface ScaleState {
 }
 
 const ROW_HEIGHT = 22
+/** 「轨道 / 对象」列的默认宽度（用户可拖动分隔线改） */
 const LABEL_WIDTH = 172
+const LABEL_WIDTH_MIN = 120
+const LABEL_WIDTH_MAX = 380
 const RULER_HEIGHT = 30
 /** 相邻主刻度之间的最小像素间距，用于挑选刻度步长 */
 const MIN_TICK_GAP = 58
@@ -288,6 +293,35 @@ export default function DopeSheet(props: DopeSheetProps) {
   const trackListRef = useRef<HTMLDivElement | null>(null)
   /** 刚打帧的轨道 id（短暂高亮） */
   const [flashTrackId, setFlashTrackId] = useState<string | null>(null)
+
+  /**
+   * 「轨道 / 对象」列宽度：分隔线可拖动，名字长的骨骼 / 插槽可以拉宽看全。
+   * 只存在本地（关掉面板再打开回到默认宽度），不影响工程数据。
+   */
+  const [labelWidth, setLabelWidth] = useState(LABEL_WIDTH)
+  const labelDragRef = useRef<{ startX: number; startWidth: number } | null>(null)
+  /**
+   * 拖分隔线：pointermove / up 挂在 window 上（指针移出几像素也不会断），
+   * 与面板里其它分隔条同一套写法。
+   */
+  const beginLabelResize = (event: React.PointerEvent): void => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    labelDragRef.current = { startX: event.clientX, startWidth: labelWidth }
+    const move = (moveEvent: PointerEvent): void => {
+      const drag = labelDragRef.current
+      if (!drag) return
+      const next = drag.startWidth + (moveEvent.clientX - drag.startX)
+      setLabelWidth(Math.max(LABEL_WIDTH_MIN, Math.min(LABEL_WIDTH_MAX, next)))
+    }
+    const up = (): void => {
+      labelDragRef.current = null
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
 
   /** 选中对象（骨骼 / 插槽）时短暂高亮的轨道组 id（整组：分组行 + 子通道行） */
   const [revealId, setRevealId] = useState<string | null>(null)
@@ -872,10 +906,10 @@ export default function DopeSheet(props: DopeSheetProps) {
       {/* 表头：轨道信息 + 帧 / 时间刻度尺 */}
       <div className="flex shrink-0 items-stretch border-b border-line bg-ink-800/80" style={{ height: RULER_HEIGHT }}>
         <div
-          className="flex shrink-0 flex-col justify-center gap-[1px] border-r border-line px-2"
-          style={{ width: LABEL_WIDTH }}
+          className="flex shrink-0 flex-col justify-center gap-[1px] overflow-hidden px-2"
+          style={{ width: labelWidth }}
         >
-          <span className="text-3xs text-content-lo">{t('轨道 / 对象')}</span>
+          <span className="truncate text-3xs text-content-lo">{t('轨道 / 对象')}</span>
           <span className="flex items-center gap-1 font-mono text-3xs text-content-lo/70">
             {t('{0} 轨 · {1} 关键帧', [channelCount, totalKeys])}
             {zoomed ? (
@@ -894,6 +928,15 @@ export default function DopeSheet(props: DopeSheetProps) {
             ) : null}
           </span>
         </div>
+
+        {/* 「轨道 / 对象」列的分隔线：左右拖调列宽（名字长的骨骼 / 插槽被截断时可以拉宽） */}
+        <span
+          role="separator"
+          aria-orientation="vertical"
+          title={t('左右拖动调整「轨道 / 对象」列的宽度')}
+          className="hao-splitter-v border-r border-line"
+          onPointerDown={beginLabelResize}
+        />
 
         <div
           className="relative shrink-0 cursor-ew-resize select-none overflow-hidden"
@@ -970,7 +1013,7 @@ export default function DopeSheet(props: DopeSheetProps) {
       <div ref={trackListRef} className="min-h-0 flex-1 overflow-auto hao-scroll">
         <div className="flex min-h-full">
           {/* 轨道名（骨骼是「分组行 + 通道子轨」两层结构） */}
-          <div className="shrink-0 border-r border-line bg-ink-800/60" style={{ width: LABEL_WIDTH }}>
+          <div className="shrink-0 overflow-hidden bg-ink-800/60" style={{ width: labelWidth }}>
             {visibleTracks.map((track) => {
               const trackActive = isTrackActive(track)
               return (
@@ -1065,20 +1108,11 @@ export default function DopeSheet(props: DopeSheetProps) {
                     role="button"
                     title={
                       track.isGroup
-                        ? (track.keyCount ?? 0) > 0
-                          ? t('删除「{0}」的全部通道（{1} 个关键帧）', [track.label, track.keyCount ?? 0])
-                          : t('「{0}」还没有关键帧', track.label)
-                        : track.keys.length > 0
-                          ? t('删除整条通道（{0} 个关键帧）', track.keys.length)
-                          : t('没有关键帧可删（显示 / 子骨架 是常驻入口行）')
+                        ? t('删除「{0}」的全部通道（{1} 个关键帧）', [track.label, track.keyCount ?? 0])
+                        : t('删除整条通道（{0} 个关键帧）', track.keys.length)
                     }
                     // 与层级树的结构行同一个样式：悬停才出现、16px 热区、红色垃圾桶
-                    className={[
-                      'hidden h-[16px] w-[16px] shrink-0 items-center justify-center rounded group-hover:flex',
-                      (track.isGroup ? (track.keyCount ?? 0) : track.keys.length) > 0
-                        ? 'text-danger/80 hover:bg-danger/15'
-                        : 'cursor-not-allowed text-content-lo/30'
-                    ].join(' ')}
+                    className="hidden h-[16px] w-[16px] shrink-0 cursor-pointer items-center justify-center rounded text-danger/80 hover:bg-danger/15 group-hover:flex"
                     onClick={(event) => {
                       event.stopPropagation()
                       props.onDeleteTrack?.(track)
@@ -1092,10 +1126,19 @@ export default function DopeSheet(props: DopeSheetProps) {
             })}
             {visibleTracks.length === 0 ? (
               <div className="px-2 py-3 text-3xs text-content-lo">
-                {t('没有轨道：在 Pose 状态调整骨骼/插槽后按 K 打关键帧')}
+                {t('没有轨道：在 Pose 状态调整骨骼/插槽后按 K 打关键帧；子骨架参数在视口下方的属性条里打帧')}
               </div>
             ) : null}
           </div>
+
+          {/* 与表头同一根分隔线：拖它改「轨道 / 对象」列宽（拖完表头与轨道区仍对齐） */}
+          <span
+            role="separator"
+            aria-orientation="vertical"
+            title={t('左右拖动调整「轨道 / 对象」列的宽度')}
+            className="hao-splitter-v border-r border-line"
+            onPointerDown={beginLabelResize}
+          />
 
           {/* 关键帧区（缩放后超出窗口的关键帧会被裁掉，靠平移查看） */}
           <div
@@ -1249,39 +1292,65 @@ export default function DopeSheet(props: DopeSheetProps) {
       </div>
 
       {/*
-        底部工具栏：智能过滤 / 横向平移滑块 / 缩放组。
+        底部工具栏：洋葱皮 / 清理帧 / 智能过滤 / 横向平移滑块 / 缩放组。
         滚轮不再缩放时间轴（只上下翻轨道），缩放与快速平移的入口统一收拢到这里
       */}
       <div className="flex h-[26px] shrink-0 items-center gap-2 border-t border-line/60 bg-ink-800/80 px-1.5">
-        <button
-          type="button"
-          title={t('洋葱皮：显示前后帧的骨骼姿态')}
-          className={['hao-tool-button', onionSkin ? 'hao-tool-button-active' : ''].join(' ')}
-          onClick={toggleOnionSkin}
-        >
-          <Zap size={13} />
-        </button>
         {/*
-          智能过滤：只显示当前选中对象的轨道。
-          不带文字（底部工具栏就 26px 高，写字会把平移滑块挤窄）—— 与旁边的洋葱皮同款图标按钮，
-          `title` 里写清含义与当前状态；没选中对象也能按：先开着，选中后立即生效。
+          洋葱皮 / 清理帧 / 智能过滤：与大纲（层级树）工具条同一套按钮 —— 18px 高的实心圆角块，
+          组内 4px 间距（`gap-1`），按下态用 accent-deep 实底。原来的无边框 hover 文字按钮
+          在这条工具条上既不好点也和别处不一致。
         */}
-        <button
-          type="button"
-          title={
-            smartFilter
-              ? filterTarget
-                ? t('智能过滤：「{0}」的轨道（再点一次恢复全部）', filterTarget)
-                : t(
-                    '智能过滤已开启，但还没选中对象：选中骨骼 / 插槽 / 约束后只显示它的轨道（再点一次恢复全部）'
-                  )
-              : t('智能过滤：只显示当前选中对象的轨道')
-          }
-          onClick={() => setSmartFilter(!smartFilter)}
-          className={['hao-tool-button', smartFilter ? 'hao-tool-button-active' : ''].join(' ')}
-        >
-          <Filter size={13} />
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            title={t('洋葱皮：显示前后帧的骨骼姿态')}
+            className={[
+              'hao-btn h-[18px] px-1.5',
+              onionSkin ? 'hao-btn-accent' : ''
+            ].join(' ')}
+            onClick={toggleOnionSkin}
+          >
+            <Zap size={13} />
+          </button>
+          {/*
+            清理帧：一键把「0 帧但还留在数据里」的轨道清掉（骨骼 / 插槽 / 显示 / 层级 / FFD / 约束），
+            时间轴只留有帧的通道。与行尾垃圾桶的区别：那个删「这一行」，这个一次扫整条动画。
+          */}
+          <button
+            type="button"
+            title={t('清理帧：清掉当前动画里没有关键帧的通道')}
+            className="hao-btn h-[18px] px-1.5"
+            disabled={!props.onCleanupFrames}
+            onClick={() => props.onCleanupFrames?.()}
+          >
+            <Eraser size={13} />
+          </button>
+          {/*
+            智能过滤：只显示当前选中对象的轨道。
+            不带文字（底部工具栏就 26px 高，写字会把平移滑块挤窄），`title` 里写清含义与当前状态；
+            没选中对象也能按：先开着，选中后立即生效。
+          */}
+          <button
+            type="button"
+            title={
+              smartFilter
+                ? filterTarget
+                  ? t('智能过滤：「{0}」的轨道（再点一次恢复全部）', filterTarget)
+                  : t(
+                      '智能过滤已开启，但还没选中对象：选中骨骼 / 插槽 / 约束后只显示它的轨道（再点一次恢复全部）'
+                    )
+                : t('智能过滤：只显示当前选中对象的轨道')
+            }
+            onClick={() => setSmartFilter(!smartFilter)}
+            className={[
+              'hao-btn h-[18px] px-1.5',
+              smartFilter ? 'hao-btn-accent' : ''
+            ].join(' ')}
+          >
+            <Filter size={13} />
+          </button>
+        </div>
         {smartFilter && filterTarget ? (
           <span className="shrink-0 text-3xs text-accent" title={t('再点一次「智能过滤」恢复全部轨道')}>
             {t('「{0}」', filterTarget)}

@@ -387,33 +387,68 @@ export function deleteSelectedTrack(): ActionResult {
 }
 
 /**
- * 删除**指定通道**的全部关键帧（时间轴行尾的垃圾桶图标 / 键盘 Delete 共用）。
+ * 删除**指定通道**（时间轴行尾的垃圾桶图标 / 键盘 Delete 共用）。
  *
  * 与 `deleteSelectedTrack` 的区别只是入口：图标点的是「这一行」，不需要先选中它。
+ *
+ * 时间轴上的行都来自真实关键帧（没打过帧的通道不占行），所以删完这一行的帧、
+ * 轨道空了之后就由数据层一并清掉，行随之消失 —— 不存在「只能藏起来的空行」。
  */
 export function deleteTrack(focus: KeySelector): ActionResult {
   const timeline = useTimelineStore.getState()
   const animation =
     useProjectStore.getState().document.animations.find((item) => item.name === timeline.currentAnimation) ?? null
+  if (!animation) return { ok: false, message: NO_ANIMATION_MESSAGE }
+  const label = trackLabelOf(focus)
   const selectors = selectorsOfFocus(animation, focus)
-  if (selectors.length === 0) {
-    // 分组行（骨骼 / 插槽）传进来的 channel 为空：说「这个对象还没有帧」，别说成常驻入口行
-    if (!focus.channel) return { ok: false, message: `「${trackLabelOf(focus)}」还没有关键帧` }
-    // 显示 / 子骨架 在「有入口、没帧」时也会常驻一行：这里要说清楚不是删除失败
-    return { ok: false, message: `通道「${trackLabelOf(focus)}」没有关键帧可删（显示 / 子骨架 是常驻入口行）` }
-  }
+  if (selectors.length === 0) return { ok: false, message: `通道「${label}」已经没有关键帧了` }
 
   let removed = 0
-  useProjectStore.getState().update('删除动画通道', (draft) => {
+  // runCommand：一帧都没删掉时不写撤销记录
+  useProjectStore.getState().runCommand('删除动画通道', (draft) => {
     removed = deleteKeys(draft, timeline.currentAnimation, selectors)
     // 删光后把空轨道也清掉：否则工程文件里会留下一条「0 帧但存在」的插槽/骨骼轨道
-    const animation = draft.animations.find((item) => item.name === timeline.currentAnimation)
-    if (animation) pruneEmptyTracks(animation)
+    const target = draft.animations.find((item) => item.name === timeline.currentAnimation)
+    if (target) pruneEmptyTracks(target)
+    return removed > 0
   })
   timeline.setSelectedKeys([])
   return removed > 0
-    ? { ok: true, message: `已删除通道「${trackLabelOf(focus)}」（${removed} 个关键帧）` }
-    : { ok: false, message: `通道「${trackLabelOf(focus)}」没有可删除的关键帧` }
+    ? { ok: true, message: `已删除通道「${label}」（${removed} 个关键帧）` }
+    : { ok: false, message: `通道「${label}」没有可删除的关键帧` }
+}
+
+/**
+ * 清理帧：把**当前动画**里没有任何关键帧的轨道条目一次性删掉。
+ *
+ * 时间轴上的行都由数据生成，但工程数据里可能残留「0 帧但存在」的轨道（导入、早期版本、
+ * 或反复打帧 / 删帧后的边角），它们会占着数据、也可能在别处冒出空行。
+ * 这里复用删帧后的同一套清理（`pruneEmptyTracks`），覆盖骨骼 / 插槽（显示·颜色·可见性·子骨架）/
+ * FFD / 约束 —— 也就是时间轴上能显示的所有轨道类型。
+ */
+export function cleanupEmptyTracks(): ActionResult {
+  const timeline = useTimelineStore.getState()
+  const animation =
+    useProjectStore.getState().document.animations.find((item) => item.name === timeline.currentAnimation) ?? null
+  if (!animation) return { ok: false, message: NO_ANIMATION_MESSAGE }
+
+  let removed = 0
+  useProjectStore.getState().runCommand('清理帧', (draft) => {
+    const target = draft.animations.find((item) => item.name === timeline.currentAnimation)
+    if (!target) return false
+    const before = countTrackEntries(target)
+    pruneEmptyTracks(target)
+    removed = before - countTrackEntries(target)
+    return removed > 0
+  })
+  return removed > 0
+    ? { ok: true, message: `已清理 ${removed} 条没有关键帧的通道` }
+    : { ok: true, message: '当前动画没有空通道需要清理' }
+}
+
+/** 轨道条目数（骨骼 / 插槽 / FFD / 约束）：清理前后对比，用来回报「清掉了几条」 */
+function countTrackEntries(anim: AuthoringAnimData): number {
+  return anim.bones.length + anim.slots.length + anim.deforms.length + anim.constraints.length
 }
 
 /**

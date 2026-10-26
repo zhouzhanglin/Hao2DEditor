@@ -49,14 +49,19 @@ const selector = (time: number): KeySelector => ({
 })
 
 describe('「子骨架」时间轴通道', () => {
-  it('挂嵌套骨架的插槽即使没帧也显示该通道', () => {
+  it('挂嵌套骨架但一帧都没打的插槽不自动出现在时间轴上', () => {
     const { doc } = docWithNest()
-    const tracks = buildTimeline(doc.animations[0], new Set(['weapon']))
-    const track = tracks.find((item) => item.kind === 'slot' && item.channel === 'subArmature')
-    expect(track).toBeDefined()
-    expect(track?.keys).toHaveLength(0)
-    // 不传集合时退化为「有帧才显示」
-    expect(buildTimeline(doc.animations[0]).some((item) => item.channel === 'subArmature')).toBe(false)
+    // 加子骨架 ≠ 打关键帧：时间轴只列数据里真实存在的轨道，这里一行都不该有
+    expect(buildTimeline(doc.animations[0])).toEqual([])
+  })
+
+  it('打了子骨架帧之后才出现该通道', () => {
+    const { doc } = docWithNest()
+    keySlotSubArmature(doc.animations[0], 'weapon', 0, { animation: 'slash', playTimes: 0, offset: 0, speed: 1 })
+    const track = buildTimeline(doc.animations[0]).find(
+      (item) => item.kind === 'slot' && item.channel === 'subArmature'
+    )
+    expect(track?.keys).toHaveLength(1)
   })
 
   it('打帧 / 读回 / 覆盖同一时间点', () => {

@@ -1,4 +1,5 @@
 import { baseName, joinPath } from '../platform'
+import { t } from '@i18n'
 import type { AuthoringImage } from '@core/model/authoring'
 import type { BatchFile } from '@shared/ipcTypes'
 
@@ -129,7 +130,7 @@ export async function copyAssets(
       // 原图被移走 / 删除：但工程自己的 images/ 里已经有上次保存的副本，用它就行
       bytes = await readSafe(reader, copy.to)
       if (bytes.length > 0) continue
-      warnings.push(`图片「${baseName(copy.from)}」源文件读不到，未复制到 ${ASSET_DIR}/`)
+      warnings.push(t('图片「{0}」源文件读不到，未复制到 {1}/', [baseName(copy.from), ASSET_DIR]))
       continue
     }
     batch.push({ path: copy.to, bytes })
@@ -140,7 +141,7 @@ export async function copyAssets(
       await writer.writeBatch(batch)
       return { copied: batch.length, warnings }
     } catch (error) {
-      warnings.push(`复制图片到 ${ASSET_DIR}/ 失败：${describe(error)}`)
+      warnings.push(t('复制图片到 {0}/ 失败：{1}', [ASSET_DIR, describe(error)]))
       return { copied: 0, warnings }
     }
   }

@@ -110,7 +110,7 @@ function buildAtlas(
     // 已经是图集（显式标 false）、且拿得到源文件：整页照搬
     if (image && image.loose === false && image.path) {
       if (image.width <= 0 || image.height <= 0) {
-        warnings.push(`图集页「${name}」缺少尺寸信息，按 1×1 记录（原图仍然整页复制）`)
+        warnings.push(t('图集页「{0}」缺少尺寸信息，按 1×1 记录（原图仍然整页复制）', name))
       }
       copies.push({
         source: name,
@@ -122,7 +122,7 @@ function buildAtlas(
       continue
     }
     if (!image || image.width <= 0 || image.height <= 0) {
-      warnings.push(`图片「${name}」缺少尺寸信息，导出时按 1×1 占位处理`)
+      warnings.push(t('图片「{0}」缺少尺寸信息，导出时按 1×1 占位处理', name))
       items.push({ id: name, width: 1, height: 1 })
       continue
     }
@@ -133,7 +133,7 @@ function buildAtlas(
     })
   }
   if (copies.length > 0 && ratio !== 1) {
-    warnings.push(`${copies.length} 张已经是图集的页按原图复制，不参与「缩放」`)
+    warnings.push(t('{0} 张已经是图集的页按原图复制，不参与「缩放」', copies.length))
   }
 
   const pageFiles: string[] = []
@@ -177,7 +177,7 @@ function buildAtlas(
   if (items.length > 0) {
     const packed = packMaxRects(items, { maxSize, initialSize: Math.min(512, maxSize), padding: 2, border: 2 })
     for (const id of packed.failed) {
-      warnings.push(`图片「${id}」超过单页最大尺寸 ${maxSize}px，未被打包（导出后该附件会缺图）`)
+      warnings.push(t('图片「{0}」超过单页最大尺寸 {1}px，未被打包（导出后该附件会缺图）', [id, maxSize]))
     }
     const offset = copies.length
     for (const page of packed.pages) {
@@ -401,7 +401,7 @@ export function prepareRuntimeExport(options: RuntimeExportOptions): RuntimeExpo
           if (!target || exportedByName.has(target)) continue
           const index = indexByName.get(target)
           if (index === undefined) {
-            warnings.push(`骨架「${asset.armatureName}」引用了工程里不存在的骨架「${target}」，导出时会是一个空 display`)
+            warnings.push(t('骨架「{0}」引用了工程里不存在的骨架「{1}」，导出时会是一个空 display', [asset.armatureName, target]))
             continue
           }
           const doc = list[index]
@@ -450,14 +450,14 @@ export function prepareRuntimeExport(options: RuntimeExportOptions): RuntimeExpo
     }
   }
   if (textures.every((name) => name.length === 0)) {
-    warnings.push('本次导出的骨架没有使用任何图片，导出的图集将为空（角色会以纯色块渲染）')
+    warnings.push(t('本次导出的骨架没有使用任何图片，导出的图集将为空（角色会以纯色块渲染）'))
   }
 
   // 导出会带上「编辑器当前皮肤」作为叠加皮肤（基底 default 仍永远生效），这里明确告知
   const activeSkin = list[0]?.editorMeta.activeSkin ?? ''
   if (activeSkin && activeSkin !== 'default') {
     warnings.push(
-      `当前皮肤：${activeSkin}（作为叠加皮肤导出：基底 default + ${activeSkin}；运行期仍可切换）`
+      t('当前皮肤：{0}（作为叠加皮肤导出：基底 default + {0}；运行期仍可切换）', activeSkin)
     )
   }
 
@@ -519,7 +519,7 @@ export async function writeRuntimeExport(
 
   const pageBytes = await readPageBytes(plan, pngs)
   if (pageBytes.failed.length > 0) {
-    warnings.push(`图集页 ${pageBytes.failed.join(' / ')} 读不出内容（源图缺失或无法读取）`)
+    warnings.push(t('图集页 {0} 读不出内容（源图缺失或无法读取）', pageBytes.failed.join(' / ')))
   }
 
   const files: Array<{ path: string; text?: string; bytes?: Uint8Array }> = [
@@ -627,7 +627,7 @@ export async function writeHao2dExport(
   )
   const pageBytes = await readPageBytes(plan, pngs)
   if (pageBytes.failed.length > 0) {
-    warnings.push(`图集页 ${pageBytes.failed.join(' / ')} 读不出内容（源图缺失或无法读取），对应的材质也未生成`)
+    warnings.push(t('图集页 {0} 读不出内容（源图缺失或无法读取），对应的材质也未生成', pageBytes.failed.join(' / ')))
   }
 
   const files: Array<{ path: string; text?: string; bytes?: Uint8Array }> = []

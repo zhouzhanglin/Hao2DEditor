@@ -1,4 +1,5 @@
 import { getPlatform, baseName, dirName, joinPath, stripExtension } from '../platform'
+import { t } from '@i18n'
 import { AI_TRANSPORT_NOTICE } from '@shared/commandTypes'
 import { AI_COMMAND_API_DOC, AI_PLAYBOOK } from '@shared/aiGuides'
 import type { Platform } from '../platform'
@@ -429,7 +430,7 @@ export async function importDragonBonesFlow(sourcePath?: string): Promise<IoResu
     project.defaultAnimations
   )
   warnings.push(...project.warnings)
-  warnings.push(`合并 ${dbTextureNames(subTextures).length} 张图集页`)
+  warnings.push(t('合并 {0} 张图集页', dbTextureNames(subTextures).length))
   useProjectStore.getState().setWarnings(warnings)
   const summary =
     project.assets.length > 1

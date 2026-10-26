@@ -16,6 +16,8 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
     environment: 'node',
-    reporters: 'default'
+    reporters: 'default',
+    // 固定简中：i18n 默认按 navigator.language 猜，英文系统上断言中文文案的用例会假失败
+    setupFiles: ['tests/setup.ts']
   }
 })

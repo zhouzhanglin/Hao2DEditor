@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Activity,
   Bone,
@@ -35,10 +36,17 @@ import { keySlotDisplayNow, keyframeTargetsNow } from '@editor/timeline/actions'
 import { CONSTRAINT_CHANNEL_LABEL, CONSTRAINT_CHANNELS, slotDisplayNameAt } from '@editor/timeline/model'
 import type { KeyframeTarget } from '@editor/timeline/model'
 import { getActiveScene } from '@editor/activeScene'
+import { getPlatform } from '@editor/platform'
 import { focusNode } from '@editor/focusNode'
 import type { FocusTarget } from '@editor/focusNode'
 import { createIkConstraint, createPathConstraint, createTransformConstraint } from '@core/model/constraints'
-import type { AuthoringBone, AuthoringConstraint, AuthoringImage, EditorDocument } from '@core/model/authoring'
+import type {
+  AuthoringAttachment,
+  AuthoringBone,
+  AuthoringConstraint,
+  AuthoringImage,
+  EditorDocument
+} from '@core/model/authoring'
 import { createAuthoringBone, createAuthoringSlot, rootBoneName } from '@core/model/authoring'
 import {
   addArmatureDisplay,
@@ -72,6 +80,7 @@ import {
 } from '@ui/widgets/dragDrop'
 import type { TreeDragPayload, TreeDropPosition } from '@ui/widgets/dragDrop'
 import { unitsToPx } from '@ui/widgets/fields'
+import { ImageThumb } from '@ui/panels/ImageThumb'
 import { t } from '@i18n'
 
 /** 右键菜单的目标：root = 空白处 */
@@ -131,6 +140,11 @@ interface TreeRowProps {
   dataAttachment?: string
   /** 非 0 时整行闪一下（定位请求；父组件 900ms 后清 0，靠这个开关重启动画） */
   flashKey?: number
+  /**
+   * 悬停到这一行（`null` = 移出）。display 行用它弹「缩略图 + 描述」浮层 ——
+   * 原生 `title` 画不出图，只能自绘。
+   */
+  onHover?: (row: HTMLElement | null) => void
 }
 
 /**
@@ -203,7 +217,8 @@ function TreeRow({
   focusTarget,
   dataBone,
   flashKey,
-  secondary
+  secondary,
+  onHover
 }: TreeRowProps) {
   const [dropActive, setDropActive] = useState(false)
   /** 树内拖动时的高亮：放进行内 or 贴在上/下沿 */
@@ -253,6 +268,8 @@ function TreeRow({
       data-bone={dataBone}
       data-attachment={dataAttachment}
       onClick={onSelect}
+      onMouseEnter={onHover ? (event) => onHover(event.currentTarget) : undefined}
+      onMouseLeave={onHover ? () => onHover(null) : undefined}
       onDoubleClick={
         focus
           ? (event) => {
@@ -724,6 +741,15 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   const setShowDisplays = useTreeUiStore((s) => s.setShowDisplays)
   /** 搜索框内容：空 = 不过滤；有值时只显示命中节点 + 其祖先（根骨骼始终保留），并临时全展开 */
   const [query, setQuery] = useState('')
+  /**
+   * display 行的悬停预览（缩略图 + 描述）。原生 `title` 只能出文字，
+   * 缩略图必须自绘浮层（与资源面板的图片悬停预览同款，只是尺寸更小）。
+   */
+  const [displayHover, setDisplayHover] = useState<{
+    slot: string
+    attachment: string
+    row: HTMLElement
+  } | null>(null)
   /** 树列表容器：拖放兜底判定要用它量各行的位置 */
   const listRef = useRef<HTMLDivElement | null>(null)
   /** 拖插槽到列表下方空白处时，在最底部画一条插入线，提示「放到最底层」 */
@@ -1793,7 +1819,9 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     if (filter && !filter.displays.has(displayKey(slot.name, attachment.name))) return null
     // 「显示中」标记与点击判定同一数据源：Animate 态按当前时间点的关键帧数据判断
     const showing = shownDisplayName(slot) === attachment.name
+    const hovered = displayHover?.slot === slot.name && displayHover.attachment === attachment.name
     return (
+      <>
       <TreeRow
         key={`display:${slot.name}:${attachment.name}`}
         dragPayload={{ kind: 'display', slot: slot.name, name: attachment.name }}
@@ -1802,7 +1830,11 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         }
         depth={depth}
         label={attachment.name}
-        title={displayRowTitle(slot, attachment, showing)}
+        // 描述改由自绘浮层展示（原生 title 画不出缩略图），这里不再挂 title
+        title={undefined}
+        onHover={(row) =>
+          setDisplayHover(row ? { slot: slot.name, attachment: attachment.name, row } : null)
+        }
         active={
           selection.kind === 'attachment' &&
           selection.slot === slot.name &&
@@ -1870,6 +1902,15 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           update(t('删除 display'), (draft) => deleteAttachment(draft, slot.name, attachment.name))
         )}
       />
+      {hovered ? (
+        <DisplayHoverCard
+          row={displayHover.row}
+          title={displayRowTitle(slot, attachment, showing)}
+          image={document.images.find((item) => item.name === attachment.image)}
+          attachment={attachment}
+        />
+      ) : null}
+      </>
     )
   }
 
@@ -2071,6 +2112,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       <div
         ref={listRef}
         className="min-h-0 flex-1 overflow-auto hao-scroll pb-1"
+        // 鼠标离开整个列表时收起 display 悬停浮层（行被折叠/删除时收不到 mouseleave）
+        onMouseLeave={() => setDisplayHover(null)}
         onContextMenu={(event) => openMenu(event, { kind: 'root', name: '', bone: '' })}
         onDragOverCapture={(event) => {
           // 用 capture：行自己会 stopPropagation，冒泡阶段收不到「正在哪一行上」
@@ -2309,6 +2352,146 @@ function chainFromSelection(doc: EditorDocument, names: readonly string[], fallb
 function toCss(hex: string): string {
   const rgb = hex.length === 9 ? hex.slice(0, 7) : hex
   return rgb.startsWith('#') ? rgb : '#ffffff'
+}
+
+/** display 悬停浮层的缩略图边长（比资源面板的 240px 大图小得多，只为「认得出是哪个」） */
+const DISPLAY_PREVIEW_THUMB = 64
+const DISPLAY_PREVIEW_GAP = 8
+const DISPLAY_PREVIEW_MARGIN = 8
+
+/**
+ * display 行的悬停浮层：**缩略图 + 描述**（原生 `title` 只能出文字）。
+ *
+ * 缩略图取附件引用的图集页（`ImageThumb`，棋盘打底）；嵌套骨架没有图，用人形图标占位。
+ * 浮层 portal 到 body，避免被层级树的滚动区裁掉；默认贴行右侧，放不下翻到左侧。
+ */
+function DisplayHoverCard({
+  row,
+  title,
+  image,
+  attachment
+}: {
+  row: HTMLElement
+  title: string
+  image: AuthoringImage | undefined
+  attachment: AuthoringAttachment
+}) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
+  const [tick, setTick] = useState(0)
+
+  /**
+   * 缩略图裁到**附件自己的 UV 矩形**（不是整张图集页）：整页缩到 64px 基本认不出是哪块，
+   * 按 UV 取景才像「这个 display 本身」。图集页可能上千像素，这里按最大边缩到 64。
+   */
+  const crop = useMemo(() => {
+    const uv = attachment.uvs
+    if (!image || image.width <= 1 || image.height <= 1 || uv.length < 8) return null
+    let u0 = 1
+    let u1 = 0
+    let v0 = 1
+    let v1 = 0
+    for (let i = 0; i + 1 < uv.length; i += 2) {
+      u0 = Math.min(u0, uv[i])
+      u1 = Math.max(u1, uv[i])
+      v0 = Math.min(v0, uv[i + 1])
+      v1 = Math.max(v1, uv[i + 1])
+    }
+    const cropWidth = (u1 - u0) * image.width
+    const cropHeight = (v1 - v0) * image.height
+    if (!(cropWidth > 1) || !(cropHeight > 1)) return null
+    const scale = Math.min(DISPLAY_PREVIEW_THUMB / cropWidth, DISPLAY_PREVIEW_THUMB / cropHeight)
+    return {
+      url: getPlatform().fileUrl(image.path),
+      width: Math.max(8, Math.round(cropWidth * scale)),
+      height: Math.max(8, Math.round(cropHeight * scale)),
+      backgroundSize: `${image.width * scale}px ${image.height * scale}px`,
+      // uv 的 v=0 在图片底边，而 CSS 背景的原点在左上角
+      backgroundPosition: `${-u0 * image.width * scale}px ${-(1 - v1) * image.height * scale}px`
+    }
+  }, [image, attachment.uvs])
+
+  // 捕获阶段的 scroll 能收到面板容器的滚动（不冒泡到 window 的那层也拦得住）
+  useEffect(() => {
+    const bump = (): void => setTick((value) => value + 1)
+    window.addEventListener('scroll', bump, true)
+    window.addEventListener('resize', bump)
+    return () => {
+      window.removeEventListener('scroll', bump, true)
+      window.removeEventListener('resize', bump)
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    const element = ref.current
+    if (!element) return
+    const rect = element.getBoundingClientRect()
+    const source = row.getBoundingClientRect()
+    let left = source.right + DISPLAY_PREVIEW_GAP
+    if (left + rect.width > window.innerWidth - DISPLAY_PREVIEW_MARGIN) {
+      left = source.left - rect.width - DISPLAY_PREVIEW_GAP
+    }
+    left = Math.max(
+      DISPLAY_PREVIEW_MARGIN,
+      Math.min(left, window.innerWidth - rect.width - DISPLAY_PREVIEW_MARGIN)
+    )
+    // 与行顶端对齐：描述可能有好几行，居中对齐会让它离鼠标太远
+    const top = Math.max(
+      DISPLAY_PREVIEW_MARGIN,
+      Math.min(source.top, window.innerHeight - rect.height - DISPLAY_PREVIEW_MARGIN)
+    )
+    setPosition({ left, top })
+  }, [row, tick, title, crop?.width, crop?.height])
+
+  const lines = title.split('\n').filter((line) => line.length > 0)
+
+  return createPortal(
+    <div
+      ref={ref}
+      className="pointer-events-none fixed z-50 flex max-w-[260px] items-start gap-1.5 rounded border border-line bg-ink-800/95 p-1.5 shadow-xl"
+      style={{
+        left: position?.left ?? -10000,
+        top: position?.top ?? -10000,
+        opacity: position ? 1 : 0,
+        transition: 'opacity 90ms linear'
+      }}
+    >
+      {crop ? (
+        <span
+          className="hao-checkerboard-sm shrink-0 overflow-hidden rounded border border-line/70"
+          style={{
+            width: crop.width,
+            height: crop.height,
+            backgroundImage: `url("${crop.url}")`,
+            backgroundSize: crop.backgroundSize,
+            backgroundPosition: crop.backgroundPosition,
+            backgroundRepeat: 'no-repeat',
+            imageRendering: 'pixelated'
+          }}
+        />
+      ) : image ? (
+        <ImageThumb path={image.path} size={DISPLAY_PREVIEW_THUMB} />
+      ) : attachment.type === 'armature' ? (
+        <span
+          className="hao-checkerboard-sm flex shrink-0 items-center justify-center overflow-hidden rounded border border-line/70"
+          style={{ width: DISPLAY_PREVIEW_THUMB, height: DISPLAY_PREVIEW_THUMB }}
+        >
+          <PersonStanding size={34} strokeWidth={2.2} className="text-accent/80" />
+        </span>
+      ) : null}
+      {lines.length > 0 ? (
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-3xs font-semibold text-content-hi">{lines[0]}</span>
+          {lines.slice(1).map((line) => (
+            <span key={line} className="text-3xs leading-[14px] text-content-lo">
+              {line}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>,
+    document.body
+  )
 }
 
 export type { AuthoringConstraint }

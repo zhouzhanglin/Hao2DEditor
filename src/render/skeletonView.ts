@@ -12,6 +12,8 @@ const INDEX_BYTES = 4
 /** 要插进本视图里的嵌套骨架子视图（`layer` = 插在第几个绘制分组之前） */
 export interface NestedLayerView {
   layer: number
+  /** 同一层内的绘制顺序（drawOrder 动画交换相邻嵌套时不画反）；缺省 0 */
+  order?: number
   container: Container
 }
 
@@ -80,7 +82,11 @@ export class SkeletonView {
     for (const old of this.nestedViews) {
       if (!views.some((view) => view.container === old.container)) old.container.removeFromParent()
     }
-    this.nestedViews = views.map((view) => ({ layer: view.layer, container: view.container }))
+    this.nestedViews = views.map((view) => ({
+      layer: view.layer,
+      order: view.order ?? 0,
+      container: view.container
+    }))
     this.orderChildren()
   }
 
@@ -273,25 +279,29 @@ export class SkeletonView {
    */
   private orderChildren(): void {
     const groups = this.meshes.length
-    const byLayer = new Map<number, Container[]>()
+    const byLayer = new Map<number, NestedLayerView[]>()
     let maxLayer = 0
     for (const view of this.nestedViews) {
       const list = byLayer.get(view.layer) ?? []
-      list.push(view.container)
+      list.push(view)
       byLayer.set(view.layer, list)
       if (view.layer > maxLayer) maxLayer = view.layer
+    }
+    // 同一层的多个子骨架按绘制顺序排（Map 的插入顺序是实例创建顺序，drawOrder 变了也不会跟）
+    for (const list of byLayer.values()) {
+      if (list.length > 1) list.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
     }
 
     const desired: Container[] = []
     for (let layer = 0; layer < groups; layer++) {
       const nested = byLayer.get(layer)
-      if (nested) desired.push(...nested)
+      if (nested) for (const view of nested) desired.push(view.container)
       const mesh = this.meshes[layer]
       if (mesh) desired.push(mesh)
     }
     for (let layer = Math.max(groups, 0); layer <= maxLayer; layer++) {
       const nested = byLayer.get(layer)
-      if (nested) desired.push(...nested)
+      if (nested) for (const view of nested) desired.push(view.container)
     }
 
     const current = this.container.children

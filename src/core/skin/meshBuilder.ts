@@ -34,7 +34,15 @@ export interface NestAnchor {
   slotIndex: number
   attachmentName: string
   armatureName: string
+  /** 组下标：子视图插在第几层（同层时按 `order` 排） */
   layer: number
+  /**
+   * 在绘制顺序里的序号（0 = 最先画）。
+   *
+   * 两个嵌套 display 中间没有几何时 `layer` 会相同：只按层排会退回「实例创建顺序」
+   * （= 插槽下标顺序），drawOrder 动画交换它们时就会画反。用 order 兜底成绘制顺序。
+   */
+  order: number
 }
 
 export interface MeshBuildResult {
@@ -241,7 +249,8 @@ export class MeshBuilder {
           slotIndex: si,
           attachmentName: attachment.name,
           armatureName: attachment.subArmature,
-          layer: this.usedGroups
+          layer: this.usedGroups,
+          order: this.nestAnchors.length
         })
         this.breakGroup = true
         continue

@@ -20,6 +20,8 @@ export interface NestAnchorLike {
   slotIndex: number
   attachmentName: string
   layer: number
+  /** 绘制顺序序号（同层排序用；缺省 0） */
+  order?: number
 }
 
 /** 一个「正在显示」的嵌套骨架实例（每帧更新，字段原地复用，避免 GC） */
@@ -33,6 +35,8 @@ export interface NestInstance {
   asset: RuntimeAsset
   skeleton: Skeleton
   player: AnimationPlayer
+  /** 绘制顺序序号：同 `layer` 的多个子骨架按它排（drawOrder 动画交换时不画反） */
+  order: number
   /** 父骨骼世界矩阵 × 附件 TRS（列主序 16），供子视图设置变换 */
   matrix: Float32Array
   /** 子骨架最终染色 = 父插槽色 × 附件色（视图再乘全局 tint） */
@@ -115,10 +119,14 @@ export class NestRuntime {
     if (!maps) return this.active
 
     const layerOf = new Map<string, number>()
+    const orderOf = new Map<string, number>()
     if (anchors) {
       for (const anchor of anchors) {
         const key = `${anchor.slotIndex}|${anchor.attachmentName}`
-        if (!layerOf.has(key)) layerOf.set(key, anchor.layer)
+        if (!layerOf.has(key)) {
+          layerOf.set(key, anchor.layer)
+          orderOf.set(key, anchor.order ?? 0)
+        }
       }
     }
 
@@ -183,6 +191,7 @@ export class NestRuntime {
       instance.tint.a = slotColor.a * attColor.a
 
       instance.layer = layerOf.get(`${slotIndex}|${name}`) ?? 0
+      instance.order = orderOf.get(`${slotIndex}|${name}`) ?? 0
       next.push(instance)
     }
 
@@ -222,6 +231,7 @@ export class NestRuntime {
       key,
       slotIndex,
       displayIndex,
+      order: 0,
       attachmentName: attachment.name,
       armatureName: source.asset.armatureName,
       asset: source.asset,

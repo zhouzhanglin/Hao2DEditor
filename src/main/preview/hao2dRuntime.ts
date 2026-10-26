@@ -195,7 +195,7 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
     if (!layer.nest) return
     const instances = layer.nest.update(source, sk, pl, host.result?.nestAnchors)
     const live = new Set<string>()
-    const layers: Array<{ layer: number; container: Container }> = []
+    const layers: Array<{ layer: number; order: number; container: Container }> = []
     for (const instance of instances) {
       live.add(instance.key)
       let entry = layer.views.get(instance.key)
@@ -228,7 +228,7 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
       }
       entry.view.update(instance.skeleton)
       syncLayer(entry.child, instance.asset, instance.skeleton, instance.player, entry.view)
-      layers.push({ layer: instance.layer, container: entry.view.container })
+      layers.push({ layer: instance.layer, order: instance.order, container: entry.view.container })
     }
     for (const [key, entry] of [...layer.views]) {
       if (live.has(key)) continue

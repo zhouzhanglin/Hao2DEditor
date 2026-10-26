@@ -619,7 +619,7 @@ export class EditorScene {
   ): boolean {
     const instances = nest.update(asset, skeleton, player, host.result?.nestAnchors, isolateSlot)
     let changed = false
-    const layers: Array<{ layer: number; container: Container }> = []
+    const layers: Array<{ layer: number; order: number; container: Container }> = []
 
     for (const instance of instances) {
       const key = prefix ? `${prefix}/${instance.key}` : instance.key
@@ -686,7 +686,7 @@ export class EditorScene {
       }
 
       if (entry.view.container.parent !== host.container) changed = true
-      layers.push({ layer: instance.layer, container: entry.view.container })
+      layers.push({ layer: instance.layer, order: instance.order, container: entry.view.container })
     }
 
     host.setNestedViews(layers)

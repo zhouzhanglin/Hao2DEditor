@@ -460,6 +460,8 @@ function ConstraintEditor({
 export default function InspectorPanel({ onStatus = () => undefined }: InspectorPanelProps) {
   const document = useProjectStore((s) => s.document)
   const update = useProjectStore((s) => s.update)
+  /** 工程内全部骨架：嵌套 display 的「引用骨架」下拉与默认动画清单都从这里取 */
+  const skeletons = useProjectStore((s) => s.skeletons)
   const selection = useSelectionStore()
   const tools = useToolStore()
   const mode = useModeStore((s) => s.mode)
@@ -851,6 +853,10 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
       ?? document.skins[0]?.slots.find((s) => s.slot === slot.name)
     // 附件解析走「皮肤优先、跨皮肤兜底」：切过皮肤后不该让检查器整段空掉（与视口同一套规则）
     const attachment = resolveAttachment(document, slot.name, selection.attachment, selection.skin)
+    /** 嵌套 display 引用的子骨架（用于列出它的动画名） */
+    const nestedSkeleton = attachment?.type === 'armature'
+      ? skeletons.find((item) => item.armatureName === attachment.subArmature)
+      : undefined
     // 权重骨骼列表：优先用附件上显式绑定的（老数据按顶点权重推断，见 weightBonesOf）
     const weightBones = attachment && attachment.type === 'mesh' ? weightBonesOf(attachment) : []
     /** 是否正在为**这个**附件等待点选骨骼（等待态是全局的，按钮只在目标附件上高亮） */
@@ -977,8 +983,95 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                 })
               }
             />
+            {/*
+              嵌套骨架：引用的是**同工程里的另一个骨架**（按名字），不复制数据。
+              默认动画 / 循环 / 偏移 / 倍速是 setup 值；时间轴上的「子骨架」通道会按帧覆盖它们。
+            */}
+            {attachment.type === 'armature' ? (
+              <>
+                <SelectField
+                  label={t('引用骨架')}
+                  value={attachment.subArmature}
+                  options={[
+                    { value: '', label: t('（未引用）') },
+                    ...skeletons
+                      .filter((item) => item.armatureName !== document.armatureName)
+                      .map((item) => ({ value: item.armatureName, label: item.armatureName }))
+                  ]}
+                  onChange={(value) =>
+                    update(t('修改嵌套骨架'), (draft) =>
+                      patchAttachment(draft, slot.name, attachment.name, (a) => {
+                        a.subArmature = value
+                        // 换了骨架，旧动画名基本不存在，清掉免得留一个无效默认值
+                        a.subAnimation = ''
+                      })
+                    )
+                  }
+                />
+                <SelectField
+                  label={t('默认动画')}
+                  value={attachment.subAnimation}
+                  options={[
+                    { value: '', label: t('（setup 姿态）') },
+                    ...(nestedSkeleton?.animations ?? []).map((animation) => ({
+                      value: animation.name,
+                      label: animation.name
+                    }))
+                  ]}
+                  onChange={(value) =>
+                    update(t('修改子骨架默认动画'), (draft) =>
+                      patchAttachment(draft, slot.name, attachment.name, (a) => {
+                        a.subAnimation = value
+                      })
+                    )
+                  }
+                />
+                <NumberField
+                  label={t('播放次数')}
+                  value={attachment.subPlayTimes}
+                  step={1}
+                  precision={0}
+                  min={0}
+                  suffix={t('次')}
+                  onChange={(value) =>
+                    update(t('修改子骨架播放次数'), (draft) =>
+                      patchAttachment(draft, slot.name, attachment.name, (a) => {
+                        a.subPlayTimes = Math.max(0, Math.round(value))
+                      })
+                    )
+                  }
+                />
+                <NumberField
+                  label={t('起始偏移')}
+                  value={attachment.subOffset}
+                  step={0.05}
+                  suffix={t('秒')}
+                  onChange={(value) =>
+                    update(t('修改子骨架起始偏移'), (draft) =>
+                      patchAttachment(draft, slot.name, attachment.name, (a) => {
+                        a.subOffset = value
+                      })
+                    )
+                  }
+                />
+                <NumberField
+                  label={t('倍速')}
+                  value={attachment.subSpeed}
+                  step={0.1}
+                  min={0}
+                  onChange={(value) =>
+                    update(t('修改子骨架倍速'), (draft) =>
+                      patchAttachment(draft, slot.name, attachment.name, (a) => {
+                        a.subSpeed = Math.max(0, value)
+                      })
+                    )
+                  }
+                />
+              </>
+            ) : null}
             {attachment.type !== 'clipping' ? (
               <>
+                {attachment.type !== 'armature' ? (
                 <SelectField
                   label={t('图片')}
                   value={attachment.image}
@@ -994,6 +1087,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                     })
                   }
                 />
+                ) : null}
                 {/* 同骨骼位置：按像素显示 / 输入（中键拖动 / 上下键按 10px 走），写回仍是世界单位 */}
                 <Vector2Field
                   label={t('位置')}
@@ -1024,7 +1118,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
               改这个数在视口里看不出任何变化，只会在「自动生成网格」按它映射尺寸时
               产生看不出来的偏差。原值仍留在数据里（「还原为 Region」与重新生成都要用）。
             */}
-            {attachment.type !== 'mesh' && attachment.type !== 'clipping' ? (
+            {attachment.type !== 'mesh' && attachment.type !== 'clipping' && attachment.type !== 'armature' ? (
               <Vector2Field
                 label={t('尺寸')}
                 value={attachment.size}

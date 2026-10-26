@@ -132,6 +132,34 @@
     return fetch(base + 'manifest.json').then(function (r) { return r.json() })
   }
 
+  /**
+   * 预取被嵌套引用的子骨架文本（含传递依赖：A 挂 B、B 挂 C 时三个都要）。
+   *
+   * 子骨架与父骨架共用同一套图集页，所以只需要额外的 ske 文本。
+   */
+  function loadNestedSkeletons(root) {
+    var byId = {}
+    ;((manifest && manifest.skeletons) || []).forEach(function (item) { byId[item.id] = item })
+    var seen = {}
+    var out = []
+    function walk(node) {
+      var links = node.nested || []
+      return Promise.all(links.map(function (link) {
+        if (!link.id || seen[link.id]) return Promise.resolve()
+        seen[link.id] = true
+        return fetch(base + 's/' + link.id + '.ske').then(function (r) { return r.text() })
+          .then(function (text) {
+            var name = link.armatureName || ''
+            try { name = (JSON.parse(text) || {}).armatureName || name } catch (e) { /* 名字只用于提示 */ }
+            out.push({ armatureName: name, skeText: text })
+            if (byId[link.id]) return walk(byId[link.id])
+            return undefined
+          })
+      }))
+    }
+    return walk(root).then(function () { return out })
+  }
+
   function loadSkeleton(entry) {
     return fetch(base + 's/' + entry.id + '.ske').then(function (r) { return r.text() })
       .then(function (skeText) {
@@ -144,7 +172,9 @@
                 .then(function (r) { return r.arrayBuffer() })
                 .then(function (buf) { return { name: name, bytes: new Uint8Array(buf) } })
             })).then(function (pages) {
-              return { skeText: skeText, atlasText: atlasText, pages: pages }
+              return loadNestedSkeletons(entry).then(function (nested) {
+                return { skeText: skeText, atlasText: atlasText, pages: pages, nested: nested }
+              })
             })
           })
       })
@@ -182,7 +212,8 @@
         canvas: target,
         pages: data.pages,
         skeText: data.skeText,
-        atlasText: data.atlasText
+        atlasText: data.atlasText,
+        nested: data.nested
       }).then(function (created) {
         stage = created
         hideStatus()

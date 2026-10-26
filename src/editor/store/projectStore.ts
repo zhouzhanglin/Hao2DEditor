@@ -6,6 +6,7 @@ import type { ProjectSnapshot } from '../history'
 import { applyAtlasSplit, deleteImage, replaceImage } from '../commands/authoringCommands'
 import type { AtlasSplitPlan } from '../commands/authoringCommands'
 import { repairAnimationDurations, repairDisplayNames } from '../timeline/model'
+import { validateNestGraph } from '@core/nesting/nest'
 import { useSelectionStore } from './selectionStore'
 
 export interface ProjectState {
@@ -170,6 +171,77 @@ function shareImages(skeletons: EditorDocument[], active: number): EditorDocumen
   return changed ? next : skeletons
 }
 
+/**
+ * 加载 / 导入时的嵌套引用兜底：清掉**自引用、成环、指向不存在骨架、超深**的 `subArmature`。
+ *
+ * 为什么放在 store 而不是各个入口：工程文件可能被手改、导入资源也可能带脏数据，
+ * 只要进到内存就必须是「可渲染」的（否则视口递归渲染会死循环）。
+ * 每个环只断开第一条边，尽量保留用户数据。
+ */
+function sanitizeNestRefs(skeletons: EditorDocument[]): { count: number; warnings: string[] } {
+  const validation = validateNestGraph(skeletons)
+  const names = new Set(skeletons.map((skeleton) => skeleton.armatureName))
+  const warnings: string[] = []
+  const reported = new Set<string>()
+  const report = (text: string): void => {
+    if (reported.has(text)) return
+    reported.add(text)
+    warnings.push(text)
+  }
+
+  const broken = new Set<string>() // `${from}\0${to}`
+  for (const edge of validation.selfReferences) {
+    broken.add(`${edge.from}\u0000${edge.to}`)
+    report(`插槽「${edge.slot}」的「${edge.attachment}」引用了自身骨架，已断开`)
+  }
+  for (const edge of validation.missing) {
+    broken.add(`${edge.from}\u0000${edge.to}`)
+    report(`骨架「${edge.from}」的插槽「${edge.slot}」引用了不存在的骨架「${edge.to}」，已断开`)
+  }
+  for (const cycle of validation.cycles) {
+    if (cycle.length >= 2) broken.add(`${cycle[0]}\u0000${cycle[1]}`)
+    report(`骨架嵌套存在循环引用（${cycle.join(' → ')}），已断开「${cycle[0]}」里的引用`)
+  }
+  const tooDeep = new Set(validation.tooDeep)
+  for (const name of tooDeep) report(`骨架「${name}」的嵌套层数超过上限，相关引用已断开`)
+
+  let count = 0
+  for (const doc of skeletons) {
+    for (const skin of doc.skins) {
+      for (const slot of skin.slots) {
+        for (const attachment of slot.attachments) {
+          if (attachment.type !== 'armature') continue
+          const target = attachment.subArmature
+          if (!target) continue
+          const invalid = !names.has(target) || broken.has(`${doc.armatureName}\u0000${target}`) || tooDeep.has(doc.armatureName)
+          if (!invalid) continue
+          attachment.subArmature = ''
+          count++
+        }
+      }
+    }
+  }
+  return { count, warnings }
+}
+
+/** 某骨架被哪些位置引用（删除骨架前的守卫） */
+function nestReferencesTo(docs: readonly EditorDocument[], name: string): string[] {
+  const out: string[] = []
+  for (const doc of docs) {
+    if (doc.armatureName === name) continue
+    for (const skin of doc.skins) {
+      for (const slot of skin.slots) {
+        for (const attachment of slot.attachments) {
+          if (attachment.type === 'armature' && attachment.subArmature === name) {
+            out.push(`${doc.armatureName} / ${slot.slot} / ${attachment.name}`)
+          }
+        }
+      }
+    }
+  }
+  return out
+}
+
 function syncFlags(state: ProjectState): Pick<ProjectState, 'canUndo' | 'canRedo' | 'undoLabel' | 'redoLabel'> {
   void state
   return {
@@ -221,6 +293,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 修好后标记为未保存，方便写回。
     const repaired = cloneDocument(document)
     const repairedCount = repairAnimationDurations(repaired) + repairDisplayNames(repaired)
+    const nested = sanitizeNestRefs([repaired])
     const previous = get()
     /*
      * 项目名**不跟着骨架名走**。
@@ -237,7 +310,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       activeSkeleton: 0,
       projectName: keepName ? previous.projectName : repaired.armatureName,
       projectPath: projectPath === undefined ? get().projectPath : projectPath,
-      dirty: repairedCount > 0 || dirty,
+      dirty: repairedCount > 0 || nested.count > 0 || dirty,
+      warnings: nested.warnings.length > 0 ? nested.warnings : get().warnings,
       ...syncFlags(get())
     })
   },
@@ -253,6 +327,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     })
     const index = clampIndex(activeSkeleton, repaired.length)
     const list = shareImages(repaired, index)
+    // 自引用 / 环 / 缺引用一律在进入内存时断开：视口是递归渲染的，脏数据会直接死循环
+    const nested = sanitizeNestRefs(list)
     set({
       document: list[index],
       skeletons: list,
@@ -260,7 +336,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // 兜底：调用方（打开工程）随后会用文件里的 projectName 覆盖
       projectName: list[index].armatureName,
       projectPath: projectPath === undefined ? get().projectPath : projectPath,
-      dirty: repairedCount > 0 || dirty,
+      dirty: repairedCount > 0 || nested.count > 0 || dirty,
+      warnings: nested.warnings.length > 0 ? nested.warnings : get().warnings,
       ...syncFlags(get())
     })
   },
@@ -288,6 +365,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 至少留一个：项目里没有骨架时编辑器的面板 / 视口都没有可编辑对象
     if (state.skeletons.length <= 1) return
     const at = clampIndex(index, state.skeletons.length)
+    // 被别的骨架嵌套引用时不允许删除（否则父骨架里就留下一个空引用）
+    const target = state.skeletons[at]?.armatureName ?? ''
+    const referencedBy = nestReferencesTo(state.skeletons, target)
+    if (referencedBy.length > 0) {
+      set({ warnings: [`骨架「${target}」正在被引用，先删除这些嵌套 display：${referencedBy.join('、')}`] })
+      return
+    }
     history.push('删除骨架', snapshotOf(state))
     const list = state.skeletons.filter((_, i) => i !== at)
     const active =
@@ -303,12 +387,38 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   renameSkeleton: (index, name) => {
     const state = get()
     const at = clampIndex(index, state.skeletons.length)
-    const renamed = { ...state.skeletons[at], armatureName: name }
+    const trimmed = name.trim()
+    const old = state.skeletons[at]?.armatureName ?? ''
+    if (!trimmed || trimmed === old) return
+    // 名字是嵌套引用的唯一键：重名会让「引用谁」变得不确定，直接拒绝
+    if (state.skeletons.some((skeleton, i) => i !== at && skeleton.armatureName === trimmed)) {
+      set({ warnings: [`已存在名为「${trimmed}」的骨架，请换一个名字`] })
+      return
+    }
     history.push('重命名骨架', snapshotOf(state))
-    const list = replaceSkeleton(state.skeletons, at, renamed)
+    // 跨骨架级联：所有指向旧名的 `subArmature` 一起改，否则父骨架里的引用会指空
+    const list = state.skeletons.map((skeleton, i) => {
+      const cascade = i !== at && skeleton.skins.some((skin) =>
+        skin.slots.some((slot) => slot.attachments.some((a) => a.type === 'armature' && a.subArmature === old))
+      )
+      if (i !== at && !cascade) return skeleton
+      const copy = cloneDocument(skeleton)
+      if (i === at) copy.armatureName = trimmed
+      if (cascade) {
+        for (const skin of copy.skins) {
+          for (const slot of skin.slots) {
+            for (const attachment of slot.attachments) {
+              if (attachment.type === 'armature' && attachment.subArmature === old) attachment.subArmature = trimmed
+            }
+          }
+        }
+      }
+      return copy
+    })
+    const shared = shareImages(list, state.activeSkeleton)
     set({
-      document: at === state.activeSkeleton ? renamed : state.document,
-      skeletons: list,
+      document: shared[state.activeSkeleton],
+      skeletons: shared,
       dirty: true,
       ...syncFlags(state)
     })

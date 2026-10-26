@@ -374,6 +374,8 @@ function buildSkins(asset: RuntimeAsset, lookup?: SpineRegionLookup): SpineSkinJ
     for (const slot of skin.slots) {
       const slotEntries: Record<string, SpineAttachmentJson> = {}
       for (const att of slot.attachments) {
+        // Spine 没有「嵌套骨架」概念：跳过（告警在 buildSpineBundles 里按骨架汇总）
+        if (att.type === AttachmentType.Armature) continue
         slotEntries[att.name] = spineAttachment(att, lookup)
       }
       attachments[slot.slotName] = slotEntries
@@ -1162,6 +1164,21 @@ export async function buildSpineBundles(
     const { trim, conflicts } = collectRegionTrim(skeleton.asset, plan.atlas)
     if (conflicts.length > 0) {
       warnings.push(`区域 ${conflicts.join(' / ')} 被多个附件以不同裁剪引用，已按原样写出（不做裁剪换算）`)
+    }
+    // 嵌套骨架：Spine 无对应表达，display 会被跳过（子骨架本身仍可作为独立骨架单独导出）
+    const nestedCount = skeleton.asset.skins.reduce(
+      (total, skin) =>
+        total +
+        skin.slots.reduce(
+          (count, slot) => count + slot.attachments.filter((a) => a.type === AttachmentType.Armature).length,
+          0
+        ),
+      0
+    )
+    if (nestedCount > 0) {
+      warnings.push(
+        `骨架「${skeleton.name}」有 ${nestedCount} 个嵌套骨架 display：Spine 不支持骨架嵌套，已跳过这些 display`
+      )
     }
     const pages = plan.atlas.pages.map((page, i) => {
       const oldFile = page.image

@@ -230,6 +230,20 @@ function colorKeys(value: unknown): AuthoringAnimData['slots'][number]['color'] 
   })
 }
 
+/** 子骨架控制帧：动画名是字符串，不能套用数值关键帧的读法（与 displayAttachment 同理） */
+function subArmatureKeys(value: unknown): AuthoringAnimData['slots'][number]['subArmature'] {
+  return arr(value).map((item) => {
+    const raw = isRecord(item) ? item : {}
+    return {
+      ...keyBase(raw),
+      animation: str(raw.animation),
+      playTimes: Math.round(num(raw.playTimes)),
+      offset: num(raw.offset),
+      speed: num(raw.speed, 1)
+    }
+  })
+}
+
 function intKeys(value: unknown): AuthoringAnimData['slots'][number]['displayIndex'] {
   return arr(value).map((item) => {
     const raw = isRecord(item) ? item : {}
@@ -292,7 +306,11 @@ function normalizeVertex(raw: Record<string, unknown>): AuthoringVertex {
 function normalizeAttachment(raw: Record<string, unknown>): AuthoringAttachment {
   const type = str(raw.type, 'region')
   const resolvedType: AuthoringAttachment['type'] =
-    type === 'mesh' || type === 'linkedmesh' || type === 'boundingbox' || type === 'clipping'
+    type === 'mesh' ||
+    type === 'linkedmesh' ||
+    type === 'boundingbox' ||
+    type === 'clipping' ||
+    type === 'armature'
       ? type
       : 'region'
   return {
@@ -324,7 +342,13 @@ function normalizeAttachment(raw: Record<string, unknown>): AuthoringAttachment 
     // 遮罩字段：老工程没有 → 空串/关闭（等价于「不是遮罩」）
     clipEndSlot: str(raw.clipEndSlot),
     clipInverse: bool(raw.clipInverse),
-    clipConvex: bool(raw.clipConvex)
+    clipConvex: bool(raw.clipConvex),
+    // 嵌套骨架（v3）：老工程没有 → 空串/循环/原速（等价于「不是嵌套附件」）
+    subArmature: str(raw.subArmature),
+    subAnimation: str(raw.subAnimation),
+    subPlayTimes: Math.round(num(raw.subPlayTimes)),
+    subOffset: num(raw.subOffset),
+    subSpeed: num(raw.subSpeed, 1)
   }
 }
 
@@ -518,7 +542,8 @@ function normalizeAnimation(raw: Record<string, unknown>): AuthoringAnimData {
         color: colorKeys(track.color),
         displayIndex: intKeys(track.displayIndex),
         displayAttachment: strArray(track.displayAttachment),
-        visible: intKeys(track.visible)
+        visible: intKeys(track.visible),
+        subArmature: subArmatureKeys(track.subArmature)
       }
     }),
     deforms: arr(raw.deforms).map((item) => {

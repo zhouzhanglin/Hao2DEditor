@@ -23,6 +23,20 @@ export interface MeshGroup {
   indexCount: number
 }
 
+/**
+ * 嵌套骨架锚点：子骨架不产生顶点，只把「应插在第几层」告诉渲染层。
+ *
+ * `layer` = 在此之前的**分组数**：子视图要插在 `groups[layer]` 之前
+ * （= 该插槽在绘制顺序里的位置）。为了让后续附件另起一组，
+ * 命中锚点时会强制断开当前分组（见 `build`）。
+ */
+export interface NestAnchor {
+  slotIndex: number
+  attachmentName: string
+  armatureName: string
+  layer: number
+}
+
 export interface MeshBuildResult {
   /** 复用缓冲，长度 = 容量 * 2；有效范围 [0, vertexCount * 2) */
   positions: Float32Array
@@ -36,6 +50,8 @@ export interface MeshBuildResult {
   vertexCount: number
   /** 按绘制顺序排列的分组，索引指向共享顶点缓冲 */
   groups: MeshGroup[]
+  /** 本帧生效的嵌套骨架锚点（无嵌套时为空数组） */
+  nestAnchors: NestAnchor[]
   /** 本帧激活过的遮罩（世界坐标），给视口叠加层 / 调试用 */
   clipPolygons: ClipPolygon[]
   /** 每个顶点属于哪个遮罩（-1 = 未被遮罩；裁剪产生的新顶点也是 -1） */
@@ -75,6 +91,7 @@ export class MeshBuilder {
     sourceVertex: new Int32Array(0),
     vertexCount: 0,
     groups: [],
+    nestAnchors: [],
     clipPolygons: [],
     vertexClip: new Int32Array(0),
     bounds: { minX: 0, minY: 0, maxX: 0, maxY: 0 }
@@ -116,6 +133,13 @@ export class MeshBuilder {
   private clipPolygons: ClipPolygon[] = []
   /** 当前激活遮罩在 clipPolygons 里的下标；-1 = 无 */
   private activeClip = -1
+  /** 本帧的嵌套骨架锚点（与 `result.nestAnchors` 共用同一个数组） */
+  private nestAnchors: NestAnchor[] = []
+  /**
+   * 下一次 `groupFor` 必须开新组（嵌套骨架是一层「页」，
+   * 它后面的附件不能并回它前面的分组，否则会被画到子骨架下面）
+   */
+  private breakGroup = false
 
   constructor(asset: RuntimeAsset, skinName = '') {
     this.asset = asset
@@ -170,6 +194,8 @@ export class MeshBuilder {
     this.vertexCount = 0
     this.usedGroups = 0
     this.lastBuildHadWeightedMesh = false
+    this.nestAnchors = []
+    this.breakGroup = false
 
     const slots = this.asset.slots
     const order = skeleton.drawOrder
@@ -201,9 +227,25 @@ export class MeshBuilder {
           : skeleton.slotDisplayIndex[si]
       if (di < 0 || di >= attachments.length) continue
 
-      let attachment = attachments[di]
-      const override = maps.resolved[si]
-      if (override && override[di]) attachment = override[di] as AttachmentData
+      // linkedmesh 的合并结果优先（按显示下标取，与参考库一致）
+      const attachment = maps.resolved[si]?.[di] ?? attachments[di]
+
+      /*
+       * 嵌套骨架：不产生任何几何，只登记一个「层锚点」并**强制断开当前分组**。
+       *
+       * 必须在 `groupFor` 之前分流：否则会先建出一个空分组，后续附件又并回它，
+       * 子视图插进来时就会盖住本该在它下面的附件（画家算法被打乱）。
+       */
+      if (attachment.type === AttachmentType.Armature) {
+        this.nestAnchors.push({
+          slotIndex: si,
+          attachmentName: attachment.name,
+          armatureName: attachment.subArmature,
+          layer: this.usedGroups
+        })
+        this.breakGroup = true
+        continue
+      }
 
       // 遮罩附件自身不渲染，但它的控制点要进顶点缓冲：
       // 顶点工具（D）在 Animate 态靠这些点写 FFD 轨道，选择 / 叠加层也要能显示它们。
@@ -257,6 +299,7 @@ export class MeshBuilder {
   private finish(): MeshBuildResult {
     const result = this.result
     result.clipPolygons = this.clipPolygons
+    result.nestAnchors = this.nestAnchors
     // 先裁三角形（会追加顶点 / 改写组索引），再固化顶点数与分组
     this.applyClipping()
     result.vertexCount = this.vertexCount
@@ -569,7 +612,11 @@ export class MeshBuilder {
   private groupFor(materialIndex: number, blendMode: number, color: RGBA): number {
     const colorKey = packColorKey(color)
     const last = this.usedGroups - 1
+    // 嵌套骨架把绘制切成两段：禁用与上一组的合并，保证它后面的附件排到子骨架之后
+    const allowMerge = !this.breakGroup
+    this.breakGroup = false
     if (
+      allowMerge &&
       last >= 0 &&
       this.groupMaterial[last] === materialIndex &&
       this.groupBlend[last] === blendMode &&

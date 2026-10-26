@@ -29,6 +29,7 @@ function attachmentTypeOf(type: AttachmentType): AuthoringAttachmentType {
   if (type === AttachmentType.LinkedMesh) return 'linkedmesh'
   if (type === AttachmentType.BoundingBox) return 'boundingbox'
   if (type === AttachmentType.Clipping) return 'clipping'
+  if (type === AttachmentType.Armature) return 'armature'
   return 'region'
 }
 
@@ -114,7 +115,13 @@ function decompileAttachment(
     linkedMeshAttachment: attachment.linkedMeshAttachment,
     clipEndSlot: attachment.clipEndSlot,
     clipInverse: attachment.clipInverse,
-    clipConvex: attachment.clipConvex
+    clipConvex: attachment.clipConvex,
+    // 嵌套骨架：DB 导入后必须原样带回，否则重新打开工程就丢了引用
+    subArmature: attachment.subArmature,
+    subAnimation: attachment.subAnimation,
+    subPlayTimes: attachment.subPlayTimes,
+    subOffset: attachment.subOffset,
+    subSpeed: attachment.subSpeed
   }
 }
 
@@ -156,7 +163,8 @@ function decompileAnim(anim: AnimData, asset: RuntimeAsset, constraints: Constra
       color: track.color,
       displayIndex: track.displayIndex,
       displayAttachment: track.displayAttachment,
-      visible: track.visible
+      visible: track.visible,
+      subArmature: track.subArmature ?? []
     })),
     deforms: anim.deforms.map((track) => ({
       slot: slotName(track.slotIndex),

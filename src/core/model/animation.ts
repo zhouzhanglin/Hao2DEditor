@@ -38,6 +38,27 @@ export interface DeformKeyframe extends KeyframeBase {
   vertexOffset: number
 }
 
+/**
+ * 子骨架控制关键帧（编辑器扩展，对应 DragonBones 的 slot 帧 `actions.gotoAndPlay`）。
+ *
+ * 一条关键帧同时带「动画名 + 循环 + 偏移 + 倍速」，而不是拆成 4 条并行轨道：
+ * 并行数组一旦某一列错位，动画名就会指到别的插槽上（`displayIndex ↔ displayAttachment`
+ * 已经踩过这个坑），对象型关键帧则天然不掉队。
+ *
+ * 时间语义：`time` 是**父动画**里的时间，`offset` 是子动画内部的起始时刻。
+ * 首个关键帧之前沿用附件的 setup 默认值（`AttachmentData.subAnimation/...`）。
+ */
+export interface SubArmatureKeyframe extends KeyframeBase {
+  /** 子骨架动画名；空串 = 回 setup 姿态（相当于 DragonBones 的 gotoAndStop） */
+  animation: string
+  /** 0 = 无限循环；n = 播 n 次后定格末帧 */
+  playTimes: number
+  /** 起始偏移（秒） */
+  offset: number
+  /** 倍速，1 = 原速 */
+  speed: number
+}
+
 /** 该时刻完整的插槽绘制顺序（非增量） */
 export interface DrawOrderKeyframe {
   time: number
@@ -71,6 +92,8 @@ export interface SlotAnim {
    * 参考库中该轨道未被采样（运行期覆盖优先）；编辑器会实现采样，导出报告需标注差异。
    */
   visible: IntKeyframe[]
+  /** 子骨架动画控制（仅该插槽挂有 armature display 时有意义） */
+  subArmature: SubArmatureKeyframe[]
 }
 
 export interface DeformAnim {
@@ -147,6 +170,7 @@ export function lastKeyframeTime(anim: AnimData): number {
     consider(track.color)
     consider(track.displayIndex)
     consider(track.visible)
+    if (track.subArmature) consider(track.subArmature)
   }
   for (const track of anim.deforms) consider(track.frames)
   for (const track of anim.iks) consider(track.mix)
@@ -185,7 +209,18 @@ export function emptyBoneAnim(boneIndex: number): BoneAnim {
 }
 
 export function emptySlotAnim(slotIndex: number): SlotAnim {
-  return { slotIndex, color: [], displayIndex: [], displayAttachment: [], visible: [] }
+  return { slotIndex, color: [], displayIndex: [], displayAttachment: [], visible: [], subArmature: [] }
+}
+
+export function emptySubArmatureKeyframe(
+  time = 0,
+  animation = '',
+  playTimes = 0,
+  offset = 0,
+  speed = 1
+): SubArmatureKeyframe {
+  // 离散量（动画名 / 循环次数）按阶跃，偏移与倍速同一帧内也不需要插值
+  return { time, easing: Easing.Stepped, curve: null, animation, playTimes, offset, speed }
 }
 
 export function emptyDeformAnim(slotIndex: number, attachmentName: string): DeformAnim {

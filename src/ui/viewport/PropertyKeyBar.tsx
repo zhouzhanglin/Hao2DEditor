@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   Droplet,
+  Film,
   Image as ImageIcon,
   Move,
   MoveDiagonal2,
@@ -10,6 +11,8 @@ import {
   Scaling
 } from 'lucide-react'
 import { sampleAngle, sampleVec2 } from '@core/anim/interpolation'
+import { AttachmentType } from '@core/model/types'
+import { sampleSubArmature } from '@core/nesting/nest'
 import { hexToRgba, rgbaToHex } from '@core/util/color'
 import { getActiveScene } from '@editor/activeScene'
 import { highlightSlotColorKey, slotColorHexAt, slotColorMessage, writeSlotColor } from '@editor/slotColorOps'
@@ -20,6 +23,7 @@ import { useSelectionStore } from '@editor/store/selectionStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import {
   keySlotDisplayNow,
+  keySlotSubArmatureNow,
   NO_ANIMATION_MESSAGE,
   resolveAnimationName,
   setBoneChannelNow
@@ -732,6 +736,29 @@ function SlotRows({
     return result.ok
   }
 
+  /*
+   * 嵌套骨架：当前显示的是 armature display 时，多给一行「子骨架动画」。
+   * 这一行写的是时间轴上的「子骨架」关键帧（动画名），其余参数（次数 / 偏移 / 倍速）
+   * 沿用当前位置已生效的帧或 setup 值 —— 属性条只负责「这一秒播哪个」。
+   */
+  const skeletons = useProjectStore((s) => s.skeletons)
+  const nestedAttachment =
+    displayReady && displays[displayIndex]?.type === AttachmentType.Armature ? displays[displayIndex] : undefined
+  const nestedDocument = nestedAttachment
+    ? skeletons.find((item) => item.armatureName === nestedAttachment.subArmature)
+    : undefined
+  const nestedTrack = animation?.slots.find((item) => item.slot === slot)
+  const nestedAnimation =
+    (nestedTrack ? sampleSubArmature(nestedTrack.subArmature, time)?.animation : '') ??
+    nestedAttachment?.subAnimation ??
+    ''
+  const nestedAnimationNames = (nestedDocument?.animations ?? []).map((item) => item.name)
+  // 引用的动画名可能在子骨架里被改名：当前值不在清单里也要能显示出来，别让下拉变成空白
+  const nestedOptions =
+    nestedAnimation && !nestedAnimationNames.includes(nestedAnimation)
+      ? [nestedAnimation, ...nestedAnimationNames]
+      : nestedAnimationNames
+
   return (
     <>
       {/* 颜色一行：色块（点开系统拾色器）+ hex。写的是 RGB，透明度原样拼回去 */}
@@ -792,6 +819,28 @@ function SlotRows({
           ))}
         </select>
       </KeyRow>
+
+      {nestedAttachment ? (
+        <KeyRow
+          icon={Film}
+          title={`${hintOf(t('子骨架动画'), slot, '', keyed('subArmature'), time)}\n${t('当前：{0}', nestedAnimation || t('（setup 姿态）'))}`}
+          keyed={keyed('subArmature')}
+          onKey={() => onStatus(keySlotSubArmatureNow(slot).message)}
+        >
+          <select
+            className="hao-field cursor-pointer bg-ink-900"
+            value={nestedAnimation}
+            onChange={(event) => onStatus(keySlotSubArmatureNow(slot, { animation: event.target.value }).message)}
+          >
+            <option value="">{t('（setup 姿态）')}</option>
+            {nestedOptions.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </KeyRow>
+      ) : null}
     </>
   )
 }

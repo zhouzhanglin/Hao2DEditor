@@ -210,6 +210,45 @@ export function addImageDisplay(
 }
 
 /**
+ * 往**已有插槽**追加一个「嵌套骨架」display，并切换为当前显示项。
+ *
+ * 同工程按名字引用（不复制子骨架数据），子骨架改动在父骨架里实时体现。
+ * 自引用 / 环 / 超深由调用方先用 `checkNestDrop` 校验 —— 这里只兜底空名与重复。
+ */
+export function addArmatureDisplay(
+  doc: EditorDocument,
+  options: { slot: string; armature: string; skin?: string; name?: string; position?: Vec2 }
+): { slot: string; attachment: string } | null {
+  const slot = doc.slots.find((item) => item.name === options.slot)
+  const armature = options.armature.trim()
+  if (!slot || !armature) return null
+
+  const skinSlot = ensureSkinSlot(targetSkin(doc, options.skin), slot.name)
+  // 同一骨架在同一插槽里只留一份：重复添加既看不出效果，也会让「显示」通道多出同名项
+  const existing = skinSlot.attachments.find(
+    (item) => item.type === 'armature' && item.subArmature === armature
+  )
+  if (existing) {
+    slot.attachment = existing.name
+    return { slot: slot.name, attachment: existing.name }
+  }
+
+  const name = uniqueName(skinSlot.attachments.map((item) => item.name), options.name ?? armature)
+  skinSlot.attachments.push(
+    createAuthoringAttachment({
+      name,
+      type: 'armature',
+      subArmature: armature,
+      // 骨架 display 没有几何尺寸：位置 / 旋转 / 缩放照常可编辑，size 保持 0
+      position: options.position ? { x: options.position.x, y: options.position.y } : { x: 0, y: 0 },
+      size: { x: 0, y: 0 }
+    })
+  )
+  slot.attachment = name
+  return { slot: slot.name, attachment: name }
+}
+
+/**
  * 删除图片：从图片池移除该条目。
  * 所有引用它的附件（`attachment.image`）会被清空（退化为「纯色」，附件本身保留），
  * 避免留下悬挂引用导致导出裂图。

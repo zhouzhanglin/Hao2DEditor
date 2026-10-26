@@ -9,6 +9,12 @@ const POSITION_BYTES_PER_VERTEX = 8
 const UV_BYTES_PER_VERTEX = 8
 const INDEX_BYTES = 4
 
+/** 要插进本视图里的嵌套骨架子视图（`layer` = 插在第几个绘制分组之前） */
+export interface NestedLayerView {
+  layer: number
+  container: Container
+}
+
 /**
  * 角色渲染视图：把 MeshBuilder 的输出搬进 pixi。
  *
@@ -35,6 +41,8 @@ export class SkeletonView {
   private dirty = true
   private lastResult: MeshBuildResult | null = null
   private triangleCount = 0
+  /** 嵌套骨架的子视图（由 Scene 创建 / 销毁，本视图只负责摆放与重排） */
+  private nestedViews: NestedLayerView[] = []
   /** 纹理加载完成后的取消订阅句柄（见构造里的说明） */
   private unsubscribeTextures: (() => void) | null = null
 
@@ -55,6 +63,31 @@ export class SkeletonView {
 
   get currentSkin(): string {
     return this.builder.currentSkin
+  }
+
+  /** 本视图对应的编译产物（Scene 用它判断子视图是否需要换 asset 重建） */
+  get runtimeAsset(): RuntimeAsset {
+    return this.asset
+  }
+
+  /**
+   * 设置嵌套骨架的子视图。
+   *
+   * `layer` = 「本视图已生成的第几个分组之前」：0 表示压在所有分组下面，
+   * `groups.length` 表示压在最上面。无嵌套时传空数组即可（行为与原先一致）。
+   */
+  setNestedViews(views: readonly NestedLayerView[]): void {
+    for (const old of this.nestedViews) {
+      if (!views.some((view) => view.container === old.container)) old.container.removeFromParent()
+    }
+    this.nestedViews = views.map((view) => ({ layer: view.layer, container: view.container }))
+    this.orderChildren()
+  }
+
+  /** 子骨架视图由 Scene 拥有：这里只摘除、不销毁 */
+  detachNestedViews(): void {
+    for (const view of this.nestedViews) view.container.removeFromParent()
+    this.nestedViews = []
   }
 
   get result(): MeshBuildResult | null {
@@ -110,11 +143,14 @@ export class SkeletonView {
 
     this.syncVertexBuffers(result)
     this.syncGroups(result)
+    this.orderChildren()
 
     return result
   }
 
   destroy(): void {
+    // 先摘子容器：子视图归 Scene 管，不能跟着父视图一起 removeChildren 后变成孤儿
+    this.detachNestedViews()
     this.unsubscribeTextures?.()
     this.unsubscribeTextures = null
     for (const mesh of this.meshes) mesh.destroy()
@@ -227,6 +263,49 @@ export class SkeletonView {
     for (let i = result.groups.length; i < this.meshes.length; i++) {
       this.meshes[i].visible = false
     }
+  }
+
+  /**
+   * 按「分组 → 紧跟其后的子视图」重排子节点，保证嵌套骨架穿在正确的层。
+   *
+   * 只在顺序真的变了才 `addChildAt`：顺序没变时每帧重排会让 pixi 反复改显示列表，
+   * 白白制造脏标记。
+   */
+  private orderChildren(): void {
+    const groups = this.meshes.length
+    const byLayer = new Map<number, Container[]>()
+    let maxLayer = 0
+    for (const view of this.nestedViews) {
+      const list = byLayer.get(view.layer) ?? []
+      list.push(view.container)
+      byLayer.set(view.layer, list)
+      if (view.layer > maxLayer) maxLayer = view.layer
+    }
+
+    const desired: Container[] = []
+    for (let layer = 0; layer < groups; layer++) {
+      const nested = byLayer.get(layer)
+      if (nested) desired.push(...nested)
+      const mesh = this.meshes[layer]
+      if (mesh) desired.push(mesh)
+    }
+    for (let layer = Math.max(groups, 0); layer <= maxLayer; layer++) {
+      const nested = byLayer.get(layer)
+      if (nested) desired.push(...nested)
+    }
+
+    const current = this.container.children
+    if (current.length === desired.length) {
+      let same = true
+      for (let i = 0; i < desired.length; i++) {
+        if (current[i] !== desired[i]) {
+          same = false
+          break
+        }
+      }
+      if (same) return
+    }
+    for (let i = 0; i < desired.length; i++) this.container.addChildAt(desired[i], i)
   }
 
   private ensureMesh(index: number): Mesh<Geometry> {

@@ -4,7 +4,12 @@ import { compileDocument } from '@core/codec/compile'
 import { projectNameFromPath } from '@core/codec/projectJson'
 import { collectHao2dWarnings, writeHao2d } from '@core/codec/hao2dWriter'
 import { RUNTIME_PPU, serializeRuntimeAtlas, serializeRuntimeSke } from '@core/codec/runtimeSkeJson'
-import type { RuntimeAtlasJson, RuntimeAtlasPage, RuntimeAtlasRegion } from '@core/codec/runtimeSkeJson'
+import type {
+  RuntimeAtlasJson,
+  RuntimeAtlasPage,
+  RuntimeAtlasRegion,
+  RuntimeSkeNested
+} from '@core/codec/runtimeSkeJson'
 import { packMaxRects } from '@core/atlas/packer'
 import { remapPageUvs } from '@core/atlas/remap'
 import type { Placement } from '@core/atlas/remap'
@@ -305,6 +310,8 @@ export interface ExportedSkeleton {
   fileName: string
   /** 已按新图集重映射 UV 的资产 */
   asset: RuntimeAsset
+  /** 被本骨架嵌套引用的子骨架（运行时 ske v2 的 `nested`） */
+  nested: RuntimeSkeNested[]
 }
 
 /**
@@ -365,7 +372,71 @@ export function prepareRuntimeExport(options: RuntimeExportOptions): RuntimeExpo
     // 两个骨架可能重名：文件名不能互相覆盖
     while (usedNames.has(name)) name = `${name}_2`
     usedNames.add(name)
-    skeletons.push({ name: doc.armatureName, stem: name, fileName: `${name}_ske.json`, asset: compiled.asset })
+    skeletons.push({
+      name: doc.armatureName,
+      stem: name,
+      fileName: `${name}_ske.json`,
+      asset: compiled.asset,
+      nested: []
+    })
+  }
+
+  /*
+   * 递归收录被嵌套引用的骨架 —— **即使它没被勾选**。
+   *
+   * 父骨架里的 armature display 只存了骨架名，运行时按名去 `nested` 里找对应文件；
+   * 少导一个子骨架，游戏里那个部件就是空的（编辑器里看得见、导出后没了）。
+   */
+  const indexByName = new Map(list.map((doc, i) => [doc.armatureName, i] as const))
+  const exportedByName = new Map(skeletons.map((entry) => [entry.name, entry] as const))
+  const queue = skeletons.map((entry) => entry.asset)
+  while (queue.length > 0) {
+    const asset = queue.pop() as RuntimeAsset
+    for (const skin of asset.skins) {
+      for (const skinSlot of skin.slots) {
+        for (const attachment of skinSlot.attachments) {
+          if (attachment.type !== AttachmentType.Armature) continue
+          const target = attachment.subArmature
+          if (!target || exportedByName.has(target)) continue
+          const index = indexByName.get(target)
+          if (index === undefined) {
+            warnings.push(`骨架「${asset.armatureName}」引用了工程里不存在的骨架「${target}」，导出时会是一个空 display`)
+            continue
+          }
+          const doc = list[index]
+          const compiled = compileDocument(doc)
+          for (const warning of compiled.warnings) warnings.push(`[${doc.armatureName}] ${warning}`)
+          let name = sanitize(stripExtension(doc.armatureName) || `skeleton-${index + 1}`) || `skeleton-${index + 1}`
+          while (usedNames.has(name)) name = `${name}_2`
+          usedNames.add(name)
+          const entry: ExportedSkeleton = {
+            name: doc.armatureName,
+            stem: name,
+            fileName: `${name}_ske.json`,
+            asset: compiled.asset,
+            nested: []
+          }
+          skeletons.push(entry)
+          exportedByName.set(entry.name, entry)
+          queue.push(entry.asset)
+        }
+      }
+    }
+  }
+
+  // 文件名都定下来之后再填 `nested`（引用的 file 就是被引用骨架自己的输出文件名）
+  for (const entry of skeletons) {
+    const names = new Set<string>()
+    for (const skin of entry.asset.skins) {
+      for (const skinSlot of skin.slots) {
+        for (const attachment of skinSlot.attachments) {
+          if (attachment.type === AttachmentType.Armature && attachment.subArmature && exportedByName.has(attachment.subArmature)) {
+            names.add(attachment.subArmature)
+          }
+        }
+      }
+    }
+    entry.nested = [...names].map((name) => ({ armatureName: name, file: exportedByName.get(name)?.fileName ?? '' }))
   }
 
   // 图集里装哪些图：先放「要导出的骨架」用到的，再按范围决定要不要补上其它骨架用到的
@@ -379,6 +450,13 @@ export function prepareRuntimeExport(options: RuntimeExportOptions): RuntimeExpo
   }
   if (textures.every((name) => name.length === 0)) {
     warnings.push('本次导出的骨架没有使用任何图片，导出的图集将为空（角色会以纯色块渲染）')
+  }
+
+  const nestedNames = [...new Set(skeletons.flatMap((entry) => entry.nested.map((item) => item.armatureName)))]
+  if (nestedNames.length > 0) {
+    warnings.push(
+      `包含嵌套子骨架：${nestedNames.join('、')}（已一并导出；运行时按 ske 的 nested 清单加载）`
+    )
   }
 
   const packed = buildAtlas(textures, store.document.images, stem, options.maxSize, options.scale)
@@ -439,7 +517,11 @@ export async function writeRuntimeExport(
     // 每个骨架一份数据（文件名取骨架名），图集是所有骨架共用的那一份
     ...plan.skeletons.map((entry) => ({
       path: joinPath(outDir, entry.fileName),
-      text: serializeRuntimeSke(entry.asset, { atlasFileName: plan.atlasName, ppu: RUNTIME_PPU })
+      text: serializeRuntimeSke(entry.asset, {
+        atlasFileName: plan.atlasName,
+        ppu: RUNTIME_PPU,
+        nested: entry.nested
+      })
     })),
     { path: joinPath(outDir, plan.atlasName), text: serializeRuntimeAtlas(plan.atlas) }
   ]
@@ -630,6 +712,8 @@ export interface Hao2dPreviewPack {
     skins: string[]
     defaultAnimation: string
     defaultSkin: string
+    /** 被嵌套引用的子骨架（按 id 从同一预览包里取） */
+    nested: Array<{ armatureName: string; id: string }>
   }>
   warnings: string[]
 }
@@ -664,15 +748,23 @@ export async function buildHao2dPreviewBundles(plan: RuntimeExportPlan): Promise
   const pages = plan.pageFiles
     .map((name, index) => ({ name, bytes: pageBytes.bytes[index] ?? new Uint8Array() }))
     .filter((page) => page.bytes && page.bytes.length > 0)
+  const idByFile = new Map(plan.skeletons.map((entry, index) => [entry.fileName, `s${index}`] as const))
   const skeletons = plan.skeletons.map((entry, index) => ({
     id: `s${index}`,
     name: entry.name,
-    skeText: serializeRuntimeSke(entry.asset, { atlasFileName: plan.atlasName, ppu: RUNTIME_PPU }),
+    skeText: serializeRuntimeSke(entry.asset, {
+      atlasFileName: plan.atlasName,
+      ppu: RUNTIME_PPU,
+      nested: entry.nested
+    }),
     atlasText: serializeRuntimeAtlas(plan.atlas),
     animations: entry.asset.animations.map((animation) => animation.name),
     skins: entry.asset.skins.map((skin) => skin.name),
     defaultAnimation: entry.asset.animations[0]?.name ?? '',
-    defaultSkin: entry.asset.skins[0]?.name ?? ''
+    defaultSkin: entry.asset.skins[0]?.name ?? '',
+    nested: entry.nested
+      .map((item) => ({ armatureName: item.armatureName, id: idByFile.get(item.file) ?? '' }))
+      .filter((item) => item.id.length > 0)
   }))
   return { pages, skeletons, warnings: pageBytes.failed }
 }

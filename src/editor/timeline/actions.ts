@@ -5,7 +5,9 @@ import { useTimelineStore } from '../store/timelineStore'
 import type { Selection } from '../store/selectionStore'
 import type { RuntimeBundle } from '../runtime'
 import { buildTimeline, deleteKeys, keyframeTargets, syncDuration } from './model'
-import { keyBoneChannel, keySlotDisplay } from '../commands/animationCommands'
+import { keyBoneChannel, keySlotDisplay, keySlotSubArmature } from '../commands/animationCommands'
+import { sampleSubArmature } from '@core/nesting/nest'
+import { AttachmentType } from '@core/model/types'
 import type { BoneChannel } from '../commands/animationCommands'
 import type { KeyframeTarget, KeyKind, KeySelector, PoseSnapshot } from './model'
 import type { AuthoringAnimData } from '@core/model/authoring'
@@ -177,6 +179,64 @@ export function keySlotDisplayNow(slotName: string, attachmentName: string): Act
     message: attachmentName
       ? `已在 ${at.toFixed(2)}s 打「${slotName}」的显示帧 → 「${attachmentName}」`
       : `已在 ${at.toFixed(2)}s 打「${slotName}」的显示帧 → 不显示`
+  }
+}
+
+/**
+ * 在当前时间点给某插槽打「子骨架」帧。
+ *
+ * 取值用该插槽**当前显示的嵌套骨架 display 的 setup 值**（动画名 / 次数 / 偏移 / 倍速）：
+ * 这是「先调好一次、之后按时间点复制」的常见用法。没挂嵌套骨架时直接失败并说明原因。
+ */
+export function keySlotSubArmatureNow(
+  slotName: string,
+  /** 只改其中一个参数时传入（例如属性条里换动画名，其余参数沿用当前帧 / setup 值） */
+  overrides?: Partial<{ animation: string; playTimes: number; offset: number; speed: number }>
+): ActionResult {
+  const scene = getActiveScene()
+  const bundle = scene?.runtime
+  if (!bundle) return { ok: false, message: '没有可打关键帧的骨架' }
+  const animationName = resolveAnimationName()
+  if (!animationName) return { ok: false, message: NO_ANIMATION_MESSAGE }
+  const slotIndex = bundle.slotIndex[slotName]
+  if (slotIndex === undefined) return { ok: false, message: `找不到插槽「${slotName}」` }
+
+  const skin = bundle.maps.skinOfSlot[slotIndex]
+  const attachments = skin >= 0 ? bundle.maps.skinArr[skin].attachments : []
+  const display = attachments[bundle.skeleton.slotDisplayIndex[slotIndex]]
+  const armature =
+    display && display.type === AttachmentType.Armature
+      ? display
+      : attachments.find((item) => item.type === AttachmentType.Armature)
+  if (!armature) return { ok: false, message: `插槽「${slotName}」上没有嵌套骨架` }
+
+  const at = useTimelineStore.getState().time
+  // 未显式覆盖的参数：优先沿用**当前位置已生效的那一帧**（改动画名不该把次数/偏移/倍速重置回 setup）
+  const doc = useProjectStore.getState().document
+  const currentTrack = doc.animations
+    .find((item) => item.name === animationName)
+    ?.slots.find((item) => item.slot === slotName)
+  const current = currentTrack ? sampleSubArmature(currentTrack.subArmature, at) : null
+  const params = {
+    animation: overrides?.animation ?? current?.animation ?? armature.subAnimation,
+    playTimes: overrides?.playTimes ?? current?.playTimes ?? armature.subPlayTimes,
+    offset: overrides?.offset ?? current?.offset ?? armature.subOffset,
+    speed: overrides?.speed ?? current?.speed ?? armature.subSpeed
+  }
+  useProjectStore.getState().update('打子骨架控制帧', (draft) => {
+    const animation = draft.animations.find((item) => item.name === animationName)
+    if (!animation) return
+    keySlotSubArmature(animation, slotName, at, params)
+  })
+  useTimelineStore.getState().notifyKeyed(`slot:${slotName}:subArmature`, at)
+  useTimelineStore.getState().setSelectedKeys([
+    { kind: 'slot', target: slotName, attachment: '', channel: 'subArmature', time: at }
+  ])
+  return {
+    ok: true,
+    message: params.animation
+      ? `已在 ${at.toFixed(2)}s 打「${slotName}」的子骨架帧 → 「${params.animation}」`
+      : `已在 ${at.toFixed(2)}s 打「${slotName}」的子骨架帧（setup 姿态）`
   }
 }
 

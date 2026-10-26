@@ -18,7 +18,16 @@ export enum AttachmentType {
    * 多边形顶点存放在 `vertices`（插槽骨骼局部空间，与 Spine 一致），
    * `clipEndSlot` 为空表示裁到绘制顺序末尾。
    */
-  Clipping = 4
+  Clipping = 4,
+  /**
+   * 嵌套骨架（DragonBones 的 slot display `type:"armature"`）。
+   *
+   * 它自身不产生任何几何，只把一个**同工程内的骨架**挂到插槽上：
+   * 运行期按「父插槽骨骼世界矩阵 × 附件 TRS」摆放子骨架，并可用插槽动画的
+   * `subArmature` 通道控制子骨架播放哪个动画（见 `core/nesting`）。
+   * 图形字段（`uvs/vertices/size/textureName`）对它是空的。
+   */
+  Armature = 5
 }
 
 /**
@@ -199,6 +208,22 @@ export interface AttachmentData {
   clipInverse: boolean
   /** 凸多边形标记（Spine 的 `convex`，仅影响裁剪算法的快慢与反向支持） */
   clipConvex: boolean
+
+  /**
+   * 嵌套骨架（仅 `type === AttachmentType.Armature`）：被引用的骨架名。
+   *
+   * 同工程 `skeletons[]` 里的 `armatureName`（不是下标 —— 骨架重排 / 改名不会错位）。
+   * 空串 = 引用缺失（工程里找不到这个名字），此时不渲染并给出告警。
+   */
+  subArmature: string
+  /** setup 默认播放的子骨架动画名；空串 = 停在子骨架的 setup 姿态 */
+  subAnimation: string
+  /** setup 默认播放次数：0 = 无限循环，n = 播 n 次后定格末帧 */
+  subPlayTimes: number
+  /** setup 默认起始偏移（秒），用于「刀光晚 3 帧起播」这类效果 */
+  subOffset: number
+  /** setup 默认倍速，1 = 原速 */
+  subSpeed: number
 }
 
 export interface SkinSlotData {
@@ -293,6 +318,11 @@ export function createAttachmentData(partial?: Partial<AttachmentData>): Attachm
     clipEndSlot: '',
     clipInverse: false,
     clipConvex: false,
+    subArmature: '',
+    subAnimation: '',
+    subPlayTimes: 0,
+    subOffset: 0,
+    subSpeed: 1,
     ...partial
   }
 }

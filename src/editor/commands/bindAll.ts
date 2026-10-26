@@ -4,6 +4,7 @@ import { useSelectionStore } from '../store/selectionStore'
 import { useModeStore, pickAnimationForAnimate } from '../store/modeStore'
 import { useTimelineStore } from '../store/timelineStore'
 import {
+  addArmatureDisplay,
   applyRename,
   autoGenerateRegionMesh,
   checkRename,
@@ -12,6 +13,7 @@ import {
   findAttachment,
   replaceImage
 } from './authoringCommands'
+import { checkNestDrop } from '@core/nesting/nest'
 import type { RenameTarget } from './authoringCommands'
 import { copyKeyframes, copyNodes, duplicateSelection, pasteKeyframes, pasteNodes } from './clipboardCommands'
 import { applySlotOrder, moveDisplay, moveSlot, moveBone } from './hierarchyCommands'
@@ -199,6 +201,38 @@ export function registerBindAllCommands(): void {
       const result = moveDisplay(draft, slot, display, toSlot, anchor, skin, { worldMatrixOf: worldMatrixOfBone })
       if (!result.ok) throw new Error(result.message)
       return changed({ slot, display, toSlot }, result.message)
+    }
+  )
+
+  // ---------------- 骨架嵌套 ----------------
+
+  defineWrite(
+    {
+      name: 'nestArmature',
+      title: '嵌套骨架',
+      description:
+        '把工程里的另一个骨架作为 display 挂到指定插槽上（同工程按名字引用，不复制数据），并切换为当前显示项。会拒绝自引用 / 循环引用 / 超深',
+      args: {
+        slot: { type: 'string', description: '目标插槽名', required: true },
+        armature: { type: 'string', description: '被引用的骨架名（必须是工程里的另一个骨架）', required: true },
+        name: { type: 'string', description: '新 display 的名字；缺省用骨架名（重名自动加序号）' },
+        skin: { type: 'string', description: '皮肤名；不传用当前皮肤' }
+      },
+      returns: '{ slot, attachment }'
+    },
+    (draft, args) => {
+      const slot = need(args, 'slot')
+      const armature = need(args, 'armature')
+      const reason = checkNestDrop(useProjectStore.getState().skeletons, draft.armatureName, armature)
+      if (reason) throw new Error(reason)
+      const result = addArmatureDisplay(draft, {
+        slot,
+        armature,
+        name: optText(args, 'name'),
+        skin: optText(args, 'skin') ?? useSelectionStore.getState().skin
+      })
+      if (!result) throw new Error(`插槽「${slot}」不存在或骨架名无效`)
+      return changed(result, `已把骨架「${armature}」嵌到插槽「${slot}」`)
     }
   )
 

@@ -9,7 +9,8 @@ import type {
   EventKeyframe,
   Float2Keyframe,
   FloatKeyframe,
-  IntKeyframe
+  IntKeyframe,
+  SubArmatureKeyframe
 } from './animation'
 
 /**
@@ -62,7 +63,7 @@ export interface AuthoringVertex {
   weights: AuthoringWeight[]
 }
 
-export type AuthoringAttachmentType = 'region' | 'mesh' | 'linkedmesh' | 'boundingbox' | 'clipping'
+export type AuthoringAttachmentType = 'region' | 'mesh' | 'linkedmesh' | 'boundingbox' | 'clipping' | 'armature'
 
 export interface AuthoringAttachment {
   name: string
@@ -116,6 +117,19 @@ export interface AuthoringAttachment {
   clipInverse: boolean
   /** 凸多边形标记（仅 clipping） */
   clipConvex: boolean
+  /**
+   * 嵌套骨架（仅 `type === 'armature'`）：被引用的骨架名（= 同工程 `skeletons[].armatureName`）。
+   * 空串 = 引用缺失，运行期不渲染。图形字段对该类型不参与渲染。
+   */
+  subArmature: string
+  /** setup 默认子动画名（空串 = 停在子骨架 setup 姿态） */
+  subAnimation: string
+  /** setup 默认播放次数：0 = 循环，n = 播 n 次后定格末帧 */
+  subPlayTimes: number
+  /** setup 默认起始偏移（秒） */
+  subOffset: number
+  /** setup 默认倍速（1 = 原速） */
+  subSpeed: number
   /**
    * 由 Region 转来的 Mesh 会保留源 Region 的显示信息，
    * 「还原为 Region」靠它恢复原尺寸与原 UV；没有快照（如导入的网格）只能按顶点包围盒近似。
@@ -194,6 +208,8 @@ export interface AuthoringSlotAnim {
   displayIndex: IntKeyframe[]
   displayAttachment: string[]
   visible: IntKeyframe[]
+  /** 子骨架动画控制（该插槽挂有 armature display 时才有意义） */
+  subArmature: SubArmatureKeyframe[]
 }
 
 export interface AuthoringDeformAnim {
@@ -288,8 +304,10 @@ export interface StageImage {
  * - **1**：初始版本；
  * - **2**：`BlendMode` 移除 `Mask` 并重排（Below 6→5、None 7→6）。
  *   读取 v1 时把旧的 5（Mask）迁移成 Normal、6/7 映射到新值（见 projectJson 的迁移）。
+ * - **3**：新增骨架嵌套：附件类型 `'armature'`（`subArmature/subAnimation/subPlayTimes/subOffset/subSpeed`）
+ *   与插槽动画的 `subArmature` 通道。只新增字段，老工程缺字段按默认值兜底、无需改写。
  */
-export const CURRENT_SCHEMA_VERSION = 2
+export const CURRENT_SCHEMA_VERSION = 3
 
 export interface EditorDocument {
   schemaVersion: number
@@ -400,6 +418,11 @@ export function createAuthoringAttachment(partial?: Partial<AuthoringAttachment>
     clipEndSlot: '',
     clipInverse: false,
     clipConvex: false,
+    subArmature: '',
+    subAnimation: '',
+    subPlayTimes: 0,
+    subOffset: 0,
+    subSpeed: 1,
     ...partial
   }
 }
@@ -425,6 +448,7 @@ export function lastKeyTime(animation: AuthoringAnimData): number {
     consider(track.color)
     consider(track.displayIndex)
     consider(track.visible)
+    if (track.subArmature) consider(track.subArmature)
   }
   for (const track of animation.deforms) consider(track.frames)
   for (const track of animation.constraints) {

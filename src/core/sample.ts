@@ -124,7 +124,8 @@ function createIdleAnimation(): AuthoringAnimData {
     ],
     displayIndex: [],
     displayAttachment: [],
-    visible: []
+    visible: [],
+    subArmature: []
   })
   idle.events.push({ time: 0.75, name: 'wavePeak', stringParam: 'wave', intParam: 1, floatParam: 1 })
   return idle
@@ -141,7 +142,8 @@ function createSwapAnimation(): AuthoringAnimData {
       { time: 0.5, value: 1, easing: 1, curve: null }
     ],
     displayAttachment: ['torso', 'torsoRegion'],
-    visible: []
+    visible: [],
+    subArmature: []
   })
   return swap
 }

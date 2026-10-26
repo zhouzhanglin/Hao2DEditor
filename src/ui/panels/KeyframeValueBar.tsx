@@ -6,7 +6,7 @@ import { usePreviewStore } from '@editor/store/previewStore'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
-import { findKeyframe } from '@editor/timeline/model'
+import { findKeyframe, slotDisplayNameAt } from '@editor/timeline/model'
 import type { AnyKeyframe, KeySelector } from '@editor/timeline/model'
 import {
   ColorField,
@@ -54,7 +54,8 @@ const CHANNEL_LABEL: Record<string, string> = {
   offsets: 'FFD 偏移',
   mix: '权重',
   position: '位置',
-  spacing: '间距'
+  spacing: '间距',
+  subArmature: '子骨架'
 }
 
 /** 通道名（中文原文在 `CHANNEL_LABEL` 里，走词典换语言；词典里没有的枚举原样返回） */
@@ -89,6 +90,14 @@ function titleOf(key: KeySelector): { object: string; channel: string } {
  */
 const SLOT = 'w-[220px] shrink-0'
 
+/*
+ * 「子骨架」帧是 4 个控件并排（动画 + 次数 + 偏移 + 倍速）：按默认 220px 一个槽会换行成两排。
+ * 这 4 个值都很短（动画名除外），把槽压窄、标签列也压窄，就能在面板里一行放下。
+ */
+const SLOT_NEST_SELECT = 'w-[150px] shrink-0 [&>label]:w-full [&_.hao-label]:w-[30px] [&_select]:min-w-0'
+const SLOT_NEST_NUMBER =
+  'w-[104px] shrink-0 [&>label]:w-full [&_.hao-label]:w-[26px] [&_input]:min-w-0 [&_input]:px-1'
+
 /**
  * 颜色行要更宽：`ColorField` 一行摆了四件**固定宽**的东西 —— 色块 30 + 透明度滑杆 64 + 百分比 46，
  * 加上 52px 标签与 4 道 6px 缝就有 216px，而上面那个槽位是 220px；夹在中间的 hex 输入框是
@@ -111,6 +120,8 @@ const SLOT_COLOR = 'w-[310px] shrink-0'
 export default function KeyframeValueBar() {
   const document = useProjectStore((s) => s.document)
   const update = useProjectStore((s) => s.update)
+  /** 「子骨架」通道的动画下拉要从被引用骨架里取动画清单 */
+  const skeletons = useProjectStore((s) => s.skeletons)
   const animationName = useTimelineStore((s) => s.currentAnimation)
   const selectedKeys = useTimelineStore((s) => s.selectedKeys)
   /** 当前皮肤：display 通道的下拉要从它取清单（取法同层级树 / 属性面板） */
@@ -188,6 +199,34 @@ export default function KeyframeValueBar() {
         }
       : null
 
+  /**
+   * 「子骨架」通道：动画名要从**被引用的那个骨架**里选。
+   *
+   * 取哪个 display：优先该时间点正在显示的那个 armature display（同一插槽可能挂了多把武器），
+   * 拿不到就退到插槽里第一个 armature display —— 动画清单只跟「引用的骨架」有关，
+   * 同一插槽的多个 armature display 通常指同一骨架，偶尔不同也不影响这里选名。
+   */
+  const nestedField = (() => {
+    if (!single || single.kind !== 'slot' || single.channel !== 'subArmature') return null
+    const attachments = displaysOf(single.target)
+    const setupAttachment = document.slots.find((slot) => slot.name === single.target)?.attachment ?? ''
+    const shown = slotDisplayNameAt(animation, single.target, single.time, setupAttachment)
+    const armature =
+      attachments.find((item) => item.type === 'armature' && item.name === shown) ??
+      attachments.find((item) => item.type === 'armature')
+    const skeleton = armature && armature.type === 'armature'
+      ? skeletons.find((item) => item.armatureName === armature.subArmature)
+      : undefined
+    return {
+      value: frame?.animation ?? '',
+      options: [
+        { value: '', label: t('（setup 姿态）') },
+        ...(skeleton?.animations ?? []).map((animation) => ({ value: animation.name, label: animation.name }))
+      ],
+      onChange: (name: string) => editFrames(t('修改子骨架动画'), (item) => { item.animation = name })
+    }
+  })()
+
   const title = single ? titleOf(single) : null
   const channels = selectedKeys.map((key) => channelLabel(key.channel)).join(t('、'))
 
@@ -247,6 +286,7 @@ export default function KeyframeValueBar() {
               frame={frame}
               channel={single.channel}
               display={displayField}
+              nested={nestedField}
               previewSlot={single.kind === 'slot' ? single.target : ''}
               onEdit={(label, mutate) => editFrames(label, mutate)}
             />
@@ -292,6 +332,7 @@ function FrameValueEditor({
   frame,
   channel,
   display,
+  nested,
   previewSlot,
   onEdit
 }: {
@@ -300,11 +341,59 @@ function FrameValueEditor({
   channel: string
   /** display 通道的下拉（帧里存的是下标，得按名字选）；其它通道为 null */
   display: { value: string; options: Array<{ value: string; label: string }>; onChange: (name: string) => void } | null
+  /** 「子骨架」通道：动画名下拉 + 三个播放参数（与 display 一样是通道专用编辑器） */
+  nested: { value: string; options: Array<{ value: string; label: string }>; onChange: (name: string) => void } | null
   /** 颜色帧所属插槽名（不是插槽轨就是空串）：拖动预览要按插槽名热写运行期颜色 */
   previewSlot: string
   onEdit: (label: string, mutate: (frame: AnyKeyframe) => void) => void
 }) {
   const value = frame?.value
+
+  // 子骨架帧没有 value（是「动画名 + 3 个参数」的对象），必须排在所有数值分支前面
+  if (channel === 'subArmature') {
+    return (
+      <>
+        <div className={SLOT_NEST_SELECT}>
+          <SelectField
+            label={t('动画')}
+            value={nested?.value ?? ''}
+            options={nested?.options ?? [{ value: '', label: t('（setup 姿态）') }]}
+            onChange={(name) => nested?.onChange(name)}
+          />
+        </div>
+        <div className={SLOT_NEST_NUMBER}>
+          <NumberField
+            label={t('次数')}
+            value={frame?.playTimes ?? 0}
+            precision={0}
+            step={1}
+            min={0}
+            onChange={(next) =>
+              onEdit(t('修改子骨架播放次数'), (item) => { item.playTimes = Math.max(0, Math.round(next)) })
+            }
+          />
+        </div>
+        <div className={SLOT_NEST_NUMBER}>
+          <NumberField
+            label={t('偏移')}
+            value={frame?.offset ?? 0}
+            step={0.05}
+            suffix={t('秒')}
+            onChange={(next) => onEdit(t('修改子骨架起始偏移'), (item) => { item.offset = next })}
+          />
+        </div>
+        <div className={SLOT_NEST_NUMBER}>
+          <NumberField
+            label={t('倍速')}
+            value={frame?.speed ?? 1}
+            step={0.1}
+            min={0}
+            onChange={(next) => onEdit(t('修改子骨架倍速'), (item) => { item.speed = Math.max(0, next) })}
+          />
+        </div>
+      </>
+    )
+  }
 
   // 显示附件要排在数值分支前面：它的值恰好也是数字（下标），但这里要选的是 display 名
   if (display) {

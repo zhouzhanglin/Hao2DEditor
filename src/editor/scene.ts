@@ -1,5 +1,5 @@
 import { Container, FillGradient, Graphics, Sprite, Texture } from 'pixi.js'
-import { MAT4_LENGTH, invert, mul, mulPoint, trs } from '@core/math/matrix'
+import { MAT4_LENGTH, decomposeTrs, invert, mul, mulPoint, trs } from '@core/math/matrix'
 import type { Vec2 } from '@core/math/matrix'
 import { Viewport } from '@render/viewport'
 import { SkeletonView } from '@render/skeletonView'
@@ -66,6 +66,8 @@ import type { AttachmentData } from '@core/model/types'
 import type { AuthoringAttachment, EditorDocument, StageImage } from '@core/model/authoring'
 import { animationDuration, applyPreviewSlotColors, applyValueChanges, buildRuntime, needsRebuild } from './runtime'
 import type { RuntimeBundle } from './runtime'
+import { useProjectStore } from './store/projectStore'
+import type { NestRuntime } from '@core/nesting/nestRuntime'
 import type { OverlayState } from './store/toolStore'
 
 export interface SceneViewState {
@@ -250,6 +252,16 @@ export class EditorScene {
   private view: SkeletonView | null = null
   private document: EditorDocument | null = null
   private skinName = ''
+  /**
+   * 嵌套骨架的子视图。key = 层级路径 + `slotIndex|displayIndex`
+   * （A 挂 B、B 挂 C 时 C 的 key 形如 `7|0/2|1`，用 `/` 分层）。
+   * 复用规则：同一路径只建一次，结构变化（换 display / 换骨架）才重建。
+   */
+  private readonly nestedViews = new Map<string, { view: SkeletonView; child: NestRuntime }>()
+  /** 子骨架上一帧的动画时间：用于判断要不要重算子网格（避免空闲时每帧重建） */
+  private readonly nestedTimes = new Map<string, number>()
+  /** 当前整体染色（子视图要自己再乘一遍：它的 MeshBuilder 与父视图不共享 tint） */
+  private tint = { r: 1, g: 1, b: 1, a: 1 }
   private animationName: string | null = null
   private dirty = true
   private viewState: SceneViewState = {
@@ -373,12 +385,14 @@ export class EditorScene {
     this.document = doc
     // 空心骨骼只存在于编辑期模型：这里按名字收集一份给叠加层使用
     this.hollowBones = new Set(doc.bones.filter((bone) => bone.hollow).map((bone) => bone.name))
-    if (needsRebuild(this.bundle, doc, skinName)) {
+    // 工程内其它骨架：解析 `subArmature` 引用（同时参与重建判定：子骨架改了父骨架要刷新）
+    const skeletons = useProjectStore.getState().skeletons
+    if (needsRebuild(this.bundle, doc, skinName, skeletons)) {
       const previousAnimation = this.animationName
       const previousTime = this.viewState.time
       // 先构建新运行时，成功了再替换：编译中途抛错时保持原样，
       // 否则会留下「视图已销毁、新运行时没建起来」的状态，网格从此不再显示
-      const nextBundle = buildRuntime(doc, skinName)
+      const nextBundle = buildRuntime(doc, skinName, { skeletons })
       // 先把旧视图从显示列表摘掉，**再**销毁它。
       //
       // 顺序反了会崩：`view.destroy()` 会释放 GPU buffer，而此时旧视图仍挂在
@@ -388,6 +402,9 @@ export class EditorScene {
       // 触发重建的编辑都会复现）。
       const previousView = this.view
       if (previousView) {
+        // 子视图归 Scene 管：先销毁（并从父容器里摘掉），再销毁父视图，避免父容器
+        // removeChildren 之后子容器变成没人释放的孤儿（GPU buffer 泄漏）
+        this.clearNestedViews()
         this.viewport.contentLayer.removeChild(previousView.container)
         previousView.destroy()
       }
@@ -521,9 +538,157 @@ export class EditorScene {
     return this.viewState
   }
 
+  /** 销毁全部子视图（换文档 / 换皮肤 / 关闭工程） */
+  private clearNestedViews(): void {
+    for (const entry of this.nestedViews.values()) {
+      entry.view.container.removeFromParent()
+      entry.view.destroy()
+    }
+    this.nestedViews.clear()
+    this.nestedTimes.clear()
+    this.view?.setNestedViews([])
+  }
+
+  /** 销毁一个子视图（连同它在更下层挂的子视图） */
+  private destroyNestedEntry(key: string): void {
+    const entry = this.nestedViews.get(key)
+    if (!entry) return
+    entry.view.container.removeFromParent()
+    entry.view.destroy()
+    this.nestedViews.delete(key)
+    this.nestedTimes.delete(key)
+    for (const childKey of [...this.nestedViews.keys()]) {
+      if (childKey.startsWith(`${key}/`)) this.destroyNestedEntry(childKey)
+    }
+  }
+
+  /**
+   * 同步嵌套骨架：驱动子播放器（`NestRuntime` 负责采样与确定性 seek）、
+   * 复用 / 重建子视图、写变换与染色，再按层号交给父视图排序。
+   *
+   * 递归：子骨架自己也可能是父骨架（A 挂 B、B 挂 C），每层用各自 `NestRuntime`。
+   * 返回「本帧画面有没有变化」，供调用方决定是否重渲染。
+   */
+  private syncNestedViews(): boolean {
+    const bundle = this.bundle
+    const view = this.view
+    const nest = bundle?.nest
+    if (!bundle || !view || !nest) return false
+
+    const live = new Set<string>()
+    // 网格工具隔离时子骨架也要跟着「只剩这一个插槽」，否则它会盖住正在编辑的网格
+    let changed = this.syncNestedLayer(
+      nest,
+      bundle.asset,
+      bundle.skeleton,
+      bundle.player,
+      view,
+      '',
+      live,
+      view.meshBuilder.isolateSlot
+    )
+    for (const key of [...this.nestedViews.keys()]) {
+      if (live.has(key)) continue
+      this.destroyNestedEntry(key)
+      changed = true
+    }
+    return changed
+  }
+
+  /** 一层嵌套（`prefix` 是这层在视图树里的路径前缀，根层为空串） */
+  private syncNestedLayer(
+    nest: NestRuntime,
+    asset: NonNullable<RuntimeBundle['asset']>,
+    skeleton: NonNullable<RuntimeBundle['skeleton']>,
+    player: NonNullable<RuntimeBundle['player']>,
+    host: SkeletonView,
+    prefix: string,
+    live: Set<string>,
+    isolateSlot = -1
+  ): boolean {
+    const instances = nest.update(asset, skeleton, player, host.result?.nestAnchors, isolateSlot)
+    let changed = false
+    const layers: Array<{ layer: number; container: Container }> = []
+
+    for (const instance of instances) {
+      const key = prefix ? `${prefix}/${instance.key}` : instance.key
+      live.add(key)
+      let entry = this.nestedViews.get(key)
+      // 引用的骨架被换掉（改指向别的骨架）：asset 不同就只能重建（连带更下层）
+      if (entry && entry.view.runtimeAsset !== instance.asset) {
+        this.destroyNestedEntry(key)
+        entry = undefined
+      }
+      if (!entry) {
+        entry = {
+          view: new SkeletonView(instance.asset, this.textures, this.skinName),
+          child: nest.createChildRuntime(this.skinName)
+        }
+        this.nestedViews.set(key, entry)
+        this.nestedTimes.set(key, Number.NaN)
+        changed = true
+      }
+
+      // 容器变换 = 父骨骼世界矩阵 × 附件 TRS（NestRuntime 已算好）
+      const parts = decomposeTrs(instance.matrix)
+      entry.view.container.position.set(parts.x, parts.y)
+      entry.view.container.rotation = (parts.rotation * Math.PI) / 180
+      entry.view.container.scale.set(parts.scaleX, parts.scaleY)
+      entry.view.container.visible = instance.visible
+
+      // 染色 = 子骨架自身（插槽色 × 附件色）× 视口整体染色；值没变就别标脏
+      const tint = entry.view.meshBuilder.tint
+      const next = {
+        r: instance.tint.r * this.tint.r,
+        g: instance.tint.g * this.tint.g,
+        b: instance.tint.b * this.tint.b,
+        a: instance.tint.a * this.tint.a
+      }
+      if (tint.r !== next.r || tint.g !== next.g || tint.b !== next.b || tint.a !== next.a) {
+        entry.view.setTint(next)
+      }
+
+      // 子动画时间变了才重算网格（空闲时子视图保持不脏，零额外开销）
+      const last = this.nestedTimes.get(key) ?? Number.NaN
+      if (!(Math.abs(last - instance.childTime) <= 1e-9)) {
+        entry.view.markDirty()
+        this.nestedTimes.set(key, instance.childTime)
+      }
+      if (entry.view.isDirty) {
+        entry.view.update(instance.skeleton)
+        changed = true
+      }
+
+      // 递归：这个子骨架自己也可能挂着别人的骨架
+      if (
+        this.syncNestedLayer(
+          entry.child,
+          instance.asset,
+          instance.skeleton,
+          instance.player,
+          entry.view,
+          key,
+          live
+        )
+      ) {
+        changed = true
+      }
+
+      if (entry.view.container.parent !== host.container) changed = true
+      layers.push({ layer: instance.layer, container: entry.view.container })
+    }
+
+    host.setNestedViews(layers)
+    return changed
+  }
+
   setSkin(skinName: string): void {
     if (!this.bundle || skinName === this.skinName) return
-    this.bundle = buildRuntime(this.bundle.sourceDocument, skinName)
+    // 子视图的皮肤是构造时定的：换肤必须整套重建（否则子骨架还穿旧皮肤）
+    this.clearNestedViews()
+    this.bundle = buildRuntime(this.bundle.sourceDocument, skinName, {
+      skeletons: useProjectStore.getState().skeletons
+    })
     this.skinName = skinName
     this.view?.setSkin(skinName)
     if (this.animationName) {
@@ -564,7 +729,10 @@ export class EditorScene {
 
   /** 整体染色（与插槽色 / 附件色相乘） */
   setTint(color: { r: number; g: number; b: number; a: number }): void {
+    this.tint = { ...color }
     this.view?.setTint(color)
+    // 子视图的 tint 在每帧同步时再乘上去（它有自己的 MeshBuilder）
+    for (const entry of this.nestedViews.values()) entry.view.markDirty()
     this.markDirty()
   }
 
@@ -606,6 +774,12 @@ export class EditorScene {
     if (this.view.isDirty) {
       this.view.update(this.bundle.skeleton)
       this.dirty = true
+    }
+
+    // 嵌套骨架：子动画时间由父播放器当前时间确定性算出（见 NestRuntime），
+    // 因此这里必须**每帧**跑一次，哪怕父视图自身没脏（暂停后拖播放头就是这种情况）
+    if (this.bundle.nest) {
+      if (this.syncNestedViews()) this.dirty = true
     }
 
     this.drawAxes()
@@ -1001,6 +1175,9 @@ export class EditorScene {
   pickAttachmentAt(worldX: number, worldY: number): { slot: string; attachment: string } | null {
     const bundle = this.bundle
     if (!bundle) return null
+    // 嵌套骨架先判：它是一整块子角色，点进去应该选中「骨架」display 本身
+    const nested = this.pickNestDisplayAt(worldX, worldY)
+    if (nested) return nested
     const hit = pickAttachmentPixel(this.meshResult, worldX, worldY, {
       // 运行时附件的纹素名 = 图片名（与 alpha 缓存的键一致）
       imageOfSlot: (slotIndex) => {
@@ -1015,6 +1192,50 @@ export class EditorScene {
     const attachment = this.attachmentAt(hit.slotIndex, displayIndex)
     if (!slot || !attachment) return null
     return { slot: slot.name, attachment: attachment.name }
+  }
+
+  /**
+   * 拾取嵌套骨架 display：用子骨架当前的**世界 AABB** 判定（不逐像素采样纹理）。
+   *
+   * 为什么不逐像素：子骨架是递归的一整棵视图，逐像素要穿过父子两级 alpha 缓存，
+   * 而这层的用途只是「点中子角色 → 选中它的 display」，包围盒足够，且不受贴图未加载影响。
+   */
+  pickNestDisplayAt(worldX: number, worldY: number): { slot: string; attachment: string } | null {
+    const bundle = this.bundle
+    const nest = bundle?.nest
+    if (!bundle || !nest) return null
+    const instances = nest.instances
+    // 绘制顺序靠后的在上层：从后往前找第一个命中的
+    for (let i = instances.length - 1; i >= 0; i--) {
+      const instance = instances[i]
+      if (!instance.visible) continue
+      const bounds = this.nestedViews.get(instance.key)?.view.result?.bounds
+      if (!bounds || !(bounds.maxX > bounds.minX) || !(bounds.maxY > bounds.minY)) continue
+      const m = instance.matrix
+      let minX = Number.POSITIVE_INFINITY
+      let minY = Number.POSITIVE_INFINITY
+      let maxX = Number.NEGATIVE_INFINITY
+      let maxY = Number.NEGATIVE_INFINITY
+      for (const [x, y] of [
+        [bounds.minX, bounds.minY],
+        [bounds.maxX, bounds.minY],
+        [bounds.maxX, bounds.maxY],
+        [bounds.minX, bounds.maxY]
+      ] as const) {
+        const wx = m[0] * x + m[4] * y + m[12]
+        const wy = m[1] * x + m[5] * y + m[13]
+        if (wx < minX) minX = wx
+        if (wx > maxX) maxX = wx
+        if (wy < minY) minY = wy
+        if (wy > maxY) maxY = wy
+      }
+      if (worldX < minX || worldX > maxX || worldY < minY || worldY > maxY) continue
+      return {
+        slot: bundle.asset.slots[instance.slotIndex]?.name ?? '',
+        attachment: instance.attachmentName
+      }
+    }
+    return null
   }
 
   /** 顶点对应的附件（权重显示与拾取共用） */
@@ -1131,6 +1352,28 @@ export class EditorScene {
     const attachment = this.attachmentAt(slotIndex, displayIndex)
     // 选中的那个此刻没显示就别画，免得轮廓圈在别的对象上
     if (!attachment || attachment.name !== attachmentName) return null
+    /*
+     * 嵌套骨架：轮廓用**子骨架当前的世界 AABB**。
+     * 不能走下面的 `size/vertices` 分支 —— 骨架附件的 size 是 0，会画出一个退化点。
+     */
+    if (attachment.type === AttachmentType.Armature) {
+      const instance = bundle.nest?.instances.find((item) => item.slotIndex === slotIndex)
+      const bounds = instance ? this.nestedViews.get(instance.key)?.view.result?.bounds : undefined
+      if (!instance || !bounds) return null
+      const m = instance.matrix
+      const corners = [
+        { x: bounds.minX, y: bounds.minY },
+        { x: bounds.maxX, y: bounds.minY },
+        { x: bounds.maxX, y: bounds.maxY },
+        { x: bounds.minX, y: bounds.maxY }
+      ]
+      return [
+        corners.map((corner) => ({
+          x: m[0] * corner.x + m[4] * corner.y + m[12],
+          y: m[1] * corner.x + m[5] * corner.y + m[13]
+        }))
+      ]
+    }
     if (attachment.type === AttachmentType.Clipping) {
       const points = this.maskWorldPointsAt(slotName, attachmentName)
       if (!points || points.length < 6) return null
@@ -1313,6 +1556,7 @@ export class EditorScene {
   }
 
   destroy(): void {
+    this.clearNestedViews()
     this.view?.destroy()
     this.view = null
     this.bundle = null

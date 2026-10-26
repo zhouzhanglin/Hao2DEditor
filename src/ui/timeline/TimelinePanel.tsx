@@ -10,7 +10,7 @@ import { animationDuration } from '@editor/runtime'
 import { getActiveScene } from '@editor/activeScene'
 import { buildTimeline, lastKeyTime, setKeysTimes } from '@editor/timeline/model'
 import { uniqueName } from '@editor/commands/authoringCommands'
-import { keyEventNow, keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
+import { keyEventNow, keyframeNow, keySlotSubArmatureNow, removeSelectedKeys } from '@editor/timeline/actions'
 import type { KeyKind, KeySelector, TimelineTrack } from '@editor/timeline/model'
 import DopeSheet, { markTimelineSelection } from './DopeSheet'
 import { CommitTextField } from '@ui/widgets/fields'
@@ -72,7 +72,17 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
    * 留白区允许把关键帧往后拖，拖过去会自动延长动画时长，因此不存在「没地方加帧」的问题。
    */
   const axis = Math.max(duration * 1.08, duration + 0.2)
-  const tracks = useMemo(() => buildTimeline(animation), [animation])
+  /** 挂了嵌套骨架的插槽：时间轴要给它们显示「子骨架」通道（即使还没打帧） */
+  const armatureSlots = useMemo(() => {
+    const set = new Set<string>()
+    for (const skin of document.skins) {
+      for (const slot of skin.slots) {
+        if (slot.attachments.some((attachment) => attachment.type === 'armature')) set.add(slot.slot)
+      }
+    }
+    return set
+  }, [document.skins])
+  const tracks = useMemo(() => buildTimeline(animation, armatureSlots), [animation, armatureSlots])
 
   // 时长会因为关键帧收缩而变小；播放头若停在旧的末尾之外，会与播放器按循环取模后的时间
   // 不一致（此时拖动骨骼写的关键帧不在画面上，看起来像「拖不动」）。收敛到时长内。
@@ -451,6 +461,7 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         snapToFrame={timeline.snapToFrame}
         selectedKeys={selectedKeys}
         onSelectKeys={timeline.setSelectedKeys}
+        onKeySubArmature={(slot) => onStatus(keySlotSubArmatureNow(slot).message)}
         onScrub={(value) => {
           timeline.setPlaying(false)
           timeline.setTime(value)

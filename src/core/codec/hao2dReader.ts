@@ -406,7 +406,8 @@ function readSlotAnims(reader: ByteReader): SlotAnim[] {
     const displayIndex = readIntKeyframes(reader)
     const displayAttachment = reader.readStringArray()
     const visible = readIntKeyframes(reader)
-    out.push({ slotIndex, color, displayIndex, displayAttachment, visible })
+    // `.hao2d` 二进制不承载编辑器扩展通道（Unity 端按固定字段读取），一律读成空轨道
+    out.push({ slotIndex, color, displayIndex, displayAttachment, visible, subArmature: [] })
   }
   return out
 }

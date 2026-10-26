@@ -3,6 +3,7 @@ import {
   emptyDeformKeyframe,
   emptyFloat2Keyframe,
   emptyFloatKeyframe,
+  emptySubArmatureKeyframe,
   removeKeyframeAt,
   upsertKeyframe
 } from '@core/model/animation'
@@ -38,7 +39,7 @@ export function ensureBoneAnim(anim: AuthoringAnimData, bone: string): Authoring
 export function ensureSlotAnim(anim: AuthoringAnimData, slot: string): AuthoringSlotAnim {
   let track = anim.slots.find((item) => item.slot === slot)
   if (!track) {
-    track = { slot, color: [], displayIndex: [], displayAttachment: [], visible: [] }
+    track = { slot, color: [], displayIndex: [], displayAttachment: [], visible: [], subArmature: [] }
     anim.slots.push(track)
   }
   return track
@@ -182,6 +183,25 @@ export function keySlotDisplay(
   track.displayAttachment = pairs.map((pair) => pair.name)
 }
 
+/**
+ * 打「子骨架」控制帧：一条帧同时带动画名 / 循环次数 / 起始偏移 / 倍速。
+ *
+ * 对象型关键帧没有并行数组，`upsertKeyframe` 按时间覆盖即可，不存在错位问题。
+ */
+export function keySlotSubArmature(
+  anim: AuthoringAnimData,
+  slot: string,
+  time: number,
+  key: { animation: string; playTimes: number; offset: number; speed: number }
+): void {
+  const track = ensureSlotAnim(anim, slot)
+  if (!track.subArmature) track.subArmature = []
+  upsertKeyframe(
+    track.subArmature,
+    emptySubArmatureKeyframe(time, key.animation, Math.max(0, Math.round(key.playTimes)), key.offset, key.speed)
+  )
+}
+
 export function keySlotVisible(anim: AuthoringAnimData, slot: string, time: number, visible: boolean): void {
   const track = ensureSlotAnim(anim, slot)
   upsertKeyframe(track.visible, { time, value: visible ? 1 : 0, easing: 1, curve: null })
@@ -221,7 +241,10 @@ export function pruneEmptyTracks(anim: AuthoringAnimData): void {
   anim.bones = anim.bones.filter((track) => !isEmptyBoneTrack(track))
   anim.slots = anim.slots.filter(
     (track) =>
-      track.color.length > 0 || track.displayIndex.length > 0 || track.visible.length > 0
+      track.color.length > 0 ||
+      track.displayIndex.length > 0 ||
+      track.visible.length > 0 ||
+      (track.subArmature?.length ?? 0) > 0
   )
   anim.deforms = anim.deforms.filter((track) => track.frames.length > 0)
   anim.constraints = anim.constraints.filter((track) => !isEmptyConstraintTrack(track))

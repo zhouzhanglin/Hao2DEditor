@@ -1127,4 +1127,43 @@ export const en: Record<string, string> = {
   '透明度百分比（0–100）；失焦 / 回车生效，中键左右拖动可调':
     'Opacity percentage (0–100); applies on blur / Enter, middle-drag left/right to scrub',
   '颜色 #RRGGBBAA（回车 / 失焦生效）': 'Color #RRGGBBAA (applies on Enter / blur)',
+
+  // ── 骨架嵌套（nesting） ─────────────────────────────────────────────
+  子骨架: 'Sub-armature',
+  嵌套骨架: 'Nested armature',
+  '骨架 {0}': 'Armature {0}',
+  '显示中 · 骨架 {0}': 'Shown · armature {0}',
+  引用骨架: 'Armature',
+  默认动画: 'Default animation',
+  播放次数: 'Play times',
+  起始偏移: 'Start offset',
+  倍速: 'Speed',
+  次数: 'Times',
+  偏移: 'Offset',
+  '（未引用）': '(none)',
+  '不能把骨架拖到它自己的层级里': "You can't drop an armature into its own hierarchy",
+  '{0}（当前骨架；双击重命名；右键重命名 / 删除）':
+    '{0} (current armature; double-click to rename; right-click to rename / delete)',
+  '{0}（拖到另一个骨架的插槽行 = 嵌套；双击重命名；右键重命名 / 删除）':
+    '{0} (drag onto a slot row of another armature to nest it; double-click to rename; right-click to rename / delete)',
+  '嵌套骨架「{0}」': 'Nest armature "{0}"',
+  '骨架只能拖到插槽上（对着插槽行中间松手）': 'Armatures can only be dropped on a slot (release over the middle of the row)',
+  '在当前时间打一帧（用嵌套骨架的 setup 值）':
+    'Key at the current time (using the nested armature setup values)',
+  '{0} · 子骨架 · 控制嵌套骨架播哪个动画；点右侧闪电图标在当前位置打一帧':
+    '{0} · Sub-armature · controls which animation the nested armature plays; click the bolt icon to key at the playhead',
+  '修改嵌套骨架': 'Edit nested armature',
+  '修改子骨架默认动画': 'Edit sub-armature default animation',
+  '修改子骨架播放次数': 'Edit sub-armature play times',
+  '修改子骨架起始偏移': 'Edit sub-armature start offset',
+  '修改子骨架倍速': 'Edit sub-armature speed',
+  '修改子骨架动画': 'Edit sub-armature animation',
+  子骨架动画: 'Sub-armature animation',
+  '打子骨架控制帧': 'Key sub-armature',
+  '骨架名不能为空': 'Armature name cannot be empty',
+  '父骨架「{0}」不存在': 'Parent armature "{0}" does not exist',
+  '子骨架「{0}」不存在': 'Child armature "{0}" does not exist',
+  '会形成循环引用：{0} → … → {1} → {0}': 'This creates a cycle: {0} → … → {1} → {0}',
+  '嵌套层数超过上限（{0} 层）': 'Nesting depth exceeds the limit ({0} levels)',
+  '（setup 姿态）': '(setup pose)',
 }

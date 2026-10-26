@@ -5,13 +5,20 @@ import type { RuntimeAsset } from '@core/model/asset'
 import { computeBindposes, createSetupPose } from '@core/model/setup'
 import { createIkConstraint } from '@core/model/constraints'
 import type { IkConstraint } from '@core/model/constraints'
-import { Easing, emptyBoneAnim, emptyDeformAnim, emptySlotAnim } from '@core/model/animation'
+import {
+  Easing,
+  emptyBoneAnim,
+  emptyDeformAnim,
+  emptySlotAnim,
+  emptySubArmatureKeyframe
+} from '@core/model/animation'
 import type { AnimData, BoneAnim, DeformAnim, DrawOrderKeyframe, EventKeyframe, IkAnim, SlotAnim } from '@core/model/animation'
 import { PPU, pxToUnit } from './uv'
 import { triangulateFromHull } from '@core/mesh/triangulate'
 import { indexDbSubTextures } from './dragonBonesAtlas'
 import type { DbSubTexture } from './dragonBonesAtlas'
 import type {
+  DbActionJson,
   DbAnimationJson,
   DbArmatureJson,
   DbBoneJson,
@@ -35,13 +42,53 @@ export interface DragonBonesImportResult {
   warnings: string[]
 }
 
+export interface DragonBonesImportOptions {
+  /** 取第几个 armature（缺省 0）。同名 armature 也能逐个导入 */
+  armatureIndex?: number
+  /** 输出骨架名（名称去重后的最终名）；缺省用 DB 里的 armature 名 */
+  label?: string
+  /** DB armature 名 → 工程骨架名（嵌套 display 按这张表改写） */
+  armatureNames?: ReadonlyMap<string, string>
+  /** 与调用方共享的告警数组（多 armature 导入时汇总到一处） */
+  warnings?: string[]
+}
+
+/** 一份 DB 骨骼 JSON 导入成整个工程：一个 armature = 一个骨架 */
+export interface DragonBoneProjectImportResult {
+  assets: RuntimeAsset[]
+  /** 与 assets 一一对应的最终骨架名 */
+  names: string[]
+  /** 各骨架的默认动画名（来自 armature.defaultActions，空串 = 没有） */
+  defaultAnimations: string[]
+  warnings: string[]
+}
+
 const FLIP_Y = -1
 
-function armatureOf(json: DbJson, name?: string): DbArmatureJson | null {
+/**
+ * 取第 `index` 个 armature。
+ *
+ * **按下标而不是按名字**：DragonBones 里可能出现两个同名 armature（手动复制造成的），
+ * 按名字 `find` 永远只会拿到第一个，第二个会被静默吞掉。
+ */
+function armatureAt(json: DbJson, index = 0): DbArmatureJson | null {
   const list = json.armature ?? []
   if (list.length === 0) return null
-  if (!name) return list[0]
-  return list.find((a) => a.name === name) ?? list[0]
+  return list[Math.max(0, Math.min(list.length - 1, index))]
+}
+
+/** 取一条动作里的「播哪个动画」（gotoAndPlay 优先，其次 gotoAndStop 播一次） */
+function actionAnimation(actions: readonly DbActionJson[] | undefined): {
+  animation: string
+  playTimes: number
+} | null {
+  for (const action of actions ?? []) {
+    const play = (action.gotoAndPlay ?? '').trim()
+    if (play) return { animation: play, playTimes: Math.max(0, Math.round(action.playTimes ?? 0)) }
+    const stop = (action.gotoAndStop ?? '').trim()
+    if (stop) return { animation: stop, playTimes: 1 }
+  }
+  return null
 }
 
 /** DB 骨骼命名空间用「父名/子名」，去重时保留最后一段 */
@@ -165,6 +212,8 @@ interface AttachmentContext {
   setupWorld: Float32Array
   subTextures: Map<string, DbSubTexture>
   origToNew: number[]
+  /** DB armature 名 → 工程骨架名（重名去重后的映射；DB 的嵌套 display 用原名引用） */
+  armatureNames: ReadonlyMap<string, string>
   warnings: string[]
 }
 
@@ -258,10 +307,11 @@ function packWeights(
 function convertDisplay(
   display: DbDisplayJson,
   ctx: AttachmentContext,
-  slotBoneIndex: number
+  slotBoneIndex: number,
+  /** setup 默认动作（display → skin slot → slot 依次回退） */
+  actions?: readonly DbActionJson[]
 ): AttachmentData | null {
   const type = (display.type ?? 'image').toLowerCase()
-  if (type === 'armature') return null
 
   const transform = display.transform ?? {}
   const base = {
@@ -269,6 +319,32 @@ function convertDisplay(
     position: { x: pxToUnit(transform.x ?? 0), y: -pxToUnit(transform.y ?? 0) },
     rotation: -(transform.skX ?? 0),
     scale: { x: transform.scX ?? 1, y: transform.scY ?? 1 }
+  }
+
+  /*
+   * 嵌套骨架：DB 的 `type:"armature"` display。
+   *
+   * **绝不能像旧实现那样返回 null**：`displayIndex` 是按下标引用 display 数组的，
+   * 少一项后面所有动画的显示下标都会整体错位（表现为「换装换错图 / 部件凭空消失」）。
+   * 引用不存在的 armature 时也保留附件，只把 `subArmature` 留空并告警。
+   */
+  if (type === 'armature') {
+    const rawName = (display.path ?? display.name ?? '').trim()
+    const mapped = ctx.armatureNames.get(rawName) ?? ''
+    if (!mapped) {
+      ctx.warnings.push(`嵌套骨架「${rawName || display.name || '未命名'}」引用的 armature 在文件里不存在，已留空`)
+    }
+    const setup = actionAnimation(actions)
+    return createAttachmentData({
+      ...base,
+      type: AttachmentType.Armature,
+      subArmature: mapped,
+      subAnimation: setup?.animation ?? '',
+      subPlayTimes: setup?.playTimes ?? 0,
+      subOffset: 0,
+      subSpeed: 1,
+      size: { x: pxToUnit(display.width ?? 0), y: pxToUnit(display.height ?? 0) }
+    })
   }
 
   if (type === 'mesh') {
@@ -442,13 +518,17 @@ function fillLocal(entry: VertexWeight, bindposes: Float32Array, worldX: number,
  * - 加权网格：局部坐标 = bindpose[骨骼] · (slotPose · 顶点)
  * - playTimes == 0（无限循环）时在末尾补一帧等于首帧的关键帧
  */
-export function importDragonBones(input: DragonBonesImportInput): DragonBonesImportResult {
-  const warnings: string[] = []
-  const armature = armatureOf(input.json, undefined)
+export function importDragonBones(
+  input: DragonBonesImportInput,
+  options: DragonBonesImportOptions = {}
+): DragonBonesImportResult {
+  const warnings = options.warnings ?? []
+  const armature = armatureAt(input.json, options.armatureIndex ?? 0)
   if (!armature) {
     warnings.push('DragonBones 数据里没有 armature 段')
     return { asset: createRuntimeAsset({ dataType: AnimType.DragonBone }), warnings }
   }
+  const label = (options.label ?? (armature.name ?? '').trim()) || 'armature'
 
   const { ordered, index: boneIndex, origToNew } = orderBones(armature.bone ?? [], warnings)
   const boneData: BoneData[] = ordered.map((bone) => {
@@ -496,7 +576,7 @@ export function importDragonBones(input: DragonBonesImportInput): DragonBonesImp
 
   const skeletonOnly = createRuntimeAsset({
     dataType: AnimType.DragonBone,
-    armatureName: armature.name ?? 'armature',
+    armatureName: label,
     frameRate: armature.frameRate ?? input.json.frameRate ?? 24,
     bones: boneData,
     slots,
@@ -516,8 +596,13 @@ export function importDragonBones(input: DragonBonesImportInput): DragonBonesImp
     setupWorld: setup.world,
     subTextures: indexDbSubTextures(input.subTextures),
     origToNew,
+    armatureNames: options.armatureNames ?? new Map(),
     warnings
   }
+
+  /** 插槽级默认动作（嵌套骨架 setup 动画的第二优先级） */
+  const slotActions = new Map<string, DbActionJson[]>()
+  for (const slot of slotJsons) if (slot.actions && slot.actions.length > 0) slotActions.set(slot.name, slot.actions)
 
   const skins: SkinData[] = (armature.skin ?? [{ name: 'default', slot: [] }]).map((skin, skinIdx) => ({
     /*
@@ -530,12 +615,23 @@ export function importDragonBones(input: DragonBonesImportInput): DragonBonesImp
     slots: (skin.slot ?? []).map((skinSlot: DbSkinSlotJson) => {
       const slotIndex = slotIndexByName.get(skinSlot.name ?? '')
       const boneIdx = slotIndex !== undefined ? slots[slotIndex].boneIndex : 0
-      return {
-        slotName: skinSlot.name ?? '',
-        attachments: (skinSlot.display ?? [])
-          .map((display: DbDisplayJson) => convertDisplay(display, ctx, boneIdx))
-          .filter((a): a is AttachmentData => a !== null)
+      const setupActions = [...(skinSlot.actions ?? []), ...(slotActions.get(skinSlot.name ?? '') ?? [])]
+      /** display 名在同一插槽里必须唯一（运行期按名字解析显示项） */
+      const usedNames = new Set<string>()
+      const attachments: AttachmentData[] = []
+      for (const display of skinSlot.display ?? []) {
+        const converted = convertDisplay(display, ctx, boneIdx, [...(display.actions ?? []), ...setupActions])
+        if (!converted) continue
+        if (!converted.name) converted.name = `display_${attachments.length}`
+        if (usedNames.has(converted.name)) {
+          let suffix = 2
+          while (usedNames.has(`${converted.name}_${suffix}`)) suffix++
+          converted.name = `${converted.name}_${suffix}`
+        }
+        usedNames.add(converted.name)
+        attachments.push(converted)
       }
+      return { slotName: skinSlot.name ?? '', attachments }
     })
   }))
 
@@ -602,6 +698,24 @@ export function importDragonBones(input: DragonBonesImportInput): DragonBonesImp
     })
     .filter((ik) => ik.boneIndices.length > 0 && ik.targetBoneIndex >= 0)
 
+  /** 默认皮肤里各插槽的 display 名（动画的 displayIndex 要落成名字才稳） */
+  const displayNames = new Map<string, string[]>()
+  for (const skinSlot of defaultSkin?.slots ?? []) {
+    displayNames.set(
+      skinSlot.slotName,
+      skinSlot.attachments.map((attachment) => attachment.name)
+    )
+  }
+  /** 挂了嵌套骨架的插槽：只有这些插槽的 actions 才写成「子骨架」通道 */
+  const armatureSlots = new Set<string>()
+  for (const skin of skins) {
+    for (const skinSlot of skin.slots) {
+      if (skinSlot.attachments.some((attachment) => attachment.type === AttachmentType.Armature)) {
+        armatureSlots.add(skinSlot.slotName)
+      }
+    }
+  }
+
   const frameRate = armature.frameRate ?? input.json.frameRate ?? 24
   const animations: AnimData[] = (armature.animation ?? []).map((animation) =>
     importDbAnimation(animation, {
@@ -612,6 +726,8 @@ export function importDragonBones(input: DragonBonesImportInput): DragonBonesImp
       staticZOrder,
       iks,
       textureNames,
+      displayNames,
+      armatureSlots,
       frameRate,
       warnings
     })
@@ -667,7 +783,7 @@ export function importDragonBones(input: DragonBonesImportInput): DragonBonesImp
 
   const asset = createRuntimeAsset({
     dataType: AnimType.DragonBone,
-    armatureName: skeletonOnly.armatureName,
+    armatureName: label,
     frameRate,
     bones: boneData,
     slots,
@@ -684,6 +800,67 @@ export function importDragonBones(input: DragonBonesImportInput): DragonBonesImp
   return { asset, warnings }
 }
 
+/**
+ * 一份 DragonBones 骨骼 JSON → 整个工程（**一个 armature = 一个骨架**）。
+ *
+ * 为什么必须整份导入：DB 的嵌套是「armature 之间按名字引用」，
+ * 只取第一个 armature 会把嵌套的父骨架与被引用的子骨架割开，`type:"armature"`
+ * 的 display 就只能变成一个空引用。名称去重（重名 / 空名）也要在这里统一决定，
+ * 否则子骨架改名后父骨架里的引用会指空。
+ */
+export function importDragonBoneProject(input: DragonBonesImportInput): DragonBoneProjectImportResult {
+  const warnings: string[] = []
+  const list = input.json.armature ?? []
+  if (list.length === 0) {
+    warnings.push('DragonBones 数据里没有 armature 段')
+    return {
+      assets: [createRuntimeAsset({ dataType: AnimType.DragonBone })],
+      names: ['armature'],
+      defaultAnimations: [''],
+      warnings
+    }
+  }
+
+  const used = new Set<string>()
+  const names: string[] = []
+  /** DB armature 名（原始） → 工程骨架名 */
+  const nameMap = new Map<string, string>()
+  for (let i = 0; i < list.length; i++) {
+    const raw = (list[i].name ?? '').trim()
+    const base = raw || `armature_${i + 1}`
+    let final = base
+    let suffix = 2
+    while (used.has(final)) final = `${base}_${suffix++}`
+    used.add(final)
+    names.push(final)
+    if (!raw) continue
+    const mapped = nameMap.get(raw)
+    if (mapped === undefined) nameMap.set(raw, final)
+    else warnings.push(`armature 名「${raw}」重复：第 ${i + 1} 个改名为「${final}」，其嵌套引用仍指向「${mapped}」`)
+    nameMap.set(final, final)
+  }
+
+  const assets: RuntimeAsset[] = []
+  const defaultAnimations: string[] = []
+  list.forEach((armature, index) => {
+    const result = importDragonBones(input, {
+      armatureIndex: index,
+      label: names[index],
+      armatureNames: nameMap,
+      warnings
+    })
+    assets.push(result.asset)
+
+    // 骨架级默认动作：只作为「打开时默认选中的动画」，不新增字段（避免双份真源）
+    const setup = actionAnimation(armature.defaultActions)
+    const exists = setup !== null && result.asset.animations.some((animation) => animation.name === setup.animation)
+    if (setup && !exists) warnings.push(`骨架「${names[index]}」的默认动画「${setup.animation}」不存在，已忽略`)
+    defaultAnimations.push(exists && setup ? setup.animation : '')
+  })
+
+  return { assets, names, defaultAnimations, warnings }
+}
+
 interface DbAnimContext {
   boneIndex: Map<string, number>
   slotIndex: Map<string, number>
@@ -693,6 +870,10 @@ interface DbAnimContext {
   staticZOrder: readonly number[]
   iks: readonly IkConstraint[]
   textureNames: readonly string[]
+  /** 默认皮肤里各插槽的 display 名（displayIndex → 名字） */
+  displayNames: ReadonlyMap<string, readonly string[]>
+  /** 挂了嵌套骨架的插槽名（只有它们的 actions 才落成「子骨架」通道） */
+  armatureSlots: ReadonlySet<string>
   frameRate: number
   warnings: string[]
 }
@@ -850,23 +1031,46 @@ function importDbAnimation(animation: DbAnimationJson, ctx: DbAnimContext): Anim
   /** 层级动画：各插槽帧里 `z`（排序键）的采样序列，循环后统一重排成 drawOrder */
   const zTracks: Array<{ slot: number; keys: Array<{ time: number; z: number }> }> = []
   for (const track of animation.slot ?? []) {
-    const index = ctx.slotIndex.get(track.name ?? '')
+    const slotName = track.name ?? ''
+    const index = ctx.slotIndex.get(slotName)
     if (index === undefined) continue
     const slot = ctx.slots[index]
     const anim = emptySlotAnim(index)
+    const displayNames = ctx.displayNames.get(slotName)
+    const nested = ctx.armatureSlots.has(slotName)
     let time = 0
     let hasColor = false
     const zKeys: Array<{ time: number; z: number }> = []
     for (const frame of track.frame ?? []) {
       if (typeof frame.z === 'number') zKeys.push({ time: toSeconds(time), z: frame.z })
-      const displayIndex = frame.displayIndex ?? 0
-      anim.displayIndex.push({
-        time: toSeconds(time),
-        value: displayIndex,
-        easing: Easing.Stepped,
-        curve: null
-      })
-      anim.displayAttachment.push('')
+      /*
+       * 缺省 displayIndex = 「这一帧不换显示项」（DB 的 -2 也是这个意思），不能默认成 0：
+       * 只为 `actions` 存在、没写 displayIndex 的帧（嵌套骨架的控制帧正是如此）会被顺手
+       * 把显示项切回第一个附件 —— 换装与嵌套 display 切换都会因此错位。
+       */
+      if (typeof frame.displayIndex === 'number' && frame.displayIndex > -2) {
+        const value = frame.displayIndex
+        anim.displayIndex.push({
+          time: toSeconds(time),
+          value,
+          easing: Easing.Stepped,
+          curve: null
+        })
+        // 名字要和下标一一对应（并行数组）：运行期优先按名字解析，换装才不容易切错
+        anim.displayAttachment.push(value >= 0 ? (displayNames?.[value] ?? '') : '')
+      }
+      if (nested && frame.actions && frame.actions.length > 0) {
+        const action = actionAnimation(frame.actions)
+        if (action) {
+          anim.subArmature.push(
+            emptySubArmatureKeyframe(toSeconds(time), action.animation, action.playTimes, 0, 1)
+          )
+        } else {
+          ctx.warnings.push(
+            `动画「${animation.name ?? ''}」插槽「${slotName}」的 actions 里没有 gotoAndPlay / gotoAndStop，已忽略`
+          )
+        }
+      }
       if (frame.color) {
         const e = easingOfFrame(frame)
         anim.color.push({
@@ -879,7 +1083,7 @@ function importDbAnimation(animation: DbAnimationJson, ctx: DbAnimContext): Anim
       }
       time += frame.duration ?? 0
     }
-    if (anim.displayIndex.length > 0 || hasColor) slots.push(anim)
+    if (anim.displayIndex.length > 0 || hasColor || anim.subArmature.length > 0) slots.push(anim)
     if (zKeys.length > 0) zTracks.push({ slot: index, keys: zKeys })
   }
 

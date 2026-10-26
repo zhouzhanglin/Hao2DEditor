@@ -6,6 +6,8 @@ import type { EditorDocument } from '@core/model/authoring'
 import { compileDocument } from '@core/codec/compile'
 import type { CompileResult } from '@core/codec/compile'
 import { hexToRgba } from '@core/util/color'
+import { NestRuntime } from '@core/nesting/nestRuntime'
+import type { NestResolver } from '@core/nesting/nestRuntime'
 import { lastKeyTime } from './timeline/model'
 
 export interface RuntimeBundle {
@@ -21,6 +23,65 @@ export interface RuntimeBundle {
   /** 编译对应的文档引用，用于判断是否需要重建 */
   sourceDocument: EditorDocument
   skinName: string
+  /** 骨架嵌套运行期（工程里没有其它骨架 / 本骨架没有嵌套引用时为 null） */
+  nest: NestRuntime | null
+  /**
+   * 参与嵌套的**其它**骨架文档（按引用链递归收集，不含当前骨架）。
+   *
+   * 用引用比较判断是否需要重建：子骨架被编辑时父文档对象不会变，
+   * 只比 `sourceDocument` 会漏掉刷新（画面上父骨架里的子骨架停在旧姿态）。
+   */
+  nestSources: EditorDocument[]
+}
+
+export interface BuildRuntimeOptions {
+  /** 工程内全部骨架：用于解析 `subArmature` 引用 */
+  skeletons?: readonly EditorDocument[]
+}
+
+/**
+ * 子骨架编译缓存：按文档引用缓存。
+ *
+ * 编辑时 store 只克隆被改的那份文档，未被改动的子骨架引用保持不变 → 直接命中缓存，
+ * 不会「父骨架动一下就把所有子骨架重编译一遍」。
+ */
+const nestAssetCache = new WeakMap<EditorDocument, RuntimeAsset>()
+
+function compileCached(doc: EditorDocument): RuntimeAsset {
+  const cached = nestAssetCache.get(doc)
+  if (cached) return cached
+  const asset = compileDocument(doc).asset
+  nestAssetCache.set(doc, asset)
+  return asset
+}
+
+/** 从当前文档出发，按 `subArmature` 引用链收集参与嵌套的其它骨架（去重、有环保护） */
+function collectNestSources(doc: EditorDocument, skeletons: readonly EditorDocument[]): EditorDocument[] {
+  const byName = new Map(skeletons.map((item) => [item.armatureName, item]))
+  const out: EditorDocument[] = []
+  const seen = new Set<string>([doc.armatureName])
+  let frontier: EditorDocument[] = [doc]
+  while (frontier.length > 0) {
+    const next: EditorDocument[] = []
+    for (const item of frontier) {
+      for (const skin of item.skins) {
+        for (const slot of skin.slots) {
+          for (const attachment of slot.attachments) {
+            if (attachment.type !== 'armature') continue
+            const name = attachment.subArmature
+            if (!name || seen.has(name)) continue
+            const target = byName.get(name)
+            if (!target) continue
+            seen.add(name)
+            out.push(target)
+            next.push(target)
+          }
+        }
+      }
+    }
+    frontier = next
+  }
+  return out
 }
 
 /**
@@ -29,12 +90,29 @@ export interface RuntimeBundle {
  * 编译是纯函数且足够快（骨骼 / 插槽 / 关键帧量级为千），因此文档每次变化都重建；
  * 调用方用 `needsRebuild` 判断是否需要替换 bundle。
  */
-export function buildRuntime(doc: EditorDocument, skinName = ''): RuntimeBundle {
+export function buildRuntime(
+  doc: EditorDocument,
+  skinName = '',
+  options: BuildRuntimeOptions = {}
+): RuntimeBundle {
   const compiled: CompileResult = compileDocument(doc)
   const maps = buildRuntimeMaps(compiled.asset, skinName)
   const skeleton = new Skeleton(compiled.asset)
   skeleton.applyRuntimeMaps(maps)
   const player = new AnimationPlayer(compiled.asset, skeleton)
+
+  const nestSources = collectNestSources(doc, options.skeletons ?? [doc])
+  const byName = new Map(nestSources.map((item) => [item.armatureName, item]))
+  const resolver: NestResolver = (armatureName) => {
+    const target = byName.get(armatureName)
+    if (!target) return null
+    const asset = compileCached(target)
+    // 子骨架跟随父骨架当前皮肤；子骨架没有同名皮肤时退回它自己的默认皮肤
+    const skin = asset.skins.some((item) => item.name === skinName) ? skinName : ''
+    return { asset, skinName: skin }
+  }
+  const nest = nestSources.length > 0 ? new NestRuntime(resolver, skinName) : null
+
   return {
     asset: compiled.asset,
     skeleton,
@@ -45,7 +123,9 @@ export function buildRuntime(doc: EditorDocument, skinName = ''): RuntimeBundle 
     slotIndex: compiled.slotIndex,
     constraintIndex: compiled.constraintIndex,
     sourceDocument: doc,
-    skinName
+    skinName,
+    nest,
+    nestSources
   }
 }
 
@@ -67,8 +147,19 @@ export function buildRuntime(doc: EditorDocument, skinName = ''): RuntimeBundle 
  * 代价：一次 O(文档) 的逐字段比较（每次 `set` 一次）。相比它省掉的整套重编译 + 重建视图，
  * 这是零头；而且比 store 里那次 `structuredClone` 还便宜。
  */
-export function needsRebuild(bundle: RuntimeBundle | null, doc: EditorDocument, skinName: string): boolean {
+export function needsRebuild(
+  bundle: RuntimeBundle | null,
+  doc: EditorDocument,
+  skinName: string,
+  skeletons?: readonly EditorDocument[]
+): boolean {
   if (!bundle || bundle.skinName !== skinName) return true
+  // 被引用的子骨架变了（编辑了别的骨架 / 新增或删除了引用）也要重建
+  if (skeletons) {
+    const sources = collectNestSources(doc, skeletons)
+    if (sources.length !== bundle.nestSources.length) return true
+    for (let i = 0; i < sources.length; i++) if (sources[i] !== bundle.nestSources[i]) return true
+  }
   if (bundle.sourceDocument === doc) return false
   return !onlyValuesChanged(bundle.sourceDocument, doc)
 }

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, Filter, Flag, Lock, Minus, Plus, Zap, ZoomIn } from 'lucide-react'
 import { TIMELINE_ZOOM_MAX, TIMELINE_ZOOM_MIN } from '@editor/store/timelineStore'
-import { sameSelector } from '@editor/timeline/model'
-import type { KeySelector, TimelineTrack } from '@editor/timeline/model'
+import { revealTrackFor, sameSelector } from '@editor/timeline/model'
+import type { KeyKind, KeySelector, TimelineTrack } from '@editor/timeline/model'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
@@ -43,6 +43,8 @@ export interface DopeSheetProps {
   onEndDrag: () => void
   /** 状态栏提示（右键「显示」通道切换 display 时反馈） */
   onStatus?: (text: string) => void
+  /** 「子骨架」通道行上的打帧按钮：用当前嵌套骨架的 setup 值在当前时间打一帧 */
+  onKeySubArmature?: (slot: string) => void
 }
 
 /** 时间→像素的映射（拖拽期间冻结，保证关键帧 1:1 跟随指针） */
@@ -339,6 +341,18 @@ export default function DopeSheet(props: DopeSheetProps) {
    * 只是过滤不落地：没有可匹配的 target，列表仍旧是全部轨道。
    */
   const selection = useSelectionStore()
+  /*
+   * 过滤要**连 kind 一起**匹配：DragonBones 里插槽常与它挂的骨骼同名（R-JIAN1 既是骨骼又是插槽），
+   * 只看 target 会把同名的骨骼轨也一起留下 —— 选中插槽却在时间轴上看到一堆骨骼通道。
+   */
+  const filterKind: KeyKind | null =
+    selection.kind === 'bone'
+      ? 'bone'
+      : selection.kind === 'slot' || selection.kind === 'attachment'
+        ? 'slot'
+        : selection.kind === 'constraint'
+          ? 'constraint'
+          : null
   const filterTarget =
     selection.kind === 'bone'
       ? selection.bone
@@ -367,29 +381,39 @@ export default function DopeSheet(props: DopeSheetProps) {
    * 过滤时一并隐藏 —— 它们不属于任何对象），再滤掉折叠分组下面的子轨道
    */
   const visibleTracks = useMemo(() => {
-    const scoped = smartFilter && filterTarget ? tracks.filter((track) => track.target === filterTarget) : tracks
+    const scoped =
+      smartFilter && filterTarget && filterKind
+        ? tracks.filter((track) => track.kind === filterKind && track.target === filterTarget)
+        : tracks
     return scoped.filter((track) => !track.parentId || !collapsed.has(track.parentId))
-  }, [tracks, collapsed, smartFilter, filterTarget])
+  }, [tracks, collapsed, smartFilter, filterTarget, filterKind])
 
   /**
-   * 选中对象（骨骼 / 插槽）→ 把它的轨道组**滚到顶部**并**高亮一下背景**：
+   * 选中对象（骨骼 / 插槽 / display）→ 把它的轨道**滚到顶部**并**高亮一下背景**：
    * 与层级树「定位」、打帧后的高亮同款体验。
    *
+   * - 骨骼 / 插槽：滚到分组行；
+   * - display（附件）：滚到该插槽的**「显示」通道行**（行号由 `revealTrackFor` 决定），
+   *   一眼能看到「它是什么时候被切上来的」。
+   *
    * 只在 Animate 态有意义（轨道才有意义）；Pose 态整块右栏是收起的。
-   * 触发条件只认「选中对象的名字」—— 同对象内再点它的子通道不会改变名字，
+   * 触发条件只认「选中对象」—— 同对象内再点它的子通道不会改变名字，
    * 也就不会反复把列表滚来滚去（点轨道行选对象也不会触发二次滚动）。
    *
    * **智能过滤开着时整个跳过**：那时列表里只剩选中对象自己的轨道，本来就在最上面，
    * 滚动与高亮都是白做，且会和用户当下的滚动打架。
    */
   const mode = useModeStore((s) => s.mode)
+  /** 去重键：同一插槽里的不同 display 也要各 reveal 一次 */
   const revealName =
     mode === 'animate'
       ? selection.kind === 'bone'
-        ? selection.bone
-        : selection.kind === 'slot' || selection.kind === 'attachment'
-          ? selection.slot
-          : ''
+        ? `bone\u0000${selection.bone}`
+        : selection.kind === 'slot'
+          ? `slot\u0000${selection.slot}`
+          : selection.kind === 'attachment'
+            ? `display\u0000${selection.slot}\u0000${selection.attachment}`
+            : ''
       : ''
   /**
    * 已经 reveal 过的对象名：**同一个对象不重复滚 / 不重复闪**。
@@ -413,22 +437,30 @@ export default function DopeSheet(props: DopeSheetProps) {
       revealedRef.current = revealName
       return
     }
-    // 智能过滤开着时，列表里只剩选中对象自己的轨道，它本来就在最上面 ——
+    // 智能过滤开着时，骨骼 / 插槽的轨道本来就在最上面 ——
     // 再「滚到顶部 + 闪一下」纯属白做，还会和用户当下的滚动打架。
+    // **display 例外**：即使列表被过滤过，也要滚到「显示」通道行（不然看到的还是插槽标题）。
     // 同样记成「已处理」：不记的话关掉过滤恢复完整列表时 `revealedRef` 里还是旧名字，
     // 会当场跳一下，看起来像「关过滤」这个按钮顺带干了别的事
-    if (smartFilter) {
+    if (smartFilter && selection.kind !== 'attachment') {
       revealedRef.current = revealName
       return
     }
-    const group = visibleTracks.find((track) => track.isGroup && track.target === revealName)
-    if (!group) return
+    // 选中的是哪一行由纯函数决定（骨骼 / 插槽 = 分组行，display = 该插槽的「显示」通道行）
+    const rowTrack = revealTrackFor(selection, visibleTracks)
+    if (!rowTrack) return
+    // display 被折叠挡在分组里：先展开，下一次 visibleTracks 变化再滚到「显示」行。
+    // 这里**不记** revealedRef，否则展开后就不会再滚了。
+    if (selection.kind === 'attachment' && rowTrack.isGroup && collapsed.has(rowTrack.id)) {
+      toggleCollapse(rowTrack.id)
+      return
+    }
     if (revealedRef.current === revealName) return
     revealedRef.current = revealName
-    const row = trackListRef.current?.querySelector(`[data-track-id="${CSS.escape(group.id)}"]`)
+    const row = trackListRef.current?.querySelector(`[data-track-id="${CSS.escape(rowTrack.id)}"]`)
     // block: 'start' = 滚到滚动容器顶部可见（相当于显示在 timeline 最上面）
     row?.scrollIntoView({ block: 'start' })
-    setRevealId(group.id)
+    setRevealId(rowTrack.id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revealName, visibleTracks])
 
@@ -969,10 +1001,15 @@ export default function DopeSheet(props: DopeSheetProps) {
                         ])
                       : track.kind === 'slot' && track.channel === 'display'
                         ? t('{0} · 显示 · 单击选中插槽，按 K 在当前时间打显示帧', track.group)
-                        : t('{0} · {1} · 点击选中该通道（按 K 只给它打帧，Delete 删除整条通道）', [
-                            track.group,
-                            track.label
-                          ])
+                        : track.channel === 'subArmature'
+                          ? t(
+                              '{0} · 子骨架 · 控制嵌套骨架播哪个动画；点右侧闪电图标在当前位置打一帧',
+                              track.group
+                            )
+                          : t('{0} · {1} · 点击选中该通道（按 K 只给它打帧，Delete 删除整条通道）', [
+                              track.group,
+                              track.label
+                            ])
                 }
                 onClick={() => props.onSelectTarget(track)}
                 onContextMenu={(event) => {
@@ -1005,6 +1042,19 @@ export default function DopeSheet(props: DopeSheetProps) {
                   <Lock size={9} className="shrink-0 text-content-lo/0" />
                 )}
                 <span className="min-w-0 flex-1 truncate">{track.label}</span>
+                {track.channel === 'subArmature' && props.onKeySubArmature ? (
+                  <span
+                    role="button"
+                    title={t('在当前时间打一帧（用嵌套骨架的 setup 值）')}
+                    className="shrink-0 rounded px-1 text-content-lo hover:bg-ink-600 hover:text-accent"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      props.onKeySubArmature?.(track.target)
+                    }}
+                  >
+                    <Zap size={9} />
+                  </span>
+                ) : null}
                 <span className="shrink-0 rounded bg-ink-600 px-1 text-content-lo">
                   {track.isGroup ? track.keyCount ?? 0 : track.keys.length}
                 </span>

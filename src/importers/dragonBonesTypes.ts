@@ -29,6 +29,18 @@ export interface DbColorJson {
   bO?: number
 }
 
+/**
+ * DragonBones 的「动作」（`actions` 数组里的一项）。
+ *
+ * 实际只用到 `gotoAndPlay` / `gotoAndStop`：它们挂在**嵌套骨架 display 所在插槽**上，
+ * 用来指定子骨架播哪个动画。`playTimes` 在部分导出器里会带（0 = 循环）。
+ */
+export interface DbActionJson {
+  gotoAndPlay?: string
+  gotoAndStop?: string
+  playTimes?: number
+}
+
 export interface DbSlotJson {
   name: string
   parent?: string
@@ -36,6 +48,8 @@ export interface DbSlotJson {
   blendMode?: number | string
   color?: DbColorJson
   z?: number
+  /** 插槽级默认动作（嵌套骨架的 setup 默认动画） */
+  actions?: DbActionJson[]
 }
 
 export interface DbDisplayJson {
@@ -56,11 +70,15 @@ export interface DbDisplayJson {
   edges?: number[]
   userEdges?: number[]
   hull?: number
+  /** display 级动作（优先级最高：skin slot → slot → display） */
+  actions?: DbActionJson[]
 }
 
 export interface DbSkinSlotJson {
   name?: string
   display?: DbDisplayJson[]
+  /** 皮肤插槽级默认动作（嵌套骨架的 setup 默认动画） */
+  actions?: DbActionJson[]
 }
 
 export interface DbSkinJson {
@@ -116,6 +134,8 @@ export interface DbBoneTrackJson {
 export interface DbSlotFrameJson extends DbFrameEasingJson {
   displayIndex?: number
   color?: DbColorJson
+  /** 该帧的子骨架动作（`gotoAndPlay` → 「子骨架」通道关键帧） */
+  actions?: DbActionJson[]
   /**
    * 层级键（DB 4.5+）：插槽绘制顺序的排序键，升序绘制、同 z 保持静态顺序。
    * 动画重新给插槽赋 z 就是「层级变化动画」（Demon 的每个动画都用它）。
@@ -177,6 +197,8 @@ export interface DbArmatureJson {
   skin?: DbSkinJson[]
   ik?: DbIkJson[]
   animation?: DbAnimationJson[]
+  /** 骨架级默认动作（类似 Unity Animator 的默认状态） */
+  defaultActions?: DbActionJson[]
 }
 
 export interface DbJson {

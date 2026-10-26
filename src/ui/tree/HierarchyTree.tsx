@@ -12,6 +12,7 @@ import {
   Image as ImageIcon,
   KeyRound,
   Link2,
+  PersonStanding,
   Lock,
   Maximize2,
   Pentagon,
@@ -40,6 +41,7 @@ import { createIkConstraint, createPathConstraint, createTransformConstraint } f
 import type { AuthoringBone, AuthoringConstraint, AuthoringImage, EditorDocument } from '@core/model/authoring'
 import { createAuthoringBone, createAuthoringSlot, rootBoneName } from '@core/model/authoring'
 import {
+  addArmatureDisplay,
   addImageDisplay,
   createRegionFromImage,
   deleteAttachment,
@@ -47,6 +49,7 @@ import {
   deleteSlot,
   toggleSlotDisplay
 } from '@editor/commands/authoringCommands'
+import { checkNestDrop } from '@core/nesting/nest'
 import {
   boneSlotAnchor,
   moveBone,
@@ -152,6 +155,8 @@ function canDropTreePayload(
   if (!payload) return true
   if (payload.kind === 'bone') return targetKind === 'bone'
   if (payload.kind === 'slot') return targetKind === 'bone' || targetKind === 'slot'
+  // 嵌套骨架只能落到插槽行（骨架列表拖出来 = 新建一个 armature display）
+  if (payload.kind === 'armature') return targetKind === 'slot'
   return targetKind === 'slot' || targetKind === 'display'
 }
 
@@ -162,6 +167,8 @@ function dropPositionOf(
 ): TreeDropPosition {
   const rect = event.currentTarget.getBoundingClientRect()
   const ratio = rect.height > 0 ? (event.clientY - rect.top) / rect.height : 0.5
+  // 骨架拖进插槽只有「放进插槽」一种语义：不需要上/下沿排序
+  if (activeTreeDrag?.kind === 'armature') return 'inside'
   if (targetKind === 'slot' && activeTreeDrag?.kind === 'slot') {
     return ratio < 0.5 ? 'above' : 'below'
   }
@@ -218,7 +225,9 @@ function TreeRow({
    * 双击聚焦的目标：显式给的优先（约束行），否则直接用拖动负载 ——
    * 骨骼 / 插槽 / display 三种负载的形状与 FocusTarget 相同，不必逐行重复声明。
    */
-  const focus: FocusTarget | undefined = focusTarget ?? dragPayload
+  // 骨架负载（从骨架栏拖出来的那种）不是可聚焦节点，只用于拖放
+  const focus: FocusTarget | undefined =
+    focusTarget ?? (dragPayload && dragPayload.kind !== 'armature' ? dragPayload : undefined)
 
   return (
     <div
@@ -579,7 +588,9 @@ function isMeshType(type: AuthoringAttachmentType): boolean {
 
 /** display 行的类型名（与行内图标同一口径：贴图 / 网格）；文案随语言切换，故是函数 */
 function attachmentKind(type: AuthoringAttachmentType): string {
-  return t({ region: '贴图', mesh: '网格', linkedmesh: '网格（链接）', boundingbox: '包围盒', clipping: '遮罩' }[type])
+  return t(
+    { region: '贴图', mesh: '网格', linkedmesh: '网格（链接）', boundingbox: '包围盒', clipping: '遮罩', armature: '骨架' }[type]
+  )
 }
 
 type TreeSlot = EditorDocument['slots'][number]
@@ -1005,6 +1016,44 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     position: TreeDropPosition
   ): void => {
     if (!canEditBinding()) return
+
+    /*
+     * 从顶部骨架栏拖来的骨架 → 落到插槽行 = 新建一个「嵌套骨架」display。
+     *
+     * 三道闸：自引用 / 环 / 层数超限（`checkNestDrop` 一次给出可读原因）。
+     * 当前骨架本身在骨架栏里是 `draggable=false`，这里再兜一次底 —— 命令 / AI 接口
+     * 也可能带着「拖自己」的请求进来。
+     */
+    if (payload.kind === 'armature') {
+      if (target.kind !== 'slot') {
+        onStatus?.(t('骨架只能拖到插槽上（对着插槽行中间松手）'))
+        return
+      }
+      const parent = document.armatureName
+      if (parent === payload.name) {
+        onStatus?.(t('不能把骨架拖到它自己的层级里'))
+        return
+      }
+      const reason = checkNestDrop(useProjectStore.getState().skeletons, parent, payload.name)
+      if (reason) {
+        onStatus?.(t(reason))
+        return
+      }
+      const created: Array<{ slot: string; attachment: string }> = []
+      update(t('嵌套骨架「{0}」', payload.name), (draft) => {
+        const result = addArmatureDisplay(draft, {
+          slot: target.name,
+          armature: payload.name,
+          skin: selection.skin
+        })
+        if (result) created.push(result)
+      })
+      const last = created[created.length - 1]
+      if (!last) return
+      selection.selectAttachment(last.slot, last.attachment)
+      expandBone(boneOfSlot(target.name))
+      return
+    }
 
     if (payload.kind === 'bone') {
       if (target.kind !== 'bone') {
@@ -1760,8 +1809,15 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           selection.attachment === attachment.name
         }
         icon={
-          // 遮罩用虚线多边形图标，网格用网格图标，贴图用图片图标
-          attachment.type === 'clipping' ? (
+          // 嵌套骨架用人形图标（一眼区别于骨骼行的骨头图标），遮罩用虚线多边形，网格用网格，贴图用图片
+          attachment.type === 'armature' ? (
+            // 人形图标本身细节少、笔画细，用满 14px 的图标列 + 加粗描边才看得清
+            <PersonStanding
+              size={15}
+              strokeWidth={2.6}
+              className={showing ? 'text-accent' : 'text-content-lo/60'}
+            />
+          ) : attachment.type === 'clipping' ? (
             <Pentagon size={11} className={showing ? 'text-accent' : 'text-content-lo/60'} />
           ) : isMeshType(attachment.type) ? (
             <Grid3x3 size={11} className={showing ? 'text-accent' : 'text-content-lo/60'} />
@@ -1770,17 +1826,21 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           )
         }
         meta={
-          attachment.type === 'clipping'
+          attachment.type === 'armature'
             ? showing
-              ? t('显示中 · 遮罩')
-              : t('遮罩')
-            : showing
-              ? isMeshType(attachment.type)
-                ? t('显示中 · 网格')
-                : t('显示中')
-              : isMeshType(attachment.type)
-                ? t('网格')
-                : undefined
+              ? t('显示中 · 骨架 {0}', attachment.subArmature || '?')
+              : t('骨架 {0}', attachment.subArmature || '?')
+            : attachment.type === 'clipping'
+              ? showing
+                ? t('显示中 · 遮罩')
+                : t('遮罩')
+              : showing
+                ? isMeshType(attachment.type)
+                  ? t('显示中 · 网格')
+                  : t('显示中')
+                : isMeshType(attachment.type)
+                  ? t('网格')
+                  : undefined
         }
         // display 行也算宿主插槽的地盘：拖到插槽下面（含子行）都是「给这个插槽加 display」
         dataSlot={slot.name}

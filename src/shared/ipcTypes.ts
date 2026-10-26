@@ -137,6 +137,8 @@ export interface SpinePreviewSkeleton {
   skins: string[]
   defaultAnimation: string
   defaultSkin: string
+  /** hao2d 预览：被本骨架嵌套引用的子骨架（页面据此预取它们的 ske 文本） */
+  nested?: Array<{ armatureName: string; id: string }>
 }
 
 /** 交给主进程起「在线预览」的整份会话数据 */

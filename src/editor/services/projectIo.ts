@@ -4,9 +4,9 @@ import { AI_COMMAND_API_DOC, AI_PLAYBOOK } from '@shared/aiGuides'
 import type { Platform } from '../platform'
 import { parseProject, projectNameFromPath, serializeProject, PROJECT_EXTENSION } from '@core/codec/projectJson'
 import { decompileAsset } from '@core/codec/decompile'
-import type { EditorDocument } from '@core/model/authoring'
+import type { AuthoringImage, EditorDocument } from '@core/model/authoring'
 import { importSpine } from '@importers/spine'
-import { importDragonBones } from '@importers/dragonBones'
+import { importDragonBoneProject } from '@importers/dragonBones'
 import { parseSpineAtlas } from '@importers/atlasSpine'
 import { dbTextureNames, parseDbTextureJson } from '@importers/dragonBonesAtlas'
 import { detectSkeletonFormat, isDbTextureJson } from '@importers/detect'
@@ -417,19 +417,27 @@ export async function importDragonBonesFlow(sourcePath?: string): Promise<IoResu
   }
   if (subTextures.length === 0) return fail(`同目录下没有找到图集（texture_*.json）：${dir}`)
 
-  const result = importDragonBones({
-    json: json as never,
-    subTextures,
+  // 一份 DB 骨骼 JSON 里可能有好几个 armature（父子骨架 + 被嵌套的子骨架）：
+  // 全部导成工程内的骨架，嵌套 display 才按名字引用得到目标
+  const project = importDragonBoneProject({ json: json as never, subTextures, pageSizes, pageImages })
+  const document = finishImportProject(
+    project.assets,
+    pageImages,
     pageSizes,
-    pageImages
-  })
-  const document = finishImport(result.asset, pageImages, pageSizes, jsonPath)
-  warnings.push(...result.warnings)
+    jsonPath,
+    0,
+    project.defaultAnimations
+  )
+  warnings.push(...project.warnings)
   warnings.push(`合并 ${dbTextureNames(subTextures).length} 张图集页`)
   useProjectStore.getState().setWarnings(warnings)
+  const summary =
+    project.assets.length > 1
+      ? `${project.assets.length} 个骨架（${project.names.join('、')}），当前编辑「${project.names[0]}」`
+      : `「${document.armatureName}」`
   return {
     ok: true,
-    message: `已导入 DragonBones：${document.bones.length} 骨骼 / ${document.slots.length} 插槽 / ${document.animations.length} 动画`,
+    message: `已导入 DragonBones：${summary} / ${document.bones.length} 骨骼 / ${document.slots.length} 插槽 / ${document.animations.length} 动画`,
     warnings
   }
 }
@@ -460,16 +468,54 @@ function finishImport(
   pageSizes: PageSizes,
   sourcePath?: string
 ): EditorDocument {
+  return finishImportProject([asset], pageImages, pageSizes, sourcePath, 0)
+}
+
+/**
+ * 多骨架导入（DragonBones 的一份 JSON 里可能有好几个 armature）。
+ *
+ * 图片池是**跨骨架共享**的：先把各骨架用到的图集合成一份再交给 store，
+ * 否则 `setProject` 的 `shareImages` 会用「当前骨架」的池子覆盖其它骨架
+ * （只被兄弟骨架引用的图会直接消失，切过去就是白块）。
+ */
+function finishImportProject(
+  assets: Array<ReturnType<typeof importSpine>['asset']>,
+  pageImages: Record<string, string>,
+  pageSizes: PageSizes,
+  sourcePath?: string,
+  activeIndex = 0,
+  /** 各骨架的默认动画名（DB 的 armature.defaultActions，空串 = 没有） */
+  defaultAnimations: readonly string[] = []
+): EditorDocument {
   releaseDocumentAssets()
-  const document = decompileAsset(asset)
-  document.images = document.images.map((image) => ({
-    ...image,
-    path: pageImages[image.name] ?? image.path,
-    width: pageSizes[image.name]?.width ?? image.width,
-    height: pageSizes[image.name]?.height ?? image.height,
-    loose: false
-  }))
-  useProjectStore.getState().setDocument(document, null, true)
+  const documents = assets.map((asset, index) => {
+    const document = decompileAsset(asset)
+    const defaultAnimation = defaultAnimations[index] ?? ''
+    if (defaultAnimation) document.editorMeta.activeAnimation = defaultAnimation
+    document.images = document.images.map((image) => ({
+      ...image,
+      path: pageImages[image.name] ?? image.path,
+      width: pageSizes[image.name]?.width ?? image.width,
+      height: pageSizes[image.name]?.height ?? image.height,
+      loose: false
+    }))
+    return document
+  })
+
+  const pool: AuthoringImage[] = []
+  for (const document of documents) {
+    for (const image of document.images) {
+      if (!pool.some((item) => item.name === image.name)) pool.push(image)
+    }
+  }
+  for (const document of documents) document.images = pool
+
+  const index = Math.max(0, Math.min(documents.length - 1, activeIndex))
+  if (documents.length > 1) {
+    useProjectStore.getState().setProject(documents, index, null, true)
+  } else {
+    useProjectStore.getState().setDocument(documents[index], null, true)
+  }
   // 一上来就导入、工程还没名字：用被导入文件的名字当项目名（导出产物都跟它走）
   adoptProjectNameFromImport(sourcePath)
   // 导入（整份替换骨架）后：回到 Pose（绑定）态、清空时间轴选中的动画，
@@ -484,7 +530,7 @@ function finishImport(
     scene.refresh()
     scene.fit()
   }
-  return document
+  return documents[index]
 }
 
 export async function importImagesFlow(paths?: readonly string[]): Promise<IoResult> {

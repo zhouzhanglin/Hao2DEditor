@@ -203,7 +203,9 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
           animations: skeleton.animations,
           skins: skeleton.skins,
           defaultAnimation: skeleton.defaultAnimation,
-          defaultSkin: skeleton.defaultSkin
+          defaultSkin: skeleton.defaultSkin,
+          // 嵌套子骨架：页面按 id 预取它们的 ske 文本（清单里不单独列出来给用户选）
+          nested: skeleton.nested ?? []
         }))
       })
     )

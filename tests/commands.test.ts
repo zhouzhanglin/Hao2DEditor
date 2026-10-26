@@ -75,26 +75,26 @@ describe('命令注册表', () => {
     }
   })
 
-  it('未知命令给出候选与查目录的提示', () => {
-    const result = executeCommand('addbon', {})
+  it('未知命令给出候选与查目录的提示', async () => {
+    const result = await executeCommand('addbon', {})
     expect(result.ok).toBe(false)
     expect(result.error).toContain('没有这个命令')
   })
 })
 
 describe('写命令：校验、撤销记录、事务', () => {
-  it('参数不合法：ok=false 且文档原样不动', () => {
+  it('参数不合法：ok=false 且文档原样不动', async () => {
     const before = useProjectStore.getState().document
-    const result = executeCommand('setBoneTransform', {})
+    const result = await executeCommand('setBoneTransform', {})
     expect(result.ok).toBe(false)
     expect(result.error).toContain('bone')
     expect(useProjectStore.getState().document).toBe(before)
   })
 
-  it('失败的命令不占撤销记录', () => {
-    executeCommand('setBoneTransform', {})
-    executeCommand('renameNode', { name: 'root', nextName: 'root2' })
-    expect(executeCommand('addBone', { name: 'arm' }).ok).toBe(true)
+  it('失败的命令不占撤销记录', async () => {
+    await executeCommand('setBoneTransform', {})
+    await executeCommand('renameNode', { name: 'root', nextName: 'root2' })
+    expect((await executeCommand('addBone', { name: 'arm' })).ok).toBe(true)
     expect(boneNames()).toContain('arm')
 
     // 撤销一次就应撤掉 addBone（前面的失败没有留下记录）
@@ -102,42 +102,42 @@ describe('写命令：校验、撤销记录、事务', () => {
     expect(boneNames()).not.toContain('arm')
   })
 
-  it('事务把一批命令合并成一条撤销记录', () => {
-    expect(executeCommand('beginTransaction', {}).ok).toBe(true)
-    expect(executeCommand('addBone', { name: 'arm' }).ok).toBe(true)
-    expect(executeCommand('addBone', { name: 'hand', parent: 'arm' }).ok).toBe(true)
-    expect(executeCommand('endTransaction', {}).ok).toBe(true)
+  it('事务把一批命令合并成一条撤销记录', async () => {
+    expect((await executeCommand('beginTransaction', {})).ok).toBe(true)
+    expect((await executeCommand('addBone', { name: 'arm' })).ok).toBe(true)
+    expect((await executeCommand('addBone', { name: 'hand', parent: 'arm' })).ok).toBe(true)
+    expect((await executeCommand('endTransaction', {})).ok).toBe(true)
     expect(boneNames()).toEqual(['root', 'arm', 'hand'])
 
     useProjectStore.getState().undo()
     expect(boneNames()).toEqual(['root'])
   })
 
-  it('rollbackTransaction 把文档整体还原', () => {
-    executeCommand('beginTransaction', {})
-    executeCommand('addBone', { name: 'arm' })
-    executeCommand('addBone', { name: 'hand', parent: 'arm' })
-    expect(executeCommand('rollbackTransaction', {}).ok).toBe(true)
+  it('rollbackTransaction 把文档整体还原', async () => {
+    await executeCommand('beginTransaction', {})
+    await executeCommand('addBone', { name: 'arm' })
+    await executeCommand('addBone', { name: 'hand', parent: 'arm' })
+    expect((await executeCommand('rollbackTransaction', {})).ok).toBe(true)
     expect(boneNames()).toEqual(['root'])
   })
 })
 
 describe('层级与顺序命令', () => {
-  it('setDrawOrder 按「先画的在前」重排', () => {
-    const result = executeCommand('setDrawOrder', { order: ['c', 'b', 'a'] })
+  it('setDrawOrder 按「先画的在前」重排', async () => {
+    const result = await executeCommand('setDrawOrder', { order: ['c', 'b', 'a'] })
     expect(result.ok).toBe(true)
     expect(drawOrder(useProjectStore.getState().document)).toEqual(['c', 'b', 'a'])
   })
 
-  it('setDrawOrder 必须给全插槽名', () => {
-    const result = executeCommand('setDrawOrder', { order: ['a', 'b'] })
+  it('setDrawOrder 必须给全插槽名', async () => {
+    const result = await executeCommand('setDrawOrder', { order: ['a', 'b'] })
     expect(result.ok).toBe(false)
     expect(result.error).toContain('c')
     expect(drawOrder(useProjectStore.getState().document)).toEqual(['a', 'b', 'c'])
   })
 
-  it('renameNode 骨骼改名会级联更新宿主引用', () => {
-    const result = executeCommand('renameNode', { kind: 'bone', name: 'root', nextName: 'spine' })
+  it('renameNode 骨骼改名会级联更新宿主引用', async () => {
+    const result = await executeCommand('renameNode', { kind: 'bone', name: 'root', nextName: 'spine' })
     expect(result.ok).toBe(true)
     const doc = useProjectStore.getState().document
     expect(doc.bones[0]!.name).toBe('spine')

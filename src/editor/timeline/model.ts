@@ -9,9 +9,11 @@ import {
   keyDeform,
   keySlotColor,
   keySlotDisplay,
+  keySlotSubArmature,
   keySlotVisible,
   pruneEmptyTracks
 } from '../commands/animationCommands'
+import type { AuthoringAttachment } from '@core/model/authoring'
 import { t } from '@i18n'
 
 export type KeyKind = 'bone' | 'slot' | 'deform' | 'constraint' | 'event' | 'drawOrder'
@@ -49,6 +51,35 @@ export interface TimelineTrack {
   channel?: string
 }
 
+/**
+ * 选中对象 → 时间轴上应该滚到 / 闪一下的那一行。
+ *
+ * - 骨骼 / 插槽 → 它们的分组行；
+ * - display（附件）→ 该插槽的**「显示」通道行**：只有这一行在表达「什么时候切到哪个 display」，
+ *   滚到插槽分组行等于把用户丢在一堆通道标题上；
+ * - 分组被折叠（子行不在 `visibleTracks` 里）或没有该子轨时，退回分组行。
+ *
+ * 纯函数便于单测：`DopeSheet` 只负责拿到行之后滚动 + 高亮。
+ */
+export function revealTrackFor(
+  selection: { kind: string; bone: string; slot: string; attachment: string },
+  tracks: readonly TimelineTrack[]
+): TimelineTrack | null {
+  if (selection.kind !== 'bone' && selection.kind !== 'slot' && selection.kind !== 'attachment') return null
+  // 必须**连 kind 一起匹配**：DragonBones 里插槽常常与它挂的骨骼同名（R-JIAN1 既是骨骼又是插槽），
+  // 只按名字找会先命中排在列表前面的骨骼分组 —— 选 display 却滚到骨骼通道就是这么来的。
+  const isBone = selection.kind === 'bone'
+  const target = isBone ? selection.bone : selection.slot
+  if (!target) return null
+  const group = tracks.find((track) => track.isGroup && track.kind === (isBone ? 'bone' : 'slot') && track.target === target)
+  if (!group) return null
+  if (selection.kind !== 'attachment') return group
+  const display = tracks.find(
+    (track) => !track.isGroup && track.parentId === group.id && track.channel === 'display'
+  )
+  return display ?? group
+}
+
 /** 骨骼子轨道的顺序与名称（位置在前，符合 TRS 习惯）；文案随语言切换，故是函数 */
 function boneChannels(): Array<{ channel: 'translate' | 'rotate' | 'scale' | 'shear'; label: string }> {
   return [
@@ -66,11 +97,16 @@ function boneChannels(): Array<{ channel: 'translate' | 'rotate' | 'scale' | 'sh
  * 藏起来用户就找不到在哪儿切 display 了（右键该行可以选要显示的 display 并打关键帧）。
  * 文案随语言切换，故是函数。
  */
-function slotChannels(): Array<{ channel: 'display' | 'color' | 'visible'; label: string; always?: boolean }> {
+function slotChannels(): Array<{
+  channel: 'display' | 'color' | 'visible' | 'subArmature'
+  label: string
+  always?: boolean
+}> {
   return [
     { channel: 'display', label: t('显示'), always: true },
     { channel: 'color', label: t('颜色') },
-    { channel: 'visible', label: t('可见性') }
+    { channel: 'visible', label: t('可见性') },
+    { channel: 'subArmature', label: t('子骨架') }
   ]
 }
 
@@ -137,7 +173,16 @@ export function slotDisplayNameAt(
 }
 
 /** 从动画数据构建轨道 + 关键帧模型（供 dope sheet 渲染与编辑） */
-export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrack[] {
+export function buildTimeline(
+  animation: AuthoringAnimData | null,
+  /**
+   * 当前骨架里「挂了嵌套骨架」的插槽名。
+   *
+   * 有它时这些插槽总是显示「子骨架」通道（哪怕一帧都还没打）—— 否则用户没有入口
+   * 打第一帧；没传时退化为「有帧才显示」，供不关心嵌套的旧调用点使用。
+   */
+  armatureSlots?: ReadonlySet<string>
+): TimelineTrack[] {
   if (!animation) return []
   const tracks: TimelineTrack[] = []
 
@@ -173,14 +218,14 @@ export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrac
   }
 
   // 插槽：同样是「分组行 + 子轨」，显示通道的每个帧带上附件名，便于一眼看出切到了哪个 display
-  for (const track of animation.slots) {
-    const displayKeys: TimelineKey[] = track.displayIndex.map((frame, index) => ({
-      id: `slot:${track.slot}#display@${frame.time}`,
-      trackId: `slot:${track.slot}`,
+  const pushSlotTracks = (slotName: string, track: AuthoringSlotAnim | null): void => {
+    const displayKeys: TimelineKey[] = (track?.displayIndex ?? []).map((frame, index) => ({
+      id: `slot:${slotName}#display@${frame.time}`,
+      trackId: `slot:${slotName}`,
       kind: 'slot' as const,
       channel: 'display',
-      target: track.slot,
-      attachment: track.displayAttachment[index] ?? '',
+      target: slotName,
+      attachment: track?.displayAttachment[index] ?? '',
       time: frame.time,
       easing: frame.easing,
       curve: frame.curve
@@ -188,14 +233,25 @@ export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrac
     pushGroupedTracks(
       tracks,
       'slot',
-      track.slot,
+      slotName,
       slotChannels().map(({ channel, label, always }) => {
-        if (channel === 'display') return { channel, label, keys: displayKeys, always }
+        // 只为「子骨架」通道冒出来的插槽（还没有任何轨道）不显示空的「显示」行
+        if (channel === 'display') return { channel, label, keys: displayKeys, always: track ? always : false }
         const keys: TimelineKey[] = []
-        pushKeys(keys, track.slot, '', 'slot', channel, track[channel])
-        return { channel, label, keys, always }
+        // 子骨架通道在没有关键帧时也要出现在「挂了嵌套骨架」的插槽上（打第一帧的入口）
+        const alwaysShow = always || (channel === 'subArmature' && Boolean(armatureSlots?.has(slotName)))
+        if (track) pushKeys(keys, slotName, '', 'slot', channel, track[channel] ?? [])
+        return { channel, label, keys, always: alwaysShow }
       })
     )
+  }
+  for (const track of animation.slots) pushSlotTracks(track.slot, track)
+  // 挂了嵌套骨架、但整个动画还没有该插槽的轨道：补一行「子骨架」，否则用户没有打第一帧的入口
+  if (armatureSlots) {
+    for (const slotName of armatureSlots) {
+      if (animation.slots.some((track) => track.slot === slotName)) continue
+      pushSlotTracks(slotName, null)
+    }
   }
 
   // 插槽层级（绘制顺序）：每帧是一份完整顺序快照，在 slot 层级面板改完顺序后打帧产生。
@@ -483,6 +539,7 @@ function sortAllTracks(animation: AuthoringAnimData): void {
     sortFrames(track.color)
     sortDisplayTrack(track)
     sortFrames(track.visible)
+    sortFrames(track.subArmature ?? [])
   }
   for (const track of animation.deforms) sortFrames(track.frames)
   for (const track of animation.constraints) {
@@ -632,6 +689,16 @@ export function keyframeTargets(
         )
       } else if (channel === 'visible') {
         keySlotVisible(animation, target.target, time, pose.slotVisible[index] !== 0)
+      } else if (channel === 'subArmature') {
+        // 子骨架帧没有「运行期姿态」可捕获：取该插槽里嵌套骨架 display 的 setup 值
+        const setup = nestedArmatureOf(doc, target.target)
+        if (!setup) continue
+        keySlotSubArmature(animation, target.target, time, {
+          animation: setup.subAnimation,
+          playTimes: setup.subPlayTimes,
+          offset: setup.subOffset,
+          speed: setup.subSpeed
+        })
       } else {
         continue
       }
@@ -702,6 +769,16 @@ export const CONSTRAINT_CHANNEL_LABEL: Record<string, string> = {
  * 这里按**名字**查而不是按已知字段直取：调用方可能传进该约束类型没有的通道名，
  * 直取会拿到 undefined 直接崩，按名字查则统一走「拿不到就跳过」。
  */
+/** 插槽上的第一个「嵌套骨架」display（子骨架通道打帧时取它的 setup 值） */
+function nestedArmatureOf(doc: EditorDocument, slotName: string): AuthoringAttachment | null {
+  for (const skin of doc.skins) {
+    const skinSlot = skin.slots.find((item) => item.slot === slotName)
+    const found = skinSlot?.attachments.find((item) => item.type === 'armature')
+    if (found) return found
+  }
+  return null
+}
+
 function constraintKeysOf(track: AuthoringConstraintAnim, channel: string): FloatKeyframe[] | null {
   const value = (track as unknown as Record<string, unknown>)[channel]
   return Array.isArray(value) ? (value as FloatKeyframe[]) : null
@@ -827,6 +904,11 @@ export interface AnyKeyframe {
   floatParam?: number
   offsets?: number[]
   vertexOffset?: number
+  /** 「子骨架」通道：动画名与三个播放参数（其余通道不会出现这些字段） */
+  animation?: string
+  playTimes?: number
+  offset?: number
+  speed?: number
 }
 
 /**
@@ -915,6 +997,7 @@ function resolveFrames(
     if (!track) return null
     if (selector.channel === 'color') return track.color
     if (selector.channel === 'visible') return track.visible
+    if (selector.channel === 'subArmature') return track.subArmature ?? []
     // 只有「显示」通道走这里；未知 channel 不再兜底到它 ——
     // 否则形状像 `order` 这类选择器会误删显示帧
     if (selector.channel === 'display') return track.displayIndex

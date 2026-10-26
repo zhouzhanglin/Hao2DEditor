@@ -5,12 +5,14 @@ import type { RuntimeAsset } from '../model/asset'
 import { createIkConstraint, createPathConstraint, createPhysicsConstraint, createTransformConstraint } from '../model/constraints'
 import type { Constraint } from '../model/constraints'
 import type { AnimData } from '../model/animation'
-import type { RuntimeAtlasJson, RuntimeSkeJson } from '../codec/runtimeSkeJson'
+import type { RuntimeAtlasJson, RuntimeSkeJson, RuntimeSkeNested } from '../codec/runtimeSkeJson'
 import { parseRuntimeAtlas, parseRuntimeSke } from '../codec/runtimeSkeJson'
 
 export interface LoadedRuntime {
   asset: RuntimeAsset
   atlas: RuntimeAtlasJson
+  /** v2：被嵌套引用的子骨架（骨架名 → 文件名），加载端按需递归读取 */
+  nested: RuntimeSkeNested[]
 }
 
 type JsonRecord = Record<string, unknown>
@@ -131,7 +133,13 @@ function attachmentsOf(value: unknown): AttachmentData[] {
       linkedMeshAttachment: str(raw.linkedMeshAttachment),
       clipEndSlot: str(raw.clipEndSlot),
       clipInverse: bool(raw.clipInverse),
-      clipConvex: bool(raw.clipConvex)
+      clipConvex: bool(raw.clipConvex),
+      // 嵌套骨架（v2 导出）：老文件没有这些字段 → 空引用 / 循环 / 原速
+      subArmature: str(raw.subArmature),
+      subAnimation: str(raw.subAnimation),
+      subPlayTimes: num(raw.subPlayTimes),
+      subOffset: num(raw.subOffset),
+      subSpeed: num(raw.subSpeed, 1)
     })
   })
 }
@@ -199,7 +207,7 @@ export function loadRuntime(skeText: string, atlasText?: string): LoadedRuntime 
   const atlas = atlasText
     ? parseRuntimeAtlas(atlasText)
     : { format: 'hao2d-atlas' as const, version: 1 as const, pages: [], regions: [] }
-  return { asset: assetFromJson(ske, atlas), atlas }
+  return { asset: assetFromJson(ske, atlas), atlas, nested: ske.nested ?? [] }
 }
 
 /** 图集区域 → 页面索引（导出后用 UV 反查时使用） */

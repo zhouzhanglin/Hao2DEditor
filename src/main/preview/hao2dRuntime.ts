@@ -1,9 +1,12 @@
 import { Application, Container } from 'pixi.js'
 import { loadRuntime } from '@core/runtime/loader'
 import { buildRuntimeMaps } from '@core/model/asset'
+import type { RuntimeAsset } from '@core/model/asset'
 import { Skeleton } from '@core/model/skeleton'
 import { AnimationPlayer } from '@core/anim/player'
 import { RUNTIME_PPU } from '@core/codec/runtimeSkeJson'
+import { decomposeTrs } from '@core/math/matrix'
+import { NestRuntime } from '@core/nesting/nestRuntime'
 import { TextureStore } from '@render/material'
 import { SkeletonView } from '@render/skeletonView'
 
@@ -37,6 +40,8 @@ export interface StageInput {
   skeText: string
   atlasText: string
   background?: string
+  /** 被嵌套引用的子骨架文本（骨架名 → ske 文本）；共用父骨架的图集 */
+  nested?: Array<{ armatureName: string; skeText: string }>
 }
 
 export interface Hao2dStage {
@@ -94,13 +99,31 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
   const loaded = loadRuntime(input.skeText, input.atlasText)
   const asset = loaded.asset
 
+  /*
+   * 嵌套骨架：子骨架与父骨架共用同一套图集页，但各自编译产物里只登记「自己用到的页」。
+   * 这里按并集加载，否则子骨架的贴图会是白块。
+   */
+  const nestedAssets = new Map<string, RuntimeAsset>()
+  for (const item of input.nested ?? []) {
+    try {
+      const nested = loadRuntime(item.skeText, input.atlasText)
+      nestedAssets.set(nested.asset.armatureName || item.armatureName, nested.asset)
+    } catch {
+      // 子骨架数据损坏：父骨架里那个 display 就不渲染（与「引用缺失」表现一致）
+    }
+  }
+
   const maps = buildRuntimeMaps(asset, '')
   const skeleton = new Skeleton(asset)
   skeleton.applyRuntimeMaps(maps)
 
   const textures = new TextureStore()
   const blobUrls: string[] = []
-  for (const name of asset.textureNames) {
+  const textureNames = [...asset.textureNames]
+  for (const nested of nestedAssets.values()) {
+    for (const name of nested.textureNames) if (!textureNames.includes(name)) textureNames.push(name)
+  }
+  for (const name of textureNames) {
     const page = input.pages.find((page) => page.name === name)
     if (page && page.bytes && page.bytes.length > 0) {
       const url = URL.createObjectURL(new Blob([page.bytes as BlobPart], { type: 'image/png' }))
@@ -131,6 +154,90 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
   app.stage.addChild(world)
 
   const player = new AnimationPlayer(asset, skeleton)
+
+  /*
+   * 嵌套骨架的视图树：每层一个 `NestRuntime` + 若干子 `SkeletonView`。
+   * 用递归结构而不是单层，是因为子骨架自己也可能是别人的父骨架（A 挂 B、B 挂 C）。
+   */
+  interface NestLayer {
+    nest: NestRuntime | null
+    views: Map<string, { view: SkeletonView; time: number; child: NestLayer }>
+  }
+  function createNestLayer(skin: string): NestLayer {
+    return {
+      nest:
+        nestedAssets.size > 0
+          ? new NestRuntime((name) => {
+              const target = nestedAssets.get(name)
+              return target ? { asset: target, skinName: '' } : null
+            }, skin)
+          : null,
+      views: new Map()
+    }
+  }
+  function destroyLayer(layer: NestLayer): void {
+    for (const entry of layer.views.values()) {
+      entry.view.container.removeFromParent()
+      entry.view.destroy()
+      destroyLayer(entry.child)
+    }
+    layer.views.clear()
+  }
+  function syncLayer(
+    layer: NestLayer,
+    source: RuntimeAsset,
+    sk: Skeleton,
+    pl: AnimationPlayer,
+    host: SkeletonView
+  ): void {
+    if (!layer.nest) return
+    const instances = layer.nest.update(source, sk, pl, host.result?.nestAnchors)
+    const live = new Set<string>()
+    const layers: Array<{ layer: number; container: Container }> = []
+    for (const instance of instances) {
+      live.add(instance.key)
+      let entry = layer.views.get(instance.key)
+      if (!entry || entry.view.runtimeAsset !== instance.asset) {
+        if (entry) {
+          entry.view.container.removeFromParent()
+          entry.view.destroy()
+          destroyLayer(entry.child)
+        }
+        entry = {
+          view: new SkeletonView(instance.asset, textures, ''),
+          time: Number.NaN,
+          child: createNestLayer('')
+        }
+        layer.views.set(instance.key, entry)
+      }
+      const parts = decomposeTrs(instance.matrix)
+      entry.view.container.position.set(parts.x, parts.y)
+      entry.view.container.rotation = (parts.rotation * Math.PI) / 180
+      entry.view.container.scale.set(parts.scaleX, parts.scaleY)
+      entry.view.container.visible = instance.visible
+      const tint = entry.view.meshBuilder.tint
+      const next = instance.tint
+      if (tint.r !== next.r || tint.g !== next.g || tint.b !== next.b || tint.a !== next.a) {
+        entry.view.setTint({ r: next.r, g: next.g, b: next.b, a: next.a })
+      }
+      if (!(Math.abs(entry.time - instance.childTime) <= 1e-9)) {
+        entry.view.markDirty()
+        entry.time = instance.childTime
+      }
+      entry.view.update(instance.skeleton)
+      syncLayer(entry.child, instance.asset, instance.skeleton, instance.player, entry.view)
+      layers.push({ layer: instance.layer, container: entry.view.container })
+    }
+    for (const [key, entry] of [...layer.views]) {
+      if (live.has(key)) continue
+      entry.view.container.removeFromParent()
+      entry.view.destroy()
+      destroyLayer(entry.child)
+      layer.views.delete(key)
+    }
+    host.setNestedViews(layers)
+  }
+  const rootLayer = createNestLayer('')
   const animations = asset.animations.map((animation) => animation.name)
   const skins = asset.skins.map((skin) => skin.name)
   const defaultAnimation = animations[0] ?? ''
@@ -242,6 +349,7 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
       view.markDirty()
     }
     view.update(skeleton)
+    syncLayer(rootLayer, asset, skeleton, player, view)
     // 首帧兜底：挂载时包围盒退化（空骨架 / 几何未就绪）就等有效几何再取景一次。
     // 用户碰过相机（touched）后不再兜底，避免把调好的视角冲掉
     if (autoFit && !touched) {
@@ -343,6 +451,7 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
     screenToWorld,
     destroy() {
       destroyed = true
+      destroyLayer(rootLayer)
       blobUrls.forEach((url) => URL.revokeObjectURL(url))
       textures.clear()
       try {

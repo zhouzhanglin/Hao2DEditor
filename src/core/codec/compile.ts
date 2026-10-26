@@ -175,7 +175,9 @@ function convertAttachment(att: AuthoringAttachment, ctx: AttachmentContext): Re
           ? AttachmentType.BoundingBox
           : att.type === 'clipping'
             ? AttachmentType.Clipping
-            : AttachmentType.Region
+            : att.type === 'armature'
+              ? AttachmentType.Armature
+              : AttachmentType.Region
 
   const isClipping = att.type === 'clipping'
   const uvs = att.uvs.length > 0 ? Float32Array.from(att.uvs) : Float32Array.from(DEFAULT_UVS)
@@ -231,7 +233,14 @@ function convertAttachment(att: AuthoringAttachment, ctx: AttachmentContext): Re
     linkedMeshAttachment: att.linkedMeshAttachment,
     clipEndSlot: att.clipEndSlot ?? '',
     clipInverse: att.clipInverse ?? false,
-    clipConvex: att.clipConvex ?? false
+    clipConvex: att.clipConvex ?? false,
+    // 嵌套骨架：只做字段透传（被引用骨架的解析交给编辑器层的运行时缓存，
+    // core 的编译必须保持纯函数，否则单测与「导出非活动骨架」都会互相牵连）
+    subArmature: att.type === 'armature' ? att.subArmature : '',
+    subAnimation: att.type === 'armature' ? att.subAnimation : '',
+    subPlayTimes: att.type === 'armature' ? att.subPlayTimes : 0,
+    subOffset: att.type === 'armature' ? att.subOffset : 0,
+    subSpeed: att.type === 'armature' ? att.subSpeed : 1
   })
 }
 
@@ -419,7 +428,11 @@ function compileAnimations(
       color: track.color,
       displayIndex: track.displayIndex,
       displayAttachment: track.displayAttachment,
-      visible: track.visible
+      visible: track.visible,
+      // 子骨架控制帧：深拷贝 + 按时间排序（作者态的顺序由编辑操作维护，编译期不信任它）
+      subArmature: (track.subArmature ?? [])
+        .map((frame) => ({ ...frame }))
+        .sort((a, b) => a.time - b.time)
     }))
 
   const deforms = anim.deforms

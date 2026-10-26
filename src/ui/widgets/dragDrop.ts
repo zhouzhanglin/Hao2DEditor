@@ -63,13 +63,26 @@ export type TreeDragPayload =
   | { kind: 'bone'; name: string }
   | { kind: 'slot'; name: string }
   | { kind: 'display'; slot: string; name: string }
+  /**
+   * 从顶部骨架栏拖出的骨架项：落到插槽行 = 新建一个嵌套骨架 display。
+   * `name` 是骨架名（= `EditorDocument.armatureName`）。
+   */
+  | { kind: 'armature'; name: string }
 
 /** 放置位置：行内部（成为子节点）/ 行的上沿 / 下沿（同级排序） */
 export type TreeDropPosition = 'inside' | 'above' | 'below'
 
-export function setTreeDragData(transfer: DataTransfer, payload: TreeDragPayload): void {
+/**
+ * `effect`：树内移动用 'move'；从骨架栏拖出来是**新建**引用（子骨架仍然留在列表里），
+ * 因此用 'copy'，光标也显示成「+」。
+ */
+export function setTreeDragData(
+  transfer: DataTransfer,
+  payload: TreeDragPayload,
+  effect: 'move' | 'copy' = 'move'
+): void {
   transfer.setData(TREE_MIME, JSON.stringify(payload))
-  transfer.effectAllowed = 'move'
+  transfer.effectAllowed = effect
 }
 
 export function hasTreeDrag(transfer: DataTransfer | null): boolean {

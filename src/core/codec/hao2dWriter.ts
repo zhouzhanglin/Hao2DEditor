@@ -117,8 +117,32 @@ function writeSkins(writer: ByteWriter, skins: readonly SkinData[]): void {
     for (const slot of skin.slots) {
       writer.writeString(slot.slotName)
       writer.writeInt32(slot.attachments.length)
-      for (const attachment of slot.attachments) writeAttachment(writer, attachment)
+      for (const attachment of slot.attachments) writeAttachment(writer, hao2dAttachment(attachment))
     }
+  }
+}
+
+/**
+ * `.hao2d` 只认既有附件枚举（Unity 端 `Hao2DCodec` 逐字节读取，遇到未知枚举会整体错位）。
+ *
+ * 嵌套骨架写成**零尺寸 Region 占位**：附件数量与 `displayIndex` 下标保持不变 ——
+ * 直接跳过会让后面所有动画的显示切换指到别的附件（换装错位），比少一个部件更难查。
+ */
+function hao2dAttachment(a: AttachmentData): AttachmentData {
+  if (a.type !== AttachmentType.Armature) return a
+  return {
+    ...a,
+    type: AttachmentType.Region,
+    size: { x: 0, y: 0 },
+    frameSize: { x: 0, y: 0 },
+    contentOffset: { x: 0, y: 0 },
+    textureName: '',
+    uvs: new Float32Array(0),
+    vertices: new Float32Array(0),
+    triangles: [],
+    edges: [],
+    hull: 0,
+    weights: []
   }
 }
 
@@ -360,6 +384,21 @@ export function collectHao2dWarnings(asset: RuntimeAsset): string[] {
   }
   if (!asset.runtimeIK) {
     warnings.push('该资源 runtimeIK = false：Unity 运行期不会再解算 IK（IK 已烘焙进骨骼轨道）')
+  }
+  // 嵌套骨架：Unity 端 .hao2d 没有 armature display 概念，只能按空占位写
+  const nestedCount = asset.skins.reduce(
+    (total, skin) =>
+      total +
+      skin.slots.reduce(
+        (count, slot) => count + slot.attachments.filter((a) => a.type === AttachmentType.Armature).length,
+        0
+      ),
+    0
+  )
+  if (nestedCount > 0) {
+    warnings.push(
+      `有 ${nestedCount} 个嵌套骨架 display：.hao2d（Unity）不支持骨架嵌套，已按零尺寸空占位导出，Unity 侧看不到这些子骨架`
+    )
   }
   // 插槽 setup 可见性（层级树眼睛）不在 .hao2d 二进制里：格式与 Unity 参考库
   // Hao2DCodec 逐字节一致，加字段会让读端从插槽段开始整体错位。隐藏状态只存工程 JSON

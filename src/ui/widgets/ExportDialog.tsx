@@ -380,7 +380,8 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
           animations: skeleton.animations,
           skins: skeleton.skins,
           defaultAnimation: skeleton.defaultAnimation,
-          defaultSkin: skeleton.defaultSkin
+          defaultSkin: skeleton.defaultSkin,
+          nested: skeleton.nested
         }))
       }
     )

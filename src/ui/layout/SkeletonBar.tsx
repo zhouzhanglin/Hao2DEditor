@@ -3,6 +3,7 @@ import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import ContextMenu from '@ui/widgets/ContextMenu'
 import type { ContextMenuItem } from '@ui/widgets/ContextMenu'
+import { setTreeDragData } from '@ui/widgets/dragDrop'
 import { t } from '@i18n'
 
 interface SkeletonBarProps {
@@ -76,7 +77,22 @@ export default function SkeletonBar({ onSwitch, onAdd, onRename, onRemove, onSta
           <button
             key={`skeleton-${index}`}
             type="button"
-            title={t('{0}（双击重命名；右键重命名 / 删除）', name)}
+            // 当前骨架不能拖（拖到自己的层级里没有意义）；其余骨架可拖到别的骨架的插槽上做嵌套
+            draggable={!isActive}
+            title={
+              isActive
+                ? t('{0}（当前骨架；双击重命名；右键重命名 / 删除）', name)
+                : t('{0}（拖到另一个骨架的插槽行 = 嵌套；双击重命名；右键重命名 / 删除）', name)
+            }
+            onDragStart={(event) => {
+              if (isActive) {
+                event.preventDefault()
+                onStatus(t('不能把骨架拖到它自己的层级里'))
+                return
+              }
+              event.stopPropagation()
+              setTreeDragData(event.dataTransfer, { kind: 'armature', name }, 'copy')
+            }}
             onClick={() => onSwitch(index)}
             onDoubleClick={() => beginRename(index)}
             onContextMenu={(event) => {

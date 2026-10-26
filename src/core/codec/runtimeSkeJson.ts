@@ -42,9 +42,25 @@ export interface RuntimeAtlasJson {
   regions: RuntimeAtlasRegion[]
 }
 
+/**
+ * 被嵌套引用的子骨架（v2）。
+ *
+ * 只写「骨架名 → 文件名」：加载端按需递归读取，父子骨架之间仍是**名字引用**，
+ * 与编辑器工程文件同一套语义（重命名骨架不会让引用错位，重新导出即可）。
+ */
+export interface RuntimeSkeNested {
+  armatureName: string
+  /** 相对当前 ske 文件名的子骨架文件名（如 `Sword_ske.json`） */
+  file: string
+}
+
 export interface RuntimeSkeJson {
   format: 'hao2d-ske'
-  version: 1
+  /**
+   * - **1**：单骨架（没有嵌套）；
+   * - **2**：新增 `nested`（被嵌套引用的子骨架清单）。
+   */
+  version: 1 | 2
   armatureName: string
   frameRate: number
   /** 骨架单位 → 像素（1 单位 = ppu 像素），方便游戏侧按像素布局 */
@@ -60,6 +76,8 @@ export interface RuntimeSkeJson {
   constraints: unknown[]
   animations: unknown[]
   bindposes: number[]
+  /** v2：子骨架清单（v1 文件没有这个字段，读成空数组） */
+  nested?: RuntimeSkeNested[]
 }
 
 export const RUNTIME_PPU = 100
@@ -76,11 +94,11 @@ export function serializeRuntimeAtlas(atlas: RuntimeAtlasJson): string {
  */
 export function serializeRuntimeSke(
   asset: RuntimeAsset,
-  options: { atlasFileName: string; ppu?: number }
+  options: { atlasFileName: string; ppu?: number; nested?: readonly RuntimeSkeNested[] }
 ): string {
   const json: RuntimeSkeJson = {
     format: 'hao2d-ske',
-    version: 1,
+    version: 2,
     armatureName: asset.armatureName,
     frameRate: asset.frameRate,
     ppu: options.ppu ?? RUNTIME_PPU,
@@ -130,7 +148,8 @@ export function serializeRuntimeSke(
     })),
     constraints: asset.constraints.map((constraint) => ({ ...constraint })),
     animations: asset.animations.map((animation) => ({ ...animation })),
-    bindposes: Array.from(asset.bindposes)
+    bindposes: Array.from(asset.bindposes),
+    nested: options.nested ? options.nested.map((item) => ({ ...item })) : []
   }
   return `${JSON.stringify(json, null, 2)}\n`
 }
@@ -141,9 +160,13 @@ export function parseRuntimeSke(text: string): RuntimeSkeJson {
   if (!raw || raw.format !== 'hao2d-ske') {
     throw new Error('不是 hao2d-ske 格式的骨骼数据')
   }
-  if (raw.version !== 1) {
+  // v1 是「无嵌套」的老格式：继续可读，缺的字段读成空
+  if (raw.version !== 1 && raw.version !== 2) {
     throw new Error(`不支持的 hao2d-ske 版本 ${raw.version}`)
   }
+  raw.nested = Array.isArray(raw.nested)
+    ? raw.nested.filter((item) => typeof item?.armatureName === 'string' && typeof item?.file === 'string')
+    : []
   return raw
 }
 

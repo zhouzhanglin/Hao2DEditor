@@ -165,7 +165,7 @@ export function registerAnimCommands(): void {
       name: 'keySlotSubArmatureFrame',
       title: '打子骨架帧',
       description:
-        '打一帧「嵌套骨架播什么」：子骨架动画名（空串 = 回 setup 姿态）+ 播放次数（0 = 循环）/ 起始偏移 / 倍速。用于「挥刀时刀光从第 3 帧起播」这类效果；插槽上要先有嵌套骨架 display',
+        '打一帧「嵌套骨架播什么」：子骨架动画名（空串 = 回 setup 姿态）+ 播放次数（0 或负数 = 循环，每轮从 offset 起播）/ 起始偏移 / 倍速。用于「挥刀时刀光从第 3 帧起播」这类效果；插槽上要先有嵌套骨架 display',
       args: {
         animation: { type: 'string', description: '动画名；不传则用当前编辑动画' },
         slot: { type: 'string', description: '挂了嵌套骨架 display 的插槽名', required: true },
@@ -175,7 +175,7 @@ export function registerAnimCommands(): void {
           description: '子骨架里要播的动画名；空串 = 回 setup 姿态（可用 getProjectState 看别的骨架有哪些动画）',
           required: true
         },
-        playTimes: { type: 'number', description: '播放次数：0 = 无限循环（默认 0）' },
+        playTimes: { type: 'number', description: '播放次数：0 或负数 = 无限循环（默认 0；写 -1 更直白），正数 = 播几次后定格' },
         offset: { type: 'number', description: '起始偏移（秒）：从子动画的第几秒开始（默认 0）' },
         speed: { type: 'number', description: '倍速，1 = 原速（默认 1）' }
       },

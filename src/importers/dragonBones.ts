@@ -84,7 +84,8 @@ function actionAnimation(actions: readonly DbActionJson[] | undefined): {
 } | null {
   for (const action of actions ?? []) {
     const play = (action.gotoAndPlay ?? '').trim()
-    if (play) return { animation: play, playTimes: Math.max(0, Math.round(action.playTimes ?? 0)) }
+    // DB 的 0 表示循环；负数在新规则里也等价于循环，原样保留
+    if (play) return { animation: play, playTimes: Math.round(action.playTimes ?? 0) }
     const stop = (action.gotoAndStop ?? '').trim()
     if (stop) return { animation: stop, playTimes: 1 }
   }

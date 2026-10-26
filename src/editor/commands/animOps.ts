@@ -189,7 +189,7 @@ export interface KeySlotSubArmatureFrameOptions {
   time: number
   /** 子骨架里要播的动画名；空串 = 回 setup 姿态 */
   clip: string
-  /** 播放次数：0 = 无限循环 */
+  /** 播放次数：0 或负数 = 无限循环（每轮从 offset 起播） */
   playTimes?: number
   /** 起始偏移（秒），即从子动画的第几秒开始 */
   offset?: number
@@ -227,7 +227,8 @@ export function keySlotSubArmatureFrame(
     throw new Error(`插槽「${slot.name}」上没有嵌套骨架 display（先用 nestArmature 把别的骨架挂上来）`)
   }
   const clip = options.clip ?? ''
-  const playTimes = Math.max(0, Math.round(options.playTimes ?? 0))
+  // 0 与负数都表示循环（负数写法让人一眼看出不是 1 次），这里只做取整
+  const playTimes = Math.round(options.playTimes ?? 0)
   const offset = options.offset ?? 0
   const speed = options.speed ?? 1
   if (!Number.isFinite(offset)) throw new Error(`offset 必须是数字（秒），收到 ${offset}`)

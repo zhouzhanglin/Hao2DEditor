@@ -23,15 +23,24 @@ function doc(name: string, refs: Array<{ slot: string; target: string }> = []): 
 }
 
 describe('子骨架时钟', () => {
-  it('循环：对时长取模，负偏移也落回 [0, duration)', () => {
+  it('循环：每轮都从 offset 起播（循环区间 [offset, duration)）', () => {
     expect(childClock({ parentTime: 0, keyTime: 0, offset: 0, speed: 1, playTimes: 0, duration: 2 })).toBe(0)
     expect(childClock({ parentTime: 3, keyTime: 0, offset: 0, speed: 1, playTimes: 0, duration: 2 })).toBeCloseTo(1)
     expect(childClock({ parentTime: 0.5, keyTime: 1, offset: 0, speed: 1, playTimes: 0, duration: 2 })).toBeCloseTo(
       1.5
     )
+    // 负偏移折回有效区间
     expect(childClock({ parentTime: 0, keyTime: 0, offset: -0.5, speed: 1, playTimes: 0, duration: 2 })).toBeCloseTo(
       1.5
     )
+    // offset = 1、时长 4：循环区间是 [1, 4)，第二轮仍然从 1 起播（旧行为会回到 0）
+    expect(childClock({ parentTime: 4, keyTime: 0, offset: 1, speed: 1, playTimes: 0, duration: 4 })).toBeCloseTo(2)
+    expect(childClock({ parentTime: 6, keyTime: 0, offset: 1, speed: 1, playTimes: 0, duration: 4 })).toBeCloseTo(1)
+  })
+
+  it('负数播放次数同样表示循环（-1 容易和「播 1 次」区分）', () => {
+    expect(childClock({ parentTime: 4, keyTime: 0, offset: 1, speed: 1, playTimes: -1, duration: 4 })).toBeCloseTo(2)
+    expect(childClock({ parentTime: 6, keyTime: 0, offset: 1, speed: 1, playTimes: -1, duration: 4 })).toBeCloseTo(1)
   })
 
   it('倍速只影响父时间到子时间的换算', () => {

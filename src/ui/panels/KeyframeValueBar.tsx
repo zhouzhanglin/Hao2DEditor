@@ -376,9 +376,9 @@ function FrameValueEditor({
             value={frame?.playTimes ?? 0}
             precision={0}
             step={1}
-            min={0}
+            // 0 / 负数 = 循环（-1 更直白）；正数 = 播几次后定格
             onChange={(next) =>
-              onEdit(t('修改子骨架播放次数'), (item) => { item.playTimes = Math.max(0, Math.round(next)) })
+              onEdit(t('修改子骨架播放次数'), (item) => { item.playTimes = Math.round(next) })
             }
           />
         </div>

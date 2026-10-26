@@ -64,6 +64,14 @@ export class AnimationPlayer {
   private cur: AnimData | null = null
   private prev: AnimData | null = null
   private timeValue = 0
+  /**
+   * **不随循环回卷**的绝对时间（秒）：`time` 在 loop 时会回到 0，这个不会。
+   *
+   * 嵌套骨架的循环播放需要它：子骨架的循环周期往往和父动画不同（父 4 秒、子 1 秒），
+   * 用 `time` 算子时间的话，父动画每次 loop 都会把子骨架拉回 0 帧 ——
+   * 看起来就像「子骨架根本没在循环，只是跟着父动画重头播」。
+   */
+  private elapsedValue = 0
   private lastTime = 0
   private fadeDuration = 0
   private fadeElapsed = 0
@@ -109,6 +117,7 @@ export class AnimationPlayer {
     this.pausedFlag = false
     this.completed = false
     this.timeValue = 0
+    this.elapsedValue = 0
     this.lastTime = 0
     this.step(0)
     return true
@@ -130,6 +139,7 @@ export class AnimationPlayer {
     this.pausedFlag = false
     this.completed = false
     this.timeValue = 0
+    this.elapsedValue = 0
     this.lastTime = 0
     this.step(0)
     return true
@@ -142,6 +152,7 @@ export class AnimationPlayer {
     this.pausedFlag = false
     this.completed = false
     this.timeValue = 0
+    this.elapsedValue = 0
     this.lastTime = 0
     this.skeleton.setToSetupPose()
     this.solveCurrentConstraints(null, 0)
@@ -149,6 +160,8 @@ export class AnimationPlayer {
 
   seek(seconds: number): void {
     const anim = this.cur
+    // 绝对时钟跟手：拖播放头时子骨架按当前父时间确定性地定位（不是累加，不会漂移）
+    this.elapsedValue = seconds
     if (!anim) {
       this.timeValue = 0
       this.lastTime = 0
@@ -196,6 +209,24 @@ export class AnimationPlayer {
 
   get time(): number {
     return this.timeValue
+  }
+
+  /**
+   * 绝对播放时间（秒，**不回卷**）：循环时持续累加，`seek` 时跟到目标时间。
+   * 子骨架「无限次播放」用它算时钟，才不会在父动画 loop 时被拉回 0。
+   */
+  get elapsed(): number {
+    return this.elapsedValue
+  }
+
+  /**
+   * 只把绝对时钟挪到指定值（不动当前姿态）。
+   *
+   * 给「临时 seek 再回来」的场景用：洋葱皮会 seek 到前后帧再 seek 回来，
+   * 若顺手把绝对时钟也拉回去，子骨架的循环相位每帧都会被重置一次。
+   */
+  restoreElapsed(seconds: number): void {
+    this.elapsedValue = seconds
   }
 
   set time(value: number) {
@@ -294,6 +325,7 @@ export class AnimationPlayer {
 
     const dur = this.durationOf(anim)
     this.timeValue += dt
+    this.elapsedValue += dt
     if (this.fading && this.fadeDuration > 0) this.fadeElapsed += dt
 
     let reachedEnd = false

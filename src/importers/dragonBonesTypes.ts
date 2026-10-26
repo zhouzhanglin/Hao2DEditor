@@ -33,7 +33,7 @@ export interface DbColorJson {
  * DragonBones 的「动作」（`actions` 数组里的一项）。
  *
  * 实际只用到 `gotoAndPlay` / `gotoAndStop`：它们挂在**嵌套骨架 display 所在插槽**上，
- * 用来指定子骨架播哪个动画。`playTimes` 在部分导出器里会带（0 = 循环）。
+ * 用来指定子骨架播哪个动画。`playTimes` 在部分导出器里会带（0 / 负数 = 循环）。
  */
 export interface DbActionJson {
   gotoAndPlay?: string

@@ -113,7 +113,8 @@ describe('AI 命令：骨架嵌套', () => {
       slot: 'weapon',
       time: 0.2,
       clip: 'slash',
-      playTimes: 0,
+      // 负数 = 循环（-1 比 0 更直白）：命令层不能把它夹成 0 / 1
+      playTimes: -1,
       offset: 0.1,
       speed: 2
     })
@@ -125,6 +126,7 @@ describe('AI 命令：骨架嵌套', () => {
     expect(slots[0].subArmature).toHaveLength(1)
     expect(slots[0].subArmature[0].clip).toBe('slash')
     expect(slots[0].subArmature[0].speed).toBe(2)
+    expect(slots[0].subArmature[0].playTimes).toBe(-1)
 
     const moved = await executeCommand('moveKeyframe', {
       animation: 'attack',

@@ -198,7 +198,8 @@ export function keySlotSubArmature(
   if (!track.subArmature) track.subArmature = []
   upsertKeyframe(
     track.subArmature,
-    emptySubArmatureKeyframe(time, key.animation, Math.max(0, Math.round(key.playTimes)), key.offset, key.speed)
+    // 0 / 负数都表示循环（-1 更直白），不要夹到 0
+    emptySubArmatureKeyframe(time, key.animation, Math.round(key.playTimes), key.offset, key.speed)
   )
 }
 

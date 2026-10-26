@@ -51,7 +51,7 @@ export interface DeformKeyframe extends KeyframeBase {
 export interface SubArmatureKeyframe extends KeyframeBase {
   /** 子骨架动画名；空串 = 回 setup 姿态（相当于 DragonBones 的 gotoAndStop） */
   animation: string
-  /** 0 = 无限循环；n = 播 n 次后定格末帧 */
+  /** 0 或负数 = 无限循环（每轮从 offset 起播）；n > 0 = 播 n 次后定格末帧 */
   playTimes: number
   /** 起始偏移（秒） */
   offset: number

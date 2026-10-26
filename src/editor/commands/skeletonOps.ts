@@ -410,7 +410,7 @@ export interface SetNestedArmatureOptions {
   armature?: string
   /** setup 默认播放的子动画名；空串 = setup 姿态 */
   animation?: string
-  /** 0 = 循环 */
+  /** 0 或负数 = 循环（每轮从 offset 起播） */
   playTimes?: number
   /** 起始偏移（秒） */
   offset?: number
@@ -447,7 +447,8 @@ export function setNestedArmature(
       changedFields.push('animation')
     }
     if (options.playTimes !== undefined) {
-      attachment.subPlayTimes = Math.max(0, Math.round(options.playTimes))
+      // 0 与负数都是循环（-1 更直白），只取整、不夹到 0
+      attachment.subPlayTimes = Math.round(options.playTimes)
       changedFields.push('playTimes')
     }
     if (options.offset !== undefined) {

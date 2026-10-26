@@ -1031,12 +1031,11 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                   value={attachment.subPlayTimes}
                   step={1}
                   precision={0}
-                  min={0}
-                  suffix={t('次')}
+                  // 0 / 负数 = 循环（-1 更直白）；正数 = 播几次后定格
                   onChange={(value) =>
                     update(t('修改子骨架播放次数'), (draft) =>
                       patchAttachment(draft, slot.name, attachment.name, (a) => {
-                        a.subPlayTimes = Math.max(0, Math.round(value))
+                        a.subPlayTimes = Math.round(value)
                       })
                     )
                   }

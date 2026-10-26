@@ -124,7 +124,7 @@ export interface AuthoringAttachment {
   subArmature: string
   /** setup 默认子动画名（空串 = 停在子骨架 setup 姿态） */
   subAnimation: string
-  /** setup 默认播放次数：0 = 循环，n = 播 n 次后定格末帧 */
+  /** setup 默认播放次数：0 或负数 = 循环（每轮从 subOffset 起播），n > 0 = 播 n 次后定格末帧 */
   subPlayTimes: number
   /** setup 默认起始偏移（秒） */
   subOffset: number

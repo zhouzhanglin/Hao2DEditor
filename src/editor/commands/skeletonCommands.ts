@@ -429,7 +429,7 @@ export function registerSkeletonCommands(): void {
         attachment: { type: 'string', description: '嵌套骨架 display 名', required: true },
         armature: { type: 'string', description: '引用哪个骨架（同工程里的骨架名；空串 = 断开引用）' },
         animation: { type: 'string', description: 'setup 默认播放的子动画名；空串 = setup 姿态' },
-        playTimes: { type: 'number', description: '播放次数：0 = 无限循环' },
+        playTimes: { type: 'number', description: '播放次数：0 或负数 = 无限循环（每轮从 offset 起播）；正数 = 播几次后定格' },
         offset: { type: 'number', description: '起始偏移（秒）' },
         speed: { type: 'number', description: '倍速，1 = 原速' }
       },

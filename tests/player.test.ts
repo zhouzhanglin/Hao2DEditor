@@ -29,6 +29,41 @@ function createPlayer(animations: AnimData[]) {
   return new AnimationPlayer(runtime, skeleton)
 }
 
+describe('AnimationPlayer 绝对时钟（子骨架循环用）', () => {
+  const loopAnim = () => ({ ...emptyAnimData('a'), duration: 1 })
+
+  it('循环时 time 回卷，elapsed 继续累加', () => {
+    const player = createPlayer([loopAnim()])
+    player.play('a', true)
+    player.update(0.75)
+    expect(player.time).toBeCloseTo(0.75)
+    expect(player.elapsed).toBeCloseTo(0.75)
+    // 越过一圈：time 回到 0.25，elapsed 继续往前走（子骨架据此才不会被拉回 0 帧）
+    player.update(0.5)
+    expect(player.time).toBeCloseTo(0.25)
+    expect(player.elapsed).toBeCloseTo(1.25)
+  })
+
+  it('seek 让绝对时钟跟手（拖播放头时子骨架确定性定位）', () => {
+    const player = createPlayer([loopAnim()])
+    player.play('a', true)
+    player.update(3)
+    player.seek(0.4)
+    expect(player.time).toBeCloseTo(0.4)
+    expect(player.elapsed).toBeCloseTo(0.4)
+  })
+
+  it('restoreElapsed 只挪绝对时钟，不动当前姿态', () => {
+    const player = createPlayer([loopAnim()])
+    player.play('a', true)
+    player.seek(0.2)
+    const time = player.time
+    player.restoreElapsed(5)
+    expect(player.time).toBe(time)
+    expect(player.elapsed).toBe(5)
+  })
+})
+
 describe('AnimationPlayer 采样', () => {
   it('play 后立即应用第 0 帧，末帧之后保持末帧值', () => {
     const animation = {

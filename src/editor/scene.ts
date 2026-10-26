@@ -1586,6 +1586,8 @@ export class EditorScene {
     const player = bundle.player
     const skeleton = bundle.skeleton
     const current = player.time
+    // 绝对时钟（子骨架循环相位的来源）要先存下来：seek 会把它一起改掉
+    const elapsed = player.elapsed
     /*
      * 前后偏移取时长的 8%（不低于 1/30s）：4% 时（1 秒动画 ≈ 40ms）姿态差异太小，
      * 幽灵几乎与本体完全重合，看上去就像「没开」。放大到 8% 才看得出前后姿态的走向。
@@ -1603,8 +1605,9 @@ export class EditorScene {
         color: offset < 0 ? GHOST_PREV_COLOR : GHOST_NEXT_COLOR
       })
     }
-    // 回到原来的时间点，恢复当前姿态
+    // 回到原来的时间点，恢复当前姿态（绝对时钟也恢复，别把子骨架循环相位带偏）
     player.seek(current)
+    player.restoreElapsed(elapsed)
 
     const lengths = bundle.asset.bones.map((bone) => bone.length)
     for (const ghost of ghosts) {

@@ -160,7 +160,14 @@ export class NestRuntime {
       const speed = sample ? sample.speed : attachment.subSpeed
       const keyTime = sample ? sample.keyTime : 0
 
-      this.drive(instance, animation, playTimes, offset, speed, parentTime, keyTime)
+      /*
+       * 循环播放（playTimes <= 0）= 「无限次播放」：用**不回卷的绝对时钟**算子时间。
+       * 父动画 loop 回卷时子骨架继续往前走，两边的循环周期互不影响；
+       * 非循环仍用父动画当前时间（父动画每轮从头播，子骨架也跟着重来）。
+       * 拖播放头时 `elapsed` 会由 `seek` 跟到目标时间，所以定位仍是确定性的、不会漂移。
+       */
+      const clockTime = playTimes <= 0 ? player.elapsed : parentTime
+      this.drive(instance, animation, playTimes, offset, speed, clockTime, keyTime)
 
       // 矩阵 = 父骨骼世界矩阵 × 附件 TRS
       const boneIndex = asset.slots[slotIndex].boneIndex
@@ -246,7 +253,7 @@ export class NestRuntime {
   ): void {
     if (instance.animation !== animation) {
       if (animation) {
-        const started = instance.player.play(animation, playTimes === 0)
+        const started = instance.player.play(animation, playTimes <= 0)
         if (!started) instance.player.stop()
       } else {
         // 空动画名 = 停在 setup 姿态（DB 的 gotoAndStop 语义）
@@ -254,7 +261,7 @@ export class NestRuntime {
       }
     } else if (animation) {
       // 循环开关随关键帧变化时同步（不影响当前时间）
-      const loop = playTimes === 0
+      const loop = playTimes <= 0
       if (instance.player.loop !== loop) instance.player.loop = loop
     }
 
@@ -272,6 +279,15 @@ export class NestRuntime {
           duration: instance.player.duration
         })
       : 0
-    if (animation) instance.player.seek(instance.childTime)
+    if (animation) {
+      instance.player.seek(instance.childTime)
+      /*
+       * 再把子播放器的绝对时钟设成**未回卷**的子时间：子骨架自己也可能挂着别人（A→B→C），
+       * 更深一层的循环同样不能被上层 loop 拉回。
+       */
+      if (playTimes <= 0) {
+        instance.player.restoreElapsed((parentTime - keyTime) * speed + offset)
+      }
+    }
   }
 }

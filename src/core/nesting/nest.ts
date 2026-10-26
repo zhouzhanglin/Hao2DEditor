@@ -86,31 +86,48 @@ export interface ChildClockInput {
   offset: number
   /** 倍速 */
   speed: number
-  /** 0 = 无限循环；n = 播 n 次后定格 */
+  /** 0 或负数 = 无限循环（每轮都从 offset 开始）；n > 0 = 播 n 次后定格 */
   playTimes: number
   /** 子动画时长（秒） */
   duration: number
+}
+
+/** 循环起点：把 offset 折进 `[0, duration)`（负偏移 / 超过时长都能落回有效区间） */
+function loopStart(offset: number, duration: number): number {
+  if (!Number.isFinite(offset)) return 0
+  const wrapped = offset % duration
+  return wrapped < 0 ? wrapped + duration : wrapped
 }
 
 /**
  * 子骨架时间**确定性**换算：同一条路径同时服务「播放」与「拖播放头」，
  * 因此暂停后拖动时间轴、来回拖都不会漂移（不能用 dt 累加）。
  *
- * - `playTimes === 0`：对时长取模（负偏移也落回 `[0, duration)`）；
+ * - **`playTimes <= 0`：无限循环，且每一轮都从 `offset` 起播** ——
+ *   循环区间是 `[offset, duration)`，不是 `[0, duration)`。
+ *   「刀光从第 3 帧起播」这种偏移在第二轮不会被抹掉（以前会对整段时长取模，
+ *   播完第一轮就跳回第 0 帧，看起来像「偏移只在第一轮生效」）。
+ *   `-1` 与 `0` 等价，写成负数只是为了让人一眼看出「这是循环、不是 1 次」。
  * - `playTimes > 0`：夹到 `duration × n`，到末尾定格在最后一帧；
  * - 时长为 0（子骨架没有可用动画）：恒返回 0。
  */
 export function childClock(input: ChildClockInput): number {
   const duration = input.duration
   if (!(duration > 1e-6)) return 0
-  const elapsed = (input.parentTime - input.keyTime) * input.speed + input.offset
-  if (input.playTimes > 0) {
-    const limit = duration * Math.max(1, Math.floor(input.playTimes))
-    // 留 1e-6 的余量：seek(duration) 在非循环下会被当成「已结束」，画面停在末帧前更自然
-    return Math.min(Math.max(0, elapsed), Math.max(0, limit - 1e-6))
+  // 相对控制关键帧的本地时间（不含 offset：循环区间要被 offset 平移）
+  const local = (input.parentTime - input.keyTime) * input.speed
+  if (input.playTimes <= 0) {
+    const start = loopStart(input.offset, duration)
+    const span = duration - start
+    // offset 正好落在末帧：没有可循环的区间了，停在起点
+    if (!(span > 1e-6)) return 0
+    const wrapped = local % span
+    return start + (wrapped < 0 ? wrapped + span : wrapped)
   }
-  const wrapped = elapsed % duration
-  return wrapped < 0 ? wrapped + duration : wrapped
+  const elapsed = local + input.offset
+  const limit = duration * Math.max(1, Math.floor(input.playTimes))
+  // 留 1e-6 的余量：seek(duration) 在非循环下会被当成「已结束」，画面停在末帧前更自然
+  return Math.min(Math.max(0, elapsed), Math.max(0, limit - 1e-6))
 }
 
 export interface NestEdge {

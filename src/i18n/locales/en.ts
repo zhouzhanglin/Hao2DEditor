@@ -1166,4 +1166,18 @@ export const en: Record<string, string> = {
   '会形成循环引用：{0} → … → {1} → {0}': 'This creates a cycle: {0} → … → {1} → {0}',
   '嵌套层数超过上限（{0} 层）': 'Nesting depth exceeds the limit ({0} levels)',
   '（setup 姿态）': '(setup pose)',
+  次: 'x',
+  秒: 's',
+  '插槽「{0}」的「{1}」引用了自身骨架，已断开':
+    'Slot "{0}" display "{1}" referenced its own armature; the reference was cleared',
+  '骨架「{0}」的插槽「{1}」引用了不存在的骨架「{2}」，已断开':
+    'Armature "{0}" slot "{1}" referenced a missing armature "{2}"; the reference was cleared',
+  '骨架嵌套存在循环引用（{0}），已断开「{1}」里的引用':
+    'Armature nesting has a cycle ({0}); the reference in "{1}" was cleared',
+  '骨架「{0}」的嵌套层数超过上限，相关引用已断开':
+    'Armature "{0}" nesting depth exceeds the limit; related references were cleared',
+  '包含嵌套子骨架：{0}（已一并导出；运行时按 ske 的 nested 清单加载）':
+    'Includes nested sub-armatures: {0} (exported together; the runtime loads them from the ske "nested" list)',
+  '骨架「{0}」有 {1} 个嵌套骨架 display：Spine 不支持骨架嵌套，已跳过这些 display':
+    'Armature "{0}" has {1} nested-armature display(s): Spine cannot express armature nesting, so they were skipped',
 }

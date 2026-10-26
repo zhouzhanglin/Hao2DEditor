@@ -6,6 +6,7 @@ import {
   keyDrawOrderFrame,
   keySlotColorFrame,
   keySlotDisplayFrame,
+  keySlotSubArmatureFrame,
   keySlotVisibleFrame,
   moveKeyframe,
   removeBoneFrame,
@@ -24,7 +25,7 @@ import type { Args } from './registry'
  */
 
 const BONE_CHANNELS = ['translate', 'rotate', 'scale', 'shear'] as const
-const SLOT_CHANNELS = ['display', 'color', 'visible'] as const
+const SLOT_CHANNELS = ['display', 'color', 'visible', 'subArmature'] as const
 const KEY_KINDS = ['bone', 'slot', 'deform', 'drawOrder'] as const
 
 type BoneChannelName = (typeof BONE_CHANNELS)[number]
@@ -51,7 +52,7 @@ function targetArgs() {
     attachment: { type: 'string' as const, description: 'kind=deform 时的附件名' },
     channel: {
       type: 'string' as const,
-      description: '通道：bone 用 translate/rotate/scale/shear，slot 用 display/color/visible',
+      description: '通道：bone 用 translate/rotate/scale/shear，slot 用 display/color/visible/subArmature',
       required: true
     }
   }
@@ -156,6 +157,46 @@ export function registerAnimCommands(): void {
       })
       const shown = result.attachment ? result.attachment : '不显示'
       return changed(result, `插槽 ${result.slot} 在 ${result.time} 秒起显示「${shown}」`)
+    }
+  )
+
+  defineWrite(
+    {
+      name: 'keySlotSubArmatureFrame',
+      title: '打子骨架帧',
+      description:
+        '打一帧「嵌套骨架播什么」：子骨架动画名（空串 = 回 setup 姿态）+ 播放次数（0 = 循环）/ 起始偏移 / 倍速。用于「挥刀时刀光从第 3 帧起播」这类效果；插槽上要先有嵌套骨架 display',
+      args: {
+        animation: { type: 'string', description: '动画名；不传则用当前编辑动画' },
+        slot: { type: 'string', description: '挂了嵌套骨架 display 的插槽名', required: true },
+        time: { type: 'number', description: '时间点（秒）', required: true },
+        clip: {
+          type: 'string',
+          description: '子骨架里要播的动画名；空串 = 回 setup 姿态（可用 getProjectState 看别的骨架有哪些动画）',
+          required: true
+        },
+        playTimes: { type: 'number', description: '播放次数：0 = 无限循环（默认 0）' },
+        offset: { type: 'number', description: '起始偏移（秒）：从子动画的第几秒开始（默认 0）' },
+        speed: { type: 'number', description: '倍速，1 = 原速（默认 1）' }
+      },
+      returns: '{ animation, slot, time, clip, playTimes, offset, speed }',
+      example: { slot: 'weapon', time: 0.2, clip: 'slash', playTimes: 0, offset: 0.1, speed: 1 }
+    },
+    (draft, args) => {
+      const result = keySlotSubArmatureFrame(draft, {
+        animation: optText(args, 'animation'),
+        slot: need(args, 'slot'),
+        time: needNum(args, 'time'),
+        clip: rawText(args, 'clip') ?? '',
+        playTimes: optNum(args, 'playTimes'),
+        offset: optNum(args, 'offset'),
+        speed: optNum(args, 'speed')
+      })
+      return changed(
+        result,
+        `插槽 ${result.slot} 在 ${result.time} 秒起让子骨架播「${result.clip || 'setup 姿态'}」` +
+          `（次数 ${result.playTimes}、偏移 ${result.offset}s、倍速 ${result.speed}）`
+      )
     }
   )
 

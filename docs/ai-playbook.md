@@ -32,6 +32,14 @@
 ## 皮肤
 addSkin {name} 建皮肤 → addDisplay {slot, image, skin} 往该皮肤放件 → keySlotDisplayFrame {slot, time, attachment, skin} 打显示帧完成切换；setActiveSkin 只影响编辑器当前预览
 
+## 骨架嵌套（把一个骨架挂到另一个骨架的插槽上）
+- 多骨架工程：`getProjectState` 的 `skeletons[]` 里有每个骨架的名字与 `animationNames`（子骨架动画名直接在这里看，不必先切换）；切当前编辑骨架用 `setActiveSkeleton`
+- 挂上去：`nestArmature {slot, armature}` —— 在**当前编辑骨架**里，把工程内另一个骨架作为 display 挂到该插槽；会拒绝自引用 / 循环引用 / 超深
+- 改引用或默认播放：`setNestedArmature {slot, attachment, armature?, animation?, playTimes?, offset?, speed?}`（`playTimes: 0` = 循环）
+- 动画里控制子骨架：`keySlotSubArmatureFrame {slot, time, clip, playTimes?, offset?, speed?}` —— `clip` 是**子骨架里**的动画名（空串 = 回 setup 姿态）；`offset` 用来做「挥刀时刀光晚 3 帧起播」
+- 换武器：同一插槽挂多个嵌套 display，用 `keySlotDisplayFrame` 切显示；`listDisplays` 的 `nested` 字段能看出每个 display 引用的是哪个骨架
+- 子骨架帧也是普通关键帧：`getAnimationKeys` 的 `slots[].subArmature` 能读到，`moveKeyframe` / `setKeyframeEasing` / `clearTrack` 的 `channel` 传 `subArmature`
+
 ## 视口与检查
 - focusNode {kind:'bone'|'slot'|'display'|'constraint', name} 把视口对准某节点；setTime / setPlaying 预览播放（播放只是编辑器内预览，交付物一律 exportProject 落盘）
 - setStage {imagePath} 给视口铺背景参考图（需工程已保存；仅编辑器显示，不参与导出）

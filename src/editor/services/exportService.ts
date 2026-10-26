@@ -16,6 +16,7 @@ import type { Placement } from '@core/atlas/remap'
 import { AttachmentType } from '@core/model/types'
 import type { ImageAtlasRegion } from '@core/model/types'
 import type { RuntimeAsset } from '@core/model/asset'
+import { t } from '@i18n'
 import { encodeAtlasPages, loadImageBitmap } from './pngEncoder'
 import type { PageEncodePlan } from './pngEncoder'
 import {
@@ -455,7 +456,7 @@ export function prepareRuntimeExport(options: RuntimeExportOptions): RuntimeExpo
   const nestedNames = [...new Set(skeletons.flatMap((entry) => entry.nested.map((item) => item.armatureName)))]
   if (nestedNames.length > 0) {
     warnings.push(
-      `包含嵌套子骨架：${nestedNames.join('、')}（已一并导出；运行时按 ske 的 nested 清单加载）`
+      t('包含嵌套子骨架：{0}（已一并导出；运行时按 ske 的 nested 清单加载）', nestedNames.join('、'))
     )
   }
 

@@ -63,7 +63,9 @@ export function registerQueryCommands(): void {
           active: index === state.activeSkeleton,
           bones: item.bones.length,
           slots: item.slots.length,
-          animations: item.animations.length
+          animations: item.animations.length,
+          // 嵌套骨架要按名字引用「别的骨架」：动画名一并给出来，AI 不必先切换骨架再查一遍
+          animationNames: item.animations.map((animation) => animation.name)
         })),
         canUndo: state.canUndo,
         canRedo: state.canRedo,
@@ -171,12 +173,14 @@ export function registerQueryCommands(): void {
     {
       name: 'listDisplays',
       title: '列附件',
-      description: '列出某个插槽（或全部插槽）在各皮肤下的附件：类型、图片、顶点数、权重绑了哪些骨骼',
+      description:
+        '列出某个插槽（或全部插槽）在各皮肤下的附件：类型、图片、顶点数、权重绑了哪些骨骼；嵌套骨架 display 还带引用的骨架与默认播放参数',
       args: {
         slot: { type: 'string', description: '插槽名（可选，不传则列全部）' },
         skin: { type: 'string', description: '皮肤名（可选，默认当前皮肤）' }
       },
-      returns: 'displays: [{ slot, skin, name, type, image, size, vertexCount, bones }]'
+      returns:
+        'displays: [{ slot, skin, name, type, image, size, vertexCount, bones, nested?: { armature, animation, playTimes, offset, speed } }]'
     },
     (args) => {
       const document = doc()
@@ -199,7 +203,18 @@ export function registerQueryCommands(): void {
               rotation: attachment.rotation,
               scale: { ...attachment.scale },
               vertexCount: attachment.vertices.length,
-              bones: attachment.bones ?? []
+              bones: attachment.bones ?? [],
+              ...(attachment.type === 'armature'
+                ? {
+                    nested: {
+                      armature: attachment.subArmature,
+                      animation: attachment.subAnimation,
+                      playTimes: attachment.subPlayTimes,
+                      offset: attachment.subOffset,
+                      speed: attachment.subSpeed
+                    }
+                  }
+                : {})
             })
           }
         }
@@ -316,7 +331,16 @@ export function registerQueryCommands(): void {
               attachment: track.displayAttachment[index] ?? '',
               easing: frame.easing
             })),
-            visible: frames(track.visible)
+            visible: frames(track.visible),
+            // 嵌套骨架通道：动画名 + 循环次数 / 偏移 / 倍速（对象型帧，不是 value 数值帧）
+            subArmature: (track.subArmature ?? []).map((frame) => ({
+              time: frame.time,
+              clip: frame.animation,
+              playTimes: frame.playTimes,
+              offset: frame.offset,
+              speed: frame.speed,
+              easing: frame.easing
+            }))
           })),
         deforms: anim.deforms
           .filter((track) => !slotFilter || track.slot === slotFilter)
@@ -591,7 +615,8 @@ export function registerQueryCommands(): void {
       description:
         '一次性拿出当前骨架全貌：骨骼父子树（嵌套）+ 插槽与附件 + 约束 + 动画。等价于「读整个编辑器结构」，AI 先读它掌握全局，不必逐个 list*',
       args: {},
-      returns: 'armatureName / skeletonCount / boneTree[…] / slots[…] / constraints[…] / animations[…]'
+      returns:
+        'armatureName / skeletonCount / skeletons[{armatureName, active, animations}] / boneTree[…] / slots[…]（displays 里嵌套骨架带 nested）/ constraints[…] / animations[…]'
     },
     () => {
       const document = doc()
@@ -609,12 +634,30 @@ export function registerQueryCommands(): void {
             ?.attachments.map((attachment) => ({
               name: attachment.name,
               type: attachment.type,
-              image: attachment.image
+              image: attachment.image,
+              ...(attachment.type === 'armature'
+                ? {
+                    nested: {
+                      armature: attachment.subArmature,
+                      animation: attachment.subAnimation,
+                      playTimes: attachment.subPlayTimes,
+                      offset: attachment.subOffset,
+                      speed: attachment.subSpeed
+                    }
+                  }
+                : {})
             })) ?? []
       }))
+      const project = useProjectStore.getState()
       return {
         armatureName: document.armatureName,
-        skeletonCount: useProjectStore.getState().skeletons.length,
+        skeletonCount: project.skeletons.length,
+        // 嵌套要按名字引用别的骨架：名字与「哪个是当前编辑的」一并给出来
+        skeletons: project.skeletons.map((item, index) => ({
+          armatureName: item.armatureName,
+          active: index === project.activeSkeleton,
+          animations: item.animations.map((animation) => animation.name)
+        })),
         boneTree: buildBoneTree(document, roots),
         slots,
         constraints: document.constraints.map((constraint) => ({

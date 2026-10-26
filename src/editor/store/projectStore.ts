@@ -7,6 +7,7 @@ import { applyAtlasSplit, deleteImage, replaceImage } from '../commands/authorin
 import type { AtlasSplitPlan } from '../commands/authoringCommands'
 import { repairAnimationDurations, repairDisplayNames } from '../timeline/model'
 import { validateNestGraph } from '@core/nesting/nest'
+import { t } from '@i18n'
 import { useSelectionStore } from './selectionStore'
 
 export interface ProjectState {
@@ -192,18 +193,22 @@ function sanitizeNestRefs(skeletons: EditorDocument[]): { count: number; warning
   const broken = new Set<string>() // `${from}\0${to}`
   for (const edge of validation.selfReferences) {
     broken.add(`${edge.from}\u0000${edge.to}`)
-    report(`插槽「${edge.slot}」的「${edge.attachment}」引用了自身骨架，已断开`)
+    report(t('插槽「{0}」的「{1}」引用了自身骨架，已断开', [edge.slot, edge.attachment]))
   }
   for (const edge of validation.missing) {
     broken.add(`${edge.from}\u0000${edge.to}`)
-    report(`骨架「${edge.from}」的插槽「${edge.slot}」引用了不存在的骨架「${edge.to}」，已断开`)
+    report(
+      t('骨架「{0}」的插槽「{1}」引用了不存在的骨架「{2}」，已断开', [edge.from, edge.slot, edge.to])
+    )
   }
   for (const cycle of validation.cycles) {
     if (cycle.length >= 2) broken.add(`${cycle[0]}\u0000${cycle[1]}`)
-    report(`骨架嵌套存在循环引用（${cycle.join(' → ')}），已断开「${cycle[0]}」里的引用`)
+    report(
+      t('骨架嵌套存在循环引用（{0}），已断开「{1}」里的引用', [cycle.join(' → '), cycle[0]])
+    )
   }
   const tooDeep = new Set(validation.tooDeep)
-  for (const name of tooDeep) report(`骨架「${name}」的嵌套层数超过上限，相关引用已断开`)
+  for (const name of tooDeep) report(t('骨架「{0}」的嵌套层数超过上限，相关引用已断开', name))
 
   let count = 0
   for (const doc of skeletons) {

@@ -120,6 +120,7 @@ POST /batch
    - 遮罩（Spine ClippingAttachment）→ `createMask`（新建，points 用**插槽骨骼局部坐标**）/ `convertToMask`（Region / 非加权 Mesh 转遮罩）/ `setMaskPoints` `setMaskPoint` `insertMaskPoint` `deleteMaskPoint`（改控制点）/ `setMaskOptions`（结束插槽、反向、凸形、是否显示）；查询用 `getMask` / `listMasks`。遮罩也能用 `keyDeformFrame` 做 FFD（offsets 长度 = 点数 × 2）
    - 工程文件：`newProject`（空白工程）/ `createProject`（具名并立刻落盘）/ `openProject` / `saveProject` —— **都不弹原生对话框**，保存位置靠参数 `dir` / `path` 显式给出
    - 多骨架：`addSkeleton` / `removeSkeleton` / `renameSkeleton` / `setActiveSkeleton`（图片池跨骨架共享）
+   - 骨架嵌套：`nestArmature`（把工程内另一个骨架挂到插槽上）/ `setNestedArmature`（改引用与默认播放参数）/ `keySlotSubArmatureFrame`（在动画里控制子骨架播哪个动画）；`listDisplays` 的 `nested` 字段、`getAnimationKeys` 的 `subArmature` 通道用于核对
    - 皮肤：`addSkin` / `renameSkin` / `removeSkin` / `setActiveSkin`（换装动画配合 `keySlotDisplayFrame`）
    - 播放与事件帧：`setTime`（播放头）、`setPlaying`（播放 / 暂停）、`keyEvent` / `setEvent` / `removeEvent`（时间轴最上面的事件轨）
    - 导出：`exportProject`（`mode` = `runtime` / `unity` / `spine`，写盘到 `dir`，**不弹对话框**）；图集缩放持久偏好 → `setExportScale`

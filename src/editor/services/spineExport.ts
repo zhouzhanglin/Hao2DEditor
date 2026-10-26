@@ -14,6 +14,7 @@ import { sortConstraints } from '@core/model/constraints'
 import { triangulateFromHull } from '@core/mesh/triangulate'
 import type { SpineJson, SpineSlotJson, SpineSkinJson, SpineAttachmentJson, SpineAnimationJson, SpineCurveKeyframe, SpineTransformConstraintJson, SpinePathConstraintJson } from '@importers/spineTypes'
 import { pageUvsToRegionRelative } from '@importers/uv'
+import { t } from '@i18n'
 import type { AtlasRegion, PageSizes } from '@importers/uv'
 import type { RuntimeAtlasJson } from '@core/codec/runtimeSkeJson'
 import type { ExportResult } from './exportService'
@@ -1177,7 +1178,10 @@ export async function buildSpineBundles(
     )
     if (nestedCount > 0) {
       warnings.push(
-        `骨架「${skeleton.name}」有 ${nestedCount} 个嵌套骨架 display：Spine 不支持骨架嵌套，已跳过这些 display`
+        t('骨架「{0}」有 {1} 个嵌套骨架 display：Spine 不支持骨架嵌套，已跳过这些 display', [
+          skeleton.name,
+          nestedCount
+        ])
       )
     }
     const pages = plan.atlas.pages.map((page, i) => {

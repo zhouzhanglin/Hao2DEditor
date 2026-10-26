@@ -403,6 +403,70 @@ export function setAttachmentTransform(doc: EditorDocument, options: SetAttachme
   if (hits === 0) throw new Error(`找不到附件：${options.slot} / ${options.attachment}（用 listDisplays 查插槽下的附件名）`)
 }
 
+export interface SetNestedArmatureOptions {
+  slot: string
+  attachment: string
+  /** 引用哪个骨架（同工程里的骨架名） */
+  armature?: string
+  /** setup 默认播放的子动画名；空串 = setup 姿态 */
+  animation?: string
+  /** 0 = 循环 */
+  playTimes?: number
+  /** 起始偏移（秒） */
+  offset?: number
+  /** 倍速 */
+  speed?: number
+}
+
+/**
+ * 改嵌套骨架 display 的引用与默认播放参数（跨所有皮肤同步改）。
+ *
+ * 与 `setAttachmentTransform` 分开：那边的 position/rotation/scale 对图片 / 网格用，
+ * 这边只对 `type === 'armature'` 的 display 有效 —— 混在一个命令里 AI 容易给图片附件
+ * 传 `playTimes`，然后误以为改动生效了。
+ */
+export function setNestedArmature(
+  doc: EditorDocument,
+  options: SetNestedArmatureOptions
+): { slot: string; attachment: string; changedFields: string[] } {
+  const changedFields: string[] = []
+  let hits = 0
+  const apply = (attachment: AuthoringAttachment): void => {
+    if (attachment.type !== 'armature') {
+      throw new Error(
+        `附件 ${options.slot} / ${options.attachment} 不是嵌套骨架 display（type=${attachment.type}；用 listDisplays 查类型）`
+      )
+    }
+    hits++
+    if (options.armature !== undefined) {
+      attachment.subArmature = options.armature
+      changedFields.push('armature')
+    }
+    if (options.animation !== undefined) {
+      attachment.subAnimation = options.animation
+      changedFields.push('animation')
+    }
+    if (options.playTimes !== undefined) {
+      attachment.subPlayTimes = Math.max(0, Math.round(options.playTimes))
+      changedFields.push('playTimes')
+    }
+    if (options.offset !== undefined) {
+      attachment.subOffset = options.offset
+      changedFields.push('offset')
+    }
+    if (options.speed !== undefined) {
+      attachment.subSpeed = Math.max(0, options.speed)
+      changedFields.push('speed')
+    }
+  }
+  patchAttachment(doc, options.slot, options.attachment, apply)
+  if (hits === 0) throw new Error(`找不到附件：${options.slot} / ${options.attachment}（用 listDisplays 查插槽下的附件名）`)
+  if (changedFields.length === 0) {
+    throw new Error('至少要给一个要改的字段：armature / animation / playTimes / offset / speed')
+  }
+  return { slot: options.slot, attachment: options.attachment, changedFields }
+}
+
 // ---------------- 动画 ----------------
 
 export interface AddAnimationOptions {

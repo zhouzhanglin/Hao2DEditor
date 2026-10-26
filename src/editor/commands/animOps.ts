@@ -8,6 +8,7 @@ import {
   keyDrawOrder,
   keySlotColor,
   keySlotDisplay,
+  keySlotSubArmature,
   keySlotVisible,
   removeBoneKeyframe,
   removeDeformKeyframe
@@ -182,6 +183,59 @@ export function keySlotColorFrame(
   return { animation: anim.name, slot: slot.name, time, color: options.color }
 }
 
+export interface KeySlotSubArmatureFrameOptions {
+  animation?: string
+  slot: string
+  time: number
+  /** 子骨架里要播的动画名；空串 = 回 setup 姿态 */
+  clip: string
+  /** 播放次数：0 = 无限循环 */
+  playTimes?: number
+  /** 起始偏移（秒），即从子动画的第几秒开始 */
+  offset?: number
+  /** 倍速，1 = 原速 */
+  speed?: number
+}
+
+/**
+ * 打一帧「嵌套骨架播什么」（子骨架通道）。
+ *
+ * 只写动画名 / 次数 / 偏移 / 倍速这 4 个语义参数，轨道与帧排序交给 `keySlotSubArmature`；
+ * 插槽上没挂嵌套骨架时直接报错 —— 否则会静默写出一条永远不生效的轨道。
+ */
+export function keySlotSubArmatureFrame(
+  doc: EditorDocument,
+  options: KeySlotSubArmatureFrameOptions
+): {
+  animation: string
+  slot: string
+  time: number
+  clip: string
+  playTimes: number
+  offset: number
+  speed: number
+} {
+  const anim = requireAnimation(doc, options.animation)
+  const slot = requireSlot(doc, options.slot)
+  const time = requireTime(options.time)
+  const hasNest = doc.skins.some((skin) =>
+    skin.slots.some(
+      (item) => item.slot === slot.name && item.attachments.some((attachment) => attachment.type === 'armature')
+    )
+  )
+  if (!hasNest) {
+    throw new Error(`插槽「${slot.name}」上没有嵌套骨架 display（先用 nestArmature 把别的骨架挂上来）`)
+  }
+  const clip = options.clip ?? ''
+  const playTimes = Math.max(0, Math.round(options.playTimes ?? 0))
+  const offset = options.offset ?? 0
+  const speed = options.speed ?? 1
+  if (!Number.isFinite(offset)) throw new Error(`offset 必须是数字（秒），收到 ${offset}`)
+  if (!Number.isFinite(speed) || speed < 0) throw new Error(`speed 必须是不小于 0 的数字，收到 ${speed}`)
+  keySlotSubArmature(anim, slot.name, time, { animation: clip, playTimes, offset, speed })
+  return { animation: anim.name, slot: slot.name, time, clip, playTimes, offset, speed }
+}
+
 export interface KeyDrawOrderFrameOptions {
   animation?: string
   time: number
@@ -298,7 +352,9 @@ function framesOf(
     if (channel === 'display') return track.displayIndex as unknown as Frames
     if (channel === 'color') return track.color as unknown as Frames
     if (channel === 'visible') return track.visible as unknown as Frames
-    throw new Error(`插槽通道只能是 display / color / visible，收到 ${channel}`)
+    // 嵌套骨架通道：帧是对象（动画名 + 次数 / 偏移 / 倍速），但「按时间定位」的语义与其它轨道一致
+    if (channel === 'subArmature') return (track.subArmature ?? []) as unknown as Frames
+    throw new Error(`插槽通道只能是 display / color / visible / subArmature，收到 ${channel}`)
   }
   const track = anim.deforms.find((item) => item.slot === target && item.attachment === (attachment ?? ''))
   if (!track) throw new Error(`动画「${anim.name}」里没有 ${target} / ${attachment ?? ''} 的 FFD 轨道`)
@@ -312,7 +368,7 @@ export interface KeyTargetOptions {
   target?: string
   /** kind = deform 时的附件名 */
   attachment?: string
-  /** bone: translate/rotate/scale/shear；slot: display/color/visible */
+  /** bone: translate/rotate/scale/shear；slot: display/color/visible/subArmature */
   channel?: string
 }
 

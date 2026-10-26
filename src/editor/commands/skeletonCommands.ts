@@ -14,6 +14,7 @@ import {
   setActiveAnimation,
   setAnimationDuration,
   setAttachmentTransform,
+  setNestedArmature,
   setBoneTransform,
   setSlotHost,
   setSlotProps
@@ -413,6 +414,41 @@ export function registerSkeletonCommands(): void {
       return changed(
         { slot, attachment, changedFields: fields },
         `已更新附件 ${slot} / ${attachment} 的 ${fields.join(' / ')}`
+      )
+    }
+  )
+
+  defineWrite(
+    {
+      name: 'setNestedArmature',
+      title: '设置嵌套骨架',
+      description:
+        '改嵌套骨架 display 的引用与默认播放参数：引用骨架名 / 默认子动画 / 播放次数（0=循环）/ 起始偏移 / 倍速。只对 type=armature 的 display 有效',
+      args: {
+        slot: { type: 'string', description: '插槽名', required: true },
+        attachment: { type: 'string', description: '嵌套骨架 display 名', required: true },
+        armature: { type: 'string', description: '引用哪个骨架（同工程里的骨架名；空串 = 断开引用）' },
+        animation: { type: 'string', description: 'setup 默认播放的子动画名；空串 = setup 姿态' },
+        playTimes: { type: 'number', description: '播放次数：0 = 无限循环' },
+        offset: { type: 'number', description: '起始偏移（秒）' },
+        speed: { type: 'number', description: '倍速，1 = 原速' }
+      },
+      returns: '{ slot, attachment, changedFields }',
+      example: { slot: 'weapon', attachment: 'Sword', armature: 'Sword', animation: 'idle', playTimes: 0, speed: 1 }
+    },
+    (draft, args) => {
+      const result = setNestedArmature(draft, {
+        slot: need(args, 'slot'),
+        attachment: need(args, 'attachment'),
+        armature: optText(args, 'armature'),
+        animation: optText(args, 'animation'),
+        playTimes: optNum(args, 'playTimes'),
+        offset: optNum(args, 'offset'),
+        speed: optNum(args, 'speed')
+      })
+      return changed(
+        result,
+        `已更新嵌套骨架 ${result.slot} / ${result.attachment} 的 ${result.changedFields.join(' / ')}`
       )
     }
   )

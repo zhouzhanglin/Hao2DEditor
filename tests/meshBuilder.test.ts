@@ -239,7 +239,7 @@ describe('Mesh 蒙皮与 FFD', () => {
     expect(result.vertexCount).toBe(2)
   })
 
-  it('Mesh 没有三角形时仍写出顶点但不产生索引（与参考库一致）', () => {
+  it('Mesh 没有三角形时仍写出顶点但不产生索引（与 Unity 端 Hao2D 运行时一致）', () => {
     const { builder, skeleton } = rigged([mesh('m', 'tex', [0, 0, 1, 1], [], [])], [bone('root', -1)])
     const result = builder.build(skeleton)
     expect(result.vertexCount).toBe(2)

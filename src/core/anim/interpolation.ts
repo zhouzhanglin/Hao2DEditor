@@ -54,12 +54,12 @@ function bezier(t: number, c1: number, c2: number): number {
 }
 
 /**
- * 平滑比例（对齐参考库 AnimationPlayer.CurvePercent）：
+ * 平滑比例（对齐 Unity 端 Hao2D 运行时 AnimationPlayer.CurvePercent）：
  * - Stepped → 恒返回 0（保持前一帧值）
  * - 非 Bezier 或控制量不足 4 个 → clamp01(percent)（线性）
  * - Bezier → 对 x(t) = percent 二分迭代 12 次求 t，再取 y(t)
  *
- * 注意参考库不使用 LUT，这里同样直接迭代求解（误差约 1e-3）。
+ * 注意 Unity 端 Hao2D 运行时不使用 LUT，这里同样直接迭代求解（误差约 1e-3）。
  */
 export function curvePercent(easing: Easing, curve: number[] | null, percent: number): number {
   if (easing === Easing.Stepped) return 0

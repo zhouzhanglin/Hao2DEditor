@@ -554,6 +554,8 @@ function normalizeAnimation(raw: Record<string, unknown>): AuthoringAnimData {
       return {
         slot: str(track.slot),
         attachment: str(track.attachment),
+        // 皮肤归属（Spine 4.2+）：缺省不写，保持旧工程 JSON 原样
+        ...(str(track.skin) ? { skin: str(track.skin) } : {}),
         frames: deformFrames(track.frames)
       }
     }),

@@ -12,7 +12,7 @@ export interface MeshGeometry {
 
 /**
  * 栅格建网格：把 Region 矩形切成 divisions × divisions 个格子。
- * uv 的 v 轴翻转（Runtime / 参考库统一约定：uv 原点在图片左下角）。
+ * uv 的 v 轴翻转（编辑器与 Unity 端 Hao2D 运行时 统一约定：uv 原点在图片左下角）。
  */
 export function createGridMesh(size: Vec2, divisions: number): MeshGeometry {
   const div = Math.max(1, Math.min(64, Math.round(divisions)))

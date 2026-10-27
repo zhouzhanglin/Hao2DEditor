@@ -82,12 +82,12 @@ export function packColorKey(color: RGBA): number {
 /**
  * 把 Skeleton 的可见附件合并为顶点缓冲，按 (图集页, blendMode, 颜色) 分组。
  *
- * 与参考库 `MeshBuilder.BuildBuffers` 一致：
+ * 与 Unity 端 Hao2D 运行时 `MeshBuilder.BuildBuffers` 一致：
  * - 蒙皮：vertex = Σ worldMatrices[bk] · (lxk, lyk) · wk
  * - FFD **先于**蒙皮叠加（!ffdInBoneSpace 时先经 bindpose 做方向变换，不含平移）
  * - 分组只与**紧邻的上一组**合并，保证画家算法顺序
  * - 顶点色 = 插槽色 × 附件色 × 整体染色
- * - Mesh 附件总会写出顶点，但没有 triangles 时不产生三角形（与参考库一致）
+ * - Mesh 附件总会写出顶点，但没有 triangles 时不产生三角形（与 Unity 端 Hao2D 运行时一致）
  * - 缓冲复用，稳态下每帧零分配
  */
 export class MeshBuilder {
@@ -235,7 +235,7 @@ export class MeshBuilder {
           : skeleton.slotDisplayIndex[si]
       if (di < 0 || di >= attachments.length) continue
 
-      // linkedmesh 的合并结果优先（按显示下标取，与参考库一致）
+      // linkedmesh 的合并结果优先（按显示下标取，与 Unity 端 Hao2D 运行时一致）
       const attachment = maps.resolved[si]?.[di] ?? attachments[di]
 
       /*
@@ -857,7 +857,7 @@ function accumulateWeighted(
   let localY = ly
   if (ffdX !== 0 || ffdY !== 0) {
     if (ffdInBoneSpace) {
-      // 偏移已是骨内坐标，直接叠加（参考库在加权路径上会跳过这一支，编辑器补全）
+      // 偏移已是骨内坐标，直接叠加（Unity 端 Hao2D 运行时在加权路径上会跳过这一支，编辑器补全）
       localX += ffdX
       localY += ffdY
     } else if (hasBind) {

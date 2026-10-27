@@ -23,7 +23,8 @@ import {
   regionUvs
 } from './uv'
 import { indexRegions } from './atlasSpine'
-import { importSpineAnimations } from './spineAnims'
+import { deformBaseKey, importSpineAnimations, slotDeformBaseKey } from './spineAnims'
+import type { SpineDeformBase, SpineDeformInfluence } from './spineAnims'
 import type {
   SpineAttachmentJson,
   SpineBoneJson,
@@ -251,7 +252,7 @@ function blendOf(blend: string | undefined, slotName: string, warnings: string[]
  * `[boneCount, (boneIdx, lx, ly, weight) × boneCount] × 顶点数`
  *
  * `lx / ly` 是**骨骼局部坐标**（像素）——与 rigid 顶点同一坐标系：官方运行期是
- * `world = Σ w × (boneWorld × (lx, ly))`（见参考库 ComputeWorldVertices，加权与
+ * `world = Σ w × (boneWorld × (lx, ly))`（见 spine-core 4.3 的 `computeWorldVertices`，加权与
  * rigid 分支共用骨骼世界矩阵；顶点是编辑器按权重反解出的局部坐标，多骨骼共享一份）。
  * 这里只做像素 → 世界单位换算，然后下标重映射 + top-4 归并 + 归一化。
  */
@@ -329,6 +330,44 @@ function packVertexWeight(entries: Array<{ bone: number; lx: number; ly: number;
   result.w2 = ws[2]
   result.w3 = ws[3]
   return result
+}
+
+/**
+ * 加权网格的「Spine deform 下标 → 编辑器顶点槽」映射。
+ *
+ * Spine 的 deform 数组逐**影响点**排布（`count` 个影响，每个一份骨内 (dx,dy)），
+ * 而编辑器每个顶点只存一份显示空间位移（最多 4 根影响，见 `parseWeights`）。
+ * 这里从原始 JSON 的 `vertices` 段取回：每顶点原始影响数 + 编辑器 4 个槽各自对应的原始下标。
+ *
+ * 筛选规则必须与 `parseWeights` 完全一致（丢掉 `w <= 1e-6` 的影响、按权重降序取前 4），
+ * 否则槽位与下标会错开，FFD 会落到别的骨骼上。
+ */
+function buildDeformInfluence(
+  raw: SpineAttachmentJson | undefined,
+  vertexCount: number
+): SpineDeformInfluence | undefined {
+  const values = raw?.vertices
+  if (!Array.isArray(values) || vertexCount <= 0) return undefined
+  // 未加权网格的 `vertices` 就是顶点坐标本身（与 uvs 等长），没有影响段
+  if (values.length === vertexCount * 2) return undefined
+  const counts = new Int32Array(vertexCount)
+  const slots = new Int8Array(vertexCount * 4).fill(-1)
+  let cursor = 0
+  for (let v = 0; v < vertexCount; v++) {
+    const count = Math.max(0, Math.trunc(values[cursor] ?? 0))
+    cursor += 1
+    if (count === 0) continue
+    counts[v] = count
+    const kept: Array<{ k: number; w: number }> = []
+    for (let k = 0; k < count; k++) {
+      const w = values[cursor + 3] ?? 0
+      cursor += 4
+      if (w > 1e-6) kept.push({ k, w })
+    }
+    kept.sort((a, b) => b.w - a.w)
+    for (let s = 0; s < 4 && s < kept.length; s++) slots[v * 4 + s] = kept[s].k
+  }
+  return { counts, slots }
 }
 
 function resolveRegion(
@@ -431,7 +470,7 @@ function convertAttachment(
     const vertexCount = Math.floor(meshUvs.length / 2)
     const rawVertices = attachment.vertices ?? []
     // Spine 把加权网格的骨骼与权重**一并编码在 `vertices` 里**：长度与 uvs 不等即加权
-    //（参考库 ReadVertices：只有 `verticesLength == vertices.Length` 才是非加权）。
+    //（spine-core 4.3 `readVertices`：只有 `verticesLength == vertices.Length` 才是非加权）。
     // 早先读的是不存在的 `weights` 字段，加权网格全被当成了 rigid。
     const weighted = rawVertices.length !== meshUvs.length
     const vertices = new Float32Array(vertexCount * 2)
@@ -593,7 +632,8 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
     warnings
   }
 
-  const skins: SkinData[] = normalizeSkins(json).map((skin) => ({
+  const rawSkins = normalizeSkins(json)
+  const skins: SkinData[] = rawSkins.map((skin) => ({
     name: skin.name,
     slots: Object.entries(skin.attachments).map<SkinSlotData>(([slotName, attachments]) => ({
       slotName,
@@ -647,21 +687,78 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
 
   const constraints = buildConstraints(json, boneIndex, warnings)
 
-  // 网格附件的绑定顶点表：deform 轨道的「长度对齐 + 绝对坐标→纯位移」换算要用
-  //（key = spot\u0000attachment；加权网格给等长零占位，只用于长度对齐）
-  const deformBase = new Map<string, { vertices: Float32Array; weighted: boolean }>()
+  // 网格附件的绑定顶点表：deform 轨道的「长度对齐 + 逐影响点折叠」换算要用
+  const deformBase = new Map<string, SpineDeformBase>()
+  // 原始 JSON 的附件：加权网格的「影响点 → 顶点」映射只能从原始 `vertices` 段反推
+  //（`parseWeights` 会按权重排序 + 截断到 4 根，原始顺序信息在那里就丢了）
+  const rawAttachment = new Map<string, SpineAttachmentJson>()
+  for (const skin of rawSkins) {
+    for (const [slotName, attachments] of Object.entries(skin.attachments ?? {})) {
+      for (const [key, raw] of Object.entries(attachments ?? {})) {
+        rawAttachment.set(deformBaseKey(skin.name, slotName, key), raw)
+      }
+    }
+  }
+  const deformBaseOf = (
+    attachment: AttachmentData,
+    skinName: string,
+    slotName: string
+  ): SpineDeformBase | null => {
+    // 遮罩的 deform 轨道同样需要按多边形点数对齐；否则短数组会让后续帧错位
+    if (attachment.type !== AttachmentType.Mesh && attachment.type !== AttachmentType.Clipping) return null
+    const count = Math.floor(attachment.vertices.length / 2)
+    const weighted = count > 0 && attachment.weights.length === count
+    const raw = rawAttachment.get(deformBaseKey(skinName, slotName, attachment.name))
+    return {
+      vertices: attachment.vertices,
+      weights: attachment.weights,
+      weighted,
+      influence: weighted ? buildDeformInfluence(raw, count) : undefined
+    }
+  }
+  // 精确项：key = 皮肤 \u0000 插槽 \u0000 附件。同名附件在不同皮肤里顶点数可能不同，
+  // 只按「插槽 + 附件」存会被后一个皮肤覆盖，deform 的长度对齐随之取错顶点表。
   for (const skin of skins) {
     for (const skinSlot of skin.slots) {
       for (const attachment of skinSlot.attachments) {
-        // 遮罩的 deform 轨道同样需要按多边形点数对齐；否则短数组会让后续帧错位
-        if (attachment.type !== AttachmentType.Mesh && attachment.type !== AttachmentType.Clipping) continue
-        const count = Math.floor(attachment.vertices.length / 2)
-        deformBase.set(`${skinSlot.slotName}\u0000${attachment.name}`, {
-          vertices: attachment.vertices,
-          weighted: count > 0 && attachment.weights.length === count
-        })
+        const base = deformBaseOf(attachment, skin.name, skinSlot.slotName)
+        if (base) deformBase.set(deformBaseKey(skin.name, skinSlot.slotName, attachment.name), base)
       }
     }
+  }
+  // 兜底项：key = 插槽 \u0000 附件，只登记默认皮肤。
+  // 3.x 的插槽层 deform 没有皮肤维度，必须回退到默认皮肤这套顶点表（不是「谁先谁赢」）。
+  for (const skinSlot of defaultSkin?.slots ?? []) {
+    for (const attachment of skinSlot.attachments) {
+      const base = deformBaseOf(attachment, defaultSkin?.name ?? 'default', skinSlot.slotName)
+      if (!base) continue
+      const key = slotDeformBaseKey(skinSlot.slotName, attachment.name)
+      if (!deformBase.has(key)) deformBase.set(key, base)
+    }
+  }
+
+  /*
+   * 每根骨骼 setup 世界矩阵的**线性部分**（bindpose 的逆的 2×2）。
+   * 加权网格的 deform 是骨内偏移，折叠成编辑器「逐顶点显示空间位移」时要用
+   * `W_k_setup · d_k`（见 spineAnims 的 collapseInfluenceOffsets）。
+   */
+  const setupWorldLin = new Float32Array(bones.length * 4)
+  for (let i = 0; i < bones.length; i++) {
+    const o = i * 16
+    const a = bindposes[o]
+    const b = bindposes[o + 4]
+    const c = bindposes[o + 1]
+    const d = bindposes[o + 5]
+    const det = a * d - b * c
+    if (!Number.isFinite(det) || Math.abs(det) < 1e-9) {
+      setupWorldLin[i * 4] = 1
+      setupWorldLin[i * 4 + 3] = 1
+      continue
+    }
+    setupWorldLin[i * 4] = d / det
+    setupWorldLin[i * 4 + 1] = -b / det
+    setupWorldLin[i * 4 + 2] = -c / det
+    setupWorldLin[i * 4 + 3] = a / det
   }
 
   // 默认皮肤下「插槽 → 附件名 → 下标」，供 attachment 轨道把名字解析成烘焙下标
@@ -694,6 +791,7 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
       regions: ctx.regions,
       pageSizes: ctx.pageSizes,
       deformBase,
+      setupWorldLin,
       absoluteCurve,
       fps: skeletonOnly.frameRate,
       warnings
@@ -900,7 +998,7 @@ function buildConstraints(
         boneIndices: bones,
         targetBoneIndex: target,
         mix: ik.mix ?? 1,
-        // 与参考库一致：bendPositive(true) → -1。解算器把它当旋转方向符号用
+        // 与 Unity 端 Hao2D 运行时一致：bendPositive(true) → -1。解算器把它当旋转方向符号用
         // （`kneeDir = Rotate(u, a1 * bendSign)`），符号反了膝盖会朝另一侧弯
         bendSign: ik.bendPositive === false ? 1 : -1,
         useBoneLength: false,

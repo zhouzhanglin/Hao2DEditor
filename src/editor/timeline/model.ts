@@ -584,7 +584,7 @@ export interface PoseSnapshot {
 
 /**
  * 每类约束可打关键帧的通道 —— 名字与 `constraintFrames` / `ConstraintState` 的字段一致。
- * 参考库的 `.hao2d` 只导出 IK 的 mix，其余通道只有本工程运行期用得上。
+ * Unity 端 Hao2D 运行时的 `.hao2d` 只导出 IK 的 mix，其余通道只有本工程运行期用得上。
  */
 export const CONSTRAINT_CHANNELS: Record<string, readonly string[]> = {
   ik: ['mix'],

@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { AnimationPlayer } from '@core/anim/player'
 import { Skeleton } from '@core/model/skeleton'
 import { Easing, emptyBoneAnim, emptySlotAnim } from '@core/model/animation'
-import type { AnimData, EventKeyframe, FloatKeyframe } from '@core/model/animation'
+import { buildRuntimeMaps } from '@core/model/asset'
+import type { AnimData, DeformAnim, EventKeyframe, FloatKeyframe } from '@core/model/animation'
 import { asset, bone, region, skin, slot } from './fixtures'
 
 function rotKeys(...values: Array<[number, number, Easing?]>): FloatKeyframe[] {
@@ -362,6 +363,66 @@ describe('FFD 采样', () => {
     player.update(0.1)
     expect(player.skeleton.deformOffsets[0]).toBeNull()
     expect(player.skeleton.deformOffsetBase[0]).toBe(-1)
+  })
+})
+
+describe('FFD 轨道的皮肤归属', () => {
+  // 皮肤 default 的插槽里是 r，皮肤 armor 里是 r2；两条 deform 各带皮肤归属。
+  // 切肤后只能应用「归属皮肤参与合并 + 附件正在显示」的那一条。
+  function deformTrack(attachmentName: string, skinName: string | null, offsets: number[]): DeformAnim {
+    return {
+      slotIndex: 0,
+      attachmentName,
+      ...(skinName ? { skin: skinName } : {}),
+      frames: [{ time: 0, offsets, vertexOffset: 0, easing: Easing.Linear, curve: null }]
+    }
+  }
+
+  function play(skinName: string, displayIndex: number, deforms: DeformAnim[]) {
+    // 显示下标必须由轨道驱动：`applyPose` 每帧都会用采样结果覆盖它
+    const animation: AnimData = {
+      ...emptyAnimData('a'),
+      duration: 1,
+      deforms,
+      slots: [
+        {
+          ...emptySlotAnim(0),
+          displayIndex: [{ time: 0, value: displayIndex, easing: Easing.Stepped, curve: null }]
+        }
+      ]
+    }
+    const runtime = asset(
+      [bone('root', -1, 0, 0, 0, 10)],
+      [slot('s', 0, { displayIndex: 0 })],
+      [
+        skin('default', [{ slotName: 's', attachments: [region('r', 'tex', 2, 2)] }]),
+        skin('armor', [{ slotName: 's', attachments: [region('r2', 'tex', 2, 2)] }])
+      ],
+      { animations: [animation], textures: ['tex'] }
+    )
+    const skeleton = new Skeleton(runtime)
+    skeleton.applyRuntimeMaps(buildRuntimeMaps(runtime, skinName))
+    const player = new AnimationPlayer(runtime, skeleton)
+    player.play('a')
+    player.update(0.5)
+    return skeleton
+  }
+
+  it('只应用当前合并皮肤里、且正在显示的那条轨道', () => {
+    const tracks = [deformTrack('r', 'default', [1, 2]), deformTrack('r2', 'armor', [3, 4])]
+    // 基底皮肤只有 r
+    expect(play('', 0, tracks).deformOffsets[0]).toEqual([1, 2])
+    // 叠加 armor 后两个附件都在表里，但显示的是 r2（合并皮肤里下标 1）
+    const armor = play('armor', 1, tracks)
+    expect(armor.slotDisplayIndex[0]).toBe(1)
+    expect(armor.deformOffsets[0]).toEqual([3, 4])
+    // 同一个合并皮肤里显示回 r：只有 r 的轨道生效
+    expect(play('armor', 0, tracks).deformOffsets[0]).toEqual([1, 2])
+  })
+
+  it('附件名不在当前皮肤里时跳过（别把别的皮肤的 FFD 套过来）', () => {
+    const tracks = [deformTrack('ghost', null, [9, 9])]
+    expect(play('', 0, tracks).deformOffsets[0]).toBeNull()
   })
 })
 

@@ -4,7 +4,7 @@ import type { AnimData } from './animation'
 import type { Constraint, IkConstraint } from './constraints'
 
 /**
- * 编辑器运行期模型 = 参考库 `Hao2DAsset` 的**超集**：
+ * 编辑器运行期模型 = Unity 端 Hao2D 运行时 `Hao2DAsset` 的**超集**：
  * 骨骼 / 插槽 / 皮肤 / 附件 / 动画沿用其结构，另新增 `constraints`（四类约束）
  * 与约束动画轨道、图集页元数据。
  *
@@ -94,7 +94,7 @@ export function imageRefByName(asset: RuntimeAsset, name: string): ImageRef | nu
 }
 
 /**
- * 运行期预解析结果（与参考库 `MeshBuilder.Init` 一一对应），
+ * 运行期预解析结果（与 Unity 端 Hao2D 运行时 `MeshBuilder.Init` 一一对应），
  * 避免每帧按字符串查字典。
  */
 export interface RuntimeMaps {
@@ -110,6 +110,11 @@ export interface RuntimeMaps {
   slotAttIndex: Array<Map<string, number> | null>
   /** 每插槽 linkedmesh 合并结果（下标与附件表一致，无覆盖处为 null） */
   resolved: Array<Array<AttachmentData | null> | null>
+  /**
+   * 参与本次合并的皮肤名（基底 + 叠加层）。
+   * deform 轨道带着皮肤归属，运行期用这张表判定轨道是否生效。
+   */
+  activeSkins: ReadonlySet<string>
 }
 
 /**
@@ -232,18 +237,25 @@ function stateDrivenSlots(asset: RuntimeAsset): Set<number> {
   return out
 }
 
-/** 构建运行期预解析映射（对齐参考库 MeshBuilder.Init）。 */
+/** 构建运行期预解析映射（对齐 Unity 端 Hao2D 运行时 MeshBuilder.Init）。 */
 export function buildRuntimeMaps(asset: RuntimeAsset, skinName = ''): RuntimeMaps {
   const slotSkin = new Map<string, SkinSlotData>()
   let baseSkin: SkinData | null = null
+  /** 本次参与合并的皮肤名：deform 轨道按它判定「这条轨道属于我的皮肤吗」 */
+  const activeSkins = new Set<string>()
   if (asset.skins.length > 0) {
     let def = asset.defaultSkinIndex
     if (def < 0 || def >= asset.skins.length) def = 0
     baseSkin = asset.skins[def] ?? null
     mergeSkinIntoSlotMap(slotSkin, asset.skins[def], false)
+    if (baseSkin?.name) activeSkins.add(baseSkin.name)
     if (skinName) {
       const idx = findSkinIndex(asset.skins, skinName)
-      if (idx >= 0 && idx !== def) mergeSkinIntoSlotMap(slotSkin, asset.skins[idx], true)
+      if (idx >= 0 && idx !== def) {
+        mergeSkinIntoSlotMap(slotSkin, asset.skins[idx], true)
+        const overlay = asset.skins[idx]?.name
+        if (overlay) activeSkins.add(overlay)
+      }
     }
   }
 
@@ -314,7 +326,7 @@ export function buildRuntimeMaps(asset: RuntimeAsset, skinName = ''): RuntimeMap
     resolved[i] = override
   }
 
-  return { slotSkin, skinArr, skinOfSlot, setupDisplayIndex, slotAttIndex, resolved }
+  return { slotSkin, skinArr, skinOfSlot, setupDisplayIndex, slotAttIndex, resolved, activeSkins }
 }
 
 /** 图集页下标：textureNames 里的位置；找不到返回 0 */

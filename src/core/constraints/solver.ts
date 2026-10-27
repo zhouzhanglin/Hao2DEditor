@@ -1,4 +1,4 @@
-import { clamp, lerpAngle, RAD2DEG } from '../math/utils'
+import { clamp, DEG2RAD, lerpAngle, RAD2DEG } from '../math/utils'
 import type { Skeleton } from '../model/skeleton'
 import type { Constraint, IkConstraint, PathConstraint, TransformConstraint } from '../model/constraints'
 import { sortConstraints } from '../model/constraints'
@@ -6,7 +6,7 @@ import { setupPoseOf } from '../model/setup'
 
 /**
  * 约束的每帧可变状态（由动画轨道覆盖；无轨道时取约束自身的静态值）。
- * 参考库只有 IK 的 mix；transform / path 的全部参数都可由轨道驱动。
+ * Unity 端 Hao2D 运行时只有 IK 的 mix；transform / path 的全部参数都可由轨道驱动。
  */
 export interface ConstraintState {
   mix: number
@@ -110,12 +110,39 @@ export function solveConstraints(
 
 // ---------------- 通用工具 ----------------
 
-/** 设置骨骼的世界朝向（考虑父世界旋转与 inheritRotation），按 mix 插值 */
+/**
+ * 设置骨骼的世界朝向（考虑父世界旋转与 inheritRotation），按 mix 插值。
+ *
+ * mix 在**世界空间**做（先算目标世界角再换算局部）。局部角不能用「世界角 − 父世界角」
+ * 直接相减：父骨骼镜像（scaleX < 0，本资产 move 骨骼就是这样翻转朝向的）或带非等比缩放时，
+ * 局部角到世界角不是平移关系，相减会把整条子链甩到别处。这里用父矩阵线性部分求逆，
+ * 把「期望的世界 x 轴朝向」反解成局部角。
+ */
 function setWorldRotation(skeleton: Skeleton, boneIndex: number, worldDeg: number, mix: number): void {
   const bone = skeleton.asset.bones[boneIndex]
   const parent = bone.parentIndex
-  const local = parent >= 0 && bone.inheritRotation ? worldDeg - skeleton.worldRot[parent] : worldDeg
-  skeleton.localRot[boneIndex] = lerpAngle(skeleton.localRot[boneIndex], local, mix)
+  const dest = mix >= 1 ? worldDeg : lerpAngle(skeleton.worldRot[boneIndex], worldDeg, mix)
+  if (parent < 0 || !bone.inheritRotation) {
+    skeleton.localRot[boneIndex] = dest
+    return
+  }
+  const o = parent * 16
+  const pa = skeleton.world[o]
+  const pb = skeleton.world[o + 4]
+  const pc = skeleton.world[o + 1]
+  const pd = skeleton.world[o + 5]
+  const det = pa * pd - pb * pc
+  if (Math.abs(det) < 1e-8) {
+    skeleton.localRot[boneIndex] = dest - skeleton.worldRot[parent]
+    return
+  }
+  const rad = dest * DEG2RAD
+  const wx = Math.cos(rad)
+  const wy = Math.sin(rad)
+  // 父矩阵的逆作用在世界 x 轴方向上，得到局部 x 轴朝向
+  const lx = (pd * wx - pb * wy) / det
+  const ly = (-pc * wx + pa * wy) / det
+  skeleton.localRot[boneIndex] = Math.atan2(ly, lx) * RAD2DEG
 }
 
 function worldScaleX(skeleton: Skeleton, boneIndex: number): number {
@@ -166,7 +193,7 @@ function solveIk(skeleton: Skeleton, ik: IkConstraint, state: ConstraintState): 
 }
 
 /**
- * 两骨解析解（余弦定理），对齐参考库 IkSolver：
+ * 两骨解析解（余弦定理），对齐 Unity 端 Hao2D 运行时 IkSolver：
  * - l1：useBoneLength 为真时取「根骨 length × |worldScale.x|」（DragonBones），
  *   否则取父骨骼原点 → 子骨骼原点的实际距离（Spine）
  * - l2：子骨 length × |worldScale.x|
@@ -320,10 +347,17 @@ function solveTransform(skeleton: Skeleton, c: TransformConstraint, state: Const
       const curY = skeleton.boneWorldY(bone)
       const wantX = c.relative ? curX + (targetPosX - setupTargetPosX) : targetPosX
       const wantY = c.relative ? curY + (targetPosY - setupTargetPosY) : targetPosY
-      const local = worldToLocal(skeleton, bone, wantX + state.offsetX, wantY + state.offsetY)
+      /*
+       * 混合在**世界空间**做：世界模式的偏移量是世界单位，父骨骼带旋转/镜像时
+       * 「先转局部再混」和「先混再转局部」并不等价（本站的 body/head 约束就挂在
+       * 旋转 90°+ 的父骨下，混错会让头飞出身体）。
+       */
+      const destX = curX + (wantX + state.offsetX - curX) * state.mixX
+      const destY = curY + (wantY + state.offsetY - curY) * state.mixY
+      const local = worldToLocal(skeleton, bone, destX, destY)
       if (local) {
-        skeleton.localPos[bone * 2] += (local.x - skeleton.localPos[bone * 2]) * state.mixX
-        skeleton.localPos[bone * 2 + 1] += (local.y - skeleton.localPos[bone * 2 + 1]) * state.mixY
+        skeleton.localPos[bone * 2] = local.x
+        skeleton.localPos[bone * 2 + 1] = local.y
         skeleton.updateFkFrom(bone)
       }
     }

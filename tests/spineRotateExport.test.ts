@@ -12,7 +12,7 @@ import { anim, asset, bone } from './fixtures'
  *
  * DragonBones 的旋转帧是作者拖出来的**未归一化**值（相对 setup 的原始角度差）。
  * Dora_zorder / forearm_r 的真实数据就是例子：setup 12.7493°，帧值 174.0408° → -160.2742°，
- * 原始差 -334.3°；编辑器与参考库 `AnimationPlayer.SampleAngle → Mathf.LerpAngle` 走最短弧，
+ * 原始差 -334.3°；编辑器与 Unity 端 Hao2D 运行时 `AnimationPlayer.SampleAngle → Mathf.LerpAngle` 走最短弧，
  * 实际只转 +25.7°。
  *
  * 官方运行库对 rotate 是**按取值直接线性插值**（`RotateTimeline` 无任何环绕处理），

@@ -136,7 +136,7 @@ function decompileAnim(anim: AnimData, asset: RuntimeAsset, constraints: Constra
   const slotName = (index: number): string => asset.slots[index]?.name ?? ''
 
   const constraintTracks: ConstraintAnim[] = [...anim.constraints]
-  // 参考库风格的 iks 轨道：若没有对应的约束轨道则合成一条
+  // Unity 端 Hao2D 运行时风格的 iks 轨道：若没有对应的约束轨道则合成一条
   const ikIndices = constraints
     .map((constraint, i) => ({ constraint, i }))
     .filter((entry) => entry.constraint.type === 'ik')
@@ -169,6 +169,8 @@ function decompileAnim(anim: AnimData, asset: RuntimeAsset, constraints: Constra
     deforms: anim.deforms.map((track) => ({
       slot: slotName(track.slotIndex),
       attachment: track.attachmentName,
+      // 皮肤归属：只在有值时写出，避免给旧工程凭空加字段
+      ...(track.skin ? { skin: track.skin } : {}),
       frames: track.frames
     })),
     drawOrder: anim.drawOrder.map((key) => ({

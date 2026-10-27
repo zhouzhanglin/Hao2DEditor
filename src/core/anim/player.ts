@@ -37,7 +37,7 @@ function createPoseBuffer(asset: RuntimeAsset): PoseBuffer {
 }
 
 /**
- * 时间线采样 / 交叉淡化 / 事件（纯数据，与参考库 AnimationPlayer 行为一致）。
+ * 时间线采样 / 交叉淡化 / 事件（纯数据，与 Unity 端 Hao2D 运行时 AnimationPlayer 行为一致）。
  *
  * 采样顺序：骨骼变换 → 插槽（颜色 / 显示下标 / 可见性）→ 绘制顺序 → FFD →
  * 事件 → FK → 约束求解。CrossFade 为两条动画的绝对 pose 线性混合，
@@ -52,7 +52,7 @@ export class AnimationPlayer {
   /** 实际参与求解的约束（`runtimeIK` 为假 = 动画已烘焙，运行期一个约束都不能再解） */
   private readonly activeConstraints: Constraint[]
   private readonly activeStates: ConstraintState[]
-  /** asset.constraints 里 IK 约束的下标（供参考库风格的 iks 轨道使用） */
+  /** asset.constraints 里 IK 约束的下标（供 Unity 端 Hao2D 运行时风格的 iks 轨道使用） */
   private readonly ikIndices: number[]
 
   private readonly bufA: PoseBuffer
@@ -532,10 +532,21 @@ export class AnimationPlayer {
     for (const track of anim.deforms) {
       const slot = track.slotIndex
       if (slot < 0 || slot >= sk.slotCount) continue
+      // 归属某个皮肤的轨道：该皮肤没参与当前合并皮肤时整条不生效
+      if (track.skin && !sk.activeSkins.has(track.skin)) continue
       if (track.attachmentName) {
         const map = sk.slotAttIndex[slot]
-        const want = map ? map.get(track.attachmentName) : undefined
-        if (want !== undefined && want !== sk.slotDisplayIndex[slot]) continue
+        // 与显示轨道同一套查找：兼容换装皮肤的「皮肤名/」前缀
+        const want = map ? findAttachmentIndex(map, track.attachmentName) : undefined
+        /*
+         * 三态判定（缺一不可）：
+         * - 当前合并皮肤里**没有**这个附件 → 轨道属于别的皮肤，跳过。
+         *   早先只在「找到了但不在显示中」时跳过，`want === undefined` 会被无条件套用，
+         *   于是皮肤 A 的 FFD 被加到皮肤 B 的同插槽网格上（顶点数不同还会整体错位）。
+         * - 找到了但没在显示 → 跳过（别的附件正在这个插槽上）。
+         * - 找到了且正在显示 → 应用。
+         */
+        if (want === undefined || want !== sk.slotDisplayIndex[slot]) continue
       }
 
       const k = sampleDeformIndex(track.frames, time)
@@ -598,7 +609,7 @@ export class AnimationPlayer {
         if (!state) continue
         this.applyConstraintTrack(track, time, state)
       }
-      // 兼容参考库风格的 iks 轨道（ikIndex 指向 IK 约束列表）
+      // 兼容 Unity 端 Hao2D 运行时风格的 iks 轨道（ikIndex 指向 IK 约束列表）
       for (const ik of anim.iks) {
         const index = this.ikIndices[ik.ikIndex]
         if (index === undefined) continue

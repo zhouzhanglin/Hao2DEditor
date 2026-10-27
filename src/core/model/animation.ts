@@ -34,7 +34,7 @@ export interface IntKeyframe extends KeyframeBase {
 export interface DeformKeyframe extends KeyframeBase {
   /** 满顶点长度的 (x,y) 偏移数组 */
   offsets: number[]
-  /** 偏移作用的起始顶点下标（参考库恒为 0） */
+  /** 偏移作用的起始顶点下标（Unity 端 Hao2D 运行时恒为 0） */
   vertexOffset: number
 }
 
@@ -89,7 +89,7 @@ export interface SlotAnim {
   displayAttachment: string[]
   /**
    * 可见性轨道。
-   * 参考库中该轨道未被采样（运行期覆盖优先）；编辑器会实现采样，导出报告需标注差异。
+   * Unity 端 Hao2D 运行时中该轨道未被采样（运行期覆盖优先）；编辑器会实现采样，导出报告需标注差异。
    */
   visible: IntKeyframe[]
   /** 子骨架动画控制（仅该插槽挂有 armature display 时有意义） */
@@ -99,10 +99,21 @@ export interface SlotAnim {
 export interface DeformAnim {
   slotIndex: number
   attachmentName: string
+  /**
+   * 该 deform 轨道**归属的皮肤名**。
+   *
+   * Spine 4.2+ 只有 `attachments.<skin>.<slot>.<attachment>.deform` 一个位置，3.x 的皮肤层
+   * 写作 `deform.<skin>.<slot>.<attachment>`；缺省表示与皮肤无关（老式插槽层
+   * `deform.<slot>.<attachment>`）。
+   *
+   * 运行期只有该皮肤**参与了当前合并皮肤**（基底 + 叠加层）时轨道才生效，
+   * 否则切肤后别的皮肤的 FFD 会被套到本插槽上（见 `AnimationPlayer.applyDeform`）。
+   */
+  skin?: string
   frames: DeformKeyframe[]
 }
 
-/** 参考库的 IK 动画轨道（仅 mix） */
+/** Unity 端 Hao2D 运行时的 IK 动画轨道（仅 mix） */
 export interface IkAnim {
   ikIndex: number
   mix: FloatKeyframe[]
@@ -223,8 +234,8 @@ export function emptySubArmatureKeyframe(
   return { time, easing: Easing.Stepped, curve: null, animation, playTimes, offset, speed }
 }
 
-export function emptyDeformAnim(slotIndex: number, attachmentName: string): DeformAnim {
-  return { slotIndex, attachmentName, frames: [] }
+export function emptyDeformAnim(slotIndex: number, attachmentName: string, skin?: string): DeformAnim {
+  return skin ? { slotIndex, attachmentName, skin, frames: [] } : { slotIndex, attachmentName, frames: [] }
 }
 
 export function emptyIkAnim(ikIndex: number): IkAnim {

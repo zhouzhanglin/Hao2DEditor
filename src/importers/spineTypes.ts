@@ -214,7 +214,7 @@ export interface SpineAnimationJson {
     Record<string, SpineCurveKeyframe[]> | Record<string, Record<string, SpineCurveKeyframe[]>>
   >
   /**
-   * 4.2 起（参考库 4.3 只认这里）：skin → slot → attachment → `{ deform: 帧 }`。
+   * 4.2 起（spine-core 4.3 只认这里）：skin → slot → attachment → `{ deform: 帧 }`。
    * 写回这个层级才有效 —— 顶层 `deform` 会被官方运行库整段忽略。
    */
   attachments?: Record<string, Record<string, Record<string, SpineAttachmentTimelineJson>>>

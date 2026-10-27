@@ -6,6 +6,7 @@ import { emptyConstraintAnim, emptyFloatKeyframe } from '@core/model/animation'
 import { createIkConstraint, createPhysicsConstraint, createTransformConstraint } from '@core/model/constraints'
 import type { Constraint } from '@core/model/constraints'
 import { createAuthoringBone, createEmptyDocument } from '@core/model/authoring'
+import { createBoneData } from '@core/model/types'
 import type { EditorDocument } from '@core/model/authoring'
 import { compileDocument } from '@core/codec/compile'
 import { anim, asset, bone, region, skin, slot } from './fixtures'
@@ -227,6 +228,67 @@ describe('变换约束', () => {
     const skeleton = new Skeleton(runtime)
     solveConstraints(skeleton, runtime.constraints, createConstraintStates(runtime.constraints))
     expect(skeleton.boneWorldX(0)).toBeCloseTo(0, 4)
+  })
+
+  it('父骨镜像（scaleX < 0）时世界朝向仍能对准目标', () => {
+    // 「一起打僵尸」这类资产会用 move 骨骼 scaleX = -1 翻转朝向，
+    // 后面挂着 aim 变换约束；父骨镜像时不能用「世界角 − 父世界角」直接相减
+    const runtime = asset(
+      [
+        createBoneData({ name: 'root', localScale: { x: -1, y: 1 } }),
+        createBoneData({ name: 'child', parentIndex: 0 }),
+        createBoneData({ name: 'target', rotation: 30 })
+      ],
+      [slot('s', 0)],
+      [skin('default', [{ slotName: 's', attachments: [region('r', 'tex', 2, 2)] }])],
+      { textures: ['tex'] }
+    )
+    runtime.constraints = [
+      createTransformConstraint({
+        name: 'aim',
+        boneIndices: [1],
+        targetBoneIndex: 2,
+        mixX: 0,
+        mixY: 0,
+        mixRotate: 1,
+        mixScaleX: 0,
+        mixScaleY: 0
+      })
+    ]
+    const skeleton = new Skeleton(runtime)
+    solveConstraints(skeleton, runtime.constraints, createConstraintStates(runtime.constraints))
+    expect(skeleton.worldRot[1]).toBeCloseTo(30, 3)
+    // 骨骼的矩阵旋转要与 worldRot 一致（渲染读的是矩阵）
+    expect(Math.atan2(skeleton.world[16 + 1], skeleton.world[16]) * (180 / Math.PI)).toBeCloseTo(30, 3)
+  })
+
+  it('偏移量按世界空间加（父骨镜像时不跟着翻向）', () => {
+    const runtime = asset(
+      [
+        createBoneData({ name: 'root', localScale: { x: -1, y: 1 } }),
+        createBoneData({ name: 'child', parentIndex: 0 }),
+        createBoneData({ name: 'target' })
+      ],
+      [slot('s', 0)],
+      [skin('default', [{ slotName: 's', attachments: [region('r', 'tex', 2, 2)] }])],
+      { textures: ['tex'] }
+    )
+    runtime.constraints = [
+      createTransformConstraint({
+        name: 'follow',
+        boneIndices: [1],
+        targetBoneIndex: 2,
+        mixRotate: 0,
+        mixScaleX: 0,
+        mixScaleY: 0,
+        offsetX: -1,
+        offsetY: 0.5
+      })
+    ]
+    const skeleton = new Skeleton(runtime)
+    solveConstraints(skeleton, runtime.constraints, createConstraintStates(runtime.constraints))
+    expect(skeleton.boneWorldX(1)).toBeCloseTo(-1, 4)
+    expect(skeleton.boneWorldY(1)).toBeCloseTo(0.5, 4)
   })
 })
 

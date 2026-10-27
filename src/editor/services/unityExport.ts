@@ -1,7 +1,7 @@
 /**
  * Unity 侧产物的生成：材质（.mat）与各类 .meta。
  *
- * 约定来自 Hao2D Unity 包（参考库 `Assets/Hao2D`）：
+ * 约定来自 Hao2D Unity 包（Unity 端 Hao2D 运行时 `Assets/Hao2D`）：
  * - `.hao2d` 由 ScriptedImporter（`Hao2DImporter`）导入成 Hao2DAsset；
  * - 图集纹理按 `.hao2d` 内 `textureNames`（含扩展名的文件名）**在同目录**查找；
  * - 材质按 `<纹理基名>_Hao2D.mat` **在同目录**查找（`Hao2DConvertUtil.SiblingMaterialPath`）；

@@ -95,7 +95,7 @@ function toBoneData(bones: AuthoringBone[], index: Map<string, number>): BoneDat
 }
 
 /**
- * 插槽按 zOrder 排序后写进 Runtime：参考库的 drawOrder 默认就是插槽数组顺序
+ * 插槽按 zOrder 排序后写进 Runtime：Unity 端 Hao2D 运行时的 drawOrder 默认就是插槽数组顺序
  * （SetToSetupPose 里 drawOrder[i] = i），因此层序必须在编译期固化。
  */
 function toSlotData(
@@ -163,7 +163,7 @@ interface AttachmentContext {
  * 附件编译。加权网格的每骨骼局部坐标由「绑定空间顶点」反算：
  *   vBind = setupWorld[slotBone] · TRS(att) · v
  *   L_k   = inverse(setupWorld[b_k]) · vBind = bindposes[b_k] · vBind
- * 运行期再按 Σ w_k · worldMatrices[b_k] · L_k 还原，与参考库 skinned 路径一致。
+ * 运行期再按 Σ w_k · worldMatrices[b_k] · L_k 还原，与 Unity 端 Hao2D 运行时 skinned 路径一致。
  * 无权重（刚体 / Region）的顶点直接存附件显示空间。
  */
 function convertAttachment(att: AuthoringAttachment, ctx: AttachmentContext): ReturnType<typeof createAttachmentData> {
@@ -445,6 +445,8 @@ function compileAnimations(
     .map<DeformAnim>((track) => ({
       slotIndex: slotIndex[track.slot],
       attachmentName: track.attachment,
+      // 皮肤归属要带进运行期：没有它的轨道只能靠「附件名在当前皮肤里存不存在」过滤
+      ...(track.skin ? { skin: track.skin } : {}),
       // 深拷贝帧与 offsets：编译期要把「骨内 FFD」换算成显示空间（normalizeBoneSpaceFfd），
       // 若直接引用工程数据会**原地改到 document**——每次重建都再换算一次，偏移被反复
       // 变换而彻底错乱。compile 必须是纯的。
@@ -469,7 +471,7 @@ function compileAnimations(
       continue
     }
     constraintTracks.push({ ...emptyConstraintAnim(index), ...track, constraintIndex: index })
-    // 同步产出参考库风格的 iks 轨道（.hao2d v5 只认这一份）
+    // 同步产出 Unity 端 Hao2D 运行时风格的 iks 轨道（.hao2d v5 只认这一份）
     if (constraints[index]?.type === 'ik' && track.mix.length > 0) {
       const ikOrder = ikIndices.indexOf(index)
       if (ikOrder >= 0) iks.push({ ikIndex: ikOrder, mix: track.mix })
@@ -617,7 +619,7 @@ export function compileDocument(doc: EditorDocument): CompileResult {
 /**
  * 归一化「骨内 FFD」：把 offsets 换算成**显示空间**，并清掉 `ffdInBoneSpace` 标记。
  *
- * 标记为骨内空间时参考库（Unity）没有一致行为 —— 纯 C# 路径**直接跳过**该 FFD，
+ * 标记为骨内空间时 Unity 端 Hao2D 运行时没有一致行为 —— 纯 C# 路径**直接跳过**该 FFD，
  * Burst 路径**忽略标记**再多乘一次 bindpose，偏移被多旋转 / 缩放一次（网格被拉飞）。
  * 编辑器自己的 FFD 工具写的本来就是显示空间，只有导入数据或手动开关会标成 true。
  *

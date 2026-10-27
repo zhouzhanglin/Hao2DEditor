@@ -10,7 +10,7 @@ export interface FkBone {
 }
 
 /**
- * Spine 式矩阵 FK —— 与参考库 `Hao2DMath.FK` 逐行对应。
+ * Spine 式矩阵 FK —— 与 Unity 端 Hao2D 运行时 `Hao2DMath.FK` 逐行对应。
  *
  * 局部 2x2 = [ cos(r+shearX)*sx , -sin(r+90+shearY)*sy ;
  *              sin(r+shearX)*sx ,  cos(r+90+shearY)*sy ]

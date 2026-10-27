@@ -3,7 +3,7 @@ import type { Vec2 } from '../math/matrix'
 /**
  * 约束系统。
  *
- * 参考库只实现了 IK（`IkData`），变换 / 路径 / 物理约束为编辑器新增，按 Spine 语义设计；
+ * Unity 端 Hao2D 运行时只实现了 IK（`IkData`），变换 / 路径 / 物理约束为编辑器新增，按 Spine 语义设计；
  * 其中物理约束仅做数据保留与导出直通，**不参与求解**。
  *
  * 求解顺序：按 order 升序，依次 ik → transform → path（physics 跳过）。

@@ -41,7 +41,7 @@ export function angleDiff(from: number, to: number): number {
   return wrapAngle(to - from)
 }
 
-/** 沿最短弧插值（对齐参考库 Skeleton.LerpAngle） */
+/** 沿最短弧插值（对齐 Unity 端 Hao2D 运行时 Skeleton.LerpAngle） */
 export function lerpAngle(a: number, b: number, t: number): number {
   return a + angleDiff(a, b) * t
 }

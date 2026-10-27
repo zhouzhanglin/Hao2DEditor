@@ -215,6 +215,11 @@ export interface AuthoringSlotAnim {
 export interface AuthoringDeformAnim {
   slot: string
   attachment: string
+  /**
+   * 轨道归属的皮肤名（Spine 4.2+ 的 `attachments.<skin>...` / 3.x 的皮肤层）。
+   * 缺省 = 与皮肤无关的老式插槽层轨道。工程 JSON 会原样保存，编译时写回运行期轨道。
+   */
+  skin?: string
   frames: DeformKeyframe[]
 }
 

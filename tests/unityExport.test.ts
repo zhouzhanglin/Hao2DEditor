@@ -72,7 +72,7 @@ describe('图集纹理 .meta', () => {
 describe('材质 YAML', () => {
   const yaml = materialYaml({ name: 'hero_0_Hao2D', textureGuid: 'aa11bb22cc33dd44ee55ff6600112233' })
 
-  it('shader 指向 Hao2D/Sprite（用参考库里的 GUID）', () => {
+  it('shader 指向 Hao2D/Sprite（用 Hao2D Unity 包里的 GUID）', () => {
     expect(yaml).toContain('m_Name: hero_0_Hao2D')
     expect(yaml).toContain(`guid: ${HAO2D_SPRITE_SHADER_GUID}`)
     expect(yaml).toContain('fileID: 4800000')

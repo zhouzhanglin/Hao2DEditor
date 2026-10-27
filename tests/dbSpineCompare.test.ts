@@ -214,7 +214,7 @@ describe('DragonBones 导出 spine 与编辑器图像一致性', () => {
           continue
         }
 
-        // 先按**顶点位置**把参考库顶点与编辑器顶点配对（几何是真相），再比较 UV；
+        // 先按**顶点位置**把 Unity 端 Hao2D 运行时顶点与编辑器顶点配对（几何是真相），再比较 UV；
         // 只按 UV 配对会把「位置对、UV 差一点」当成找不到顶点，掩盖贴图错位。
         const eds = (editorVerts.get(si) ?? []).filter(Boolean)
         const vCount = world.length / 2
@@ -274,8 +274,8 @@ describe('DragonBones 导出 spine 与编辑器图像一致性', () => {
       expect(maxUvDiff).toBeLessThan(1e-5)
       expect(problems.filter((p) => !p.includes('pos off'))).toEqual([])
 
-      // 绘制顺序：按参考库读法重放导出的 offsets，必须还原出编辑器每一帧的完整顺序。
-      // Dora_zorder 曾因为 offsets 按「目标位置」乱序写出，让参考库的 originalIndex 永远追不上
+      // 绘制顺序：按 Unity 端 Hao2D 运行时读法重放导出的 offsets，必须还原出编辑器每一帧的完整顺序。
+      // Dora_zorder 曾因为 offsets 按「目标位置」乱序写出，让 Unity 端 Hao2D 运行时的 originalIndex 永远追不上
       // index 而 RangeError: Invalid array length（读都读不进来）。
       const slotNames = asset.slots.map((s: any) => s.name)
       for (const anim of asset.animations) {
@@ -295,7 +295,7 @@ describe('DragonBones 导出 spine 与编辑器图像一致性', () => {
 /**
  * 照抄 spine-core `SkeletonJson.readDrawOrder` 的还原算法：
  * 沿 setup 下标单向扫描，未出现在 offsets 里的槽按 setup 顺序回填剩余位置。
- * 参考库在该算法里只往前走，所以任何「非升序 / 越界」的 entries 都会让它死循环或越界，
+ * Unity 端 Hao2D 运行时在该算法里只往前走，所以任何「非升序 / 越界」的 entries 都会让它死循环或越界，
  * 这里顺便把这种情况直接暴露成断言失败。
  */
 function replayDrawOrder(
@@ -314,7 +314,7 @@ function replayDrawOrder(
     const index = indexOf.get(change.slot)
     if (index === undefined) continue
     while (originalIndex !== index) {
-      if (originalIndex >= slotCount) throw new Error(`drawOrder offsets 非升序（参考库会死循环）：${change.slot}`)
+      if (originalIndex >= slotCount) throw new Error(`drawOrder offsets 非升序（Unity 端 Hao2D 运行时会死循环）：${change.slot}`)
       unchanged[unchangedIndex++] = originalIndex++
     }
     drawOrder[originalIndex + change.offset] = originalIndex++

@@ -694,7 +694,7 @@ export function importDragonBones(
         boneIndices: chainIndices,
         targetBoneIndex: target ?? -1,
         mix: ik.weight ?? 1,
-        // 对齐参考库：DB 的 bendPositive（缺省 true）表示正向弯曲 → +1
+        // 对齐 Unity 端 Hao2D 运行时：DB 的 bendPositive（缺省 true）表示正向弯曲 → +1
         bendSign: ik.bendPositive === false ? -1 : 1,
         // DragonBones 用「根骨 length × 缩放」作为 l1
         useBoneLength: true

@@ -1,6 +1,6 @@
 import type { Vec2 } from '../math/matrix'
 
-/** 资源来源。与参考库 AnimType 一致：DragonBone = 1，Spine = 2。 */
+/** 资源来源。与 Unity 端 Hao2D 运行时 AnimType 一致：DragonBone = 1，Spine = 2。 */
 export enum AnimType {
   DragonBone = 1,
   Spine = 2
@@ -254,7 +254,7 @@ export interface ImageAtlasRegion {
   offsetY?: number
 }
 
-/** 图集页 / 图片引用（编辑器扩展字段，参考库用 Texture2D 表达）。 */
+/** 图集页 / 图片引用（编辑器扩展字段，Unity 端 Hao2D 运行时用 Texture2D 表达）。 */
 export interface ImageRef {
   /** = AttachmentData.textureName */
   name: string

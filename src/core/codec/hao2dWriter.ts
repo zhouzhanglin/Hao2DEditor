@@ -35,7 +35,7 @@ export const HAO2D_MAGIC = 0x44324f48
  * - **9**：文件尾补 `defaultSkin`（编辑器当前皮肤，作为叠加皮肤；基底仍是 `defaultSkinIndex` 那套），
  *   否则只在非默认皮肤里的 display（例如挂在 goblin 皮肤上的嵌套骨架）导出后不显示。
  *
- * ⚠️ 附件段**只写 C# 参考库 `Hao2DCodec` 认识的字段**。编辑器内部还有 `frameSize`
+ * ⚠️ 附件段**只写 Unity 端 Hao2D 运行时 `Hao2DCodec` 认识的字段**。编辑器内部还有 `frameSize`
  * （未裁剪原图尺寸，只用于检查器显示与选中框），它**不进二进制**：写进去会让 Unity 读端
  * 从附件段开始整体错位（EndOfStreamException）。展示用的 frameSize 请放工程 JSON。
  */
@@ -50,7 +50,7 @@ export interface Hao2dInspectResult {
 
 /**
  * 序列化为 `.hao2d`（Version = 6；读端兼容 5）。
- * 字段顺序、类型宽度、字符串编码与参考库 `Hao2DCodec.Write` 逐字节一致。
+ * 字段顺序、类型宽度、字符串编码与 Unity 端 Hao2D 运行时 `Hao2DCodec.Write` 逐字节一致。
  *
  * 结构：MAGIC(u32) | VERSION(u16) | armatureName | frameRate | bones | slots | skins |
  *       iks | animations | bindposes | textureNames | dataType(i32) | defaultSkinIndex
@@ -161,7 +161,7 @@ function writeAttachment(writer: ByteWriter, a: AttachmentData): void {
     writer.writeFloat32(a.uvs[i + 1])
   }
 
-  // vertices：写「float2 元素个数」，与 uvs 及参考库的 ReadFloat2Array 语义一致。
+  // vertices：写「float2 元素个数」，与 uvs 及 Unity 端 Hao2D 运行时的 ReadFloat2Array 语义一致。
   // 写成 writeFloatArray 的「float 总数」会让 Unity 按元素个数多读一倍，
   // 之后 triangles / edges / weights 全部错位（读取直接抛 EndOfStreamException）。
   writer.writeInt32(a.vertices.length / 2)
@@ -272,6 +272,8 @@ function writeSlotAnims(writer: ByteWriter, arr: readonly SlotAnim[]): void {
 
 function writeDeformAnims(writer: ByteWriter, arr: readonly DeformAnim[]): void {
   writer.writeInt32(arr.length)
+  // 皮肤归属（`anim.skin`）**不进 v9 二进制**：加字段要升版本，老运行库就读不了新文件。
+  // 工程 JSON 完整保存它；二进制侧由运行期「附件名是否在当前合并皮肤里」兜底。
   for (const anim of arr) {
     writer.writeInt32(anim.slotIndex)
     writer.writeString(anim.attachmentName)
@@ -369,7 +371,7 @@ function writeBindposes(writer: ByteWriter, bindposes: Float32Array): void {
 
 /**
  * 导出 .hao2d 的差异告警：v5 格式无法表达的能力项。
- * 参考库运行期对这些项的行为与编辑器不同，必须提示给用户。
+ * Unity 端 Hao2D 运行时的行为与编辑器不同，必须提示给用户。
  */
 export function collectHao2dWarnings(asset: RuntimeAsset): string[] {
   const warnings: string[] = []
@@ -407,7 +409,7 @@ export function collectHao2dWarnings(asset: RuntimeAsset): string[] {
       ])
     )
   }
-  // 插槽 setup 可见性（层级树眼睛）不在 .hao2d 二进制里：格式与 Unity 参考库
+  // 插槽 setup 可见性（层级树眼睛）不在 .hao2d 二进制里：格式与 Unity 端 Hao2D 运行时
   // Hao2DCodec 逐字节一致，加字段会让读端从插槽段开始整体错位。隐藏状态只存工程 JSON
   const hiddenSlots = asset.slots.filter((slot) => !slot.visible)
   if (hiddenSlots.length > 0) {
@@ -435,7 +437,7 @@ export function collectHao2dWarnings(asset: RuntimeAsset): string[] {
     })
   )
   if (weightedWithFfd) {
-    warnings.push(t('存在「加权网格 + 骨内 FFD」的组合：参考库运行期会跳过该 FFD，编辑器会正常应用'))
+    warnings.push(t('存在「加权网格 + 骨内 FFD」的组合：Unity 端 Hao2D 运行时会跳过该 FFD，编辑器会正常应用'))
   }
 
   const hasConstraintAnim = asset.animations.some((anim) => anim.constraints.length > 0)
@@ -452,7 +454,7 @@ export function collectHao2dWarnings(asset: RuntimeAsset): string[] {
     anim.slots.some((slotAnim) => slotAnim.visible.length > 0)
   )
   if (visibleTracks) {
-    warnings.push(t('存在插槽可见性轨道：参考库运行期不采样该轨道（编辑器会采样）'))
+    warnings.push(t('存在插槽可见性轨道：Unity 端 Hao2D 运行时不采样该轨道（编辑器会采样）'))
   }
 
   return warnings

@@ -11,7 +11,7 @@ export function vec2(x = 0, y = 0): Vec2 {
 
 /**
  * 4x4 矩阵，**列主序**，长度 16 的 Float32Array，索引 = col * 4 + row。
- * 与 Unity.Mathematics.float4x4 的内存布局一致，便于与参考库算法逐行对照：
+ * 与 Unity.Mathematics.float4x4 的内存布局一致，便于与 Unity 端 Hao2D 运行时算法逐行对照：
  *   m[0] = m00 = a   m[1] = m10 = c   m[4] = m01 = b   m[5] = m11 = d
  *   m[12] = tx       m[13] = ty
  */
@@ -41,7 +41,7 @@ export function copyInto(out: Float32Array, src: Float32Array): Float32Array {
   return out
 }
 
-/** 写入普通 TRS（不含 shear），等价参考库 Hao2DMath.Trs */
+/** 写入普通 TRS（不含 shear），等价 Unity 端 Hao2D 运行时 Hao2DMath.Trs */
 export function trsInto(
   out: Float32Array,
   posX: number,

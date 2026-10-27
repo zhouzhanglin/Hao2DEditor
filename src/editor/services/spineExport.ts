@@ -482,7 +482,7 @@ function buildConstraints(asset: RuntimeAsset): SpineJson['constraints'] {
 /**
  * rotate 通道写 json 前的**连续化**：每一键换成与前一键同方向、跨度落在 (-180°, 180°] 内的等价角。
  *
- * 编辑器/参考库的采样走最短弧（`sampleAngle → lerpAngle`），而官方运行库对 rotate 是
+ * 编辑器/Unity 端 Hao2D 运行时的采样走最短弧（`sampleAngle → lerpAngle`），而官方运行库对 rotate 是
  * **按取值直接线性插值**（`RotateTimeline.apply → getCurveValue`，没有任何环绕处理）。
  * DragonBones 的旋转帧是作者拖出来的**未归一化**值 —— 例如 hair3 的 `-358.05`（≡ +1.95，
  * 本意只是根头发轻轻摆一下）、forearm_r 的 `-186.79`；照字面写进 json，官方库会在两键之间
@@ -628,7 +628,7 @@ function findAttachment(asset: RuntimeAsset, slotName: string, attachmentName: s
 }
 
 /**
- * FFD 轨道指向哪个附件：轨道名（DB 导入存的是显示名 / 参考库存的是附件名）优先，
+ * FFD 轨道指向哪个附件：轨道名（DB 导入存的是显示名 / Unity 端 Hao2D 运行时存的是附件名）优先，
  * 其次插槽的 setup 附件，再兜底到该插槽的第一个网格附件。
  * DB 的 FFD 是**按插槽**记录的（数据里没有附件名），只按名字硬查会整条轨道丢掉。
  */
@@ -659,7 +659,7 @@ function deformAttachmentName(asset: RuntimeAsset, slotName: string, track: Defo
  *   偏移就等于没跟着附件的旋转/缩放走：Ubbie 的披风（附件旋转约 50°、偏移上千像素）整块
  *   被扯歪，最大偏差 250px，而偏移为 0 的顶点却完好（这是「setup 对、一播动画就错」的由来）。
  *
- * 数组长度严格等于附件顶点数 ×2（加权网格 = 影响数 ×2）：短了参考库按 0 补齐没问题，
+ * 数组长度严格等于附件顶点数 ×2（加权网格 = 影响数 ×2）：短了 Unity 端 Hao2D 运行时按 0 补齐没问题，
  * 长了 `Array.Copy` 直接越界抛异常。
  */
 function deformFrameVertices(asset: RuntimeAsset, att: AttachmentData, frame: DeformAnim['frames'][number]): number[] {
@@ -731,7 +731,7 @@ function buildDeforms(asset: RuntimeAsset, animation: AnimData): SpineAnimationJ
     const frames: SpineCurveKeyframe[] = track.frames.map((f, i) => {
       const next = track.frames[i + 1]
       const key: SpineCurveKeyframe = { time: f.time, vertices: deformFrameVertices(asset, att, f) }
-      // 参考库读 deform 曲线时按「值域 0..1」换算（SkeletonJson: ReadCurve(..., 0, 1, 1)）
+      // spine-core 4.3 读 deform 曲线时按「值域 0..1」换算（`SkeletonJson.readCurve(..., 0, 1, 1)`）
       const curve = spineCurve(f.easing, f.curve, f.time, next ? next.time : f.time, 0, 1)
       if (curve !== undefined) key.curve = curve
       return key
@@ -746,7 +746,7 @@ function buildDeforms(asset: RuntimeAsset, animation: AnimData): SpineAnimationJ
 /**
  * 一帧完整抽取顺序 → Spine 的 `offsets`。
  *
- * 参考库的读法（`SkeletonJson.readDrawOrder`）是**沿 setup 下标单向扫描**：
+ * spine-core 4.3 的读法（`SkeletonJson.readDrawOrder`）是**沿 setup 下标单向扫描**：
  * 维护 originalIndex 从 0 往 n-1 走，遇到一条 offset 就先把沿途未改动的槽收进 unchanged，
  * 再把当前槽放到 `slotIndex + offset` 位置；扫完剩下的槽按 setup 顺序回填空位。
  * 因此：
@@ -755,7 +755,7 @@ function buildDeforms(asset: RuntimeAsset, animation: AnimData): SpineAnimationJ
  *   `RangeError: Invalid array length`（Dora_zorder 就是这么炸的）；
  * - offset 是相对 **setup 顺序**的位移，每帧独立还原、不叠加前一帧；旧实现按上一帧推算，
  *   多帧重排时就会写出反向 / 过量的 entries；
- * - 未出现在 entries 里的槽由参考库按 setup 顺序回填，所以只需给
+ * - 未出现在 entries 里的槽由 spine-core 4.3 按 setup 顺序回填，所以只需给
  *   `targetPos != setupIndex` 的槽写 entry，entries 数量天然 ≤ 槽数，不会越界。
  */
 function buildDrawOrder(asset: RuntimeAsset, animation: AnimData): SpineCurveKeyframe[] {

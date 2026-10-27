@@ -203,7 +203,7 @@ function readAttachment(reader: ByteReader, version: number): AttachmentData {
     uvs[i * 2 + 1] = reader.readFloat32()
   }
 
-  // vertices：按「float2 元素个数」读（与 writer 及参考库 ReadFloat2Array 对齐）
+  // vertices：按「float2 元素个数」读（与 writer 及 Unity 端 Hao2D 运行时 ReadFloat2Array 对齐）
   const vertexCount = reader.readInt32()
   const vertices = new Float32Array(vertexCount * 2)
   for (let i = 0; i < vertexCount; i++) {
@@ -454,6 +454,7 @@ function readDeformAnims(reader: ByteReader): DeformAnim[] {
     const slotIndex = reader.readInt32()
     const attachmentName = reader.readString()
     const frames = readDeformKeyframes(reader)
+    // v9 二进制没有皮肤归属，`skin` 保持缺省（运行期退回附件名过滤）
     out.push({ slotIndex, attachmentName, frames })
   }
   return out
@@ -501,7 +502,7 @@ function readBindposes(reader: ByteReader): Float32Array {
   return out
 }
 
-/** 参考库以「长度 0 的 float[]」表示无曲线，这里统一成 null */
+/** Unity 端 Hao2D 运行时以「长度 0 的 float[]」表示无曲线，这里统一成 null */
 function normalizeCurve(curve: number[]): number[] | null {
   return curve.length === 0 ? null : curve
 }

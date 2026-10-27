@@ -160,7 +160,7 @@ describe('compileDocument', () => {
     expect(asset.constraints[0].targetBoneIndex).toBe(1)
   })
 
-  it('ik 约束的 mix 轨道同步产出参考库风格的 iks 轨道', () => {
+  it('ik 约束的 mix 轨道同步产出 Unity 端 Hao2D 运行时风格的 iks 轨道', () => {
     const doc = sampleDocument()
     doc.animations[0].constraints.push({
       constraint: 'armIK',
@@ -339,7 +339,7 @@ describe('.hao2d v5 二进制', () => {
   })
 })
 
-describe('.hao2d 与参考库的字节语义', () => {
+describe('.hao2d 与 Unity 端 Hao2D 运行时的字节语义', () => {
   /** 一个含真网格（带顶点/UV/权重/三角形）的工程 */
   function docWithMesh(): EditorDocument {
     const doc = createEmptyDocument('t')
@@ -380,7 +380,7 @@ describe('.hao2d 与参考库的字节语义', () => {
     const firstVertexAt = findFloat32(bytes, 0.125)
     expect(firstVertexAt).toBeGreaterThan(4)
 
-    // 顶点数据前面紧挨着的就是长度字段：参考库用 ReadFloat2Array（按 float2 个数读）
+    // 顶点数据前面紧挨着的就是长度字段：Unity 端 Hao2D 运行时用 ReadFloat2Array（按 float2 个数读）
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
     expect(view.getInt32(firstVertexAt - 4, true)).toBe(3)
 
@@ -389,7 +389,7 @@ describe('.hao2d 与参考库的字节语义', () => {
     expect(view.getInt32(uvAt - 4, true)).toBe(3)
   })
 
-  it('导出的文件能被「参考库语义」完整解析到底（附件段不越界）', () => {
+  it('导出的文件能被「Unity 端 Hao2D 运行时语义」完整解析到底（附件段不越界）', () => {
     const doc = docWithMesh()
     const { asset } = compileDocument(doc)
     const bytes = writeHao2d(asset)
@@ -435,7 +435,7 @@ describe('.hao2d 与参考库的字节语义', () => {
       f32() // scale
       f32()
       f32() // size
-      // v6 新增：contentOffset（2 个 float）。附件段只写 C# 参考库认识的字段，
+      // v6 新增：contentOffset（2 个 float）。附件段只写 Unity 端 Hao2D 运行时认识的字段，
       // 多写一个字段后面全部错位（Unity 侧即 EndOfStreamException）。
       f32()
       f32() // contentOffset
@@ -736,7 +736,7 @@ describe('裁剪图的「原图尺寸」信息', () => {
     /*
      * 导出侧：.hao2d（v6）必须带 `contentOffset` —— Unity 就靠它把裁剪块放回原位，丢了零件会错位。
      *
-     * `frameSize` 是**编辑器内部**信息（检查器显示、选中框），**不进二进制**：C# 参考库的
+     * `frameSize` 是**编辑器内部**信息（检查器显示、选中框），**不进二进制**：Unity 端 Hao2D 运行时的
      * `AttachmentData` 没有这个字段，多写 8 字节会让读端从附件段开始整体错位，Unity 侧报
      * EndOfStreamException。展示用的原图尺寸请存工程 JSON。
      */

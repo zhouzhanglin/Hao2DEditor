@@ -33,6 +33,8 @@ export class Skeleton {
   setupDisplayBase: Int32Array
   /** 每插槽的「附件名 → 下标」表（指向当前合并皮肤） */
   slotAttIndex: Array<Map<string, number> | null> = []
+  /** 当前合并进运行期的皮肤名（基底 + 叠加层），deform 轨道按它判定归属 */
+  activeSkins: ReadonlySet<string> = new Set<string>()
 
   /** FFD：每插槽的当前顶点偏移（满顶点长度或 null） */
   deformOffsets: Array<number[] | null>
@@ -95,6 +97,7 @@ export class Skeleton {
   applyRuntimeMaps(maps: RuntimeMaps): void {
     this.setupDisplayBase.set(maps.setupDisplayIndex)
     this.slotAttIndex = maps.slotAttIndex
+    this.activeSkins = maps.activeSkins
     for (let i = 0; i < this.slotCount; i++) {
       const override = this.attOverrideName[i]
       if (override) {

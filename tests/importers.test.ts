@@ -963,6 +963,130 @@ describe('Spine FFD（deform）的偏移语义', () => {
     // 未覆盖的顶点保持 0 偏移
     expect(offsets[0]).toBeCloseTo(0, 6)
   })
+
+  // 4.2 的 deform 唯一位置是 `attachments.<skin>...`：多个皮肤的轨道都必须收下来
+  //（早先只取第一个皮肤，其余皮肤的 FFD 直接丢），顶点基线也要按皮肤分开。
+  const TWO_SKIN_DEFORM = {
+    skeleton: { spine: '4.3.0', fps: 30 },
+    bones: [{ name: 'root' }, { name: 'arm', parent: 'root' }],
+    slots: [{ name: 'arm', bone: 'arm', attachment: 'arm' }],
+    skins: [
+      {
+        name: 'default',
+        attachments: {
+          arm: {
+            arm: {
+              type: 'mesh',
+              width: 10,
+              height: 10,
+              // 3 顶点 → 6 个分量
+              vertices: [0, 0, 10, 0, 10, 10],
+              uvs: [0, 0, 1, 0, 1, 1],
+              triangles: [0, 1, 2]
+            }
+          }
+        }
+      },
+      {
+        name: 'armor',
+        attachments: {
+          arm: {
+            // 同名附件但 4 顶点 → 8 个分量：顶点基线必须按皮肤分开
+            arm: {
+              type: 'mesh',
+              width: 10,
+              height: 10,
+              vertices: [0, 0, 10, 0, 10, 10, 0, 10],
+              uvs: [0, 0, 1, 0, 1, 1, 0, 1],
+              triangles: [0, 1, 2, 0, 2, 3]
+            }
+          }
+        }
+      }
+    ],
+    animations: {
+      wave: {
+        attachments: {
+          default: { arm: { arm: { deform: [{ time: 0, offset: 0, vertices: [1, 1] }] } } },
+          armor: { arm: { arm: { deform: [{ time: 0, offset: 0, vertices: [2, 2, 2, 2] }] } } }
+        }
+      }
+    }
+  }
+
+  it('每个皮肤的 deform 轨道都收，顶点长度按各自皮肤的基线对齐', () => {
+    const { asset } = importSpine({ json: TWO_SKIN_DEFORM, regions: [], pageSizes: {} })
+    const tracks = asset.animations[0].deforms
+    expect(tracks.map((track) => track.skin)).toEqual(['default', 'armor'])
+    const bySkin = new Map(tracks.map((track) => [track.skin, track]))
+    expect(bySkin.get('default')?.frames[0].offsets.length).toBe(6)
+    expect(bySkin.get('armor')?.frames[0].offsets.length).toBe(8)
+  })
+
+  /*
+   * 加权网格的 deform 在 Spine 里是**逐影响点**的骨内偏移（长度 = 影响数 × 2），
+   * 编辑器按顶点存显示空间位移。折叠公式（见 collapseInfluenceOffsets）：
+   *   D = Σ w_k · W_k_setup · d_k
+   *
+   * 这里两根骨骼朝向差 90°、权重各半、两根影响的偏移都是 (4,0)px：
+   *   W_a = 单位矩阵     → 0.5 * (0.04, 0)
+   *   W_b = rot90        → 0.5 * (0, 0.04)
+   *   D = (0.02, 0.02)
+   * 若按「顶点下标」硬切（旧实现），第 0 个顶点会读到 (0.04, 0) 与 (0.04, 0)，
+   * 长度也会是 12（3 顶点 × 2 影响 × 2）而不是 6。
+   */
+  const WEIGHTED_DEFORM = {
+    skeleton: { spine: '4.3.0', fps: 30 },
+    bones: [
+      { name: 'root' },
+      { name: 'a', parent: 'root' },
+      { name: 'b', parent: 'root', x: 500, y: 0, rotation: 90 }
+    ],
+    slots: [{ name: 's', bone: 'a', attachment: 'mesh' }],
+    skins: [
+      {
+        name: 'default',
+        attachments: {
+          s: {
+            mesh: {
+              type: 'mesh',
+              width: 10,
+              height: 10,
+              // 每顶点 2 根影响：[count, (boneIdx, lx, ly, w) × 2]
+              // 三个顶点的绑定位置分别是 (10,10)、(11,10)、(10,11)（世界单位 = 像素 / 100）
+              vertices: [
+                2, 1, 1000, 1000, 0.5, 2, 1000, -500, 0.5,
+                2, 1, 1100, 1000, 0.5, 2, 1100, -500, 0.5,
+                2, 1, 1000, 1100, 0.5, 2, 1000, -600, 0.5
+              ],
+              uvs: [0, 0, 1, 0, 1, 1],
+              triangles: [0, 1, 2]
+            }
+          }
+        }
+      }
+    ],
+    animations: {
+      wave: {
+        attachments: {
+          default: {
+            s: { mesh: { deform: [{ time: 0, vertices: [4, 0, 4, 0, 4, 0, 4, 0, 4, 0, 4, 0] }] } }
+          }
+        }
+      }
+    }
+  }
+
+  it('加权网格的 deform 按影响点折叠成逐顶点显示空间位移', () => {
+    const { asset } = importSpine({ json: WEIGHTED_DEFORM, regions: [], pageSizes: {} })
+    const frames = asset.animations[0].deforms[0].frames
+    // 逐顶点：3 个顶点 × 2 个分量
+    expect(frames[0].offsets.length).toBe(6)
+    for (let i = 0; i < 3; i++) {
+      expect(frames[0].offsets[i * 2]).toBeCloseTo(0.02, 6)
+      expect(frames[0].offsets[i * 2 + 1]).toBeCloseTo(0.02, 6)
+    }
+  })
 })
 
 describe('Spine 图集旋转区域的 UV 映射（rotate 90/180/270）', () => {
@@ -1094,7 +1218,7 @@ describe('Spine 导入', () => {
       expect(ik.boneIndices).toEqual([0, 1])
       expect(ik.targetBoneIndex).toBe(1)
       expect(ik.mix).toBeCloseTo(0.5, 5)
-      // 与参考库一致：bendPositive(false) → +1（解算器把 bendSign 当旋转方向符号，
+      // 与 Unity 端 Hao2D 运行时一致：bendPositive(false) → +1（解算器把 bendSign 当旋转方向符号，
       // `kneeDir = Rotate(u, a1 * bendSign)`，符号反了膝盖会朝另一侧弯）
       expect(ik.bendSign).toBe(1)
       expect(ik.useBoneLength).toBe(false)

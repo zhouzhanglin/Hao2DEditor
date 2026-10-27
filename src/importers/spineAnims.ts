@@ -11,17 +11,63 @@ import type {
   IkAnim,
   SlotAnim
 } from '@core/model/animation'
-import type { BoneData } from '@core/model/types'
+import type { BoneData, VertexWeight } from '@core/model/types'
 import type { Constraint } from '@core/model/constraints'
 import type { AtlasRegion, PageSizes } from './uv'
 import { parseHexColor, pxToUnit } from './uv'
 import type { SpineAnimationJson } from './spineTypes'
 
-/** 网格附件的绑定顶点（deform 换算与长度对齐用）：key = `slot\u0000attachment` */
+/** 网格附件的绑定顶点（deform 换算与长度对齐用） */
 export interface SpineDeformBase {
   /** 绑定顶点（世界单位，每顶点 x,y）；加权网格为等长的零占位 */
   vertices: Float32Array
   weighted: boolean
+  /** 顶点的骨骼权重（加权网格折叠 FFD 时按权重分摊） */
+  weights?: readonly VertexWeight[]
+  /** 加权网格的顶点影响映射（Spine 的 deform 数组按**影响点**排布，编辑器按顶点存） */
+  influence?: SpineDeformInfluence
+}
+
+/**
+ * 加权网格「Spine deform 下标 → 编辑器顶点」的映射。
+ *
+ * Spine 的 deform 数组是**逐影响点**展开的（每根影响一份骨内 (dx,dy)），
+ * 长度 = 影响点数 × 2；编辑器的 FFD 数据是**逐顶点**的（长度 = 顶点数 × 2），
+ * 由运行期按 bindpose 分摊到每根影响上。两者之间要用本表换算。
+ */
+export interface SpineDeformInfluence {
+  /** 每顶点在 Spine deform 数组里的影响点数（累加即得下标） */
+  counts: Int32Array
+  /** 每顶点 4 个影响槽 → Spine 原始影响下标（-1 = 该槽没有影响） */
+  slots: Int8Array
+}
+
+/**
+ * deformBase 的精确 key：皮肤 + 插槽 + 附件。
+ * 同名附件在不同皮肤里顶点数可能不同（换装网格），只按「插槽 + 附件」存会互相覆盖，
+ * deform 的长度对齐就会取到别的皮肤的顶点表。
+ */
+export function deformBaseKey(skinName: string, slotName: string, attachmentName: string): string {
+  return `${skinName}\u0000${slotName}\u0000${attachmentName}`
+}
+
+/** deformBase 的「与皮肤无关」回退 key：3.x 的插槽层 deform 没有皮肤维度，只认默认皮肤 */
+export function slotDeformBaseKey(slotName: string, attachmentName: string): string {
+  return `${slotName}\u0000${attachmentName}`
+}
+
+/** 先按「皮肤 + 插槽 + 附件」精确查；没有精确项（3.x 插槽层轨道）再回退到默认皮肤的表 */
+export function lookupDeformBase(
+  deformBase: ReadonlyMap<string, SpineDeformBase>,
+  skinName: string,
+  slotName: string,
+  attachmentName: string
+): SpineDeformBase | undefined {
+  if (skinName) {
+    const exact = deformBase.get(deformBaseKey(skinName, slotName, attachmentName))
+    if (exact) return exact
+  }
+  return deformBase.get(slotDeformBaseKey(slotName, attachmentName))
 }
 
 export interface SpineAnimContext {
@@ -34,8 +80,13 @@ export interface SpineAnimContext {
   attIndexBySlot: Map<string, Map<string, number>>
   regions: Map<string, AtlasRegion>
   pageSizes: PageSizes
-  /** 网格顶点基线：key = `slot\u0000attachment` */
+  /** 网格顶点基线：精确项 key 见 `deformBaseKey`，无皮肤的兜底项见 `slotDeformBaseKey` */
   deformBase: ReadonlyMap<string, SpineDeformBase>
+  /**
+   * 每根骨骼 setup 世界矩阵的线性部分（列主序 4 个数 m00,m01,m10,m11）。
+   * Spine 的加权网格 deform 是**骨内**偏移，换算成编辑器的显示空间位移要用它。
+   */
+  setupWorldLin: Float32Array
   /**
    * 贝塞尔 `curve` 的坐标系：`true` = 绝对值（spine ≥ 4.2 的「(时间, 值) 控制点」），
    * `false` = 归一化 0..1 控制点（≤ 4.1），`null` = 版本未知（回退数值启发式）。
@@ -49,7 +100,7 @@ export interface SpineAnimContext {
 /**
  * Spine 动画 → AnimData。
  *
- * 关键点（与参考库一致）：
+ * 关键点（与 spine-core 4.3 一致）：
  * - 骨骼轨道的 rotate/translate/scale 是**相对 setup 的增量**，这里叠加成绝对值后写入
  * - `attachment` 轨道固定 Stepped，同时产出附件名（换皮肤后按名解析才正确）
  * - `deform` 的层级既可能是 3.x 的「插槽层」，也可能是 4.x 的「皮肤层」
@@ -135,8 +186,8 @@ export function importSpineAnimations(
       const rawX = numberOr(key.x, 0)
       const nrawX = next ? numberOr(next.x, 0) : rawX
       const e = curveOfChannel(key.curve, 0, timeOf(key), next ? timeOf(next) : timeOf(key), rawX, nrawX, ctx.absoluteCurve)
-      // 与参考库一致：shear 帧**原样保留**（不叠加 setup）
-      // —— 参考的注释明确写着「setup 里没有 shear，且运行期不采样它，原样保留」
+      // 与 Unity 端 Hao2D 运行时一致：shear 帧**原样保留**（不叠加 setup）
+      // —— 那边的注释明确写着「setup 里没有 shear，且运行期不采样它，原样保留」
       track.shear.push({
         time: timeOf(key),
         value: { x: rawX, y: numberOr(key.y, 0) },
@@ -208,7 +259,7 @@ export function importSpineAnimations(
     duration = Math.max(duration, timeOf(key))
   }
 
-  // ik 轨道（参考库风格，ikIndex 指向 IK 约束列表）
+  // ik 轨道（Unity 端 Hao2D 运行时风格，ikIndex 指向 IK 约束列表）
   const ikConstraintIndices = ctx.constraints
     .map((constraint, i) => ({ constraint, i }))
     .filter((entry) => entry.constraint.type === 'ik')
@@ -301,7 +352,9 @@ function floatKey(
 }
 
 /**
- * deform 层级判定：第一层键能在插槽表找到 → 3.x 插槽层；否则是 4.x 皮肤层（只取第一个皮肤）。
+ * deform 层级判定：第一层键能在插槽表找到 → 3.x 插槽层（与皮肤无关）；
+ * 否则是皮肤层 `deform.<skin>.<slot>.<attachment>` —— **每个皮肤都要收**，轨道带上皮肤归属，
+ * 运行期再按当前合并皮肤过滤。早先只取 `keys[0]` 那一个皮肤，其余皮肤的 deform 全丢。
  * 4.2 起官方把 deform 挪进了 `attachments.<skin>.<slot>.<attachment>.deform`，
  * 由 `collectAttachmentDeforms` 单独处理。
  */
@@ -315,17 +368,41 @@ function collectDeforms(
   collectAttachmentDeforms(animation, ctx, out, onTime)
   if (!deform) return
 
-  const keys = Object.keys(deform)
-  if (keys.length === 0) return
-  const isSlotLayer = ctx.slotIndex.has(keys[0])
-  const layer = (
-    isSlotLayer ? deform : (deform[keys[0]] ?? {})
-  ) as unknown as Record<string, Record<string, Array<Record<string, unknown>>>>
+  const entries = Object.entries(deform)
+  if (entries.length === 0) return
+  if (ctx.slotIndex.has(entries[0][0])) {
+    // 3.x 插槽层：没有皮肤维度，统一传空皮肤名（顶点基线取默认皮肤）
+    collectDeformLayer('', deform, ctx, out, onTime)
+    return
+  }
+  for (const [skinName, layer] of entries) {
+    // 皮肤层：key 是皮肤名（4.0/4.1 用 `deform.<skin>.<slot>.<attachment>`）
+    collectDeformLayer(skinName, layer, ctx, out, onTime)
+  }
+}
 
-  for (const [slotName, attachments] of Object.entries(layer)) {
-    for (const [attachmentName, frames] of Object.entries(attachments)) {
+/** `deform.<slot>.<attachment>` 这一层展开成轨道；`skinName` 为空表示与皮肤无关 */
+function collectDeformLayer(
+  skinName: string,
+  layer: unknown,
+  ctx: SpineAnimContext,
+  out: DeformAnim[],
+  onTime: (time: number) => void
+): void {
+  if (!layer || typeof layer !== 'object') return
+  for (const [slotName, attachments] of Object.entries(layer as Record<string, unknown>)) {
+    if (!attachments || typeof attachments !== 'object') continue
+    for (const [attachmentName, frames] of Object.entries(attachments as Record<string, unknown>)) {
       if (!Array.isArray(frames)) continue
-      pushDeformTrack(slotName, attachmentName, frames as Array<Record<string, unknown>>, ctx, out, onTime)
+      pushDeformTrack(
+        skinName,
+        slotName,
+        attachmentName,
+        frames as Array<Record<string, unknown>>,
+        ctx,
+        out,
+        onTime
+      )
     }
   }
 }
@@ -339,20 +416,29 @@ function collectAttachmentDeforms(
 ): void {
   const skins = animation.attachments
   if (!skins) return
-  for (const slots of Object.values(skins)) {
+  for (const [skinName, slots] of Object.entries(skins)) {
     if (!slots || typeof slots !== 'object') continue
     for (const [slotName, attachments] of Object.entries(slots)) {
       if (!attachments || typeof attachments !== 'object') continue
       for (const [attachmentName, timeline] of Object.entries(attachments)) {
         const frames = (timeline as { deform?: unknown } | null)?.deform
         if (!Array.isArray(frames)) continue
-        pushDeformTrack(slotName, attachmentName, frames as Array<Record<string, unknown>>, ctx, out, onTime)
+        pushDeformTrack(
+          skinName,
+          slotName,
+          attachmentName,
+          frames as Array<Record<string, unknown>>,
+          ctx,
+          out,
+          onTime
+        )
       }
     }
   }
 }
 
 function pushDeformTrack(
+  skinName: string,
   slotName: string,
   attachmentName: string,
   frames: Array<Record<string, unknown>>,
@@ -362,32 +448,43 @@ function pushDeformTrack(
 ): void {
   const slotIndex = ctx.slotIndex.get(slotName)
   if (slotIndex === undefined) return
-  const track = emptyDeformAnim(slotIndex, attachmentName)
-  const base = ctx.deformBase.get(`${slotName}\u0000${attachmentName}`)
-  // 数组长度对齐到附件绑定顶点数（参考库用 `deformLength = 附件顶点数 × 2`）
-  let need = base ? base.vertices.length : 0
+  const track = emptyDeformAnim(slotIndex, attachmentName, skinName || undefined)
+  // 顶点基线必须按「皮肤 + 插槽 + 附件」取：换装皮肤里同名附件的顶点数不同
+  const base = lookupDeformBase(ctx.deformBase, skinName, slotName, attachmentName)
+  const vertexCount = base ? Math.floor(base.vertices.length / 2) : 0
+  const influence = base?.weighted ? base.influence : undefined
+  /*
+   * 数组长度按 spine-core 4.3 的 `deformLength` 语义：
+   * - 加权网格 = **影响点数** × 2（逐影响点一份骨内偏移）
+   * - 未加权网格 = 顶点数 × 2
+   * 早先一律按「顶点数 × 2」对齐（Unity 端 Hao2D 运行时的写法），加权网格的偏移
+   * 就被按顶点切开了：第 k 个顶点读到的是第 k/2 个影响的数据，FFD 整体错位。
+   */
+  let need = vertexCount * 2
+  if (influence) {
+    let count = 0
+    for (let v = 0; v < vertexCount; v++) count += influence.counts[v]
+    need = count * 2
+  }
   for (const frame of frames) {
-    const offset = numberOr(frame.offset, 0)
+    const offset = Math.round(numberOr(frame.offset, 0))
     const vertices = Array.isArray(frame.vertices) ? (frame.vertices as number[]) : []
-    need = Math.max(need, Math.round(offset) + vertices.length)
+    need = Math.max(need, offset + vertices.length)
     onTime(numberOr(frame.time, 0))
   }
   for (const frame of frames) {
     const offset = Math.max(0, Math.round(numberOr(frame.offset, 0)))
     const vertices = Array.isArray(frame.vertices) ? (frame.vertices as number[]) : []
-    const offsets = new Array<number>(need).fill(0)
+    const raw = new Array<number>(need).fill(0)
     for (let i = 0; i < vertices.length; i++) {
-      const at = offset + i
-      // Spine 的 deform 帧 `vertices` **本身就是「相对绑定顶点的偏移」**：
-      // 官方 SkeletonJson 读取时是 `deform[i] = 该偏移[i] + 绑定顶点[i]`（非加权网格）
-      // 才凑出绝对坐标。我们运行期同样是「绑定顶点 + 偏移」（见 meshBuilder），
-      // 所以这里**原样使用**。
-      //
-      // 早先误以为 json 存的是绝对坐标、又减了一次绑定顶点 → 偏移变成
-      // 「偏移 − 绑定坐标」，FFD 彻底错乱（表现：deform 作用的部件变形诡异，
-      // 看起来像缩放/斜切出问题 —— 如 spineunitygirl 的手指与脚）。
-      offsets[at] = pxToUnit(vertices[i])
+      // Spine 的 deform 帧 `vertices` **本身就是「相对绑定顶点的偏移」**（像素），
+      // 这里只做像素 → 世界单位换算，语义原样保留。
+      raw[offset + i] = pxToUnit(vertices[i])
     }
+    const offsets =
+      influence && vertexCount > 0
+        ? collapseInfluenceOffsets(raw, base?.weights, influence, vertexCount, ctx.setupWorldLin)
+        : raw
     const key: DeformKeyframe = {
       time: numberOr(frame.time, 0),
       offsets,
@@ -398,6 +495,61 @@ function pushDeformTrack(
     track.frames.push(key)
   }
   if (track.frames.length > 0) out.push(track)
+}
+
+/**
+ * 「逐影响点的骨内偏移」→「逐顶点的显示空间偏移」。
+ *
+ * 加权网格的顶点位置是 `Σ w_k · W_k · (l_k + d_k)`，其中 `d_k` 是第 k 根影响的骨内偏移。
+ * 编辑器的 FFD 每个顶点只存一份**显示空间**位移 `D`，运行期给每根影响加
+ * `inv(W_k_setup) · D`（见 meshBuilder 的 `accumulateWeighted`）。要让两者在 setup 姿态下
+ * 完全等价，取
+ *
+ *     D = Σ w_k · W_k_setup · d_k
+ *
+ * （`W_k_setup` = 该骨骼 setup 世界矩阵的线性部分，`Σ w_k = 1`，所以
+ * `Σ w_k · inv(W_k_setup) · D = D`，顶点位移就是 Spine 算出来的那个位移）。
+ *
+ * 与 `spineExport.ts` 的 `deformFrameVertices` 是互逆操作，导入导出可来回。
+ */
+function collapseInfluenceOffsets(
+  raw: readonly number[],
+  weights: readonly VertexWeight[] | undefined,
+  influence: SpineDeformInfluence,
+  vertexCount: number,
+  setupWorldLin: Float32Array
+): number[] {
+  const out = new Array<number>(vertexCount * 2).fill(0)
+  if (!weights || weights.length < vertexCount) return out
+  let at = 0
+  for (let v = 0; v < vertexCount; v++) {
+    const count = influence.counts[v]
+    const w = weights[v]
+    if (count > 0) {
+      const bones = [w.b0, w.b1, w.b2, w.b3]
+      const ws = [w.w0, w.w1, w.w2, w.w3]
+      let dx = 0
+      let dy = 0
+      for (let k = 0; k < 4; k++) {
+        const weight = ws[k]
+        if (weight <= 0) continue
+        const orig = influence.slots[v * 4 + k]
+        if (orig < 0 || orig >= count) continue
+        const idx = (at + orig) * 2
+        const dxi = raw[idx] ?? 0
+        const dyi = raw[idx + 1] ?? 0
+        if (dxi === 0 && dyi === 0) continue
+        const o = bones[k] * 4
+        if (o + 3 >= setupWorldLin.length) continue
+        dx += weight * (setupWorldLin[o] * dxi + setupWorldLin[o + 1] * dyi)
+        dy += weight * (setupWorldLin[o + 2] * dxi + setupWorldLin[o + 3] * dyi)
+      }
+      out[v * 2] = dx
+      out[v * 2 + 1] = dy
+    }
+    at += count
+  }
+  return out
 }
 
 type SpineCurveKeyframeMap = Record<string, Array<Record<string, unknown>>>
@@ -497,8 +649,8 @@ function numberOr(value: unknown, fallback: number): number {
 }
 
 /**
- * 关键帧时间（秒）。Spine 的**第一帧通常省略 `time` 字段**（等价于 0，见参考库
- * `GetFloat(keyMap, "time", 0)`），直接读会得到 undefined —— 时间轴上第一帧就
+ * 关键帧时间（秒）。Spine 的**第一帧通常省略 `time` 字段**（等价于 0，见 spine-core 4.3
+ * `Json.getFloat(key, "time", 0)`），直接读会得到 undefined —— 时间轴上第一帧就
  * 不在 0 处（排序/插值也跟着错）。
  */
 function timeOf(key: { time?: number }): number {

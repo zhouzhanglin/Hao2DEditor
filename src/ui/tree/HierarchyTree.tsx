@@ -1765,7 +1765,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       <TreeRow
         key={`bone:${bone.name}`}
         dataBone={bone.name}
-        flashKey={flash?.name === bone.name ? flash.nonce : 0}
+        // 必须连 kind 一起比：display / 插槽定位也是按 name 记的，同名骨骼不能跟着闪
+        flashKey={flash?.kind === 'bone' && flash.name === bone.name ? flash.nonce : 0}
         dragPayload={{ kind: 'bone', name: bone.name }}
         onDropNode={(payload, position) => handleNodeDrop(payload, { kind: 'bone', name: bone.name }, position)}
         depth={depth}

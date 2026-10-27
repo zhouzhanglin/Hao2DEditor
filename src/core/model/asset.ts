@@ -209,12 +209,37 @@ export function findAttachmentIndex(map: ReadonlyMap<string, number>, name: stri
   return undefined
 }
 
+/**
+ * 只作为「临时状态」出现的插槽：动画里会把它们清空（眨眼 / 收枪 / 换弹）。
+ *
+ * 判定依据是插槽显示轨道上存在「清空」关键帧（`displayAttachment` 里的空串）。
+ * 这类插槽在 setup 里为空是**故意**的，不能因为当前皮肤为它提供了附件就默认显示：
+ * Goblins 的 `eyes` 在 `walk` 里 0.7s 显示 `eyes-closed`、0.8s 清空，兜底会让它在 setup 态永远闭眼。
+ */
+const stateDrivenCache = new WeakMap<RuntimeAsset, Set<number>>()
+
+function stateDrivenSlots(asset: RuntimeAsset): Set<number> {
+  const cached = stateDrivenCache.get(asset)
+  if (cached) return cached
+  const out = new Set<number>()
+  for (const anim of asset.animations) {
+    for (const track of anim.slots) {
+      if (out.has(track.slotIndex)) continue
+      if (track.displayAttachment.some((name) => !name)) out.add(track.slotIndex)
+    }
+  }
+  stateDrivenCache.set(asset, out)
+  return out
+}
+
 /** 构建运行期预解析映射（对齐参考库 MeshBuilder.Init）。 */
 export function buildRuntimeMaps(asset: RuntimeAsset, skinName = ''): RuntimeMaps {
   const slotSkin = new Map<string, SkinSlotData>()
+  let baseSkin: SkinData | null = null
   if (asset.skins.length > 0) {
     let def = asset.defaultSkinIndex
     if (def < 0 || def >= asset.skins.length) def = 0
+    baseSkin = asset.skins[def] ?? null
     mergeSkinIntoSlotMap(slotSkin, asset.skins[def], false)
     if (skinName) {
       const idx = findSkinIndex(asset.skins, skinName)
@@ -257,6 +282,20 @@ export function buildRuntimeMaps(asset: RuntimeAsset, skinName = ''): RuntimeMap
       // 换装皮肤的附件名带「皮肤名/」前缀，而 slot.attachment 是裸名 → 用兼容查找
       const byName = findAttachmentIndex(map, want)
       if (byName !== undefined) display = byName
+    } else if (
+      display < 0 &&
+      !baseSkin?.slots.some((slot) => slot.slotName === asset.slots[i].name) &&
+      !stateDrivenSlots(asset).has(i)
+    ) {
+      /*
+       * 换装武器的典型写法：「一把武器一组插槽」，每个皮肤只声明自己那把枪 / 那只手的附件，
+       * 插槽在 setup 里不写 attachment（换哪把枪由皮肤决定，动画再按附件名把它显示出来）。
+       *
+       * 这时基底皮肤里根本没有这个插槽，setup 附件也是空串 —— 沿用它就是 -1（什么都不画），
+       * 表现成「切换皮肤后视口没有任何变化」。当前皮肤既然为它提供了附件，就默认显示第一个。
+       * 基底皮肤里存在的插槽不受影响：它们的 setup 附件为空是「本来就不显示」，必须保持 -1。
+       */
+      display = 0
     }
     // -1 是「setup 时不显示任何附件」的合法值，必须保留；只有越界才退化为第一个附件
     if (display >= count) display = 0

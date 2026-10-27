@@ -619,6 +619,15 @@ function normalizeMeta(raw: unknown): EditorMeta {
       : rawMode === 'smooth'
         ? 'smooth'
         : 'addSubtract'
+  /*
+   * 老工程的 `strength` 是 0..1 的直接强度（更早的版本），新语义是 0..100 的「一笔上限」：
+   * ≤1 按老单位 ×100。`hardness`（每笔增量）在新语义下换不回来（增量 ≠ 上限），
+   * 只有它时回退默认值 —— 笔刷偏好丢掉比换成错误的手感好。
+   */
+  const rawStrength = num(brush.strength, NaN)
+  const strength = Number.isFinite(rawStrength)
+    ? Math.min(100, Math.max(0, rawStrength <= 1 ? rawStrength * 100 : rawStrength))
+    : base.brush.strength
   return {
     layout: isRecord(raw.layout)
       ? Object.fromEntries(
@@ -639,8 +648,8 @@ function normalizeMeta(raw: unknown): EditorMeta {
     brush: {
       mode,
       size: num(brush.size, num(brush.radius, base.brush.size)),
-      // 老工程的 strength 是 0..1 的直接强度；换成 0..100 的 Hardness 要乘 100
-      hardness: num(brush.hardness, num(brush.strength, base.brush.hardness / 100) * 100),
+      strength,
+      feather: Math.min(100, Math.max(0, num(brush.feather, base.brush.feather))),
       normalize: bool(brush.normalize, base.brush.normalize)
     },
     stage: normalizeStage(raw.stage)

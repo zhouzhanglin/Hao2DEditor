@@ -551,34 +551,52 @@ describe('工程 JSON', () => {
     expect(warnings[0]).toContain('皮肤')
   })
 
-  it('笔刷参数按 Unity 同名读写（Mode / Size / Hardness / Normalize）', () => {
+  it('笔刷参数按 Strength / Feather 读写（Mode / Size / Strength / Feather / Normalize）', () => {
     const { document } = parseDocument(
       JSON.stringify({
         armatureName: 'brush',
-        editorMeta: { brush: { mode: 'smooth', size: 80, hardness: 30, normalize: false } }
+        editorMeta: { brush: { mode: 'smooth', size: 80, strength: 30, feather: 20, normalize: false } }
       })
     )
     expect(document.editorMeta.brush).toEqual({
       mode: 'smooth',
       size: 80,
-      hardness: 30,
+      strength: 30,
+      feather: 20,
       normalize: false
     })
   })
 
-  it('旧工程的笔刷参数（radius / strength / 方向模式）被读成同名新参数', () => {
+  it('旧工程的笔刷参数（radius / strength 0..1 / 方向模式）被读成新参数', () => {
     const { document } = parseDocument(
       JSON.stringify({
         armatureName: 'legacy-brush',
         editorMeta: { brush: { radius: 64, strength: 0.02, mode: 'subtract' } }
       })
     )
-    // 老的 add / subtract / replace 都属于「影响周围所有顶点」→ addSubtract
+    // 老的 add / subtract / replace 都属于「影响周围所有顶点」→ addSubtract；strength 是 0..1 → ×100
     expect(document.editorMeta.brush).toEqual({
       mode: 'addSubtract',
       size: 64,
-      hardness: 2,
+      strength: 2,
+      feather: 50,
       normalize: true
+    })
+  })
+
+  it('只有 hardness（每笔增量）的老工程：换不回上限语义，回退默认 Strength', () => {
+    const { document } = parseDocument(
+      JSON.stringify({
+        armatureName: 'hardness-brush',
+        editorMeta: { brush: { mode: 'smooth', size: 80, hardness: 30, normalize: false } }
+      })
+    )
+    expect(document.editorMeta.brush).toEqual({
+      mode: 'smooth',
+      size: 80,
+      strength: 40,
+      feather: 50,
+      normalize: false
     })
   })
 

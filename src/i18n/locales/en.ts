@@ -987,10 +987,30 @@ export const en: Record<string, string> = {
   'Grow and Shrink（只动已受影响的顶点）': 'Grow and Shrink (only affect already-influenced vertices)',
   'Smooth（朝邻居平均）': 'Smooth (average toward neighbors)',
   '（未选）': '(none selected)',
+
+  // ── 权重刷的子工具（刷权重 / 框选顶点） ──
+  '刷权重': 'Paint weights',
+  '框选顶点': 'Box-select vertices',
+  '刷权重（默认）：按住拖动按 Mode / Strength / Feather 刷；有选中顶点时只刷这些顶点':
+    'Paint weights (default): hold and drag to paint with Mode / Strength / Feather; when vertices are selected only those are painted',
+  '框选顶点：拖出矩形选中顶点（Shift 追加）；之后刷权重只影响这些顶点，点空白处取消选择':
+    'Box-select vertices: drag a rectangle to select (Shift adds); painting then only affects these vertices — click empty space to clear',
+  '权重刷：{0}': 'Weight brush: {0}',
+  '框选顶点属于绑定编辑：切到 Pose 状态再用':
+    'Box-selecting vertices edits the bind pose: switch to Pose mode first',
+  '框选顶点：拖出矩形；松手后刷权重只影响这些顶点，点空白处取消选择':
+    'Box select vertices: drag a rectangle; painting will then only affect these vertices — click empty space to clear',
+  '框选顶点（Shift：加进当前选择）：拖出矩形；松手后刷权重只影响这些顶点，点空白处取消选择':
+    'Box select vertices (Shift: add to current selection): drag a rectangle; painting will then only affect these vertices — click empty space to clear',
+  '已取消顶点选择：之后刷权重又影响整块网格':
+    'Vertex selection cleared: painting affects the whole mesh again',
+  '框选：矩形里没有顶点（选择没有变化）': 'Box select: no vertices inside the rectangle (selection unchanged)',
+  '已框选 {0} 个顶点（共 {1} 个）：之后只刷这些顶点的权重，点空白处取消选择':
+    'Box-selected {0} vertices ({1} in total): painting now only affects these — click empty space to clear',
   '刷过的顶点权重归一到 1；关掉就只改目标骨骼，权重和可能不等于 1':
     'Normalize painted vertex weights to 1; when off, only the target bone changes and the weight sum may not equal 1',
-  'Hardness 100 = 一次刷满；按住修饰键临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长':
-    'Hardness 100 = fully painted in one pass; hold a modifier to temporarily change direction: Alt = subtract / Shift = replace / Ctrl = smooth / Ctrl+Shift = grow',
+  'Strength = 一笔能刷到的权重上限；Feather = 边缘衰减占笔刷半径的比例（0 = 硬边）；按住修饰键临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长':
+    'Strength = the maximum weight one stroke can reach; Feather = share of the brush radius used to fade out (0 = hard edge); hold a modifier to change direction: Alt = subtract / Shift = replace / Ctrl = smooth / Ctrl+Shift = grow',
   '整体染色': 'Global tint',
   '染色与插槽色、附件色相乘，用于快速检查叠加效果':
     'Tint multiplies with slot and attachment colors; handy for quickly checking the blended result',
@@ -1595,8 +1615,12 @@ export const en: Record<string, string> = {
   '{0}「{1}」的权重': '{0} weights of "{1}"',
   '权重刷「{0}」': 'Weight brush "{0}"',
   '{0}：按住拖动{1}': '{0}: hold and drag to {1}',
-  '（Mode {0} / Size {1}px / Hardness {2}{3}；临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长）':
-    ' (Mode {0} / Size {1}px / Hardness {2}{3}; temporary direction: Alt=subtract / Shift=replace / Ctrl=smooth / Ctrl+Shift=grow)',
+  '（Mode {0} / Size {1}px / Strength {2}% / Feather {3}%{4}；临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长）':
+    ' (Mode {0} / Size {1}px / Strength {2}% / Feather {3}%{4}; temporary direction: Alt=subtract / Shift=replace / Ctrl=smooth / Ctrl+Shift=grow)',
+  '{0}：按住拖动{1}（只刷选中的 {2} 个顶点；点空白处取消选择）':
+    '{0}: hold and drag to {1} (only the {2} selected vertices; click empty space to clear the selection)',
+  '；只刷选中的 {0} 个顶点（点空白处取消选择）':
+    '; only the {0} selected vertices (click empty space to clear the selection)',
   ' / Normalize 关': ' / Normalize off',
   '增加': 'Add',
   '增长': 'Grow',

@@ -14,6 +14,7 @@ import HierarchyTree from './tree/HierarchyTree'
 import ViewportCanvas from './viewport/ViewportCanvas'
 import ModeSwitch from './viewport/ModeSwitch'
 import MeshSubtoolBar from './viewport/MeshSubtoolBar'
+import WeightSubtoolBar from './viewport/WeightSubtoolBar'
 import PropertyKeyBar from './viewport/PropertyKeyBar'
 import ViewportOverlays from './viewport/ViewportOverlays'
 import ViewportTools from './viewport/ViewportTools'
@@ -21,6 +22,8 @@ import PanelShell from './widgets/PanelShell'
 import { pickAnimationForAnimate, useModeStore } from '@editor/store/modeStore'
 import type { EditorMode } from '@editor/store/modeStore'
 import { useProjectStore } from '@editor/store/projectStore'
+import { executeCommand } from '@editor/commands'
+import { createSampleDocument } from '@core/sample'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useToolStore } from '@editor/store/toolStore'
 import type { EditorTool, GizmoMode } from '@editor/store/toolStore'
@@ -213,6 +216,15 @@ export default function App() {
     },
     [importTargetRequest]
   )
+
+  // TEMP-WIKI-SHOT: 截图调试钩子，截完即删
+  useEffect(() => {
+    ;(window as unknown as Record<string, unknown>).__hao2d = {
+      loadSample: () => useProjectStore.getState().setDocument(createSampleDocument(), null, false),
+      cmd: (name: string, args?: unknown) => executeCommand(name, args),
+      openImport: (kind: string) => setImportTargetRequest({ kind, resolve: () => {} }),
+    }
+  }, [])
 
   const booted = useRef(false)
 
@@ -884,6 +896,8 @@ export default function App() {
               <ViewportTools onStatus={flash} onOpenStage={() => setStageOpen(true)} />
               {/* 左下角网格子工具条：只在「网格工具 + Pose 态」出现（见 MeshSubtoolBar 内部判断） */}
               <MeshSubtoolBar onStatus={flash} />
+              {/* 左下角权重刷子工具条：只在「权重刷 + Pose 态」出现，与网格子工具条互斥 */}
+              <WeightSubtoolBar onStatus={flash} />
               {/* 左下角属性打帧条：Animate 态下给选中骨骼 / 插槽的每条通道一个「打一帧」入口 */}
               <PropertyKeyBar onStatus={flash} />
               {/* 关键帧的值：贴在视口正下方中间，改值时光看画面即可（仅 Animate 态出现） */}

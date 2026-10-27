@@ -560,7 +560,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
     <>
       {tools.tool === 'weight' && mode === 'pose' ? (
         <FieldGroup title={t('权重刷')}>
-          {/* 参数与 Unity 2D Animation 的 Weight Brush 面板同名：Mode / Bone / Normalize / Size / Hardness */}
+          {/* 参数：Mode / Bone / Normalize / Size / Strength / Feather（Strength 与 Feather 对齐 Spine 的笔刷语义） */}
           <SelectField
             label="Mode"
             value={tools.brush.mode}
@@ -597,16 +597,26 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             onChange={(value) => tools.setBrush({ size: value })}
           />
           <NumberField
-            label="Hardness"
-            value={tools.brush.hardness}
-            step={0.5}
-            min={0.1}
+            label="Strength"
+            value={tools.brush.strength}
+            step={5}
+            min={1}
             max={100}
-            onChange={(value) => tools.setBrush({ hardness: value })}
+            suffix="%"
+            onChange={(value) => tools.setBrush({ strength: value })}
+          />
+          <NumberField
+            label="Feather"
+            value={tools.brush.feather}
+            step={5}
+            min={0}
+            max={100}
+            suffix="%"
+            onChange={(value) => tools.setBrush({ feather: value })}
           />
           <p className="flex items-center gap-1 text-3xs text-content-lo">
             <Brush size={10} />
-            {t('Hardness 100 = 一次刷满；按住修饰键临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长')}
+            {t('Strength = 一笔能刷到的权重上限；Feather = 边缘衰减占笔刷半径的比例（0 = 硬边）；按住修饰键临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长')}
           </p>
         </FieldGroup>
       ) : null}

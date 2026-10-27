@@ -658,6 +658,18 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
 
   if (tools.tool === 'weight') {
     /*
+     * 子工具「框选顶点」（左下角图标条切换）：左键拖动只拉框选，松手结算，全程不写权重。
+     * 与「刷权重」二选一 —— 同一个左键拖动不能既是框选又是刷。
+     */
+    if (tools.weightSubtool === 'box') {
+      if (host.mode !== 'pose') {
+        host.status(t('框选顶点属于绑定编辑：切到 Pose 状态再用'))
+        return true
+      }
+      startVertexBox(host, info)
+      return true
+    }
+    /*
      * 单击 = **选中顶点**（属性检查器随即显示它的权重），拖动才刷权重。
      *
      * 两个细节别漏：
@@ -682,6 +694,9 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
         vertices: [hit.vertexIndex],
         vertex: ref.vertex
       })
+    } else if (useSelectionStore.getState().vertices.length > 0) {
+      // 点空白 = 取消顶点选择（Spine 的规则）：下一次拖动恢复为刷整块网格
+      useSelectionStore.getState().select({ vertices: [], vertex: -1 })
     }
     const vertexLabel = ref
       ? t('顶点 #{0}（{1} / {2}）', [ref.vertex, ref.slot, ref.attachment])
@@ -721,18 +736,22 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
         : t('{0}「{1}」的权重', [t(BRUSH_ACTION[paintMode]).toLowerCase(), bone])
     const target = paintMode === 'smooth' ? t('权重刷') : t('权重刷「{0}」', bone)
     const brushParams = t(
-      '（Mode {0} / Size {1}px / Hardness {2}{3}；临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长）',
+      '（Mode {0} / Size {1}px / Strength {2}% / Feather {3}%{4}；临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长）',
       [
         tools.brush.mode,
         tools.brush.size,
-        tools.brush.hardness,
+        tools.brush.strength,
+        tools.brush.feather,
         tools.brush.normalize ? '' : t(' / Normalize 关')
       ]
     )
+    const onlyCount = useSelectionStore.getState().vertices.length
     host.status(
       vertexLabel
-        ? t('{0}：按住拖动{1}', [vertexLabel, action])
-        : t('{0}：按住拖动{1}', [target, action]) + brushParams
+        ? t('{0}：按住拖动{1}（只刷选中的 {2} 个顶点；点空白处取消选择）', [vertexLabel, action, onlyCount])
+        : t('{0}：按住拖动{1}', [target, action]) +
+          (onlyCount > 0 ? t('；只刷选中的 {0} 个顶点（点空白处取消选择）', onlyCount) : '') +
+          brushParams
     )
     drag = { ...IDLE, kind: 'paint', bone, paintMode, lastPaint: { ...info.world } }
     return true
@@ -2216,8 +2235,13 @@ function paintAt(host: ToolHost, world: Vec2): void {
    * 只刷**选中的那个附件**（与官方工具「刷选中的网格」一致）。
    * `anySlot` 传 false：附件对不上就一个顶点都不取 —— 原来没选附件时会把整个角色的顶点
    * 都刷上，等于在看不见的地方改了数据。
+   *
+   * 若还**选中了顶点**，就只刷这些顶点（Spine 的规则：不选 = 刷整块网格，选了 = 只刷选中的），
+   * 局部修权重不用再把笔刷调到很小。
    */
-  const samples = samplesFor(host, host.selection.slot, host.selection.attachment, false)
+  const all = samplesFor(host, host.selection.slot, host.selection.attachment, false)
+  const keys = selectedVertexKeys(host, host.selection.vertices)
+  const samples = keys ? all.filter((sample) => keys.has(vertexSampleKey(sample))) : all
   if (samples.length === 0) return
   const brush = host.tools.brush
   let touched = 0
@@ -2228,9 +2252,10 @@ function paintAt(host: ToolHost, world: Vec2): void {
       drag.bone,
       world,
       brush.size / 100,
-      brush.hardness / 100,
+      brush.strength / 100,
       drag.paintMode,
-      brush.normalize
+      brush.normalize,
+      brush.feather / 100
     )
   })
   if (touched === 0) return
@@ -2284,10 +2309,19 @@ function startVertexBox(host: ToolHost, info: PointerInfo): void {
     vertexBox: { x0: info.world.x, y0: info.world.y, x1: info.world.x, y1: info.world.y }
   })
   host.scene.markDirty()
+  /*
+   * 权重刷下没有右键语义（右键留给上下文菜单），提示换成「点空白取消」；
+   * 而且那里框选的目的就是限定刷的范围，直接说出来比只说「选中顶点」有用。
+   */
+  const forWeight = host.tools.tool === 'weight'
   host.status(
-    info.shift
-      ? t('框选顶点（Shift：加进当前选择）：拖出矩形，松手选中框内的顶点；右键取消选择')
-      : t('框选顶点：拖出矩形，松手选中框内的顶点；右键取消选择')
+    forWeight
+      ? info.shift
+        ? t('框选顶点（Shift：加进当前选择）：拖出矩形；松手后刷权重只影响这些顶点，点空白处取消选择')
+        : t('框选顶点：拖出矩形；松手后刷权重只影响这些顶点，点空白处取消选择')
+      : info.shift
+        ? t('框选顶点（Shift：加进当前选择）：拖出矩形，松手选中框内的顶点；右键取消选择')
+        : t('框选顶点：拖出矩形，松手选中框内的顶点；右键取消选择')
   )
 }
 
@@ -2309,11 +2343,18 @@ function finishVertexBox(host: ToolHost, session: DragSession): void {
   const maxX = Math.max(box.x0, box.x1)
   const minY = Math.min(box.y0, box.y1)
   const maxY = Math.max(box.y0, box.y1)
-  // 一次「点击」（没拖出面积，按屏幕 3px 判）：保持原选择不动 —— 这正是本条交互改动的目的
-  const minSize = scene.viewport.pixelsToWorld(3)
-  if (maxX - minX < minSize || maxY - minY < minSize) return
-
   const current = useSelectionStore.getState()
+  // 一次「点击」（没拖出面积，按屏幕 3px 判），两种工具语义不同：
+  // - 权重刷的框选子工具：点空白 = **取消顶点选择**（这里没有右键可用，就地取消最顺）；
+  // - 网格 / 顶点工具：保持原选择不动（取消选择走右键，见 ViewportCanvas 的 onContextMenu）。
+  const minSize = scene.viewport.pixelsToWorld(3)
+  if (maxX - minX < minSize || maxY - minY < minSize) {
+    if (host.tools.tool === 'weight' && current.vertices.length > 0) {
+      useSelectionStore.getState().select({ vertices: [], vertex: -1 })
+      host.status(t('已取消顶点选择：之后刷权重又影响整块网格'))
+    }
+    return
+  }
   const lockedSlot = current.kind === 'attachment' ? current.slot : ''
   const lockedAttachment = current.kind === 'attachment' ? current.attachment : ''
   const hits: Array<{ shared: number; slot: string; attachment: string }> = []
@@ -2327,7 +2368,11 @@ function finishVertexBox(host: ToolHost, session: DragSession): void {
     hits.push({ shared: i, slot: ref.slot, attachment: ref.attachment })
   }
   if (hits.length === 0) {
-    host.status(t('框选：矩形里没有顶点（右键可取消当前选择）'))
+    host.status(
+      host.tools.tool === 'weight'
+        ? t('框选：矩形里没有顶点（选择没有变化）')
+        : t('框选：矩形里没有顶点（右键可取消当前选择）')
+    )
     return
   }
   const slot = lockedSlot || hits[0].slot
@@ -2339,7 +2384,14 @@ function finishVertexBox(host: ToolHost, session: DragSession): void {
   for (const index of picked) set.add(index)
   const list = [...set]
   useSelectionStore.getState().select({ kind: 'attachment', slot, attachment, vertices: list, vertex: -1 })
-  host.status(t('框选到 {0} 个顶点（共选中 {1} 个；拖动任意一个整组移动）', [picked.length, list.length]))
+  host.status(
+    host.tools.tool === 'weight'
+      ? t('已框选 {0} 个顶点（共 {1} 个）：之后只刷这些顶点的权重，点空白处取消选择', [
+          picked.length,
+          list.length
+        ])
+      : t('框选到 {0} 个顶点（共选中 {1} 个；拖动任意一个整组移动）', [picked.length, list.length])
+  )
 }
 
 function dragVertex(host: ToolHost, world: Vec2): void {
@@ -2455,6 +2507,27 @@ function samplesFor(host: ToolHost, slot: string, attachment: string, anySlot = 
     if (restrict && (slotData.name !== slot || current.name !== attachment)) return null
     return { slot: slotData.name, attachment: current.name, vertex }
   })
+}
+
+/** 顶点样本 → 与「选中顶点集合」比对的键（同一附件内的下标） */
+function vertexSampleKey(sample: VertexSample): string {
+  return `${sample.slot}\u0000${sample.attachment}\u0000${sample.vertex}`
+}
+
+/**
+ * 选中顶点（全局缓冲下标）→ 样本键集合；空集合返回 null（= 不限制，刷整块网格）。
+ *
+ * `selection.vertices` 是**共享顶点缓冲**下标，而刷权重拿到的样本是**附件内**下标，
+ * 所以要经 `scene.vertexRefAt` 换算一次 —— 直接拿下标比会串到别的附件上。
+ */
+function selectedVertexKeys(host: ToolHost, indices: readonly number[]): Set<string> | null {
+  if (indices.length === 0) return null
+  const keys = new Set<string>()
+  for (const index of indices) {
+    const ref = host.scene.vertexRefAt(index)
+    if (ref) keys.add(`${ref.slot}\u0000${ref.attachment}\u0000${ref.vertex}`)
+  }
+  return keys.size > 0 ? keys : null
 }
 
 /** 共享顶点下标 → 附件顶点（权重 / FFD 工具用） */

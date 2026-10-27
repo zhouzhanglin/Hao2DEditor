@@ -265,11 +265,16 @@ export interface EditorMeta {
   activeAnimation: string
   /** 视口叠加层开关（只留骨架与约束：网格 / FFD / 权重都由选中项与工具驱动） */
   overlay: { bones: boolean; constraints: boolean }
-  /** 权重画笔参数（与 Unity Weight Brush 面板同名：Mode / Size / Hardness / Normalize） */
+  /**
+   * 权重画笔参数（Mode / Size / Strength / Feather / Normalize，笔刷语义对齐 Spine 的 Weights）：
+   * - `strength`：一笔内能刷到的权重上限（0..100，100 = 一次刷满）；
+   * - `feather`：边缘衰减占半径的百分比（0 = 硬边，100 = 从中心开始衰减）。
+   */
   brush: {
     mode: 'addSubtract' | 'growShrink' | 'smooth'
     size: number
-    hardness: number
+    strength: number
+    feather: number
     normalize: boolean
   }
   /** 上次导出的图集缩放（有存档时持久化进工程文件，下次导出默认沿用）；未设置按 1 处理 */
@@ -336,7 +341,7 @@ export function createDefaultMeta(): EditorMeta {
     activeSkin: '',
     activeAnimation: '',
     overlay: { bones: true, constraints: true },
-    brush: { mode: 'addSubtract', size: 40, hardness: 1.5, normalize: true },
+    brush: { mode: 'addSubtract', size: 40, strength: 40, feather: 50, normalize: true },
     stage: null
   }
 }

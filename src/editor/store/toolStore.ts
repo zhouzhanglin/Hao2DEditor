@@ -50,23 +50,54 @@ export function isDrawTool(tool: EditorTool): boolean {
 export type BrushModeSetting = 'addSubtract' | 'growShrink' | 'smooth'
 
 /**
- * 权重刷参数 —— **与 Unity Weight Brush 面板同名**（Mode / Size / Hardness / Normalize），
- * 面板在属性最下面的「权重刷」一栏（只在权重刷工具下出现）。
+ * 权重刷参数 —— Mode / Size / Strength / Feather / Normalize。
+ *
+ * `strength` 与 `feather` 走 **Spine Weights 工具的笔刷语义**：
+ * - `strength`：一笔内目标骨骼能刷到的**权重上限**（0..100）。100 = 一次刷满；
+ *   30 = 无论这一笔里来回刷多少遍，最多到 30%，不再像"每帧增量"那样越刷越浓。
+ * - `feather`：笔刷边缘的衰减范围占半径的百分比（0..100）。0 = 硬边（整圈满强度），
+ *   100 = 从中心就开始线性衰减到边缘 0。
  *
  * 修饰键仍可临时改方向，落笔用的是**修饰键优先、其次这个 Mode**：
  * Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长（见 brushModeFor）。
  */
 export interface BrushState {
   mode: BrushModeSetting
-  /** Unity: Size —— 笔刷光标大小（像素，视口里的圈就是它） */
+  /** Size —— 笔刷光标大小（像素，视口里的圈就是它） */
   size: number
-  /**
-   * Unity: Hardness —— 每次笔刷施加多少权重，0..100（100 = 一次到位）。
-   * 默认 1.5：一次划过约百分之几，需要来回刷才逐步加满（500 时代一次拖拽就冲满，手感"擦一下就满"）。
-   */
-  hardness: number
-  /** Unity: Normalize —— 刷过的顶点权重归一到 1；关掉则只改目标骨骼，权重和可能 ≠ 1 */
+  /** Strength —— 一笔能刷到的权重上限（0..100） */
+  strength: number
+  /** Feather —— 边缘衰减占比（0 = 硬边，100 = 从中心开始衰减） */
+  feather: number
+  /** Normalize —— 刷过的顶点权重归一到 1；关掉则只改目标骨骼，权重和可能 ≠ 1 */
   normalize: boolean
+}
+
+/**
+ * 权重刷的**子工具**：决定左键拖动是刷权重还是框选顶点。
+ *
+ * 权重刷的左键拖动本来只有一个含义（刷），要加框选就必须二选一 —— 用视口左下角的小工具条切换，
+ * 而不是抢修饰键：Alt / Shift / Ctrl 已经是「减少 / 覆盖 / 平滑」。
+ *
+ * - `paint`：刷权重（默认）
+ * - `box`：拉矩形框选顶点（Shift 追加）；框选只改选择，之后再刷只影响这些顶点
+ */
+export type WeightSubtool = 'paint' | 'box'
+
+/** 权重刷子工具图标条的顺序与文案（工具条、状态提示共用一处，改一处即可） */
+export function weightSubtools(): Array<{ id: WeightSubtool; label: string; hint: string }> {
+  return [
+    {
+      id: 'paint',
+      label: t('刷权重'),
+      hint: t('刷权重（默认）：按住拖动按 Mode / Strength / Feather 刷；有选中顶点时只刷这些顶点')
+    },
+    {
+      id: 'box',
+      label: t('框选顶点'),
+      hint: t('框选顶点：拖出矩形选中顶点（Shift 追加）；之后刷权重只影响这些顶点，点空白处取消选择')
+    }
+  ]
 }
 
 /**
@@ -202,9 +233,15 @@ export interface ToolState {
    * 免得下次切回网格工具时鼠标还停在「删顶点」这种危险的语义上。
    */
   meshSubtool: MeshSubtool
+  /**
+   * 权重刷的子工具（刷权重 / 框选顶点）。与 `meshSubtool` 同理：换工具 / 换 gizmo 都回到 `paint`，
+   * 免得下次切回权重刷时鼠标还停在「框选」上、按下去以为是刷。
+   */
+  weightSubtool: WeightSubtool
   setTool: (tool: EditorTool) => void
   setGizmo: (mode: GizmoMode) => void
   setMeshSubtool: (subtool: MeshSubtool) => void
+  setWeightSubtool: (subtool: WeightSubtool) => void
   setOverlay: (overlay: OverlayState) => void
   toggleOverlay: (key: keyof OverlayState) => void
   setBrush: (brush: Partial<BrushState>) => void
@@ -217,16 +254,17 @@ export const useToolStore = create<ToolState>((set, get) => ({
   gizmo: 'move',
   overlay: { bones: true, constraints: true },
   /*
-   * 笔刷参数：与 Unity Weight Brush 面板同名（Mode / Size / Hardness / Normalize），
-   * 面板见属性最下面的「权重刷」一栏。
+   * 笔刷参数（Mode / Size / Strength / Feather / Normalize），面板见属性最下面的「权重刷」一栏。
    * - Size 40px = 0.4 世界单位（视口里的圈就是它）；
-   * - Hardness 1.5（= 强度 0.015）：每移动一次叠加 0.015×衰减，一次划过约百分之几；
+   * - Strength 40%：一笔刷到 40% —— 一笔封顶、来回刷不会越来越浓，想一次刷满就调到 100；
+   * - Feather 50%：外半边线性衰减到 0，边缘过渡自然；
    * - Normalize 默认开：刷完归一化到 1，避免出现权重和不等于 1 的顶点。
    */
-  brush: { mode: 'addSubtract', size: 40, hardness: 1.5, normalize: true },
+  brush: { mode: 'addSubtract', size: 40, strength: 40, feather: 50, normalize: true },
   gridDivisions: 4,
   pendingWeightBone: null,
   meshSubtool: 'edit',
+  weightSubtool: 'paint',
 
   /**
    * 换工具**不再改任何显示层**：网格线框与顶点、FFD、权重着色都由工具与选中项驱动
@@ -234,8 +272,11 @@ export const useToolStore = create<ToolState>((set, get) => ({
    * 见 Scene.drawOverlays）。这里的 overlay 只留给「骨架 / 约束」两个纯显示开关。
    */
   setTool: (tool) => {
-    // 换工具就放弃「等待点选骨骼」与网格子工具，免得换个工具后第一次点击被旧状态吃掉
-    set({ tool, pendingWeightBone: null, meshSubtool: 'edit' })
+    /*
+     * 换工具就放弃「等待点选骨骼」与两个子工具，免得换个工具后第一次点击被旧状态吃掉。
+     * 权重刷子工具回到 `paint`（默认刷）—— 切走再回来时按下去是刷，而不是莫名其妙的框选。
+     */
+    set({ tool, pendingWeightBone: null, meshSubtool: 'edit', weightSubtool: 'paint' })
   },
   /**
    * 选择变换工具（移动/旋转/缩放/斜切）时**自动退出绘制类工具**，见 `isDrawTool`。
@@ -244,8 +285,8 @@ export const useToolStore = create<ToolState>((set, get) => ({
     const tool = get().tool
     set(
       isDrawTool(tool)
-        ? { gizmo, tool: 'select', pendingWeightBone: null, meshSubtool: 'edit' }
-        : { gizmo, pendingWeightBone: null, meshSubtool: 'edit' }
+        ? { gizmo, tool: 'select', pendingWeightBone: null, meshSubtool: 'edit', weightSubtool: 'paint' }
+        : { gizmo, pendingWeightBone: null, meshSubtool: 'edit', weightSubtool: 'paint' }
     )
   },
   setOverlay: (overlay) => set({ overlay }),
@@ -253,7 +294,8 @@ export const useToolStore = create<ToolState>((set, get) => ({
   setBrush: (brush) => set({ brush: { ...get().brush, ...brush } }),
   setGridDivisions: (value) => set({ gridDivisions: Math.max(1, Math.min(24, Math.round(value))) }),
   setPendingWeightBone: (target) => set({ pendingWeightBone: target }),
-  setMeshSubtool: (meshSubtool) => set({ meshSubtool })
+  setMeshSubtool: (meshSubtool) => set({ meshSubtool }),
+  setWeightSubtool: (weightSubtool) => set({ weightSubtool })
 }))
 
 export function currentTools(): ToolState {

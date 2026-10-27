@@ -735,7 +735,13 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
      * 由它自己判骨骼会把「在网格上起笔」也吃掉。分开判就不会互相干扰：
      * 点击 = 选骨骼，拖动 = 刷权重。
      */
-    if (useToolStore.getState().tool === 'weight' && !scene.pickVertexAt(world.x, world.y)) {
+    const weightTools = useToolStore.getState()
+    if (
+      weightTools.tool === 'weight' &&
+      // 框选子工具下拖动是在拉框，不是刷：别把「点骨骼换目标」也挂上
+      weightTools.weightSubtool !== 'box' &&
+      !scene.pickVertexAt(world.x, world.y)
+    ) {
       const hitBone = scene.pickBoneAt(world.x, world.y)
       const name = hitBone && scene.runtime ? (scene.runtime.asset.bones[hitBone.boneIndex]?.name ?? '') : ''
       pointer.current.boneClick = name ? { bone: name, clientX: event.clientX, clientY: event.clientY } : null
@@ -854,6 +860,19 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
      */
     if (useToolStore.getState().tool === 'weight') {
       const tools = useToolStore.getState()
+      /*
+       * 子工具「框选顶点」：**不画刷子圈、也不刷权重** —— 光标换十字，拖动只更新框选矩形
+       * （矩形由 toolPointerMove 的 vertex-box 分支维护，松手才结算选中集合）。
+       */
+      if (tools.weightSubtool === 'box') {
+        if (event.currentTarget.style.cursor !== 'crosshair') event.currentTarget.style.cursor = 'crosshair'
+        if (scene.state.brushRing) scene.setViewState({ brushRing: null })
+        if (isDragging()) {
+          const host = buildHost()
+          if (host) toolPointerMove(host, { world, shift: event.shiftKey, ctrl: event.ctrlKey, alt: event.altKey })
+        }
+        return
+      }
       const mode = brushModeFor(
         { alt: event.altKey, shift: event.shiftKey, ctrl: event.ctrlKey },
         baseBrushMode(tools.brush.mode)
@@ -865,7 +884,13 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       scene.setViewState({
         brushRing: overBone
           ? null
-          : { x: world.x, y: world.y, radius: tools.brush.size / 100, mode }
+          : {
+              x: world.x,
+              y: world.y,
+              radius: tools.brush.size / 100,
+              mode,
+              feather: tools.brush.feather / 100
+            }
       })
       // 拖动超过阈值就不再算「点击」：这一次是刷权重，不是选骨骼（阈值同插点：6px）
       const click = pointer.current.boneClick

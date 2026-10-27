@@ -26,6 +26,7 @@ import {
   findAttachment,
   resolveAttachment,
   insertMeshVertex,
+  brushFalloffStops,
   paintWeights,
   removeWeightBone,
   applyVertexWeight,
@@ -545,13 +546,43 @@ describe('权重', () => {
     expect(touched).toBe(1)
   })
 
-  it('衰减：中心权重高于边缘', () => {
+  it('衰减：中心权重高于边缘（Feather 控制外圈占比）', () => {
     const doc = setup()
-    paintWeights(doc, samples, 'arm', { x: 5, y: 0 }, 12, 0.8, 'replace')
+    // Feather 90%：只有最里面 10% 是满强度，外圈线性衰减
+    paintWeights(doc, samples, 'arm', { x: 5, y: 0 }, 12, 0.8, 'replace', true, 0.9)
     const vertex = findAttachment(doc, 's', 'a')?.vertices[1]
     const weight = vertex?.weights.find((w) => w.bone === 'arm')?.weight ?? 0
     expect(weight).toBeGreaterThan(0.8 * 0.6)
     expect(weight).toBeLessThan(0.8)
+  })
+
+  it('Feather = 0 是硬边：半径内权重一致', () => {
+    const doc = setup()
+    paintWeights(doc, samples, 'arm', { x: 5, y: 0 }, 12, 0.5, 'replace', false, 0)
+    for (const index of [0, 1]) {
+      const weight =
+        findAttachment(doc, 's', 'a')?.vertices[index].weights.find((w) => w.bone === 'arm')?.weight ?? 0
+      expect(weight).toBeCloseTo(0.5, 5)
+    }
+  })
+
+  it('Strength 是上限：同一处反复刷不会越刷越浓', () => {
+    const doc = setup()
+    const vertex = findAttachment(doc, 's', 'a')!.vertices[0]
+    for (let i = 0; i < 6; i++) {
+      paintWeights(doc, [samples[0]], 'arm', { x: 0, y: 0 }, 20, 0.3, 'add', false)
+    }
+    expect(vertex.weights.find((w) => w.bone === 'arm')?.weight ?? 0).toBeCloseTo(0.3, 5)
+  })
+
+  it('视口的刷子渐变与落笔用同一条衰减曲线（Feather）', () => {
+    // Feather 0 = 硬边：整圈都是满强度
+    expect(brushFalloffStops(0).every(([, strength]) => strength === 1)).toBe(true)
+    // Feather 100%：从中心 1 线性衰减到边缘 0
+    const soft = brushFalloffStops(1)
+    expect(soft[0][1]).toBeCloseTo(1, 5)
+    expect(soft[soft.length - 1][1]).toBeCloseTo(0, 5)
+    expect(soft[4][1]).toBeCloseTo(1 - 4 / 8, 5)
   })
 
   it('subtract 可以把权重刷回 0 并归一化给其它骨骼', () => {
@@ -591,12 +622,12 @@ describe('权重', () => {
     expect(paintWeights(grown, [samples[0]], 'arm', { x: 0, y: 0 }, 20, 0.5, 'grow')).toBe(0)
     expect(other.weights.some((w) => w.bone === 'arm')).toBe(false)
 
-    // 已经受影响的顶点上，grow 照常叠加
+    // 已受影响但低于上限的顶点：grow 把它推到 Strength（超过上限则保持不动）
     const seeded = setup()
     const seededVertex = findAttachment(seeded, 's', 'a')!.vertices[0]
-    const before = seededVertex.weights.find((w) => w.bone === 'root')?.weight ?? 0
-    expect(paintWeights(seeded, [samples[0]], 'root', { x: 0, y: 0 }, 20, 0.5, 'grow')).toBe(1)
-    expect(seededVertex.weights.find((w) => w.bone === 'root')?.weight ?? 0).toBeGreaterThanOrEqual(before)
+    paintWeights(seeded, [samples[0]], 'root', { x: 0, y: 0 }, 20, 0.2, 'replace', false)
+    expect(paintWeights(seeded, [samples[0]], 'root', { x: 0, y: 0 }, 20, 0.5, 'grow', false)).toBe(1)
+    expect(seededVertex.weights.find((w) => w.bone === 'root')?.weight ?? 0).toBeCloseTo(0.5, 5)
   })
 
   it('smooth（Unity 的 Smooth）：把顶点权重朝邻居平均，并保持总和为 1', () => {
@@ -622,8 +653,8 @@ describe('权重', () => {
     expect(vertex.weights.find((w) => w.bone === 'arm')?.weight ?? 0).toBeCloseTo(0.5, 5)
     expect(vertex.weights.find((w) => w.bone === 'root')?.weight ?? 0).toBeCloseTo(0.5, 5)
 
-    // 关掉：arm 直接变成 1，root 原样留在 0.5（和 Unity 一样，权重和可以 ≠ 1）
-    paintWeights(doc, [samples[0]], 'arm', { x: 0, y: 0 }, 20, 0.5, 'add', false)
+    // 关掉：arm 直接到上限 1，root 原样留在 0.5（和 Unity 一样，权重和可以 ≠ 1）
+    paintWeights(doc, [samples[0]], 'arm', { x: 0, y: 0 }, 20, 1, 'add', false)
     expect(vertex.weights.find((w) => w.bone === 'arm')?.weight ?? 0).toBeCloseTo(1, 5)
     expect(vertex.weights.find((w) => w.bone === 'root')?.weight ?? 0).toBeCloseTo(0.5, 5)
   })

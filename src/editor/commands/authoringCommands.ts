@@ -1122,8 +1122,15 @@ export function deleteAttachment(doc: EditorDocument, slotName: string, attachme
 /**
  * 权重刷：以世界坐标为中心、radius 为半径，对目标附件顶点刷权重的权重（模式见 BrushMode）。
  *
- * - add / grow：在现有权重上叠加（grow 跳过还没受这根骨骼影响的顶点）
- * - subtract：衰减；replace：直接覆盖
+ * 笔刷手感按 **Spine Weights 工具**：
+ * - `strength`（0..1）= **一笔内能刷到的权重上限**。add / grow 只朝目标值靠近、不越过它，
+ *   所以来回刷不会越刷越浓（旧实现是每帧增量叠加，很容易刷过头）；
+ * - `feather`（0..1）= 边缘衰减占半径的百分比。内圈满强度、外圈线性衰减到 0：
+ *   0 = 硬边，1 = 从中心就开始衰减。
+ *
+ * 模式语义：
+ * - add / grow：朝目标值增长（grow 跳过还没受这根骨骼影响的顶点）
+ * - subtract：按目标值衰减；replace：直接覆盖成目标值
  * - smooth：朝邻居的平均权重靠拢（与刷哪根骨骼无关）
  * - `normalize`（Unity 的 Normalize，默认开）：把其它骨骼按比例缩放，让权重和回到 1；
  *   关掉时只改目标骨骼，权重和可以 ≠ 1 —— 渲染按相对比例算（见 meshBuilder），
@@ -1139,13 +1146,17 @@ export function paintWeights(
   radius: number,
   strength: number,
   mode: BrushMode,
-  normalize = true
+  normalize = true,
+  /** 边缘衰减占半径的比例（0..1，0 = 硬边；对齐 Spine 的 Feather） */
+  feather = 0.5
 ): number {
   // 只有 smooth 不需要目标骨骼（它平均的是全部骨骼的权重）
   if ((mode !== 'smooth' && !bone) || radius <= 0) return 0
   let touched = 0
   /** 邻接表按附件懒建：只有真正刷到 smooth 时才需要邻居 */
   const adjacency = new Map<string, Map<number, number[]>>()
+  const cap = Math.min(1, Math.max(0, strength))
+  const soft = Math.min(1, Math.max(0, feather))
 
   for (const sample of samples) {
     if (sample.slot === '' || sample.attachment === '') continue
@@ -1159,24 +1170,36 @@ export function paintWeights(
     const distance = Math.sqrt(dx * dx + dy * dy)
     if (distance > radius) continue
 
-    // 平滑衰减：中心为 1，边缘为 0
-    const falloff = smoothStep(1 - distance / radius)
-    const delta = strength * falloff
-    if (delta <= 0) continue
+    /*
+     * 内圈满强度、外圈线性衰减（Spine 的 Feather）：
+     * feather = 0 → 整圈满强度（硬边）；feather = 1 → 从中心衰减到边缘 0。
+     */
+    const t = distance / radius
+    const falloff = soft <= 0 || t <= 1 - soft ? 1 : (1 - t) / soft
+    if (falloff <= 0) continue
+    /** 这一笔在该顶点上的目标值：中心 = Strength，边缘按 Feather 递减 */
+    const goal = cap * falloff
 
     if (mode === 'smooth') {
       const neighbors = adjacencyFor(adjacency, attachment, sample.slot, sample.attachment).get(sample.vertex)
       if (!neighbors || neighbors.length === 0) continue
-      if (smoothVertex(attachment, sample.vertex, neighbors, Math.min(1, delta), normalize)) touched++
+      if (smoothVertex(attachment, sample.vertex, neighbors, Math.min(1, goal), normalize)) touched++
       continue
     }
 
-    let current = vertex.weights.find((item) => item.bone === bone)?.weight ?? 0
+    const before = vertex.weights.find((item) => item.bone === bone)?.weight ?? 0
     // grow（Unity 的 Grow and Shrink）：只在**已经受这根骨骼影响**的顶点上生长
-    if (mode === 'grow' && current <= 1e-6) continue
-    if (mode === 'add' || mode === 'grow') current = Math.min(1, current + delta)
-    else if (mode === 'subtract') current = Math.max(0, current - delta)
-    else current = delta
+    if (mode === 'grow' && before <= 1e-6) continue
+    let current = before
+    if (mode === 'add' || mode === 'grow') {
+      // 一笔封顶：只朝 goal 靠近、不越过它 —— 来回刷不会越来越浓（旧实现是 current + delta）
+      if (goal > current) current = goal
+    } else if (mode === 'subtract') {
+      current = Math.max(0, current - goal)
+    } else {
+      current = goal
+    }
+    if (Math.abs(current - before) <= 1e-6) continue
 
     applyVertexWeight(vertex.weights, bone, current, normalize)
     touched++
@@ -1532,21 +1555,17 @@ export function uvRect(uvs: readonly number[]): { u0: number; u1: number; v0: nu
 /**
  * 笔刷衰减的**采样点**：`[距圆心的比例, 相对强度]`，从圆心到边缘等距取样（9 档，中间由 GPU 插值）。
  *
- * 直接由落笔用的 `smoothStep(1 - t)` 算出，所以**改衰减曲线时视口里的软边跟着一起变** ——
- * 屏幕上看到的明暗，就是真正刷出来的强度分布。
+ * 与 `paintWeights` 用的是同一条曲线（Feather：内圈满强度、外圈线性衰减到 0），
+ * 所以视口里那团软边的明暗就是真正刷出来的强度分布 —— 调 Feather 时两边一起变。
  * 用途：权重刷那团软边圆的填充渐变（见 Scene.drawOverlays / brushGradient）。
  */
-export const BRUSH_FALLOFF_STOPS: ReadonlyArray<readonly [number, number]> = Array.from(
-  { length: 9 },
-  (_, index) => {
+export function brushFalloffStops(feather: number): Array<readonly [number, number]> {
+  const soft = Math.min(1, Math.max(0, feather))
+  return Array.from({ length: 9 }, (_, index) => {
     const t = index / 8
-    return [t, smoothStep(1 - t)] as const
-  }
-)
-
-function smoothStep(t: number): number {
-  const x = Math.max(0, Math.min(1, t))
-  return x * x * (3 - 2 * x)
+    const strength = soft <= 0 || t <= 1 - soft ? 1 : (1 - t) / soft
+    return [t, strength] as const
+  })
 }
 
 function distanceToSegment(

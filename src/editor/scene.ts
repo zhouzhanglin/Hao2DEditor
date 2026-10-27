@@ -24,7 +24,7 @@ import { circlePolygon } from '@render/overlays/shapes'
 import type { GizmoDrawMode } from '@render/overlays/boneOverlay'
 import { drawMeshOverlay } from '@render/overlays/meshOverlay'
 import { BRUSH_MODE_COLORS, brushModeColorValue, weightBoneColorMap } from '@core/weightPalette'
-import { BRUSH_FALLOFF_STOPS } from '@editor/commands/authoringCommands'
+import { brushFalloffStops } from '@editor/commands/authoringCommands'
 import type { BrushMode } from '@editor/commands/authoringCommands'
 import {
   attachmentGizmoFrame,
@@ -97,12 +97,12 @@ export interface SceneViewState {
   selectedVertices: number[]
   hoveredVertex: number
   /**
-   * 权重刷的刷子指示（世界坐标 + 半径 + 模式），null = 不显示。
+   * 权重刷的刷子指示（世界坐标 + 半径 + 模式 + Feather），null = 不显示。
    *
    * 画成一个圆：**圈有多大，刷一下就有多大**（半径与 paintAt 用的是同一个世界值），
-   * 颜色跟着模式变（增加绿 / 减少红 / 覆盖蓝）。
+   * 圈内的软边按 Feather 衰减（见 brushFalloffStops），颜色跟着模式变（增加绿 / 减少红 / 覆盖蓝）。
    */
-  brushRing: { x: number; y: number; radius: number; mode: BrushMode } | null
+  brushRing: { x: number; y: number; radius: number; mode: BrushMode; feather: number } | null
   /**
    * 网格顶点的**框选矩形**（世界坐标）：顶点工具在空白处左键拖动时显示。
    * null = 没在框选。松手后由工具按它算选中哪些顶点。
@@ -251,8 +251,8 @@ export class EditorScene {
    * 贴图由 ViewportCanvas 异步加载后经 `setStageTexture` 喂进来；配置每帧应用（改弹窗实时生效）。
    */
   private readonly stageSprite = new Sprite()
-  /** 软边圆用的径向渐变（按模式缓存：颜色与停止点都是固定的，与半径无关） */
-  private readonly brushGradients = new Map<BrushMode, FillGradient>()
+  /** 软边圆用的径向渐变（按「模式 + Feather」缓存：颜色与停止点固定，与半径无关） */
+  private readonly brushGradients = new Map<string, FillGradient>()
   /** 需要画成空心的骨骼名集合（编辑期模型才有 hollow 字段） */
   private hollowBones = new Set<string>()
   private bundle: RuntimeBundle | null = null
@@ -1648,15 +1648,16 @@ export class EditorScene {
   }
 
   /**
-   * 软边圆用的径向渐变（按模式缓存）。
+   * 软边圆用的径向渐变（按「模式 + Feather」缓存）。
    *
-   * 停止点取自落笔的衰减曲线（`BRUSH_FALLOFF_STOPS`：距圆心比例 → 相对强度），强度折算成
-   * alpha —— 于是**屏幕上看到的那团明暗就是实际刷出来的强度分布**，改曲线两边一起变。
+   * 停止点取自落笔的衰减曲线（`brushFalloffStops`：距圆心比例 → 相对强度），强度折算成
+   * alpha —— 于是**屏幕上看到的那团明暗就是实际刷出来的强度分布**，改 Feather 两边一起变。
    * 颜色用 8 位十六进制（`#RRGGBBAA`）把 alpha 编进去：渐变的颜色停止点没有独立的 alpha 字段。
-   * 坐标按形状包围盒归一化（0..1），与半径、缩放无关 —— 所以一个模式只建一次就够。
+   * 坐标按形状包围盒归一化（0..1），与半径、缩放无关 —— 所以一个「模式 + Feather」只建一次就够。
    */
-  private brushGradient(mode: BrushMode): FillGradient {
-    const cached = this.brushGradients.get(mode)
+  private brushGradient(mode: BrushMode, feather: number): FillGradient {
+    const key = `${mode}:${Math.round(Math.min(1, Math.max(0, feather)) * 100)}`
+    const cached = this.brushGradients.get(key)
     if (cached) return cached
     const rgb = BRUSH_MODE_COLORS[mode].slice(1)
     /** 圆心处的不透明度：够看清这团软边，又不遮住底下要刷的图 */
@@ -1666,12 +1667,12 @@ export class EditorScene {
       center: { x: 0.5, y: 0.5 },
       innerRadius: 0,
       outerRadius: 0.5,
-      colorStops: BRUSH_FALLOFF_STOPS.map(([offset, strength]) => {
+      colorStops: brushFalloffStops(feather).map(([offset, strength]) => {
         const byte = Math.round(Math.max(0, Math.min(1, strength)) * maxAlpha * 255)
         return { offset, color: `#${rgb}${byte.toString(16).padStart(2, '0')}` }
       })
     })
-    this.brushGradients.set(mode, gradient)
+    this.brushGradients.set(key, gradient)
     return gradient
   }
 
@@ -2015,13 +2016,13 @@ export class EditorScene {
       const color = brushModeColorValue(ring.mode)
       /*
        * Photoshop 那样的软边圆：**一整片径向渐变**（中心浓、边缘透明），不做等强线分层。
-       * 明暗分布直接取落笔的衰减曲线（见 BRUSH_FALLOFF_STOPS），且按形状包围盒归一化，
+       * 明暗分布直接取落笔的衰减曲线（见 brushFalloffStops / Feather），且按形状包围盒归一化，
        * 所以半径 / 缩放怎么变，这团软边的相对形状都一样。
        * 外沿再描一圈实线当边界 —— 圈外一个顶点都不碰。
        */
       this.brushRing
         .poly(circlePolygon(ring.x, ring.y, ring.radius))
-        .fill(this.brushGradient(ring.mode))
+        .fill(this.brushGradient(ring.mode, ring.feather))
         .stroke({ width: unitPerPixel * 1.2, color, alpha: 0.8 })
       // 落点（鼠标精确位置）
       this.brushRing.poly(circlePolygon(ring.x, ring.y, unitPerPixel * 2)).fill({ color, alpha: 0.85 })

@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom'
 
 export interface ContextMenuItem {
   key: string
-  label: string
+  /** 菜单文字；分隔线项（`separator: true`）不需要 */
+  label?: string
   icon?: React.ReactNode
   hint?: string
   danger?: boolean

@@ -72,7 +72,12 @@ describe('导出 rotate 关键帧的连续化', () => {
   })
 
   it('官方运行库播放与编辑器采样逐帧一致（含关键帧之间）', () => {
-    const data = new spine.SkeletonJson().readSkeletonData(JSON.stringify(json))
+    /*
+     * 这个用例只用旋转轨道（json 里没有任何附件），运行库不需要附件加载器 ——
+     * 官方实现允许传 null，但类型定义要求非空，故显式断言。
+     */
+    const noLoader = null as unknown as spine.AttachmentLoader
+    const data = new spine.SkeletonJson(noLoader).readSkeletonData(JSON.stringify(json))
     const editorSkel = new Skeleton(runtime)
     editorSkel.applyRuntimeMaps(buildRuntimeMaps(runtime))
     const player = new AnimationPlayer(runtime, editorSkel)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createEmptyDocument } from '@core/model/authoring'
+import { createAuthoringAttachment, createEmptyDocument } from '@core/model/authoring'
 import type {
   AuthoringAnimData,
   AuthoringAttachment,
@@ -39,24 +39,14 @@ function bone(name: string, parent: string): AuthoringBone {
 }
 
 function attachment(name: string): AuthoringAttachment {
-  return {
+  // 用模型工厂打底：附件结构还在长（frameSize / contentOffset / 裁剪相关…），
+  // 手写字面量每加一个必填字段就会在这里编译失败，且失败信息跟被测逻辑毫无关系
+  return createAuthoringAttachment({
     name,
-    type: 'region',
     image: `${name}.png`,
-    position: { x: 0, y: 0 },
-    rotation: 0,
-    scale: { x: 1, y: 1 },
     size: { x: 1, y: 1 },
-    color: '#FFFFFFFF',
-    vertices: [],
-    uvs: [0, 0, 1, 0, 1, 1, 0, 1],
-    triangles: [],
-    edges: [],
-    hull: 0,
-    ffdInBoneSpace: false,
-    linkedMeshSkin: '',
-    linkedMeshAttachment: ''
-  }
+    uvs: [0, 0, 1, 0, 1, 1, 0, 1]
+  })
 }
 
 /** 按 fk.ts 的局部矩阵约定构造（支持斜切）：X 轴角 = r + shearX，Y 轴角 = r + 90 + shearY */

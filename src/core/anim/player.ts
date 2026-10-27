@@ -49,7 +49,7 @@ export class AnimationPlayer {
   readonly constraints: Constraint[]
   /** 与 asset.constraints 一一对齐的可变状态 */
   private readonly states: ConstraintState[]
-  /** 实际参与求解的约束（runtimeIK 为假时剔除 IK，因为 IK 已烘焙进骨骼轨道） */
+  /** 实际参与求解的约束（`runtimeIK` 为假 = 动画已烘焙，运行期一个约束都不能再解） */
   private readonly activeConstraints: Constraint[]
   private readonly activeStates: ConstraintState[]
   /** asset.constraints 里 IK 约束的下标（供参考库风格的 iks 轨道使用） */
@@ -97,7 +97,13 @@ export class AnimationPlayer {
     for (let i = 0; i < this.constraints.length; i++) {
       const constraint = this.constraints[i]
       if (constraint.type === 'ik') this.ikIndices.push(i)
-      if (!asset.runtimeIK && constraint.type === 'ik') continue
+      /*
+       * `runtimeIK === false` 的含义是「变形结果已经烘焙进骨骼轨道」（导入的 Spine 资源），
+       * 那么**所有**约束都不能再解：轨道里的局部值本身就是约束解出来的，
+       * 再解一遍等于翻倍。之前只跳过 IK，所以变换约束一旦导入（如 mix-and-match 的
+       * `hair-side-front-control`、`head-control`）就会把头发 / 帽子 / 裙子推飞。
+       */
+      if (!asset.runtimeIK) continue
       this.activeConstraints.push(constraint)
       this.activeStates.push(this.states[i])
     }

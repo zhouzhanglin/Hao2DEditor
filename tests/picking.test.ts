@@ -74,6 +74,10 @@ function quadMesh(quads: QuadSpec[]): MeshBuildResult {
     sourceVertex,
     vertexCount,
     groups,
+    // 这份手搓的网格不涉及嵌套骨架 / 遮罩，但结果类型要求这几项存在
+    nestAnchors: [],
+    clipPolygons: [],
+    vertexClip: new Int32Array(vertexCount),
     bounds: { minX, minY, maxX, maxY }
   }
 }

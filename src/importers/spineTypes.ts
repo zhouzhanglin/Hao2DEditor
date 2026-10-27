@@ -44,19 +44,36 @@ export interface SpineTransformConstraintJson {
   name: string
   order?: number
   bones: string[]
-  target: string
+  target?: string
+  /** 4.3 起 `target` 改名 `source`（同一含义：提供变换的源骨骼） */
+  source?: string
   mixRotate?: number
   mixX?: number
   mixY?: number
   mixScaleX?: number
   mixScaleY?: number
   mixShearY?: number
+  /**
+   * 3.8–4.1 的混合系数名（4.0 起改叫 mixRotate / mixX …；translateMix 同时管 X 与 Y）
+   */
+  rotateMix?: number
+  translateMix?: number
+  scaleMix?: number
+  shearMix?: number
+  /** 3.8–4.1 的偏移字段名 */
   rotate?: number
   x?: number
   y?: number
   scaleX?: number
   scaleY?: number
   shearY?: number
+  /** 4.0+ 的偏移字段名（导出写的就是这套） */
+  offsetRotation?: number
+  offsetX?: number
+  offsetY?: number
+  offsetScaleX?: number
+  offsetScaleY?: number
+  offsetShearY?: number
   relative?: boolean
   local?: boolean
 }
@@ -124,8 +141,23 @@ export interface SpineAttachmentJson {
   convex?: boolean
 
   // linkedmesh
+  /** 源网格所在的皮肤（缺省 = 默认皮肤） */
   skin?: string
+  /**
+   * 源网格的附件名（**Spine 4.x 的字段名**）。
+   * 官方读取顺序是 `source`；3.8 用的是 `parent`。两者都缺省时按官方语义
+   * 取「同名附件」（见 SkeletonJson：`source` 缺失就退化成普通 mesh，
+   * 但 3.x 的 linkedmesh 一定带 `parent`）。
+   */
+  source?: string
+  /**
+   * 3.8–4.1 的源网格附件名。
+   * 注意：本编辑器只在**同一个槽位**里找源网格（Spine 4.x 允许用 `slot` 指向别的槽位，
+   * 这种资源目前的导入会找不到父附件）。
+   */
   parent?: string
+  /** Spine 4.x：源网格所在槽位名（缺省 = 同槽位）—— 暂不支持，见 `parent` 的说明 */
+  slot?: string
 }
 
 export interface SpineSkinJson {
@@ -172,7 +204,15 @@ export interface SpineAnimationJson {
   bones?: Record<string, SpineBoneTimelineJson>
   slots?: Record<string, SpineSlotTimelineJson>
   /** 3.x：slot → attachment → 帧；4.0~4.1：skin → slot → attachment → 帧 */
-  deform?: Record<string, Record<string, SpineCurveKeyframe[]>>
+  /**
+   * deform 轨道有两种层级，导入器两套都认（见 spineAnims 的 `collectDeforms`）：
+   * - 3.x：`deform.<插槽>.<附件>` → 帧
+   * - 4.x：`deform.<皮肤>.<插槽>.<附件>` → 帧
+   */
+  deform?: Record<
+    string,
+    Record<string, SpineCurveKeyframe[]> | Record<string, Record<string, SpineCurveKeyframe[]>>
+  >
   /**
    * 4.2 起（参考库 4.3 只认这里）：skin → slot → attachment → `{ deform: 帧 }`。
    * 写回这个层级才有效 —— 顶层 `deform` 会被官方运行库整段忽略。

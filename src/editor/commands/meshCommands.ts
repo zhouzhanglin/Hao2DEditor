@@ -171,11 +171,18 @@ export function registerMeshCommands(): void {
       const mask = await imageAlphaMask(image.path)
       if (!mask) throw new Error(t('读不到图片「{0}」的像素，无法生成轮廓', image.name))
       const divisions = Math.max(1, Math.min(64, Math.round(optNum(args, 'divisions') ?? 8)))
-      let result: { vertices: number; triangles: number; coverage: number } | null = null
+      /*
+       * 结果用 `{ value }` 装着而不是直接用一个 `let`：赋值发生在 runCommand 的回调里，
+       * 类型检查看不到那次赋值，会把 `let result: T | null = null` 窄化成 `null`（进而 `never`）。
+       */
+      const box: { value: { vertices: number; triangles: number; coverage: number } | null } = {
+        value: null
+      }
       const committed = useProjectStore.getState().runCommand(t('AI：按轮廓生成网格'), (draft) => {
-        result = autoGenerateRegionMesh(draft, slot, attachment, mask, divisions)
-        return result !== null
+        box.value = autoGenerateRegionMesh(draft, slot, attachment, mask, divisions)
+        return box.value !== null
       })
+      const result = box.value
       if (!committed || !result) {
         throw new Error(t('生成网格失败：附件不是有效的 Region / 网格，或图片没有不透明像素'))
       }

@@ -123,7 +123,7 @@ describe('DragonBones 蒙皮网格权重', () => {
   }
 
   it('绑多根骨骼的顶点不会让后续顶点整体错位', () => {
-    const { asset } = importDragonBones({ json: DB_MESH, subTextures: [] })
+    const { asset } = importDragonBones({ json: DB_MESH, subTextures: [], pageSizes: {} })
     const mesh = asset.skins[0].slots[0].attachments[0]
     expect(mesh.type).toBe(AttachmentType.Mesh)
     expect(mesh.weights).toHaveLength(4)
@@ -291,6 +291,8 @@ describe('DragonBones 5.x 动画通道与网格 UV', () => {
   const SUB_TEXTURES = [
     {
       name: 'mesh',
+      // DB 的子区域 path 通常为空（等于 name）；类型里是必填
+      path: '',
       textureName: 'p.png',
       x: 0,
       y: 0,
@@ -601,7 +603,8 @@ describe('Spine 烘焙后处理：阶跃还原与关键帧简化', () => {
 
   it('阶跃（瞬间切换）被识别，且阶跃段不参与简化', () => {
     // head-turn 的镜像切换：scale 1 → -1
-    const scale = [
+    // `stepped` 是 markSteppedVec2 写上去的标记，本地推断类型里要先声明出来
+    const scale: Array<{ time: number; x: number; y: number; stepped?: boolean }> = [
       { time: 0.1, x: 1, y: 1 },
       { time: 0.1 + 1 / 30, x: -1, y: 1 }
     ]
@@ -618,14 +621,14 @@ describe('Spine 烘焙后处理：阶跃还原与关键帧简化', () => {
   })
 
   it('正常运动不会被误标为阶跃（位移 0.1 世界单位 / 旋转 60 度阈值）', () => {
-    const smooth = [
+    const smooth: Array<{ time: number; x: number; y: number; stepped?: boolean }> = [
       { time: 0, x: 0, y: 0 },
       { time: 1 / 30, x: 0.03, y: 0.02 }
     ]
     markSteppedVec2(smooth, 0.1)
     expect(smooth[0].stepped).toBeUndefined()
 
-    const rotate = [
+    const rotate: Array<{ time: number; value: number; stepped?: boolean }> = [
       { time: 0, value: 0 },
       { time: 0.5, value: 20 },
       { time: 1, value: 120 }
@@ -802,7 +805,7 @@ describe('DragonBones 的 IK 链（chain 展开）', () => {
   }
 
   it('chain=1 → 两骨链，顺序为「根 → 末端」', () => {
-    const { asset } = importDragonBones({ json: DB, subTextures: [] })
+    const { asset } = importDragonBones({ json: DB, subTextures: [], pageSizes: {} })
     expect(asset.constraints).toHaveLength(1)
     const ik = asset.constraints[0]
     const upper = asset.bones.findIndex((b) => b.name === 'upper')
@@ -810,6 +813,8 @@ describe('DragonBones 的 IK 链（chain 展开）', () => {
     // 根在前、末端在最后（solveIkTwoBone 取 [0] 作根、[1] 作末端）
     expect(ik.boneIndices).toEqual([upper, lower])
     expect(ik.targetBoneIndex).toBe(asset.bones.findIndex((b) => b.name === 'ikTarget'))
+    // `Constraint` 是判别联合：先确认类型，`useBoneLength` 才在收窄后的类型上
+    if (ik.type !== 'ik') throw new Error(`期望 IK 约束，实际是 ${ik.type}`)
     expect(ik.useBoneLength).toBe(true)
   })
 })
@@ -829,17 +834,17 @@ describe('DragonBones 皮肤名：空串回落成 default', () => {
   }
 
   it('空串 → default', () => {
-    const { asset } = importDragonBones({ json: dbWith([{ name: '', slot: [] }]), subTextures: [] })
+    const { asset } = importDragonBones({ json: dbWith([{ name: '', slot: [] }]), subTextures: [], pageSizes: {} })
     expect(asset.skins.map((skin) => skin.name)).toEqual(['default'])
   })
 
   it('缺 name 字段 → 同样是 default', () => {
-    const { asset } = importDragonBones({ json: dbWith([{ slot: [] }]), subTextures: [] })
+    const { asset } = importDragonBones({ json: dbWith([{ slot: [] }]), subTextures: [], pageSizes: {} })
     expect(asset.skins.map((skin) => skin.name)).toEqual(['default'])
   })
 
   it('真的有名字就原样保留', () => {
-    const { asset } = importDragonBones({ json: dbWith([{ name: 'goblin', slot: [] }]), subTextures: [] })
+    const { asset } = importDragonBones({ json: dbWith([{ name: 'goblin', slot: [] }]), subTextures: [], pageSizes: {} })
     expect(asset.skins.map((skin) => skin.name)).toEqual(['goblin'])
   })
 
@@ -849,7 +854,8 @@ describe('DragonBones 皮肤名：空串回落成 default', () => {
         { name: '', slot: [] },
         { name: '', slot: [] }
       ]),
-      subTextures: []
+      subTextures: [],
+      pageSizes: {}
     })
     expect(asset.skins.map((skin) => skin.name)).toEqual(['default', 'skin1'])
   })
@@ -1117,6 +1123,72 @@ describe('Spine 导入', () => {
       expect(ik.bendSign).toBe(-1)
     }
     expect(warnings.filter((w) => w.includes('IK'))).toHaveLength(0)
+  })
+
+  it('transform 约束的 4.x 字段名（offsetRotation / offsetX…）能被读出', () => {
+    const json = {
+      skeleton: { spine: '4.3.0' },
+      bones: [{ name: 'root' }, { name: 'target' }],
+      slots: [{ name: 'slot', bone: 'root' }],
+      skins: [{ name: 'default', attachments: {} }],
+      constraints: [
+        {
+          type: 'transform',
+          name: 'tc',
+          bones: ['root'],
+          target: 'target',
+          mixRotate: 0.25,
+          mixX: 0.5,
+          offsetRotation: 30,
+          offsetX: 100, // px → 1 世界单位
+          offsetY: -50,
+          offsetScaleX: 0.2
+        }
+      ]
+    }
+    const { asset } = importSpine({ json: json as never, regions: [], pageSizes: {} })
+    const tc = asset.constraints[0]
+    expect(tc.type).toBe('transform')
+    if (tc.type !== 'transform') return
+    // 早先只读 3.8 的 rotate / x / y，4.x 资源里的偏移会整段读成 0
+    expect(tc.offsetRotate).toBeCloseTo(30, 6)
+    expect(tc.offsetX).toBeCloseTo(1, 6)
+    expect(tc.offsetY).toBeCloseTo(-0.5, 6)
+    expect(tc.offsetScaleX).toBeCloseTo(0.2, 6)
+    // 混合系数：新名优先，缺省的仍是 1
+    expect(tc.mixRotate).toBeCloseTo(0.25, 6)
+    expect(tc.mixX).toBeCloseTo(0.5, 6)
+    expect(tc.mixY).toBeCloseTo(1, 6)
+  })
+
+  it('transform 约束的 3.8 字段名（rotate / x / translateMix…）仍然认', () => {
+    const json = {
+      skeleton: { spine: '3.8.75' },
+      bones: [{ name: 'root' }, { name: 'target' }],
+      slots: [{ name: 'slot', bone: 'root' }],
+      skins: [{ name: 'default', attachments: {} }],
+      transform: [
+        {
+          name: 'tc',
+          bones: ['root'],
+          target: 'target',
+          rotateMix: 0.4,
+          translateMix: 0.6,
+          rotate: -15,
+          x: 200
+        }
+      ]
+    }
+    const { asset } = importSpine({ json: json as never, regions: [], pageSizes: {} })
+    const tc = asset.constraints[0]
+    expect(tc.type).toBe('transform')
+    if (tc.type !== 'transform') return
+    expect(tc.offsetRotate).toBeCloseTo(-15, 6)
+    expect(tc.offsetX).toBeCloseTo(2, 6)
+    // translateMix 同时管 X 与 Y
+    expect(tc.mixRotate).toBeCloseTo(0.4, 6)
+    expect(tc.mixX).toBeCloseTo(0.6, 6)
+    expect(tc.mixY).toBeCloseTo(0.6, 6)
   })
 
   it('4.2+ 的 curve 是 (时间,值) 绝对坐标 → 归一化；旧版 0..1 直接用', () => {
@@ -1397,7 +1469,7 @@ describe('Spine 贝塞尔 curve 的坐标系（≥4.2 是绝对坐标，不是�
   }
 
   it('4.2+：绝对控制点按帧区间归一化（段 0.5→1.0 时 y 应压到 0.2 / 0.6）', () => {
-    const asset = importSpine({ json: JSON_42 as never, regions: new Map(), pageSizes: {} }).asset
+    const asset = importSpine({ json: JSON_42 as never, regions: [], pageSizes: {} }).asset
     const key = asset.animations[0].bones[0].scale[0]
     expect(key.easing).toBe(Easing.Bezier)
     expect(key.curve).not.toBeNull()
@@ -1426,7 +1498,7 @@ describe('Spine 贝塞尔 curve 的坐标系（≥4.2 是绝对坐标，不是�
         }
       }
     }
-    const asset = importSpine({ json: json as never, regions: new Map(), pageSizes: {} }).asset
+    const asset = importSpine({ json: json as never, regions: [], pageSizes: {} }).asset
     const key = asset.animations[0].bones[0].scale[0]
     expect(key.easing).toBe(Easing.Bezier)
     expect(key.curve).toEqual([0.25, 0.1, 0.75, 0.9])

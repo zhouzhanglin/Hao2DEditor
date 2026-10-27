@@ -12,7 +12,8 @@ import type { AnimData, BoneAnim, FloatKeyframe, SlotAnim, DeformAnim, Constrain
 import { angleDiff } from '@core/math/utils'
 import { sortConstraints } from '@core/model/constraints'
 import { triangulateFromHull } from '@core/mesh/triangulate'
-import type { SpineJson, SpineSlotJson, SpineSkinJson, SpineAttachmentJson, SpineAnimationJson, SpineCurveKeyframe, SpineTransformConstraintJson, SpinePathConstraintJson } from '@importers/spineTypes'
+import type { SpineJson, SpineBoneJson, SpineSlotJson, SpineSkinJson, SpineAttachmentJson, SpineAnimationJson, SpineCurveKeyframe, SpinePathConstraintJson } from '@importers/spineTypes'
+import type { TransformConstraint } from '@core/model/constraints'
 import { pageUvsToRegionRelative } from '@importers/uv'
 import { t } from '@i18n'
 import type { AtlasRegion, PageSizes } from '@importers/uv'
@@ -260,7 +261,13 @@ function spineAttachment(att: AttachmentData, lookup?: SpineRegionLookup): Spine
   if (att.type === AttachmentType.LinkedMesh) {
     base.type = 'linkedmesh'
     base.skin = att.linkedMeshSkin || undefined
-    base.parent = att.linkedMeshAttachment || undefined
+    /*
+     * 源网格字段名是 **`source`**（4.x），不是 3.8 的 `parent` —— 官方 SkeletonJson 4.x 只认
+     * `source`，缺失时会把这条当成普通 mesh 去读 uvs / vertices（linkedmesh 并没有），
+     * 导出的骨骼在官方运行库里这条附件直接废掉。
+     * 名字缺省时按同槽位同名附件兜底（与导入侧的默认一致）。
+     */
+    base.source = att.linkedMeshAttachment || att.name
     base.width = att.size.x * RUNTIME_PPU
     base.height = att.size.y * RUNTIME_PPU
     return base
@@ -413,7 +420,10 @@ function buildConstraints(asset: RuntimeAsset): SpineJson['constraints'] {
         stretch: (c as { stretch: boolean }).stretch
       })
     } else if (c.type === 'transform') {
-      const t = c as unknown as SpineTransformConstraintJson
+      // 读的是**编辑器内的**约束（字段是 offsetRotate / offsetX …），
+      // 别拿 Spine JSON 的类型来套：Spine 4.0 起那几个字段叫 offsetRotation / offsetX …，
+      // 3.8 叫 rotate / x …，套错类型会读出一堆 undefined（写出 NaN / 丢字段）。
+      const t = c as TransformConstraint
       out.push({
         type: 'transform',
         name: c.name,
@@ -463,7 +473,8 @@ function buildConstraints(asset: RuntimeAsset): SpineJson['constraints'] {
       })
     }
   }
-  return out as SpineJson['constraints']
+  // 逐项是手工拼的 JSON 片（ik / transform / path / physics 四种形状），与联合类型不同构
+  return out as unknown as SpineJson['constraints']
 }
 
 // ---------------- 动画 ----------------
@@ -535,8 +546,8 @@ function buildBoneTimeline(track: BoneAnim, bone: BoneData): SpineAnimationJson[
         } else {
           const sx1 = setupScale.x !== 0 ? v1.x / setupScale.x : v1.x
           const sy1 = setupScale.y !== 0 ? v1.y / setupScale.y : v1.y
-          const sx2 = next && setupScale.x !== 0 ? (next.value as { x: number }).x / setupScale.x : sx1
-          const sy2 = next && setupScale.y !== 0 ? (next.value as { x: number }).y / setupScale.y : sy1
+          const sx2 = next && setupScale.x !== 0 ? (next.value as { x: number; y: number }).x / setupScale.x : sx1
+          const sy2 = next && setupScale.y !== 0 ? (next.value as { x: number; y: number }).y / setupScale.y : sy1
           void setupShear
           frame = { time: t1, x: sx1, y: sy1 }
           const curve = spineCurve(k.easing, k.curve, t1, t2, sx1, sx2, sy1, sy2)
@@ -553,7 +564,8 @@ function buildBoneTimeline(track: BoneAnim, bone: BoneData): SpineAnimationJson[
   emit('scale', track.scale as never)
   emit('shear', track.shear as never)
   if (Object.keys(tl).length > 0) {
-    json[bone.name] = tl as SpineAnimationJson['bones'][string]
+    // `bones` 在 JSON 类型里是可缺省的，索引前要先去掉 undefined
+    json[bone.name] = tl as NonNullable<SpineAnimationJson['bones']>[string]
   }
   return json
 }
@@ -825,7 +837,8 @@ function buildAnimations(asset: RuntimeAsset): SpineJson['animations'] {
     const { ik, transform, path } = buildConstraintTimelines(asset, animation)
     const anim: SpineAnimationJson = { bones, slots }
     const attachments = buildDeforms(asset, animation)
-    if (Object.keys(attachments).length > 0) anim.attachments = attachments
+    // 这几个通道在 JSON 类型里都是可选的（构建函数可能返回 undefined）：取 keys 前先兜成空对象
+    if (Object.keys(attachments ?? {}).length > 0) anim.attachments = attachments
     const drawOrder = buildDrawOrder(asset, animation)
     if (drawOrder.length > 0) anim.drawOrder = drawOrder
     if (animation.events.length > 0) {
@@ -837,9 +850,9 @@ function buildAnimations(asset: RuntimeAsset): SpineJson['animations'] {
         float: e.floatParam
       }))
     }
-    if (Object.keys(ik).length > 0) anim.ik = ik
-    if (Object.keys(transform).length > 0) anim.transform = transform
-    if (Object.keys(path).length > 0) anim.path = path
+    if (Object.keys(ik ?? {}).length > 0) anim.ik = ik
+    if (Object.keys(transform ?? {}).length > 0) anim.transform = transform
+    if (Object.keys(path ?? {}).length > 0) anim.path = path
     out[animation.name] = anim
   }
   return out
@@ -884,7 +897,8 @@ function computeBounds(asset: RuntimeAsset): { x: number; y: number; width: numb
 
 export function buildSpineJson(asset: RuntimeAsset, lookup?: SpineRegionLookup): SpineJson {
   const bounds = computeBounds(asset)
-  const skeleton = {
+  // 标注成 JSON 的 skeleton 形状：下面的 `hash` 不在推断结果里，不标注会被当成「多余字段」
+  const skeleton: NonNullable<SpineJson['skeleton']> = {
     spine: SPINE_VERSION,
     fps: asset.frameRate,
     ...bounds

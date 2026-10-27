@@ -41,6 +41,7 @@ export function slot(
     defaultDisplayIndex: options?.displayIndex ?? 0,
     defaultZOrder: 0,
     z: 0,
+    visible: true,
     setupAttachment: options?.setupAttachment ?? ''
   }
 }

@@ -5,8 +5,10 @@ import {
   Physics,
   Skeleton,
   SkeletonJson,
+  Skin,
   TextureAtlas
 } from '@esotericsoftware/spine-core'
+import type { Bone, BoneData, ConstraintData, SkeletonData } from '@esotericsoftware/spine-core'
 import { PPU } from './uv'
 import { normalizeLegacyAnimations } from './spineLegacyCurves'
 import type { SpineCurveKeyframe, SpineJson } from './spineTypes'
@@ -79,6 +81,195 @@ export interface SpineBakeInput {
   /** 我们模型的插槽名（下标 → 名字） */
   slotNames: readonly string[]
   fps?: number
+}
+
+/** 骨骼的局部变换（我们 BoneData 的同一口径：位置是世界单位、角度是度） */
+export interface SetupBoneLocal {
+  x: number
+  y: number
+  rotation: number
+  scaleX: number
+  scaleY: number
+  shearX: number
+  shearY: number
+}
+
+/** 官方运行库的 `appliedPose`：局部姿态 + 约束算出的世界变换 */
+type BonePose = SetupBoneLocal & {
+  updateLocalTransform?: (skeleton: Skeleton) => void
+  a: number
+  b: number
+  c: number
+  d: number
+  worldX: number
+  worldY: number
+  /** 局部值所属的「第几次更新」；等于 `skeleton._update` 表示是被约束改写的脏值 */
+  local?: number
+}
+
+/**
+ * 取**约束求解之后**的骨骼局部变换（`updateWorldTransform` 之后再调用）。
+ *
+ * 官方运行库的约束只改世界变换（`PathConstraint` / `TransformConstraint` 都走
+ * `modifyWorld`），局部值仍是**约束前**那一份；官方用 `appliedPose.local === skeleton._update`
+ * 标记「局部已经和世界对不上」，再由 `validateLocalTransform` 按需反解回局部。
+ *
+ * 我们导入后不再跑任何约束，照抄那份过期局部值，整条受约束的骨链就会偏：
+ * 路径约束铺在曲线上的 `leg-front-1..8`（mix-and-match）、变换约束驱动的 `hat-control` /
+ * `dress-control-*` 都是这样，网格蒙皮后脚 / 帽子 / 裙子贴图错位。
+ *
+ * 所以只对**被约束碰过**的骨骼（`derive`，见 `constrainedBones`）调用 `updateLocalTransform`。
+ * 不能对所有骨骼一概反解：没被约束碰过的骨骼世界与局部本来就一致，反解只是把同一变换重新分解一遍
+ *（旋转 + 斜切不是唯一表示），我们自己的 FK 会还原出略微不同的世界，子链跟着漂 ——
+ * 3.3 的 Spineunitygirl 就是这样被弄成四肢脱位的。
+ *
+ * 另外父级 0 缩放（Spine 里常见的「靠缩放隐藏」做法）会让世界矩阵不可逆：反解结果是 0 缩放 +
+ * 巨大位移，数值有限却完全错误（mix-and-match 的 `hair-strand-*`），这类骨骼也退回局部值。
+ */
+function resolveLocal(skeleton: Skeleton, bone: Bone, derive: boolean): SetupBoneLocal | null {
+  const pose = (bone as unknown as { appliedPose?: BonePose }).appliedPose
+  if (!pose) return null
+  const before = readLocal(pose)
+  // 约束列表里查不到、但官方自己标了脏的（约束间接改写了世界）同样要反解
+  const needDerive = derive || isLocalDirty(skeleton, pose)
+  if (needDerive && typeof pose.updateLocalTransform === 'function' && !isSingularWorld(pose)) {
+    pose.updateLocalTransform(skeleton)
+    const after = readLocal(pose)
+    if (isFiniteLocal(after)) return after
+    writeLocal(pose, before)
+  }
+  return isFiniteLocal(before) ? before : null
+}
+
+/** 局部值是否已被约束改写而失效（官方自己的脏标记，见 `BonePose.validateLocalTransform`） */
+function isLocalDirty(skeleton: Skeleton, pose: BonePose): boolean {
+  const update = (skeleton as unknown as { _update?: number })._update
+  return typeof update === 'number' && pose.local === update
+}
+
+/**
+ * 官方运行库**真的会解算**的骨骼名（被 IK / 变换 / 路径约束直接改写的那些）。
+ *
+ * 只看 `data.constraints`（运行库实际解析出来的约束），不看 JSON 版本号：
+ * - 4.2+ 的约束在 `constraints` 数组里，运行库会解，世界变换被改写 → 局部必须反解；
+ * - 3.x / 4.0 / 4.1 的约束写在顶层 `ik` / `transform` / `path`，4.x 运行库**根本不读**，
+ *   `data.constraints` 是空的，世界变换没被动过 → 局部原样即可
+ *  （Spineunitygirl 的 `main` 就是这样：约束由我们自己的运行期求解，烘焙值不能动）。
+ */
+function constrainedBones(data: SkeletonData): Set<string> {
+  const out = new Set<string>()
+  for (const constraint of data.constraints) {
+    const bones = (constraint as unknown as { bones?: BoneData[] }).bones ?? []
+    for (const bone of bones) out.add(bone.name)
+  }
+  return out
+}
+
+function readLocal(pose: SetupBoneLocal): SetupBoneLocal {
+  return {
+    x: pose.x,
+    y: pose.y,
+    rotation: pose.rotation,
+    scaleX: pose.scaleX,
+    scaleY: pose.scaleY,
+    shearX: pose.shearX,
+    shearY: pose.shearY
+  }
+}
+
+function writeLocal(pose: SetupBoneLocal, local: SetupBoneLocal): void {
+  pose.x = local.x
+  pose.y = local.y
+  pose.rotation = local.rotation
+  pose.scaleX = local.scaleX
+  pose.scaleY = local.scaleY
+  pose.shearX = local.shearX
+  pose.shearY = local.shearY
+}
+
+/**
+ * 让所有「只在特定皮肤里出现」的骨骼 / 约束都生效。
+ *
+ * Spine 4.x 的 `skin: true`（`skinRequired`）在运行库里意味着：当前皮肤没声明它时，
+ * 该骨骼**不进更新队列** —— `appliedPose` 不再从 `pose` 重算、世界变换恒为 0；带同样标记的
+ * 约束也不参与求解（见 `Skeleton.updateCache`）。
+ *
+ * 编辑器没有这个概念（导入后所有骨骼都可见可动），所以烘焙前必须合成一个「包含所有皮肤
+ * 声明过的骨骼与约束」的皮肤。否则这些骨骼的采样值永远停在 setup：mix-and-match 的
+ * `hair-bangs-transparent` 网格额外蒙皮在 `hair-strand-*` 上，那些骨骼不跟动画走，
+ * 动画里这一片头发就会错位。
+ */
+function activateAllSkinParts(skeleton: Skeleton, data: SkeletonData): void {
+  const skin = new Skin('*bake-all')
+  const bones = new Set<BoneData>()
+  const constraints = new Set<ConstraintData<any, any>>()
+  for (const item of data.skins) {
+    for (const bone of item.bones) bones.add(bone)
+    for (const constraint of item.constraints) constraints.add(constraint)
+  }
+  skin.bones = [...bones]
+  skin.constraints = [...constraints]
+  skeleton.setSkin(skin)
+}
+
+/**
+ * 世界矩阵是否退化（不可逆）。
+ *
+ * 判据用「行列式相对于自身量级」而不是绝对阈值：整副骨架被放大 / 缩小时，
+ * 真实的 0 行列式依然会被判出来，而 0.001 这种合法的小缩放不会被误伤。
+ */
+function isSingularWorld(world: { a: number; b: number; c: number; d: number }): boolean {
+  if (![world.a, world.b, world.c, world.d].every(Number.isFinite)) return true
+  const det = world.a * world.d - world.b * world.c
+  const scale = Math.abs(world.a * world.d) + Math.abs(world.b * world.c)
+  return !(Math.abs(det) > 1e-12 * (scale + 1))
+}
+
+function isFiniteLocal(local: SetupBoneLocal): boolean {
+  return (
+    Number.isFinite(local.x) &&
+    Number.isFinite(local.y) &&
+    Number.isFinite(local.rotation) &&
+    Number.isFinite(local.scaleX) &&
+    Number.isFinite(local.scaleY) &&
+    Number.isFinite(local.shearX) &&
+    Number.isFinite(local.shearY)
+  )
+}
+
+/**
+ * 用官方运行库求 **setup 姿态**的骨骼局部变换（含 IK / 变换 / 路径约束），key = 我们的骨骼下标。
+ *
+ * 回传的是**全部骨骼**的求解结果，调用方按需与 JSON 原值比较后替换（没被约束改过的骨骼
+ * 差异只在浮点末位，替换成原值可避免把噪声写进工程）。
+ * 读不到官方运行库（老格式 / 图集缺失）时返回 null，调用方保持 JSON 里的原始姿态。
+ */
+export function bakeSetupLocals(input: SpineBakeInput): Map<number, SetupBoneLocal> | null {
+  try {
+    const atlas = new TextureAtlas(input.atlasText)
+    const skeletonJson = new SkeletonJson(new AtlasAttachmentLoader(atlas))
+    // 与动画烘焙同一口径：官方输出的位置直接是我们的世界单位
+    skeletonJson.scale = 1 / PPU
+    const data = skeletonJson.readSkeletonData(input.json)
+    const skeleton = new Skeleton(data)
+    const index = new Map<string, number>()
+    input.boneNames.forEach((name, i) => index.set(name, i))
+    activateAllSkinParts(skeleton, data)
+    // setup 姿态里不推进物理，只让约束落位
+    skeleton.setupPose()
+    skeleton.updateWorldTransform(Physics.reset)
+    const derive = constrainedBones(data)
+    const out = new Map<number, SetupBoneLocal>()
+    for (const bone of skeleton.bones) {
+      const at = index.get(bone.data.name)
+      if (at === undefined) continue
+      const local = resolveLocal(skeleton, bone, derive.has(bone.data.name))
+      if (local) out.set(at, local)
+    }
+    return out
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -438,14 +629,20 @@ function bakeOnce(
     const boneIndexOf = new Map<string, number>()
     input.boneNames.forEach((name, i) => boneIndexOf.set(name, i))
 
+    // 皮肤专属骨骼/约束必须全部生效，否则它们的 appliedPose 停在 setup、动画采样不到（见 activateAllSkinParts）
+    activateAllSkinParts(skeleton, data)
 
-    // setup 基准（官方坐标系的原始值，与我们的 BoneData 同源）：常量通道要靠它判断「是否已在 setup」
-    const setupById = new Map<number, { x: number; y: number; rotation: number; scaleX: number; scaleY: number; shearX: number; shearY: number }>()
+    // setup 基准（含约束求解后反解回局部的值，与导入时落到 BoneData 的口径一致）：
+    // 常量通道要靠它判断「是否已在 setup」，用原始 JSON 值当基准会把被约束改过的骨骼
+    // 全部误判成「有动画」（每个动画都多出一堆恒定轨道）
+    const derive = constrainedBones(data)
+    const setupById = new Map<number, SetupBoneLocal>()
     skeleton.setupPose()
+    skeleton.updateWorldTransform(Physics.reset)
     for (const bone of skeleton.bones) {
       const index = boneIndexOf.get(bone.data.name)
       if (index === undefined) continue
-      const pose = bone.pose
+      const pose: SetupBoneLocal = resolveLocal(skeleton, bone, derive.has(bone.data.name)) ?? bone.appliedPose
       setupById.set(index, {
         x: pose.x,
         y: pose.y,
@@ -482,7 +679,8 @@ function bakeOnce(
         for (const bone of skeleton.bones) {
           const index = boneIndexOf.get(bone.data.name)
           if (index === undefined) continue
-          const pose = bone.appliedPose
+          // 被约束改写过世界的骨骼必须反解回局部才能被我们的 FK 重现（见 resolveLocal）
+          const pose: SetupBoneLocal = resolveLocal(skeleton, bone, derive.has(bone.data.name)) ?? bone.appliedPose
           // 采样值必须是有限数。官方运行库对**过老的格式**只有部分兼容：实测 3.3 的工程
           // （对象式 skins + Y 轴朝下的坐标约定）里，所有采样值的 y 分量都会变成 NaN ——
           // 一旦带进轨道，播放时整条骨骼链连同网格顶点全部 NaN，角色直接消失

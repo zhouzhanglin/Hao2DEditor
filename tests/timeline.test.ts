@@ -172,7 +172,8 @@ describe('时间轴模型', () => {
       color: [{ time: 0, value: { r: 1, g: 1, b: 1, a: 1 }, easing: 1, curve: null }],
       displayIndex: [],
       displayAttachment: [],
-      visible: []
+      visible: [],
+      subArmature: []
     })
 
     const tracks = buildTimeline(anim)
@@ -338,7 +339,8 @@ describe('关键帧编辑', () => {
           ],
           // 坏数据：名字只有一个（老版本删除帧时漏删/错位）
           displayAttachment: ['head'],
-          visible: []
+          visible: [],
+          subArmature: []
         }
       ],
       deforms: [],

@@ -113,7 +113,8 @@ export function triangulateFromHull(vertices: Float32Array, hull: number, edges:
   }
 
   // 从 edges 串成闭合外轮廓；没有可用 edges 时默认按 vertices 顺序
-  let order: number[]
+  // 先声明成 `undefined`：串轮廓的分支可能整段被跳过（`edges` 不足），下面统一兜底
+  let order: number[] | undefined
   if (edges.length >= 4) {
     const adj = new Map<number, number[]>()
     for (let i = 0; i + 1 < edges.length; i += 2) {

@@ -149,15 +149,19 @@ function findSkinAttachments(asset: RuntimeAsset, skinName: string, slotName: st
 /**
  * 解析 Spine 的 linkedmesh：
  * 几何（顶点 / 权重 / UV / 三角形 / 尺寸）取自父附件，变换 / 颜色 / 贴图 / 名字用 linkedmesh 自己的。
- * 查找规则与官方一致：在 `linkedMeshSkin` 指定皮肤、**同一个槽位**下按名字找父附件。
+ * 查找规则与官方一致：在 `linkedMeshSkin` 指定皮肤（缺省 = 默认皮肤）、**同一个槽位**下按名字找父附件。
+ *
+ * 源网格名缺省时退回自身名字：换装皮肤的 linkedmesh 绝大多数就是「同名附件、换一张图」，
+ * 这样老工程（导入时把 4.x 的 `source` 读丢、存成空串）也能直接恢复正常显示。
  */
 export function resolveLinkedMesh(asset: RuntimeAsset, lm: AttachmentData, slotName: string): AttachmentData | null {
-  if (asset.skins.length === 0 || !lm.linkedMeshAttachment) return null
+  const sourceName = lm.linkedMeshAttachment || lm.name
+  if (asset.skins.length === 0 || !sourceName) return null
   const parents = findSkinAttachments(asset, lm.linkedMeshSkin, slotName)
   if (!parents) return null
 
   for (const parent of parents) {
-    if (parent.name !== lm.linkedMeshAttachment) continue
+    if (parent.name !== sourceName) continue
     if (parent.type === AttachmentType.LinkedMesh) return null
 
     const merged: AttachmentData = {
@@ -169,7 +173,14 @@ export function resolveLinkedMesh(asset: RuntimeAsset, lm: AttachmentData, slotN
       edges: parent.edges,
       hull: parent.hull,
       size: { ...parent.size },
-      uvs: lm.uvs.length > 0 ? lm.uvs : parent.uvs,
+      /*
+       * UV 必须与父网格的顶点一一对应。linkedmesh 在 Spine 数据里**没有 uvs**
+       *（几何全取自源网格），但 `createAttachmentData` 默认给 8 个占位 UV，
+       * 老工程 / 拆分过图集的工程里这 8 个数还会被换算成乱七八糟的值。
+       * 直接采用就会「32 个顶点只配 8 个 UV」：越界读到 NaN，整块网格消失
+       *（Goblins 切到 goblingirl 后脚没了）。长度对不上就一律用父网格的。
+       */
+      uvs: lm.uvs.length > 0 && lm.uvs.length === parent.uvs.length ? lm.uvs : parent.uvs,
       ffdInBoneSpace: parent.ffdInBoneSpace,
       position: { ...lm.position },
       scale: { ...lm.scale },

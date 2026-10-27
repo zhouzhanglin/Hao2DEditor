@@ -1371,10 +1371,12 @@ export const en: Record<string, string> = {
   '骨骼「{0}」父链过深或存在环，已截断': 'Bone "{0}" has a too-deep parent chain or a cycle; truncated',
   '插槽「{0}」的混合模式 mask 不受支持，已按 Normal 导入（遮罩请用 clipping 附件）': 'Slot "{0}" uses the unsupported mask blend mode; imported as Normal (use a clipping attachment for masks)',
   '附件的图集区域「{0}」不存在，贴图可能显示异常': 'Atlas region "{0}" for this attachment does not exist; textures may render incorrectly',
+  'linkedmesh「{0}」的源网格在另一个槽位（Spine 4.x 的 slot 字段），当前只支持同槽位查找': 'The source mesh of linkedmesh "{0}" lives in another slot (Spine 4.x "slot" field); only same-slot lookup is supported for now',
   '官方运行库烘焙失败，动画改用内置解析（老版本格式常见：3.3 及更早；缓动 / IK 可能与官方有差异）': 'Official runtime baking failed; animations fall back to the built-in parser (common with old formats 3.3 and earlier; easing / IK may differ from the official runtime)',
   'IK「{0}」的目标或骨骼链无效，已跳过': 'IK "{0}" has an invalid target or bone chain; skipped',
   '变换约束「{0}」的目标或骨骼链无效，已跳过': 'Transform constraint "{0}" has an invalid target or bone chain; skipped',
-  '路径约束「{0}」信息不完整，已跳过': 'Path constraint "{0}" is incomplete; skipped',
+  '路径约束「{0}」不支持编辑，求解结果已烘进骨骼姿态':
+    'Path constraint "{0}" is not editable; its solved result is baked into the bone pose',
   '图集区域「{0}」出现在任何图集页之前，已忽略': 'Atlas region "{0}" appears before any atlas page; ignored',
   '图集页「{0}」的 size 无法解析：{1}': 'Could not parse the size of atlas page "{0}": {1}',
   '图集中没有解析出任何区域': 'No regions were parsed from the atlas',

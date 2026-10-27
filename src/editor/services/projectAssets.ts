@@ -21,7 +21,8 @@ export const STAGE_DIR = 'stage'
 
 /** 舞台参考图在磁盘上的绝对路径 */
 export function stageFilePath(projectDir: string, file: string): string {
-  return joinPath(projectDir, STAGE_DIR, file)
+  // `joinPath` 只接两段：先拼目录名，再拼文件名（分隔符由它自己按平台判断）
+  return joinPath(joinPath(projectDir, STAGE_DIR), file)
 }
 
 /** 舞台参考图在工程内的相对路径（用于显示/调试，不参与导出） */

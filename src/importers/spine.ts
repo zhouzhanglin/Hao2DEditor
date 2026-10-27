@@ -14,7 +14,14 @@ import type { Constraint } from '@core/model/constraints'
 import { emptyIkAnim } from '@core/model/animation'
 import type { AnimData } from '@core/model/animation'
 import type { AtlasRegion, PageSizes } from './uv'
-import { mapRegionRelativeUvs, parseHexColor, pxToUnit, regionGeometry, regionUvs } from './uv'
+import {
+  mapRegionRelativeUvs,
+  pageUvsToRegionRelative,
+  parseHexColor,
+  pxToUnit,
+  regionGeometry,
+  regionUvs
+} from './uv'
 import { indexRegions } from './atlasSpine'
 import { importSpineAnimations } from './spineAnims'
 import type {
@@ -24,8 +31,8 @@ import type {
   SpineJson,
   SpineSlotJson
 } from './spineTypes'
-import { bakeSpineAnimations } from './spineBake'
-import type { BakedAnimation } from './spineBake'
+import { bakeSetupLocals, bakeSpineAnimations } from './spineBake'
+import type { BakedAnimation, SetupBoneLocal } from './spineBake'
 import { Easing, emptySlotAnim } from '@core/model/animation'
 
 export interface SpineImportInput {
@@ -156,6 +163,61 @@ function normalizeSkins(json: SpineJson): Array<{ name: string; attachments: Rec
     name: fallbackName(name, index),
     attachments
   }))
+}
+
+/** 骨骼局部变换是否与给定值几乎一致（容差内视为「约束没改过它」） */
+function sameBoneLocal(bone: BoneData, local: SetupBoneLocal): boolean {
+  return (
+    Math.abs(bone.localPosition.x - local.x) < 1e-3 &&
+    Math.abs(bone.localPosition.y - local.y) < 1e-3 &&
+    Math.abs(bone.rotation - local.rotation) < 1e-2 &&
+    Math.abs(bone.localScale.x - local.scaleX) < 1e-3 &&
+    Math.abs(bone.localScale.y - local.scaleY) < 1e-3 &&
+    Math.abs(bone.localShear.x - local.shearX) < 1e-2 &&
+    Math.abs(bone.localShear.y - local.shearY) < 1e-2
+  )
+}
+
+/**
+ * 给 linkedmesh 补上「按自己区域」的 UV。
+ *
+ * Spine 的 linkedmesh **自己不存 uvs**：几何（顶点 / 三角形 / 权重）取自源网格，UV 则取源网格的
+ * **区域相对** UV、再乘它自己的区域矩形（官方 `MeshAttachment.ComputeUVs`）。编辑器模型只存
+ * 整页 UV，所以导入时要把源网格的整页 UV 反解成区域相对、再映射进自己的区域 ——
+ * 换装皮肤（Goblins 的 goblingirl）直接沿用源皮肤那块 UV 的话，画出来是源皮肤的贴图；
+ * 而完全不补时附件只剩 `createAttachmentData` 的 8 个占位 UV，跟源网格的顶点数对不上，
+ * 整块网格直接不画（运行期见 `resolveLinkedMesh` 的长度校验）。
+ */
+function remapLinkedMeshUvs(
+  skins: readonly SkinData[],
+  defaultSkin: SkinData | undefined,
+  ctx: AttachmentContext
+): void {
+  const byName = new Map(skins.map((skin) => [skin.name, skin]))
+  for (const skin of skins) {
+    for (const skinSlot of skin.slots) {
+      for (const attachment of skinSlot.attachments) {
+        if (attachment.type !== AttachmentType.LinkedMesh) continue
+        // 源皮肤缺省 = 默认皮肤；源网格名缺省 = 自身名字（与 resolveLinkedMesh 同一口径）
+        const sourceSkin = (attachment.linkedMeshSkin ? byName.get(attachment.linkedMeshSkin) : undefined) ?? defaultSkin
+        const sourceSlot = sourceSkin?.slots.find((item) => item.slotName === skinSlot.slotName)
+        const sourceName = attachment.linkedMeshAttachment || attachment.name
+        const parent = sourceSlot?.attachments.find(
+          (item) => item.name === sourceName && item.type !== AttachmentType.LinkedMesh
+        )
+        if (!parent || parent.uvs.length === 0) continue
+        const own = attachment.regionName ? ctx.regions.get(attachment.regionName) : undefined
+        const source = parent.regionName ? ctx.regions.get(parent.regionName) : undefined
+        // 拿不到区域矩形（没有 .atlas）就保持原样，运行期会退回源网格的 UV
+        if (!own || !source) continue
+        attachment.uvs = mapRegionRelativeUvs(
+          pageUvsToRegionRelative(parent.uvs, source, ctx.pageSizes),
+          own,
+          ctx.pageSizes
+        )
+      }
+    }
+  }
 }
 
 function blendOf(blend: string | undefined, slotName: string, warnings: string[]): BlendMode {
@@ -310,6 +372,18 @@ function convertAttachment(
 
   if (type === 'linkedmesh') {
     const region = resolveRegion(attachment, ctx, skinName)
+    /*
+     * 源网格名：**4.x 用 `source`，3.8 用 `parent`**（官方 SkeletonJson 读的就是 `source`）。
+     * 两个都缺时退回自身名字 —— 换装皮肤里的 linkedmesh 通常就是「同名附件、换一张图」，
+     * 早先只读 `parent` 会得到空串，`resolveLinkedMesh` 直接判定为「没有父网格」，
+     * 结果 Goblins 这类 4.x 资源的脚/袖子整块不画（几何为空）。
+     */
+    const linked = attachment as { source?: string; parent?: string; slot?: string }
+    if (linked.slot) {
+      ctx.warnings.push(
+        t('linkedmesh「{0}」的源网格在另一个槽位（Spine 4.x 的 slot 字段），当前只支持同槽位查找', base.name)
+      )
+    }
     return createAttachmentData({
       ...base,
       type: AttachmentType.LinkedMesh,
@@ -317,7 +391,7 @@ function convertAttachment(
       regionName: region ? region.name : undefined,
       size: { x: pxToUnit(attachment.width ?? 0), y: pxToUnit(attachment.height ?? 0) },
       linkedMeshSkin: (attachment as { skin?: string }).skin ?? '',
-      linkedMeshAttachment: (attachment as { parent?: string }).parent ?? ''
+      linkedMeshAttachment: linked.source ?? linked.parent ?? base.name
     })
   }
 
@@ -467,6 +541,32 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
     })
   })
 
+  /*
+   * setup 姿态要先按**官方运行库求解过的结果**校正一遍局部变换。
+   *
+   * 导入后不再跑约束（`runtimeIK = false`，路径约束更是没有对应模型），而 IK / 变换约束改的是局部姿态、
+   * 路径约束只改**世界**姿态 —— 于是这类骨架的 setup 会和 Spine 对不上：mix-and-match 的腿链
+   *（`leg-front-1..8` 铺在曲线上）整条偏掉，网格按骨骼蒙皮后脚部贴图错位（缩略图对、视口错）。
+   * 必须在 `createSetupPose` / `computeBindposes` 之前校正，蒙皮绑定才跟着一致。
+   */
+  if (input.atlasText) {
+    const baked = bakeSetupLocals({
+      json,
+      atlasText: input.atlasText,
+      boneNames: bones.map((bone) => bone.name),
+      slotNames: slots.map((slot) => slot.name)
+    })
+    for (const [at, local] of baked ?? []) {
+      const bone = bones[at]
+      // 没被约束改过的骨骼差异只在浮点末位：保留 JSON 原值，别把噪声写进工程
+      if (!bone || sameBoneLocal(bone, local)) continue
+      bone.localPosition = { x: local.x, y: local.y }
+      bone.rotation = local.rotation
+      bone.localScale = { x: local.scaleX, y: local.scaleY }
+      bone.localShear = { x: local.shearX, y: local.shearY }
+    }
+  }
+
   const skeletonOnly = createRuntimeAsset({
     dataType: AnimType.Spine,
     armatureName: json.skeleton?.spine ? 'spine' : 'spine',
@@ -522,6 +622,10 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
   // setup 显示的附件：在默认皮肤里按名解析出真正的显示下标
   const defaultSkinIndex = Math.max(0, skins.findIndex((s) => s.name === 'default'))
   const defaultSkin = skins[defaultSkinIndex]
+
+  // linkedmesh 的 UV 要按它**自己的区域**重算（源网格的 UV 只提供形状），见 remapLinkedMeshUvs
+  remapLinkedMeshUvs(skins, defaultSkin, ctx)
+
   for (const slot of slots) {
     if (!slot.setupAttachment) continue
     const skinSlot = defaultSkin?.slots.find((s) => s.slotName === slot.name)
@@ -657,9 +761,16 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
     animations,
     textureNames,
     defaultSkinIndex,
-    // IK 已经被官方运行库烘焙进骨骼轨道（含约束修正），运行期不再重复求解 ——
-    // 否则会出现「Pose 态的脚不对」「膝盖朝反」这类问题
-    runtimeIK: !bakedApplied,
+    /*
+     * `runtimeIK === false` 的含义是「约束结果已烘焙进骨骼轨道，运行期一条都不要再解」。
+     *
+     * 但**老格式（3.x / 4.0 / 4.1）的约束写在顶层 `ik` / `transform` / `path` 数组里**，
+     * 官方 4.3 运行库只认 4.2 起的 `constraints` 数组（见 `SkeletonJson` 的 `root.constraints`）
+     * —— 也就是说烘焙时这些约束**根本没生效**，轨道里也没有它们的结果。
+     * 这类文件必须由运行期自己解，标成 false 会让约束整体失效（Spineunitygirl 的 `main`
+     * 就会像四肢脱位）；只有确认官方读到了约束（`json.constraints` 存在）才敢全部关掉。
+     */
+    runtimeIK: !bakedApplied || hasLegacyConstraintArrays(json),
     images
   })
   asset.bindposes = bindposes
@@ -743,6 +854,16 @@ function applyBakedAnimations(
   return applied
 }
 
+/**
+ * 约束是否写在**老格式**的顶层数组里（3.x / 4.0 / 4.1 的 `ik` / `transform` / `path`）。
+ *
+ * 官方 4.3 运行库只读 4.2 起的 `constraints` 数组，老数组它完全不看 ——
+ * 所以这类文件的烘焙结果里**不含约束效果**，运行期必须自己解（见 `runtimeIK` 的赋值处）。
+ */
+function hasLegacyConstraintArrays(json: SpineJson): boolean {
+  return (json.ik?.length ?? 0) > 0 || (json.transform?.length ?? 0) > 0 || (json.path?.length ?? 0) > 0
+}
+
 function buildConstraints(
   json: SpineJson,
   boneIndex: Map<string, number>,
@@ -791,7 +912,9 @@ function buildConstraints(
 
   for (const transform of legacyTransform) {
     const bones = remapBones(transform.bones, boneIndex)
-    const target = boneIndex.get(transform.target)
+    // 4.3 起 transform 约束把 target 改名成 source（同一含义：提供变换的源骨骼）
+    const sourceName = transform.target ?? transform.source
+    const target = sourceName === undefined ? undefined : boneIndex.get(sourceName)
     if (bones.length === 0 || target === undefined) {
       warnings.push(t('变换约束「{0}」的目标或骨骼链无效，已跳过', transform.name))
       continue
@@ -803,18 +926,24 @@ function buildConstraints(
         enabled: true,
         boneIndices: bones,
         targetBoneIndex: target,
-        mixRotate: transform.mixRotate ?? 1,
-        mixX: transform.mixX ?? 1,
-        mixY: transform.mixY ?? 1,
-        mixScaleX: transform.mixScaleX ?? 1,
-        mixScaleY: transform.mixScaleY ?? 1,
-        mixShearY: transform.mixShearY ?? 1,
-        offsetRotate: transform.rotate ?? 0,
-        offsetX: pxToUnit(transform.x ?? 0),
-        offsetY: pxToUnit(transform.y ?? 0),
-        offsetScaleX: transform.scaleX ?? 0,
-        offsetScaleY: transform.scaleY ?? 0,
-        offsetShearY: transform.shearY ?? 0,
+        /*
+         * 字段名两套都要认：Spine 4.0 把 transform 约束的混合与偏移改名了 ——
+         *   mix:  rotateMix / translateMix / scaleMix / shearMix  →  mixRotate / mixX+Y / mixScaleX+Y / mixShearY
+         *   offset: rotate / x / y / scaleX / scaleY / shearY    →  offsetRotation / offsetX / offsetY / …
+         * 只读旧名会让 4.x 资源里的偏移整段丢成 0（导出侧写的是新名，所以两边也曾不对称）。
+         */
+        mixRotate: transform.mixRotate ?? transform.rotateMix ?? 1,
+        mixX: transform.mixX ?? transform.translateMix ?? 1,
+        mixY: transform.mixY ?? transform.translateMix ?? 1,
+        mixScaleX: transform.mixScaleX ?? transform.scaleMix ?? 1,
+        mixScaleY: transform.mixScaleY ?? transform.scaleMix ?? 1,
+        mixShearY: transform.mixShearY ?? transform.shearMix ?? 1,
+        offsetRotate: transform.offsetRotation ?? transform.rotate ?? 0,
+        offsetX: pxToUnit(transform.offsetX ?? transform.x ?? 0),
+        offsetY: pxToUnit(transform.offsetY ?? transform.y ?? 0),
+        offsetScaleX: transform.offsetScaleX ?? transform.scaleX ?? 0,
+        offsetScaleY: transform.offsetScaleY ?? transform.scaleY ?? 0,
+        offsetShearY: transform.offsetShearY ?? transform.shearY ?? 0,
         relative: transform.relative ?? false,
         local: transform.local ?? false,
         inherit: 'normal'
@@ -825,7 +954,9 @@ function buildConstraints(
   for (const path of legacyPath) {
     const bones = remapBones(path.bones, boneIndex)
     if (bones.length === 0 || path.target === undefined) {
-      warnings.push(t('路径约束「{0}」信息不完整，已跳过', path.name))
+      // 4.3 的路径约束挂在插槽的 path 附件上（本项目模型没有对应类型）。
+      // 姿态本身已经由官方运行库烘焙补偿，这里只是提示「约束对象没有导进来」
+      warnings.push(t('路径约束「{0}」不支持编辑，求解结果已烘进骨骼姿态', path.name))
       continue
     }
     constraints.push(

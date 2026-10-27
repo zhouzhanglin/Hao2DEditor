@@ -14,6 +14,7 @@ import { Skeleton } from '@core/model/skeleton'
 import { MeshBuilder } from '@core/skin/meshBuilder'
 import { buildRuntimeMaps } from '@core/model/asset'
 import { RUNTIME_PPU } from '@core/codec/runtimeSkeJson'
+import type { RuntimeAtlasJson } from '@core/codec/runtimeSkeJson'
 import { AttachmentType } from '@core/model/types'
 import * as spine from '@esotericsoftware/spine-core'
 
@@ -59,7 +60,9 @@ function loadExample(dir: string) {
   return result.asset
 }
 
-function buildAtlas(asset: any) {
+function buildAtlas(asset: any): RuntimeAtlasJson {
+  // 标注成图集 JSON：下游 serializeSpineAtlas / 区域改名都按这份结构读，
+  // 少了 format / version 会被当成残缺数据
   const pages = asset.images.map((img: any) => ({
     image: img.name,
     width: img.width,
@@ -83,7 +86,7 @@ function buildAtlas(asset: any) {
       })
     }
   })
-  return { pages, regions }
+  return { format: 'hao2d-atlas', version: 1, pages, regions }
 }
 
 // 复刻真实导出路径：spineAtlasRegionNames + collectRegionTrim
@@ -106,17 +109,18 @@ function exportSpine(asset: any) {
 // 用 spine-core 4.3 真实运行库计算 region 附件的世界坐标 + 整页 UV。
 // 4.3 起附件不再有 `region` 属性，纹理区域、UV、四边形偏移都由 `sequence` 承载，
 // `updateSequence()` 在 readSkeletonData 里已经调用过，sequence.uvs/offsets 可直接用。
-function spineRegionWorld(spa: any, slot: any) {
+function spineRegionWorld(spa: any, slot: any): { world: number[]; uvs: number[] } {
   const seq = spa.sequence
   const world = new Float32Array(8)
   spa.computeWorldVertices(slot, seq.offsets[0], world, 0, 2)
-  return { world: Array.from(world), uvs: Array.from(seq.getUVs(0)) }
+  return { world: Array.from(world), uvs: Array.from(seq.getUVs(0) as ArrayLike<number>) }
 }
 
-function spineMeshWorld(spa: any, skel: any, slot: any) {
+function spineMeshWorld(spa: any, skel: any, slot: any): { world: number[]; uvs: number[] } {
   const out = new Float32Array(spa.worldVerticesLength)
   spa.computeWorldVertices(skel, slot, 0, spa.worldVerticesLength, out, 0, 2)
-  return { world: Array.from(out), uvs: Array.from(spa.sequence.getUVs(0)) }
+  // `spa` 是 any，`getUVs` 的结果会退化成 unknown[] —— 这里按数值数组收口
+  return { world: Array.from(out), uvs: Array.from(spa.sequence.getUVs(0) as ArrayLike<number>) }
 }
 
 const key = (u: number, v: number) => `${u.toFixed(5)}:${v.toFixed(5)}`
@@ -186,7 +190,8 @@ describe('DragonBones 导出 spine 与编辑器图像一致性', () => {
           problems.push(`slot not found: ${slotName}`)
           continue
         }
-        const spa = data.defaultSkin.getAttachment(slotIndex, att.name)
+        // defaultSkin 在运行库里是可空的（没有皮肤时）—— 这里按缺失处理
+        const spa = data.defaultSkin?.getAttachment(slotIndex, att.name)
         if (!spa) {
           problems.push(`attachment not found: ${slotName}/${att.name}`)
           continue

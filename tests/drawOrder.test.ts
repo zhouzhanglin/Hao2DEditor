@@ -117,7 +117,8 @@ describe('删除插槽时清理动画引用', () => {
       color: [],
       displayIndex: [],
       displayAttachment: [],
-      visible: []
+      visible: [],
+      subArmature: []
     })
     deleteSlot(doc, 'b')
     expect(doc.animations[0].slots).toHaveLength(0)
@@ -175,7 +176,7 @@ describe('未知 channel 不再误删显示帧', () => {
   it('slot 的 order 选择器不会落到 displayIndex 上', () => {
     const doc = docWithSlots()
     const slotTrack = doc.animations[0].slots
-    slotTrack.push({ slot: 'a', color: [], displayIndex: [], displayAttachment: [], visible: [] })
+    slotTrack.push({ slot: 'a', color: [], displayIndex: [], displayAttachment: [], visible: [], subArmature: [] })
     const track = doc.animations[0].slots.find((item) => item.slot === 'a')!
     track.displayIndex.push({ time: 0.5, value: 0, easing: 1, curve: null })
     track.displayAttachment.push('a_art')

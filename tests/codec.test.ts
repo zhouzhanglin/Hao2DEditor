@@ -100,7 +100,8 @@ function sampleDocument(): EditorDocument {
       { time: 0.5, value: 0, easing: 1, curve: null }
     ],
     displayAttachment: ['bodyMesh', ''],
-    visible: []
+    visible: [],
+    subArmature: []
   })
   animation.events.push({ time: 0.25, name: 'roar', stringParam: 's1', intParam: 7, floatParam: 1.5 })
   doc.animations.push(animation)

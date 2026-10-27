@@ -2411,6 +2411,50 @@ const DISPLAY_PREVIEW_THUMB = 64
 const DISPLAY_PREVIEW_GAP = 8
 const DISPLAY_PREVIEW_MARGIN = 8
 
+/** 页面归一化取景矩形（u 向右、v 向上，与 UV 同口径） */
+interface PageRect {
+  u0: number
+  u1: number
+  v0: number
+  v1: number
+}
+
+/** UV 包围盒 → 取景矩形；顶点太少或退化（零面积）返回 null */
+function uvBounds(uv: readonly number[]): PageRect | null {
+  if (uv.length < 8) return null
+  let u0 = 1
+  let u1 = 0
+  let v0 = 1
+  let v1 = 0
+  for (let i = 0; i + 1 < uv.length; i += 2) {
+    u0 = Math.min(u0, uv[i])
+    u1 = Math.max(u1, uv[i])
+    v0 = Math.min(v0, uv[i + 1])
+    v1 = Math.max(v1, uv[i + 1])
+  }
+  return u1 > u0 && v1 > v0 ? { u0, u1, v0, v1 } : null
+}
+
+/**
+ * 图集页里某块 sprite 的矩形 → 取景矩形。
+ *
+ * 给 **linkedmesh** 用：它自己不带 uvs，但 `regionName` 指向它实际用的那块图。
+ * 旋转存放（90°/270°）的 sprite 仍按存放矩形取景 —— 预览只为「认出是哪个」，
+ * 不必为它做转正（转正会连带 offset / orig 尺寸一起算）。
+ */
+function regionBounds(image: AuthoringImage, regionName: string | undefined): PageRect | null {
+  if (!regionName || image.width <= 1 || image.height <= 1) return null
+  const region = image.regions?.find((item) => item.name === regionName)
+  if (!region || !(region.width > 0) || !(region.height > 0)) return null
+  return {
+    u0: region.x / image.width,
+    u1: (region.x + region.width) / image.width,
+    // 图集矩形是左上原点、向下为正；uv 的 v=0 在底边
+    v0: 1 - (region.y + region.height) / image.height,
+    v1: 1 - region.y / image.height
+  }
+}
+
 /**
  * display 行的悬停浮层：**缩略图 + 描述**（原生 `title` 只能出文字）。
  *
@@ -2433,24 +2477,19 @@ function DisplayHoverCard({
   const [tick, setTick] = useState(0)
 
   /**
-   * 缩略图裁到**附件自己的 UV 矩形**（不是整张图集页）：整页缩到 64px 基本认不出是哪块，
-   * 按 UV 取景才像「这个 display 本身」。图集页可能上千像素，这里按最大边缩到 64。
+   * 缩略图裁到**附件自己的取景矩形**（不是整张图集页）：整页缩到 64px 基本认不出是哪块，
+   * 按矩形取景才像「这个 display 本身」。图集页可能上千像素，这里按最大边缩到 64。
+   *
+   * 取景矩形优先用附件自己的 UV 包围盒；**linkedmesh 按定义没有 uvs**（顶点 / UV 全取自
+   * 源网格），直接看 `uvs` 会落空、退回整页 —— 那种情况改按图集页里这块 sprite 的矩形取景
+   *（`regionName` 是导入时记下的 sprite 名，指向它自己那张图，比源网格的 UV 更准）。
    */
   const crop = useMemo(() => {
-    const uv = attachment.uvs
-    if (!image || image.width <= 1 || image.height <= 1 || uv.length < 8) return null
-    let u0 = 1
-    let u1 = 0
-    let v0 = 1
-    let v1 = 0
-    for (let i = 0; i + 1 < uv.length; i += 2) {
-      u0 = Math.min(u0, uv[i])
-      u1 = Math.max(u1, uv[i])
-      v0 = Math.min(v0, uv[i + 1])
-      v1 = Math.max(v1, uv[i + 1])
-    }
-    const cropWidth = (u1 - u0) * image.width
-    const cropHeight = (v1 - v0) * image.height
+    if (!image || image.width <= 1 || image.height <= 1) return null
+    const rect = uvBounds(attachment.uvs) ?? regionBounds(image, attachment.regionName)
+    if (!rect) return null
+    const cropWidth = (rect.u1 - rect.u0) * image.width
+    const cropHeight = (rect.v1 - rect.v0) * image.height
     if (!(cropWidth > 1) || !(cropHeight > 1)) return null
     const scale = Math.min(DISPLAY_PREVIEW_THUMB / cropWidth, DISPLAY_PREVIEW_THUMB / cropHeight)
     return {
@@ -2459,9 +2498,9 @@ function DisplayHoverCard({
       height: Math.max(8, Math.round(cropHeight * scale)),
       backgroundSize: `${image.width * scale}px ${image.height * scale}px`,
       // uv 的 v=0 在图片底边，而 CSS 背景的原点在左上角
-      backgroundPosition: `${-u0 * image.width * scale}px ${-(1 - v1) * image.height * scale}px`
+      backgroundPosition: `${-rect.u0 * image.width * scale}px ${-(1 - rect.v1) * image.height * scale}px`
     }
-  }, [image, attachment.uvs])
+  }, [image, attachment.uvs, attachment.regionName])
 
   // 捕获阶段的 scroll 能收到面板容器的滚动（不冒泡到 window 的那层也拦得住）
   useEffect(() => {

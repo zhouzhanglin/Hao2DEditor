@@ -126,7 +126,10 @@ export default function PsdImportDialog({ parsed, onConfirm, onClose }: PsdImpor
             {node.name}
           </span>
           {node.hidden ? (
-            <EyeOff size={10} className="shrink-0 text-warn/80" title={t('在 PSD 中隐藏')} />
+            // lucide 图标不接受 title：提示要挂在包一层的元素上
+            <span className="shrink-0 text-warn/80" title={t('在 PSD 中隐藏')}>
+              <EyeOff size={10} />
+            </span>
           ) : null}
           <span className="shrink-0 font-mono text-content-lo/80">
             {node.isGroup ? t('组') : node.hasPixels ? `${node.width}×${node.height}` : t('无像素')}

@@ -76,7 +76,9 @@ describe('Spine clipping 导入 / 导出', () => {
       pageSizes: { 'atlas.png': { width: 128, height: 128 } }
     })
     const json = buildSpineJson(imported.asset)
-    const attachment = json.skins![0]!.attachments!.mask!.mask as Record<string, unknown>
+    // `skins` 在 JSON 类型里是「数组 | 按皮肤名索引的对象」两种写法：导出走数组
+    const skins = Array.isArray(json.skins) ? json.skins : []
+    const attachment = skins[0]!.attachments!.mask!.mask as Record<string, unknown>
     expect(attachment.type).toBe('clipping')
     expect(attachment.end).toBe('body')
     expect(attachment.inverse).toBe(true)

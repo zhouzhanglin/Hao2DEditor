@@ -199,7 +199,8 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
     // 拿它做基准会从「上次同步的位置」跳，逐帧会跳错。
     const current = Math.round(playheadTime() * document.frameRate)
     const next = Math.max(0, Math.min(totalFrames, current + delta)) / document.frameRate
-    timeline.setTime(Number(next.toFixed(4)))
+    // 不要截到 4 位小数：1.1333333 → 1.1333 会落在该帧关键帧时间之前，采样退回上一帧
+    timeline.setTime(next)
   }
 
   const keyCurrent = (): void => {

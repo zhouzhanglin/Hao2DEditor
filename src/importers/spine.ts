@@ -695,6 +695,7 @@ export function importSpine(input: SpineImportInput): SpineImportResult {
       pageSizes: ctx.pageSizes,
       deformBase,
       absoluteCurve,
+      fps: skeletonOnly.frameRate,
       warnings
     })
   )

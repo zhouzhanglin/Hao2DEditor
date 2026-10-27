@@ -671,6 +671,22 @@ function bakeOnce(
 
       for (let f = 0; f <= frames; f++) {
         if (f > 0) state.update(1 / fps)
+        /*
+         * 把内部 `trackTime` 对齐到**精确的帧时刻**。
+         *
+         * `state.update(1 / fps)` 是逐帧累加，33 帧后得到的是 1.0999999999999999
+         * 而不是 1.1 —— 源动画里正好落在该帧的关键帧（例如 `portal` 的 flare1/flare2
+         * 在 1.1s、= 第 33 帧的 translate）就会差 1e-16 而**晚一帧**才被采样，
+         * 于是整条轨道从这一帧起都往后错一帧：第 33 帧火焰还在原位、第 34 帧才飞出去。
+         *
+         * 吸附到帧网格既消掉累加误差，又保留循环回卷后的时间（回卷值会被吸到 0）。
+         */
+        for (const track of state.tracks) {
+          if (!track) continue
+          const trackDuration = track.animation.duration
+          const snapped = Math.round(track.trackTime * fps) / fps
+          track.trackTime = trackDuration > 0 ? Math.min(trackDuration, snapped) : snapped
+        }
         state.apply(skeleton)
         // 官方在这里应用 IK / 变换 / 路径 / 物理约束，并把结果写进 appliedPose
         skeleton.updateWorldTransform(Physics.update)

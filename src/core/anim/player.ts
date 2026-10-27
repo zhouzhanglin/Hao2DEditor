@@ -178,7 +178,11 @@ export class AnimationPlayer {
     if (this.loopFlag) {
       // 正好落在时长上时停在末尾，不取模成 0：否则「时间轴在末尾、画面却是开头」，
       // 此时拖动骨骼写下的关键帧会落在画面之外，看起来像「拖不动」
-      next = Math.abs(seconds - dur) < 1e-6 ? dur : ((next % dur) + dur) % dur
+      if (Math.abs(seconds - dur) < 1e-6) next = dur
+      // 已经在 [0, dur) 内就**原样保留**：`(x % dur + dur) % dur` 会丢掉 1e-16 级精度，
+      // 让「刚好停在第 N 帧」的时间落到关键帧时间之前 —— stepped 通道（portal 的 flare）
+      // 会因此退回上一帧的值，看起来就是「这一帧位置不对」
+      else if (next < 0 || next >= dur) next = ((next % dur) + dur) % dur
     } else next = Math.max(0, Math.min(dur, next))
     this.timeValue = next
     this.lastTime = next

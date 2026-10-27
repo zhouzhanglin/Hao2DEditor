@@ -655,7 +655,8 @@ export default function App() {
           // 用播放头时钟取当前位置：主 store 的 time 在播放期间是低频的，
           // 拿它会从「上次同步的位置」出发，逐帧会跳错
           const next = Math.max(0, Math.min(duration, playheadTime() + step))
-          state.setTime(Number(next.toFixed(4)))
+          // 不要截到 4 位小数：1.1333333 → 1.1333 会落在该帧关键帧时间之前，采样退回上一帧
+          state.setTime(next)
           return
         }
         default:

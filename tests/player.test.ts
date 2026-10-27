@@ -365,6 +365,18 @@ describe('FFD 采样', () => {
   })
 })
 
+describe('时间精度', () => {
+  it('设置到帧时刻不丢精度（否则 stepped 关键帧会晚一帧）', () => {
+    const player = createPlayer([{ ...emptyAnimData('a'), duration: 3.6 }])
+    player.play('a', true)
+    const t = 34 / 30
+    player.time = t
+    // 必须是位级相等：循环取模 (x % dur + dur) % dur 会让它小 4e-16，
+    // 采样时就会退回上一个关键帧，第 34 帧的 flare 位置因此不生效
+    expect(player.time).toBe(t)
+  })
+})
+
 function emptyAnimData(name: string): AnimData {
   return {
     name,

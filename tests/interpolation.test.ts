@@ -81,6 +81,31 @@ describe('sampleNumber', () => {
   })
 })
 
+describe('关键帧边界的浮点回差', () => {
+  /*
+   * 实测 bug（spineboy-pro 的 portal）：flare1/2/7 的烘焙关键帧正好落在 34/30，
+   * 前一段是 stepped（火焰「甩出去」）。播放器的 seek 取模 / 时间轴 4 位小数取整
+   * 会让采样时间比关键帧时间小 1e-16~1e-5，严格 `<=` 就退回上一帧 →
+   * 第 34 帧火焰还停在原位，下一帧才飞出去。
+   */
+  const frame = 34
+  const fps = 30
+  const t = frame / fps
+  const keys = [key(0, 0), key(t - 1 / fps, 0, Easing.Stepped), key(t, 100)]
+
+  it('停在帧时刻时该帧的关键帧当帧生效', () => {
+    expect(sampleNumber(keys, t)).toBe(100)
+  })
+
+  it('采样时间比关键帧小 1e-16（取模 / 累加误差）仍当帧生效', () => {
+    expect(sampleNumber(keys, t - 4.4e-16)).toBe(100)
+  })
+
+  it('确实在区间内（差 1e-3 秒）仍旧保持前一帧的值', () => {
+    expect(sampleNumber(keys, t - 1e-3)).toBe(0)
+  })
+})
+
 describe('sampleInt', () => {
   it('取最后一个 time <= 当前时间的关键帧，并返回其下标', () => {
     const keys = [

@@ -41,6 +41,8 @@ export interface SpineAnimContext {
    * `false` = 归一化 0..1 控制点（≤ 4.1），`null` = 版本未知（回退数值启发式）。
    */
   absoluteCurve: boolean | null
+  /** 工程帧率：附件切换要按帧对齐（骨骼轨道是 30fps 烘焙量化的，见附件轨道的处理） */
+  fps: number
   warnings: string[]
 }
 
@@ -176,9 +178,10 @@ export function importSpineAnimations(
     for (const key of timeline.attachment ?? []) {
       const attachment = typeof key.name === 'string' ? key.name : ''
       const index = attachment ? (attIndex?.get(attachment) ?? -1) : -1
-      track.displayIndex.push({ time: timeOf(key), value: index, easing: Easing.Stepped, curve: null })
+      const time = attachmentKeyTime(timeOf(key), ctx.fps)
+      track.displayIndex.push({ time, value: index, easing: Easing.Stepped, curve: null })
       track.displayAttachment.push(attachment)
-      duration = Math.max(duration, timeOf(key))
+      duration = Math.max(duration, time)
     }
 
     if (track.color.length > 0 || track.displayIndex.length > 0) slots.push(track)
@@ -500,4 +503,24 @@ function numberOr(value: unknown, fallback: number): number {
  */
 function timeOf(key: { time?: number }): number {
   return numberOr(key.time, 0)
+}
+
+/**
+ * 附件（`displayIndex`）关键帧的时间换算：**float32 落位 + 对齐到帧**。
+ *
+ * ① float32：官方运行库把关键帧时间存进 `Float32Array`，`"time": 1.1` 实际是
+ *    `1.1000000238`；判定是 `time < frames[0]`，所以「正好停在第 33 帧」
+ *    （`33/30 = 1.1`，双精度）时官方认为这个键还没到。
+ * ② 对齐到帧：骨骼轨道是 30fps 烘焙的 —— 关键帧只在「帧时间 ≥ 关键帧时间」的那一帧生效。
+ *    附件切换必须落在**同一帧**，否则会在一帧之内先行切换：连续播放、或关掉
+ *    「关键帧吸附到帧」慢慢拖时间轴时，能明显看到 flare 贴图先在旧位置闪一下，
+ *    下一帧才跟骨骼一起飞出去（portal 第 33→34 帧）。
+ *
+ * 容差 1e-9 帧：只吃掉 `0.2 * 30 = 6.000000000000001` 这类倍精度噪声，
+ * **必须远小于** float32 造成的帧内偏移（最小约 1e-7 帧），否则会把
+ * 本该落到下一帧的切换又拉回本帧。
+ */
+function attachmentKeyTime(time: number, fps: number): number {
+  if (!(fps > 0)) return Math.fround(time)
+  return Math.ceil(Math.fround(time) * fps - 1e-9) / fps
 }

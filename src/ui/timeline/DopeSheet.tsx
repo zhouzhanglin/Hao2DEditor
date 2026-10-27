@@ -552,7 +552,12 @@ export default function DopeSheet(props: DopeSheetProps) {
     const { axis: total, frameRate: fps, snapToFrame: doSnap } = propsRef.current
     const clamped = Math.max(0, Math.min(total, value))
     if (!doSnap || fps <= 0) return Number(clamped.toFixed(4))
-    return Number((Math.round(clamped * fps) / fps).toFixed(4))
+    /*
+     * 对齐到帧后**不能再截到 4 位小数**：1.1333333 会被截成 1.1333，
+     * 比该帧的关键帧时间（34/30）小 3.3e-5，采样会退回上一帧 —— stepped 通道
+     * （portal 的 flare 甩出）就会在该帧显示成未飞出去的位置。
+     */
+    return Math.round(clamped * fps) / fps
   }
 
   /** 擦洗时间不能超过动画时长（超过会让播放器循环回卷，画面会跳） */

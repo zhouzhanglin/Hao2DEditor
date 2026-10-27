@@ -1125,6 +1125,28 @@ describe('Spine 导入', () => {
     expect(warnings.filter((w) => w.includes('IK'))).toHaveLength(0)
   })
 
+  it('附件关键帧对齐到帧（连续播放不会在一帧之内提前切换）', () => {
+    /*
+     * 官方运行库把关键帧时间存成 float32：`"time": 1.1` → `1.1000000238`，
+     * 判定用 `time < frames[0]`，所以「正好停在第 33 帧」（33/30 = 1.1）时该键还没到。
+     * 而骨骼轨道是 30fps 烘焙的（关键帧只在「帧时间 ≥ 关键帧时间」的那一帧生效），
+     * 附件切换必须落在同一帧；否则连续播放 / 关掉吸附慢慢拖时间轴时，
+     * 会看到 flare 贴图先在旧位置闪一下（portal 第 33→34 帧）。
+     */
+    const json = {
+      skeleton: { spine: '4.3.0', fps: 30 },
+      bones: [{ name: 'root' }],
+      slots: [{ name: 'flare', bone: 'root' }],
+      skins: [{ name: 'default', attachments: { flare: { flare: { type: 'region', width: 10, height: 10 } } } }],
+      animations: { a: { slots: { flare: { attachment: [{ time: 0 }, { time: 1.1, name: 'flare' }] } } } }
+    }
+    const { asset } = importSpine({ json: json as never, regions: [], pageSizes: {} })
+    const track = asset.animations[0].slots[0]
+    // 1.1 → 34/30（而不是恰好 1.1，正好落在两个采样帧之间）
+    expect(track.displayIndex[1].time).toBeCloseTo(34 / 30, 10)
+    expect(track.displayIndex[1].time).toBeGreaterThan(1.1)
+  })
+
   it('transform 约束的 4.x 字段名（offsetRotation / offsetX…）能被读出', () => {
     const json = {
       skeleton: { spine: '4.3.0' },

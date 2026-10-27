@@ -15,14 +15,29 @@ export function firstIndexAtOrAfter<T extends { time: number }>(keys: readonly T
   return lo
 }
 
-/** 最后一个 time <= target 的下标；全部大于 target 时返回 -1 */
+/**
+ * 时间比较容差（秒）。
+ *
+ * 播放时间来自「累加 dt」或「帧号 ÷ fps」两条路，二进制浮点必然带 1e-16 级误差：
+ * `seek` 里的 `(x % dur + dur) % dur`、逐帧 `time += 1/30`、以及 4 位小数取整，
+ * 都会让「正好停在第 N 帧」的采样时间**比关键帧时间小一丁点**。
+ * 严格 `<=` 时就会退回**上一个**关键帧的取值 —— 对 stepped 通道（例如 portal 的
+ * flare 甩出去）是整块位移不对：第 34 帧火焰还挂在原位，下一帧突然飞出去。
+ * 容差取 1e-9 秒：既大于倍精度的累加/取模误差（1e-16~1e-12），
+ * 又**小于 float32 的时间量化步长**（t≈1~4s 时约 1e-7）——
+ * 否则会把「Spine 用 float32 存关键帧时间」造成的、本该在下一帧才生效的切换提前吃掉
+ * （portal 第 33 帧 flare 贴图早一帧出现）。
+ */
+export const TIME_EPSILON = 1e-10
+
+/** 最后一个 time <= target 的下标（允许 TIME_EPSILON 的浮点回差）；全部大于 target 时返回 -1 */
 export function lastIndexAtOrBefore<T extends { time: number }>(keys: readonly T[], target: number): number {
   let lo = 0
   let hi = keys.length - 1
   let result = -1
   while (lo <= hi) {
     const mid = (lo + hi) >> 1
-    if (keys[mid].time <= target) {
+    if (keys[mid].time <= target + TIME_EPSILON) {
       result = mid
       lo = mid + 1
     } else {

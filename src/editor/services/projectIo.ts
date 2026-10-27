@@ -591,7 +591,7 @@ export async function importImagesFlow(paths?: readonly string[]): Promise<IoRes
 
   const existing = useProjectStore.getState().document.images
   const { images, warnings } = registerLooseImages(inputs, existing)
-  useProjectStore.getState().update('导入图片', (draft) => {
+  useProjectStore.getState().update(t('导入图片'), (draft) => {
     draft.images = images.map((image) => ({
       name: image.name,
       path: image.path,

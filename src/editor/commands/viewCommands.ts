@@ -8,6 +8,7 @@ import { changed, defineAction, unchanged } from './registry'
 import { need, needNum, optNum, optText } from './args'
 import type { FocusTarget } from '../focusNode'
 import type { StageImage } from '@core/model/authoring'
+import { t } from '@i18n'
 
 /**
  * 补齐「纯相机操作」与「舞台参考图」这两组只影响视口、不进文档数据的命令。
@@ -66,22 +67,30 @@ export function registerViewCommands(): void {
       const rawKind = need(args, 'kind')
       const name = need(args, 'name')
       if (rawKind !== 'bone' && rawKind !== 'slot' && rawKind !== 'display' && rawKind !== 'constraint') {
-        throw new Error(`kind 只能是 bone / slot / display / constraint，收到 ${rawKind}`)
+        throw new Error(
+          t('kind 只能是 bone / slot / display / constraint，收到 {0}', rawKind)
+        )
       }
       const kind = rawKind as 'bone' | 'slot' | 'display' | 'constraint'
       let target: FocusTarget
       if (kind === 'display') {
         const slot = optText(args, 'slot')
-        if (!slot) throw new Error('kind = display 时需要同时给 slot（附件所在的插槽名）')
+        if (!slot) throw new Error(t('kind = display 时需要同时给 slot（附件所在的插槽名）'))
         target = { kind: 'display', slot, name }
       } else {
         target = { kind, name }
       }
-      if (!getActiveScene()) throw new Error('场景未就绪：视口还没挂载好，稍后再试')
+      if (!getActiveScene()) throw new Error(t('场景未就绪：视口还没挂载好，稍后再试'))
       if (!focusNode(useProjectStore.getState().document, target)) {
-        throw new Error(`聚焦失败：找不到 ${kind}「${name}」（名字可能不对，或该节点没有可框取的尺寸）`)
+        throw new Error(
+          t('聚焦失败：找不到 {0}「{1}」（名字可能不对，或该节点没有可框取的尺寸）', [kind, name])
+        )
       }
-      return { changed: false, data: { kind, name }, message: `视口已聚焦到 ${kind}「${name}」` }
+      return {
+        changed: false,
+        data: { kind, name },
+        message: t('视口已聚焦到 {0}「{1}」', [kind, name])
+      }
     }
   )
 
@@ -99,14 +108,17 @@ export function registerViewCommands(): void {
     },
     async (args) => {
       const scene = getActiveScene()
-      if (!scene) throw new Error('场景未就绪：视口还没挂载好，稍后再试')
+      if (!scene) throw new Error(t('场景未就绪：视口还没挂载好，稍后再试'))
       scene.viewport.pan(needNum(args, 'dx'), needNum(args, 'dy'))
       scene.viewport.render()
       const offset = scene.viewport.offset
       return {
         changed: false,
         data: { offset },
-        message: `视口已平移（dx=${needNum(args, 'dx')}px, dy=${needNum(args, 'dy')}px）`
+        message: t('视口已平移（dx={0}px, dy={1}px）', [
+          needNum(args, 'dx'),
+          needNum(args, 'dy')
+        ])
       }
     }
   )
@@ -121,13 +133,13 @@ export function registerViewCommands(): void {
     },
     async (args) => {
       const zoom = needNum(args, 'zoom')
-      if (!(zoom > 0)) throw new Error(`zoom 必须大于 0，收到 ${zoom}`)
+      if (!(zoom > 0)) throw new Error(t('zoom 必须大于 0，收到 {0}', zoom))
       const scene = getActiveScene()
-      if (!scene) throw new Error('场景未就绪：视口还没挂载好，稍后再试')
+      if (!scene) throw new Error(t('场景未就绪：视口还没挂载好，稍后再试'))
       const vp = scene.viewport
       vp.zoomAt(zoom / vp.zoom, vp.width * 0.5, vp.height * 0.5)
       vp.render()
-      return { changed: false, data: { zoom: vp.zoom }, message: `视口缩放已设为 ${vp.zoom}` }
+      return { changed: false, data: { zoom: vp.zoom }, message: t('视口缩放已设为 {0}', vp.zoom) }
     }
   )
 
@@ -146,7 +158,7 @@ export function registerViewCommands(): void {
       const x = needNum(args, 'x')
       const y = needNum(args, 'y')
       const scene = getActiveScene()
-      if (!scene) throw new Error('场景未就绪：视口还没挂载好，稍后再试')
+      if (!scene) throw new Error(t('场景未就绪：视口还没挂载好，稍后再试'))
       const vp = scene.viewport
       const screen = vp.worldToScreen(x, y)
       vp.pan(vp.width * 0.5 - screen.x, vp.height * 0.5 - screen.y)
@@ -154,7 +166,7 @@ export function registerViewCommands(): void {
       return {
         changed: false,
         data: { x, y, zoom: vp.zoom },
-        message: `视口已居中到世界坐标 (${x}, ${y})`
+        message: t('视口已居中到世界坐标 ({0}, {1})', [x, y])
       }
     }
   )
@@ -181,16 +193,18 @@ export function registerViewCommands(): void {
       const imagePath = need(args, 'imagePath')
       const ext = imagePath.slice(imagePath.lastIndexOf('.') + 1).toLowerCase()
       if (!STAGE_EXT.includes(ext)) {
-        throw new Error(`参考图后缀不在支持范围（${STAGE_EXT.join(' / ')}），收到 .${ext}`)
+        throw new Error(
+          t('参考图后缀不在支持范围（{0}），收到 .{1}', [STAGE_EXT.join(' / '), ext])
+        )
       }
       const store = useProjectStore.getState()
       const path = store.projectPath
       if (!path) {
-        throw new Error('请先保存工程：参考图要落到工程目录的 stage/ 下（先 createProject 或 saveProject）')
+        throw new Error(t('请先保存工程：参考图要落到工程目录的 stage/ 下（先 createProject 或 saveProject）'))
       }
       const platform = getPlatform()
       const bytes = await platform.readBinary(imagePath)
-      if (!bytes.length) throw new Error(`读不到图片文件：${imagePath}`)
+      if (!bytes.length) throw new Error(t('读不到图片文件：{0}', imagePath))
       const infos = await platform.imageInfo([imagePath])
       const size = infos[0] ?? { width: 0, height: 0 }
 
@@ -217,7 +231,12 @@ export function registerViewCommands(): void {
       const next = [
         '底图已铺好（默认 1:1、图片中心=世界原点）：接下来逐张挂部件——addSlot + addDisplay 后用 getDisplayWorldBounds 读世界包围盒与底图量出的目标框对比、setDisplayTransform 修到重合，对齐一个再挂下一个；captureViewport 截图做视觉复核；全部对齐后 removeStage 删底图'
       ]
-      return changed({ ...init, next }, previous ? `已更换舞台参考图「${fileName}」` : `已设置舞台参考图「${fileName}」`)
+      return changed(
+        { ...init, next },
+        previous
+          ? t('已更换舞台参考图「{0}」', fileName)
+          : t('已设置舞台参考图「{0}」', fileName)
+      )
     }
   )
 
@@ -237,16 +256,18 @@ export function registerViewCommands(): void {
     },
     async (args) => {
       if (!useProjectStore.getState().document.editorMeta.stage) {
-        throw new Error('还没有舞台参考图：先调 setStage，或让用户用「舞台」弹窗选一张')
+        throw new Error(t('还没有舞台参考图：先调 setStage，或让用户用「舞台」弹窗选一张'))
       }
       const x = optNum(args, 'x')
       const y = optNum(args, 'y')
       const width = optNum(args, 'width')
       const height = optNum(args, 'height')
       const opacity = optNum(args, 'opacity')
-      if (width !== undefined && !(width > 0)) throw new Error(`width 必须大于 0，收到 ${width}`)
-      if (height !== undefined && !(height > 0)) throw new Error(`height 必须大于 0，收到 ${height}`)
-      useProjectStore.getState().update('调整舞台参考图', (draft) => {
+      if (width !== undefined && !(width > 0)) throw new Error(t('width 必须大于 0，收到 {0}', width))
+      if (height !== undefined && !(height > 0)) {
+        throw new Error(t('height 必须大于 0，收到 {0}', height))
+      }
+      useProjectStore.getState().update(t('调整舞台参考图'), (draft) => {
         const stage = draft.editorMeta.stage
         if (!stage) return
         if (x !== undefined) stage.x = x
@@ -256,8 +277,8 @@ export function registerViewCommands(): void {
         if (opacity !== undefined) stage.opacity = clampAlpha(opacity)
       })
       const stage = useProjectStore.getState().document.editorMeta.stage
-      if (!stage) return unchanged('舞台参考图在调整中消失了')
-      return changed(stage, '已调整舞台参考图')
+      if (!stage) return unchanged(t('舞台参考图在调整中消失了'))
+      return changed(stage, t('已调整舞台参考图'))
     }
   )
 
@@ -272,14 +293,14 @@ export function registerViewCommands(): void {
     async () => {
       const store = useProjectStore.getState()
       const stage = store.document.editorMeta.stage
-      if (!stage) return unchanged('本来就没有舞台参考图')
+      if (!stage) return unchanged(t('本来就没有舞台参考图'))
       if (store.projectPath) {
         await getPlatform().deleteFile(stageFilePath(dirName(store.projectPath), stage.file))
       }
-      useProjectStore.getState().update('删除舞台参考图', (draft) => {
+      useProjectStore.getState().update(t('删除舞台参考图'), (draft) => {
         draft.editorMeta.stage = null
       })
-      return changed({ removed: stage.file }, `已删除舞台参考图「${stage.file}」`)
+      return changed({ removed: stage.file }, t('已删除舞台参考图「{0}」', stage.file))
     }
   )
 }

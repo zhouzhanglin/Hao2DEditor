@@ -25,6 +25,7 @@ import { ASSET_DIR } from '../services/projectAssets'
 import { splitAtlasImage } from '../services/atlasSplit'
 import { useToolStore } from '../store/toolStore'
 import { lastKeyTime } from '@core/model/authoring'
+import { t } from '@i18n'
 
 /**
  * 把编辑器已有的成熟操作再包一层命令：层级移动、重命名、绘制顺序、图片池、选择。
@@ -56,7 +57,7 @@ function decodeImageData(data: string): { bytes: Uint8Array; ext?: string } {
   try {
     binary = atob(raw)
   } catch {
-    throw new Error('data 不是合法 base64')
+    throw new Error(t('data 不是合法 base64'))
   }
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
@@ -112,7 +113,9 @@ export function registerBindAllCommands(): void {
       const target = optText(args, 'target') ?? ''
       const rawZone = optText(args, 'zone') ?? 'inside'
       if (rawZone !== 'inside' && rawZone !== 'above' && rawZone !== 'below') {
-        throw new Error(`参数 zone 只能是 inside / above / below，收到 ${rawZone}`)
+        throw new Error(
+          t('参数 zone 只能是 inside / above / below，收到 {0}', rawZone)
+        )
       }
       const zone: DropZone = rawZone
       const keptWorldPose = getActiveScene() !== null
@@ -150,11 +153,11 @@ export function registerBindAllCommands(): void {
       if (anchorName) {
         const side = rawSide ?? 'after'
         if (side !== 'before' && side !== 'after') {
-          throw new Error(`参数 side 只能是 before / after，收到 ${side}`)
+          throw new Error(t('参数 side 只能是 before / after，收到 {0}', side))
         }
         anchor = { name: anchorName, side }
       } else if (rawSide) {
-        throw new Error('给了 side 就要一并给 anchorSlot（排序锚点的插槽名）')
+        throw new Error(t('给了 side 就要一并给 anchorSlot（排序锚点的插槽名）'))
       }
       const result = moveSlot(draft, slot, bone, anchor, { worldMatrixOf: worldMatrixOfBone })
       if (!result.ok) throw new Error(result.message)
@@ -193,7 +196,7 @@ export function registerBindAllCommands(): void {
       if (anchorName) {
         const side = rawSide ?? 'after'
         if (side !== 'before' && side !== 'after') {
-          throw new Error(`参数 side 只能是 before / after，收到 ${side}`)
+          throw new Error(t('参数 side 只能是 before / after，收到 {0}', side))
         }
         anchor = { name: anchorName, side }
       }
@@ -231,8 +234,8 @@ export function registerBindAllCommands(): void {
         name: optText(args, 'name'),
         skin: optText(args, 'skin') ?? useSelectionStore.getState().skin
       })
-      if (!result) throw new Error(`插槽「${slot}」不存在或骨架名无效`)
-      return changed(result, `已把骨架「${armature}」嵌到插槽「${slot}」`)
+      if (!result) throw new Error(t('插槽「{0}」不存在或骨架名无效', slot))
+      return changed(result, t('已把骨架「{0}」嵌到插槽「{1}」', [armature, slot]))
     }
   )
 
@@ -252,22 +255,29 @@ export function registerBindAllCommands(): void {
     (draft, args) => {
       const order = optTextList(args, 'order')
       if (!order || order.length === 0) {
-        throw new Error('缺少参数 order（插槽名数组，第 0 个最先画；用 listSlots 可以拿到当前顺序）')
+        throw new Error(t('缺少参数 order（插槽名数组，第 0 个最先画；用 listSlots 可以拿到当前顺序）'))
       }
       const existing = draft.slots.map((slot) => slot.name)
       const unique = new Set(order)
-      if (unique.size !== order.length) throw new Error('order 里有重复的插槽名')
+      if (unique.size !== order.length) throw new Error(t('order 里有重复的插槽名'))
       const unknown = order.filter((name) => !existing.includes(name))
       if (unknown.length > 0) {
-        throw new Error(`order 里有不存在的插槽：${unknown.join('、')}（用 listSlots 查现有插槽名）`)
+        throw new Error(
+          t('order 里有不存在的插槽：{0}（用 listSlots 查现有插槽名）', unknown.join('、'))
+        )
       }
       const missing = existing.filter((name) => !unique.has(name))
       if (missing.length > 0) {
-        throw new Error(`order 少了 ${missing.length} 个插槽：${missing.join('、')}（必须给出全部插槽名）`)
+        throw new Error(
+          t('order 少了 {0} 个插槽：{1}（必须给出全部插槽名）', [
+            missing.length,
+            missing.join('、')
+          ])
+        )
       }
       // applySlotOrder 约定 names[0] = 最上层；命令参数反过来是「先画的在前」，所以倒序传入
       applySlotOrder(draft, [...order].reverse())
-      return changed({ order }, `已重排 ${order.length} 个插槽的绘制顺序`)
+      return changed({ order }, t('已重排 {0} 个插槽的绘制顺序', order.length))
     }
   )
 
@@ -293,15 +303,23 @@ export function registerBindAllCommands(): void {
       const nextName = need(args, 'nextName')
       const slot = optText(args, 'slot')
       if (kind === 'attachment' && !slot) {
-        throw new Error('附件改名要带上 slot（附件所在插槽名；用 listDisplays 查）')
+        throw new Error(t('附件改名要带上 slot（附件所在插槽名；用 listDisplays 查）'))
       }
       const target: RenameTarget = slot ? { kind, slot } : { kind }
       const reason = checkRename(draft, target, name, nextName)
       if (reason) throw new Error(reason)
       if (!applyRename(draft, target, name, nextName)) {
-        throw new Error(`改不了：找不到${kind}「${name}」（用 listBones / listSlots / listDisplays / listConstraints 核对）`)
+        throw new Error(
+          t('改不了：找不到{0}「{1}」（用 listBones / listSlots / listDisplays / listConstraints 核对）', [
+            kind,
+            name
+          ])
+        )
       }
-      return changed({ kind, from: name, to: nextName }, `已把「${name}」改名为「${nextName}」`)
+      return changed(
+        { kind, from: name, to: nextName },
+        t('已把「{0}」改名为「{1}」', [name, nextName])
+      )
     }
   )
 
@@ -323,7 +341,7 @@ export function registerBindAllCommands(): void {
       const image = need(args, 'image')
       const force = optBool(args, 'force') ?? false
       if (!draft.images.some((item) => item.name === image)) {
-        throw new Error(`图片不存在：${image}（用 listImages 查图片池）`)
+        throw new Error(t('图片不存在：{0}（用 listImages 查图片池）', image))
       }
       const references = countImageReferences(draft, image)
       if (references > 0 && !force) {
@@ -332,7 +350,13 @@ export function registerBindAllCommands(): void {
         )
       }
       deleteImage(draft, image)
-      return changed({ image, references }, `已删除图片「${image}」${references > 0 ? `（清空了 ${references} 处引用）` : ''}`)
+      return changed(
+        { image, references },
+        t('已删除图片「{0}」{1}', [
+          image,
+          references > 0 ? t('（清空了 {0} 处引用）', references) : ''
+        ])
+      )
     }
   )
 
@@ -356,9 +380,12 @@ export function registerBindAllCommands(): void {
       const width = needNum(args, 'width')
       const height = needNum(args, 'height')
       if (!replaceImage(draft, image, { path, width, height })) {
-        throw new Error(`图片不存在：${image}（用 listImages 查图片池）`)
+        throw new Error(t('图片不存在：{0}（用 listImages 查图片池）', image))
       }
-      return changed({ image, path, width, height }, `已替换图片「${image}」的来源与尺寸`)
+      return changed(
+        { image, path, width, height },
+        t('已替换图片「{0}」的来源与尺寸', image)
+      )
     }
   )
 
@@ -417,7 +444,7 @@ export function registerBindAllCommands(): void {
       const next = needOneOf(args, 'mode', ['pose', 'animate'] as const)
       const modeStore = useModeStore.getState()
       if (next === modeStore.mode) {
-        return unchanged(`已在 ${next} 状态`)
+        return unchanged(t('已在 {0} 状态', next))
       }
       const timeline = useTimelineStore.getState()
       if (next === 'animate') {
@@ -456,15 +483,18 @@ export function registerBindAllCommands(): void {
     },
     (args) => {
       if (useModeStore.getState().mode !== 'animate') {
-        throw new Error('当前不在 Animate 状态：请先调用 setMode 切到 animate 再做动画编辑')
+        throw new Error(t('当前不在 Animate 状态：请先调用 setMode 切到 animate 再做动画编辑'))
       }
       const name = need(args, 'name')
       const document = useProjectStore.getState().document
       if (!document.animations.some((a) => a.name === name)) {
-        throw new Error(`没有这个动画：${name}（用 listAnimations 查全部动画名）`)
+        throw new Error(t('没有这个动画：{0}（用 listAnimations 查全部动画名）', name))
       }
       useTimelineStore.getState().setAnimation(name)
-      return changed({ animation: useTimelineStore.getState().currentAnimation }, `已切换到动画「${name}」`)
+      return changed(
+        { animation: useTimelineStore.getState().currentAnimation },
+        t('已切换到动画「{0}」', name)
+      )
     }
   )
 
@@ -492,7 +522,9 @@ export function registerBindAllCommands(): void {
       return {
         changed: false,
         data: { overlay: { ...overlay } },
-        message: `「${key === 'bones' ? '骨骼' : '约束'}」叠加层已${overlay[key] ? '显示' : '隐藏'}`
+        message: overlay[key]
+          ? t('「{0}」叠加层已显示', key === 'bones' ? t('骨骼') : t('约束'))
+          : t('「{0}」叠加层已隐藏', key === 'bones' ? t('骨骼') : t('约束'))
       }
     }
   )
@@ -508,9 +540,9 @@ export function registerBindAllCommands(): void {
     },
     () => {
       const scene = getActiveScene()
-      if (!scene) throw new Error('视口还没就绪：等编辑器窗口画完一帧再试')
+      if (!scene) throw new Error(t('视口还没就绪：等编辑器窗口画完一帧再试'))
       scene.fit()
-      return { changed: false, message: '已适配视野' }
+      return { changed: false, message: t('已适配视野') }
     }
   )
 
@@ -532,7 +564,11 @@ export function registerBindAllCommands(): void {
       const next = optBool(args, 'enabled') ?? !timeline.onionSkin
       if (next !== timeline.onionSkin) timeline.toggleOnionSkin()
       const now = useTimelineStore.getState().onionSkin
-      return { changed: false, data: { onionSkin: now }, message: `洋葱皮已${now ? '开启' : '关闭'}` }
+      return {
+        changed: false,
+        data: { onionSkin: now },
+        message: now ? t('洋葱皮已开启') : t('洋葱皮已关闭')
+      }
     }
   )
 
@@ -552,7 +588,11 @@ export function registerBindAllCommands(): void {
       const timeline = useTimelineStore.getState()
       const next = optBool(args, 'enabled') ?? !timeline.smartFilter
       timeline.setSmartFilter(next)
-      return { changed: false, data: { smartFilter: next }, message: `智能过滤已${next ? '开启' : '关闭'}` }
+      return {
+        changed: false,
+        data: { smartFilter: next },
+        message: next ? t('智能过滤已开启') : t('智能过滤已关闭')
+      }
     }
   )
 
@@ -570,10 +610,10 @@ export function registerBindAllCommands(): void {
     },
     (args) => {
       const zoom = needNum(args, 'zoom')
-      if (!Number.isFinite(zoom) || zoom <= 0) throw new Error('zoom 必须是正数')
+      if (!Number.isFinite(zoom) || zoom <= 0) throw new Error(t('zoom 必须是正数'))
       useTimelineStore.getState().setZoom(zoom)
       const now = useTimelineStore.getState().zoom
-      return { changed: false, data: { zoom: now }, message: `时间轴缩放已设为 ${now}×` }
+      return { changed: false, data: { zoom: now }, message: t('时间轴缩放已设为 {0}×', now) }
     }
   )
 
@@ -593,10 +633,12 @@ export function registerBindAllCommands(): void {
       const frames = Math.max(1, Math.round(needNum(args, 'frames')))
       const name = optText(args, 'animation') || draft.editorMeta.activeAnimation
       if (!name) {
-        throw new Error('没有指定动画：传 animation 参数，或先 setMode 切到 animate（会自动选中一个动画）')
+        throw new Error(
+          t('没有指定动画：传 animation 参数，或先 setMode 切到 animate（会自动选中一个动画）')
+        )
       }
       const target = draft.animations.find((item) => item.name === name)
-      if (!target) throw new Error(`没有这个动画：${name}（用 listAnimations 查全部动画名）`)
+      if (!target) throw new Error(t('没有这个动画：{0}（用 listAnimations 查全部动画名）', name))
       const minFrames = Math.ceil(lastKeyTime(target) * draft.frameRate - 1e-6)
       const finalFrames = Math.max(frames, minFrames)
       target.duration = finalFrames / draft.frameRate
@@ -624,9 +666,11 @@ export function registerBindAllCommands(): void {
     () => {
       const count = copyNodes()
       if (count === 0) {
-        throw new Error('没有可复制的内容：先用 setSelection 选中骨骼（kind=bone）或插槽（kind=slot）')
+        throw new Error(
+          t('没有可复制的内容：先用 setSelection 选中骨骼（kind=bone）或插槽（kind=slot）')
+        )
       }
-      return { changed: false, data: { count }, message: `已复制 ${count} 个节点` }
+      return { changed: false, data: { count }, message: t('已复制 {0} 个节点', count) }
     }
   )
 
@@ -642,9 +686,11 @@ export function registerBindAllCommands(): void {
     () => {
       const count = pasteNodes()
       if (count === 0) {
-        throw new Error('粘贴失败：剪贴板为空，或没有合适的落点。先 copyNodes，再用 setSelection 选中目标骨骼')
+        throw new Error(
+          t('粘贴失败：剪贴板为空，或没有合适的落点。先 copyNodes，再用 setSelection 选中目标骨骼')
+        )
       }
-      return changed({ count }, `已粘贴 ${count} 个节点`)
+      return changed({ count }, t('已粘贴 {0} 个节点', count))
     }
   )
 
@@ -660,9 +706,11 @@ export function registerBindAllCommands(): void {
     () => {
       const count = duplicateSelection()
       if (count === 0) {
-        throw new Error('没有可复制的选择：先用 setSelection 选中骨骼或插槽（关键帧的复制请用 copyKeyframes）')
+        throw new Error(
+          t('没有可复制的选择：先用 setSelection 选中骨骼或插槽（关键帧的复制请用 copyKeyframes）')
+        )
       }
-      return changed({ count }, `已复制并粘贴 ${count} 个节点`)
+      return changed({ count }, t('已复制并粘贴 {0} 个节点', count))
     }
   )
 
@@ -679,9 +727,11 @@ export function registerBindAllCommands(): void {
     () => {
       const count = copyKeyframes()
       if (count === 0) {
-        throw new Error('没有选中的关键帧：这一步需要在时间轴上手动选中（或直接改用 keyBoneFrame / moveKeyframe 逐个编辑）')
+        throw new Error(
+          t('没有选中的关键帧：这一步需要在时间轴上手动选中（或直接改用 keyBoneFrame / moveKeyframe 逐个编辑）')
+        )
       }
-      return { changed: false, data: { count }, message: `已复制 ${count} 个关键帧` }
+      return { changed: false, data: { count }, message: t('已复制 {0} 个关键帧', count) }
     }
   )
 
@@ -699,9 +749,9 @@ export function registerBindAllCommands(): void {
       const time = optNum(args, 'time')
       const count = pasteKeyframes(time)
       if (count === 0) {
-        throw new Error('粘贴失败：剪贴板里没有关键帧（先 copyKeyframes），或目标动画不存在')
+        throw new Error(t('粘贴失败：剪贴板里没有关键帧（先 copyKeyframes），或目标动画不存在'))
       }
-      return changed({ count, time: time ?? null }, `已粘贴 ${count} 个关键帧`)
+      return changed({ count, time: time ?? null }, t('已粘贴 {0} 个关键帧', count))
     }
   )
 
@@ -725,24 +775,30 @@ export function registerBindAllCommands(): void {
       const attachmentName = need(args, 'attachment')
       const divisions = Math.max(1, Math.min(24, Math.round(optNum(args, 'divisions') ?? 8)))
       const scene = getActiveScene()
-      if (!scene) throw new Error('视口还没就绪，取不到图片像素。等编辑器窗口画完一帧再试')
+      if (!scene) throw new Error(t('视口还没就绪，取不到图片像素。等编辑器窗口画完一帧再试'))
       const attachment = findAttachment(useProjectStore.getState().document, slot, attachmentName)
-      if (!attachment) throw new Error(`找不到附件：${slot} / ${attachmentName}（用 listDisplays 查）`)
+      if (!attachment) {
+        throw new Error(t('找不到附件：{0} / {1}（用 listDisplays 查）', [slot, attachmentName]))
+      }
       const isFromImage =
         attachment.type === 'region' || (attachment.type === 'mesh' && Boolean(attachment.regionSnapshot))
       if (!isFromImage) {
-        throw new Error('只有图片（Region）或由图片转来的网格能生成轮廓网格；纯网格请用 convertToMesh 的规则栅格')
+        throw new Error(
+          t('只有图片（Region）或由图片转来的网格能生成轮廓网格；纯网格请用 convertToMesh 的规则栅格')
+        )
       }
       const entry = attachment.image ? scene.imageAlpha.entryOf(attachment.image) : null
-      if (!entry) throw new Error(`图片「${attachment.image || '(空)'}」还没解码完成，稍后再试`)
+      if (!entry) {
+        throw new Error(t('图片「{0}」还没解码完成，稍后再试', attachment.image || '(空)'))
+      }
       let result: { vertices: number; triangles: number; coverage: number } | null = null
-      const committed = useProjectStore.getState().runCommand('生成轮廓网格', (draft) => {
+      const committed = useProjectStore.getState().runCommand(t('生成轮廓网格'), (draft) => {
         result = autoGenerateRegionMesh(draft, slot, attachmentName, entry, divisions)
         return result !== null
       })
       const stats = result as { vertices: number; triangles: number; coverage: number } | null
       if (!committed || !stats) {
-        throw new Error('生成失败：图片没有可用的不透明像素区域（可能整张图都是透明的）')
+        throw new Error(t('生成失败：图片没有可用的不透明像素区域（可能整张图都是透明的）'))
       }
       // 网格数据变了，推回场景并重画
       const next = useProjectStore.getState().document
@@ -798,8 +854,10 @@ export function registerBindAllCommands(): void {
     },
     () => {
       const rolledBack = useProjectStore.getState().rollbackTransaction()
-      if (!rolledBack) throw new Error('没有正在进行的事务（rollbackTransaction 要跟在 beginTransaction 之后）')
-      return changed({ rolledBack }, '已回滚到批量操作前的状态')
+      if (!rolledBack) {
+        throw new Error(t('没有正在进行的事务（rollbackTransaction 要跟在 beginTransaction 之后）'))
+      }
+      return changed({ rolledBack }, t('已回滚到批量操作前的状态'))
     }
   )
 
@@ -823,12 +881,14 @@ export function registerBindAllCommands(): void {
       const store = useProjectStore.getState()
       const projectPath = store.projectPath
       if (!projectPath) {
-        throw new Error('请先保存或创建工程：导入的图片要落到工程目录的 images/ 下（可先调用 createProject 或 saveProject）')
+        throw new Error(
+          t('请先保存或创建工程：导入的图片要落到工程目录的 images/ 下（可先调用 createProject 或 saveProject）')
+        )
       }
       const data = optText(args, 'data')
       const sourcePath = optText(args, 'path')
       if (!data && !sourcePath) {
-        throw new Error('必须给 data（base64 / dataURL）或 path（本地图片绝对路径）其中一个')
+        throw new Error(t('必须给 data（base64 / dataURL）或 path（本地图片绝对路径）其中一个'))
       }
       let bytes: Uint8Array
       let ext: string
@@ -841,7 +901,9 @@ export function registerBindAllCommands(): void {
         bytes = await platform.readBinary(sourcePath as string)
         ext = extOf(sourcePath as string)
       }
-      if (!bytes || bytes.length === 0) throw new Error('读不到图片字节（data 解码失败或 path 文件不存在）')
+      if (!bytes || bytes.length === 0) {
+        throw new Error(t('读不到图片字节（data 解码失败或 path 文件不存在）'))
+      }
 
       const dir = joinPath(dirName(projectPath), ASSET_DIR)
       const given = optText(args, 'name') ?? (sourcePath ? stripExtension(baseName(sourcePath)) : 'image')
@@ -852,10 +914,13 @@ export function registerBindAllCommands(): void {
       const info = await platform.imageInfo([target])
       const width = info[0]?.width ?? 0
       const height = info[0]?.height ?? 0
-      store.update('导入图片', (draft) => {
+      store.update(t('导入图片'), (draft) => {
         draft.images.push({ name: fileName, path: target, width, height, loose: true })
       })
-      return changed({ name: fileName, width, height, path: target }, `已导入图片 ${fileName}（${width}×${height}）`)
+      return changed(
+        { name: fileName, width, height, path: target },
+        t('已导入图片 {0}（{1}×{2}）', [fileName, width, height])
+      )
     }
   )
 

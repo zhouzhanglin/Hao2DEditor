@@ -3,6 +3,7 @@ import { rootBoneName } from '@core/model/authoring'
 import { MAT4_LENGTH, decomposeTrs, invert, mul, mulPoint, trs } from '@core/math/matrix'
 import { DEG2RAD } from '@core/math/utils'
 import { findSkinSlot } from './authoringCommands'
+import { t } from '@i18n'
 
 /**
  * 层级树里的拖动重排：骨骼换父级 / 插槽换宿主 / display 换插槽。
@@ -125,20 +126,20 @@ export function isDescendantOf(bones: readonly Bones[number][], name: string, an
 
 /** 骨骼移动的合法性检查（只读，不改文档）：UI 先校验再落历史，避免撤销栈里出现空操作 */
 export function validateBoneMove(doc: EditorDocument, name: string, targetBone: string): MoveResult {
-  if (!doc.bones.some((item) => item.name === name)) return { ok: false, message: `找不到骨骼「${name}」` }
-  if (name === targetBone) return { ok: false, message: '骨骼不能拖到它自己下面' }
+  if (!doc.bones.some((item) => item.name === name)) return { ok: false, message: t('找不到骨骼「{0}」', name) }
+  if (name === targetBone) return { ok: false, message: t('骨骼不能拖到它自己下面') }
   /*
    * 层级根骨骼是整棵树的根：它一动，下面所有骨骼的世界变换都要跟着漂，
    * 「唯一顶层骨骼」这个结构前提也没了 —— 直接拒绝（它自己也没有可平级的位置）。
    */
   if (name === rootBoneName(doc.bones)) {
-    return { ok: false, message: `「${name}」是层级根骨骼：其他骨骼都在它之下，它自己不能移动` }
+    return { ok: false, message: t('「{0}」是层级根骨骼：其他骨骼都在它之下，它自己不能移动', name) }
   }
   if (targetBone && isDescendantOf(doc.bones, targetBone, name)) {
-    return { ok: false, message: `「${targetBone}」在「${name}」的子树里，拖进去会形成环` }
+    return { ok: false, message: t('「{0}」在「{1}」的子树里，拖进去会形成环', [targetBone, name]) }
   }
   if (targetBone && !doc.bones.some((item) => item.name === targetBone)) {
-    return { ok: false, message: `找不到骨骼「${targetBone}」` }
+    return { ok: false, message: t('找不到骨骼「{0}」', targetBone) }
   }
   return { ok: true, message: '' }
 }
@@ -196,7 +197,7 @@ export function moveBone(
   if (zone === 'inside' || !targetBone) {
     bone.parent = parent
   } else {
-    if (!target) return { ok: false, message: `找不到骨骼「${targetBone}」` }
+    if (!target) return { ok: false, message: t('找不到骨骼「{0}」', targetBone) }
     bone.parent = parent
     const from = doc.bones.indexOf(bone)
     if (from >= 0) doc.bones.splice(from, 1)
@@ -218,10 +219,10 @@ export function moveBone(
 
 /** 插槽移动的合法性检查：插槽要在、宿主骨骼要有 */
 export function validateSlotMove(doc: EditorDocument, name: string, targetBone: string): MoveResult {
-  if (!doc.slots.some((item) => item.name === name)) return { ok: false, message: `找不到插槽「${name}」` }
-  if (!targetBone) return { ok: false, message: '插槽必须挂在某根骨骼下' }
+  if (!doc.slots.some((item) => item.name === name)) return { ok: false, message: t('找不到插槽「{0}」', name) }
+  if (!targetBone) return { ok: false, message: t('插槽必须挂在某根骨骼下') }
   if (!doc.bones.some((item) => item.name === targetBone)) {
-    return { ok: false, message: `找不到骨骼「${targetBone}」` }
+    return { ok: false, message: t('找不到骨骼「{0}」', targetBone) }
   }
   return { ok: true, message: '' }
 }
@@ -273,7 +274,7 @@ export function moveSlot(
   ordered.forEach((item, order) => {
     item.zOrder = order
   })
-  return { ok: true, message: `插槽「${name}」已挂到骨骼「${targetBone}」下` }
+  return { ok: true, message: t('插槽「{0}」已挂到骨骼「{1}」下', [name, targetBone]) }
 }
 
 /**
@@ -282,7 +283,7 @@ export function moveSlot(
  */
 export function moveSlotToBottom(doc: EditorDocument, name: string, options?: MoveOptions): MoveResult {
   const root = rootBoneName(doc.bones)
-  if (!root) return { ok: false, message: '工程里还没有骨骼：插槽必须挂在某根骨骼下' }
+  if (!root) return { ok: false, message: t('工程里还没有骨骼：插槽必须挂在某根骨骼下') }
   const ordered = [...doc.slots]
     .sort((left, right) => left.zOrder - right.zOrder)
     .filter((item) => item.name !== name)
@@ -309,12 +310,12 @@ export function validateDisplayMove(
   skinName: string
 ): MoveResult {
   const skin = doc.skins.find((item) => item.name === skinName) ?? doc.skins[0]
-  if (!skin) return { ok: false, message: '工程里没有皮肤' }
+  if (!skin) return { ok: false, message: t('工程里没有皮肤') }
   const source = findSkinSlot(skin, fromSlot)
   const target = fromSlot === toSlot ? source : findSkinSlot(skin, toSlot)
-  if (!source || !target) return { ok: false, message: '找不到对应的插槽附件清单' }
+  if (!source || !target) return { ok: false, message: t('找不到对应的插槽附件清单') }
   if (!source.attachments.some((item) => item.name === name)) {
-    return { ok: false, message: `插槽「${fromSlot}」里没有 display「${name}」` }
+    return { ok: false, message: t('插槽「{0}」里没有 display「{1}」', [fromSlot, name]) }
   }
   return { ok: true, message: '' }
 }
@@ -378,7 +379,10 @@ export function moveDisplay(
   remapDisplayIndices(doc, [fromSlot, toSlot], skin.name)
   return {
     ok: true,
-    message: fromSlot === toSlot ? `已调整 display「${name}」的顺序` : `display「${name}」已移到插槽「${toSlot}」下`
+    message:
+      fromSlot === toSlot
+        ? t('已调整 display「{0}」的顺序', name)
+        : t('display「{0}」已移到插槽「{1}」下', [name, toSlot])
   }
 }
 

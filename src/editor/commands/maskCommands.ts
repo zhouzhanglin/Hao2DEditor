@@ -12,6 +12,7 @@ import {
 import { changed, defineRead, defineWrite, unchanged } from './registry'
 import type { Args } from './registry'
 import { need, needNum, optBool, optNum, optText, optVec, rawText, requireSomeField } from './args'
+import { t } from '@i18n'
 
 /**
  * 遮罩（Spine ClippingAttachment）命令。
@@ -34,23 +35,23 @@ function doc(): EditorDocument {
 
 function requireSlot(document: EditorDocument, name: string): AuthoringSlot {
   const slot = document.slots.find((item) => item.name === name)
-  if (!slot) throw new Error(`找不到插槽「${name}」（用 listSlots 查现有插槽名）`)
+  if (!slot) throw new Error(t('找不到插槽「{0}」（用 listSlots 查现有插槽名）', name))
   return slot
 }
 
 function readPoints(args: Args): Vec2[] {
   const raw = args.points
   if (!Array.isArray(raw)) {
-    throw new Error('缺少参数 points（数组 [{x,y}, ...]，至少 3 个点，坐标是插槽骨骼局部坐标）')
+    throw new Error(t('缺少参数 points（数组 [{x,y}, ...]，至少 3 个点，坐标是插槽骨骼局部坐标）'))
   }
-  if (raw.length < 3) throw new Error(`points 至少需要 3 个点，收到 ${raw.length} 个`)
+  if (raw.length < 3) throw new Error(t('points 至少需要 3 个点，收到 {0} 个', raw.length))
   return raw.map((item, index) => {
     if (typeof item !== 'object' || item === null || Array.isArray(item)) {
-      throw new Error(`points[${index}] 必须是 {x,y}`)
+      throw new Error(t('points[{0}] 必须是 {x,y}', index))
     }
     const { x, y } = item as { x?: unknown; y?: unknown }
     if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) {
-      throw new Error(`points[${index}] 的 x / y 必须是有限数字`)
+      throw new Error(t('points[{0}] 的 x / y 必须是有限数字', index))
     }
     return { x, y }
   })
@@ -64,7 +65,9 @@ function findMask(
 ): FoundMask {
   const slot = requireSlot(document, slotName)
   const skins = skinName ? document.skins.filter((item) => item.name === skinName) : document.skins
-  if (skinName && skins.length === 0) throw new Error(`找不到皮肤「${skinName}」（用 listSkins 查）`)
+  if (skinName && skins.length === 0) {
+    throw new Error(t('找不到皮肤「{0}」（用 listSkins 查）', skinName))
+  }
 
   let wrongType = ''
   for (const skin of skins) {
@@ -81,7 +84,9 @@ function findMask(
       `附件「${slotName} / ${attachmentName}」类型是 ${wrongType}，不是遮罩；先用 convertToMask 转换`
     )
   }
-  throw new Error(`找不到遮罩附件「${slotName} / ${attachmentName}」（用 listMasks 查）`)
+  throw new Error(
+    t('找不到遮罩附件「{0} / {1}」（用 listMasks 查）', [slotName, attachmentName])
+  )
 }
 
 function findAnyAttachment(
@@ -97,15 +102,19 @@ function findAnyAttachment(
       ?.attachments.find((item) => item.name === attachmentName)
     if (found) return { skin: skin.name, attachment: found }
   }
-  throw new Error(`找不到附件「${slotName} / ${attachmentName}」（用 listDisplays 查）`)
+  throw new Error(
+    t('找不到附件「{0} / {1}」（用 listDisplays 查）', [slotName, attachmentName])
+  )
 }
 
 /** 结束插槽必须存在、不能是遮罩自己，并且排在自己之后 */
 function validateEndSlot(document: EditorDocument, maskSlot: AuthoringSlot, endSlot: string): void {
   if (!endSlot) return
   const target = document.slots.find((item) => item.name === endSlot)
-  if (!target) throw new Error(`结束插槽「${endSlot}」不存在（用 listSlots 查）`)
-  if (target.name === maskSlot.name) throw new Error('结束插槽不能是遮罩自己；要裁到末尾就把 endSlot 留空')
+  if (!target) throw new Error(t('结束插槽「{0}」不存在（用 listSlots 查）', endSlot))
+  if (target.name === maskSlot.name) {
+    throw new Error(t('结束插槽不能是遮罩自己；要裁到末尾就把 endSlot 留空'))
+  }
   if (target.zOrder <= maskSlot.zOrder) {
     throw new Error(
       `结束插槽「${endSlot}」必须排在遮罩「${maskSlot.name}」之后（zOrder 更大）；要裁到末尾就把 endSlot 留空`
@@ -221,7 +230,7 @@ export function registerMaskCommands(): void {
       const convex = inverse ? true : (optBool(args, 'convex') ?? false)
       const skin = optText(args, 'skin')
       if (skin && !draft.skins.some((item) => item.name === skin)) {
-        throw new Error(`找不到皮肤「${skin}」（用 listSkins 查）`)
+        throw new Error(t('找不到皮肤「{0}」（用 listSkins 查）', skin))
       }
       const created = createClippingAttachment(draft, slot.name, {
         name: optText(args, 'name'),
@@ -233,14 +242,19 @@ export function registerMaskCommands(): void {
         display: optBool(args, 'display') ?? true
       })
       if (!created) {
-        throw new Error(`创建遮罩失败：插槽「${slot.name}」或皮肤不存在，或点数不足 3（用 listSlots / listSkins 查）`)
+        throw new Error(
+          t('创建遮罩失败：插槽「{0}」或皮肤不存在，或点数不足 3（用 listSlots / listSkins 查）', slot.name)
+        )
       }
       // 必须回到「实际创建到的那张皮肤」去读；跨皮肤按名字找可能命中另一个皮肤里的同名遮罩
       const skinName = skin ?? draft.editorMeta.activeSkin
       const targetSkin =
         (skinName ? draft.skins.find((item) => item.name === skinName) : undefined) ?? draft.skins[0]
       const found = findMask(draft, slot.name, created.name, targetSkin?.name)
-      return changed(maskInfo(found), `已创建遮罩 ${slot.name} / ${created.name}（${points.length} 个点）`)
+      return changed(
+        maskInfo(found),
+        t('已创建遮罩 {0} / {1}（{2} 个点）', [slot.name, created.name, points.length])
+      )
     }
   )
 
@@ -266,7 +280,9 @@ export function registerMaskCommands(): void {
       const skin = optText(args, 'skin')
       const source = findAnyAttachment(draft, slotName, attachmentName, skin)
       if (source.attachment.type === 'clipping') {
-        throw new Error(`附件「${slotName} / ${attachmentName}」已经是遮罩（用 getMask 查它）`)
+        throw new Error(
+          t('附件「{0} / {1}」已经是遮罩（用 getMask 查它）', [slotName, attachmentName])
+        )
       }
       if (!convertAttachmentToClipping(draft, slotName, attachmentName, source.skin)) {
         throw new Error(
@@ -308,11 +324,18 @@ export function registerMaskCommands(): void {
           const current = attachment.vertices[index]
           return Math.abs(current.x - point.x) < 1e-9 && Math.abs(current.y - point.y) < 1e-9
         })
-      if (same) return unchanged('遮罩控制点没有变化')
+      if (same) return unchanged(t('遮罩控制点没有变化'))
       if (!setClippingVertices(draft, found.slot.name, attachment.name, points, found.skin)) {
-        throw new Error('设置遮罩控制点失败：附件或皮肤已变化')
+        throw new Error(t('设置遮罩控制点失败：附件或皮肤已变化'))
       }
-      return changed(maskInfo(found), `已更新遮罩 ${found.slot.name} / ${attachment.name}（${points.length} 个点）`)
+      return changed(
+        maskInfo(found),
+        t('已更新遮罩 {0} / {1}（{2} 个点）', [
+          found.slot.name,
+          attachment.name,
+          points.length
+        ])
+      )
     }
   )
 
@@ -334,12 +357,17 @@ export function registerMaskCommands(): void {
       const found = findMask(draft, need(args, 'slot'), need(args, 'attachment'), optText(args, 'skin'))
       const index = Math.round(needNum(args, 'index'))
       const point = optVec(args, 'point')
-      if (!point) throw new Error('缺少参数 point（新位置 {x,y}，插槽骨骼局部坐标）')
+      if (!point) throw new Error(t('缺少参数 point（新位置 {x,y}，插槽骨骼局部坐标）'))
       if (index < 0 || index >= found.attachment.vertices.length) {
-        throw new Error(`index 越界：该遮罩有 ${found.attachment.vertices.length} 个点，index 应在 0..${found.attachment.vertices.length - 1}`)
+        throw new Error(
+          t('index 越界：该遮罩有 {0} 个点，index 应在 0..{1}', [
+            found.attachment.vertices.length,
+            found.attachment.vertices.length - 1
+          ])
+        )
       }
       if (!setClippingPoint(draft, found.slot.name, found.attachment.name, index, point, found.skin)) {
-        throw new Error('移动遮罩控制点失败：附件或皮肤已变化')
+        throw new Error(t('移动遮罩控制点失败：附件或皮肤已变化'))
       }
       return changed(
         { slot: found.slot.name, attachment: found.attachment.name, index, point, pointCount: found.attachment.vertices.length },
@@ -367,12 +395,17 @@ export function registerMaskCommands(): void {
       const found = findMask(draft, need(args, 'slot'), need(args, 'attachment'), optText(args, 'skin'))
       const index = Math.round(optNum(args, 'index') ?? -1)
       const point = optVec(args, 'point')
-      if (!point) throw new Error('缺少参数 point（新点 {x,y}，插槽骨骼局部坐标）')
+      if (!point) throw new Error(t('缺少参数 point（新点 {x,y}，插槽骨骼局部坐标）'))
       if (index < -1 || index >= found.attachment.vertices.length) {
-        throw new Error(`index 越界：该遮罩有 ${found.attachment.vertices.length} 个点，index 应在 -1..${found.attachment.vertices.length - 1}`)
+        throw new Error(
+          t('index 越界：该遮罩有 {0} 个点，index 应在 -1..{1}', [
+            found.attachment.vertices.length,
+            found.attachment.vertices.length - 1
+          ])
+        )
       }
       if (!insertClippingPoint(draft, found.slot.name, found.attachment.name, index, point, found.skin)) {
-        throw new Error('插入遮罩控制点失败：附件或皮肤已变化')
+        throw new Error(t('插入遮罩控制点失败：附件或皮肤已变化'))
       }
       const newIndex = index + 1
       return changed(
@@ -399,10 +432,15 @@ export function registerMaskCommands(): void {
       const found = findMask(draft, need(args, 'slot'), need(args, 'attachment'), optText(args, 'skin'))
       const index = Math.round(needNum(args, 'index'))
       if (index < 0 || index >= found.attachment.vertices.length) {
-        throw new Error(`index 越界：该遮罩有 ${found.attachment.vertices.length} 个点，index 应在 0..${found.attachment.vertices.length - 1}`)
+        throw new Error(
+          t('index 越界：该遮罩有 {0} 个点，index 应在 0..{1}', [
+            found.attachment.vertices.length,
+            found.attachment.vertices.length - 1
+          ])
+        )
       }
       if (!deleteClippingPoint(draft, found.slot.name, found.attachment.name, index, found.skin)) {
-        throw new Error('遮罩至少保留 3 个控制点，当前删不了')
+        throw new Error(t('遮罩至少保留 3 个控制点，当前删不了'))
       }
       return changed(
         { slot: found.slot.name, attachment: found.attachment.name, pointCount: found.attachment.vertices.length },
@@ -438,7 +476,10 @@ export function registerMaskCommands(): void {
         fields.push('display')
       }
       requireSomeField(fields)
-      return changed(maskInfo(found), `已更新遮罩选项（${fields.join(' / ')}）`)
+      return changed(
+        maskInfo(found),
+        t('已更新遮罩选项（{0}）', fields.join(' / '))
+      )
     }
   )
 

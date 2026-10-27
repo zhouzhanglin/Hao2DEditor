@@ -16,6 +16,7 @@ import {
 import type { BoneChannel } from './animationCommands'
 import { findSkinSlot } from './authoringCommands'
 import type { Vec2 } from './skeletonOps'
+import { t } from '@i18n'
 
 /**
  * 关键帧操作：给 AI 用的「打帧 / 删帧 / 改帧」。
@@ -34,13 +35,18 @@ export function requireAnimation(doc: EditorDocument, name?: string): AuthoringA
   const target = name?.trim() || doc.editorMeta.activeAnimation
   const anim = doc.animations.find((item) => item.name === target)
   if (anim) return anim
-  if (doc.animations.length === 0) throw new Error('还没有任何动画：先用 addAnimation 建一条')
-  throw new Error(`动画不存在：${target || '(空)'}（现有：${doc.animations.map((item) => item.name).join(' / ')}）`)
+  if (doc.animations.length === 0) throw new Error(t('还没有任何动画：先用 addAnimation 建一条'))
+  throw new Error(
+    t('动画不存在：{0}（现有：{1}）', [
+      target || t('(空)'),
+      doc.animations.map((item) => item.name).join(' / ')
+    ])
+  )
 }
 
 export function requireSlot(doc: EditorDocument, name: string): EditorDocument['slots'][number] {
   const slot = doc.slots.find((item) => item.name === name)
-  if (!slot) throw new Error(`插槽不存在：${name}（用 listSlots 查现有插槽名）`)
+  if (!slot) throw new Error(t('插槽不存在：{0}（用 listSlots 查现有插槽名）', name))
   return slot
 }
 
@@ -48,14 +54,16 @@ export function requireSlot(doc: EditorDocument, name: string): EditorDocument['
 export function pickSkin(doc: EditorDocument, name?: string): AuthoringSkin | null {
   if (name) {
     const named = doc.skins.find((skin) => skin.name === name)
-    if (!named) throw new Error(`皮肤不存在：${name}（用 listSkins 查现有皮肤名）`)
+    if (!named) throw new Error(t('皮肤不存在：{0}（用 listSkins 查现有皮肤名）', name))
     return named
   }
   return doc.skins.find((skin) => skin.name === doc.editorMeta.activeSkin) ?? doc.skins[0] ?? null
 }
 
 function requireTime(time: number): number {
-  if (!Number.isFinite(time) || time < 0) throw new Error(`time 必须是不小于 0 的数字（单位：秒），收到 ${time}`)
+  if (!Number.isFinite(time) || time < 0) {
+    throw new Error(t('time 必须是不小于 0 的数字（单位：秒），收到 {0}', time))
+  }
   return time
 }
 
@@ -77,12 +85,12 @@ export function keyBoneFrame(
   options: KeyBoneFrameOptions
 ): { animation: string; bone: string; channel: BoneChannel; time: number; value: number | Vec2Like } {
   if (!doc.bones.some((bone) => bone.name === options.bone)) {
-    throw new Error(`骨骼不存在：${options.bone}（用 listBones 查现有骨骼名）`)
+    throw new Error(t('骨骼不存在：{0}（用 listBones 查现有骨骼名）', options.bone))
   }
   if (options.channel === 'rotate') {
-    if (typeof options.value !== 'number') throw new Error('rotate 通道的 value 要传数字（度）')
+    if (typeof options.value !== 'number') throw new Error(t('rotate 通道的 value 要传数字（度）'))
   } else if (typeof options.value !== 'number' && (typeof options.value !== 'object' || options.value === null)) {
-    throw new Error(`${options.channel} 通道的 value 要传 {x,y} 或单个数字`)
+    throw new Error(t('{0} 通道的 value 要传 {x,y} 或单个数字', options.channel))
   }
   const anim = requireAnimation(doc, options.animation)
   const time = requireTime(options.time)
@@ -137,7 +145,11 @@ export function keySlotDisplayFrame(
     displayIndex = skinSlot ? skinSlot.attachments.findIndex((item) => item.name === name) : -1
     if (displayIndex < 0) {
       throw new Error(
-        `插槽「${slot.name}」在皮肤「${skin?.name ?? '(无)'}」里没有附件「${name}」（用 listDisplays 查该插槽下的附件名）`
+        t('插槽「{0}」在皮肤「{1}」里没有附件「{2}」（用 listDisplays 查该插槽下的附件名）', [
+          slot.name,
+          skin?.name ?? t('(无)'),
+          name
+        ])
       )
     }
   }
@@ -224,15 +236,17 @@ export function keySlotSubArmatureFrame(
     )
   )
   if (!hasNest) {
-    throw new Error(`插槽「${slot.name}」上没有嵌套骨架 display（先用 nestArmature 把别的骨架挂上来）`)
+    throw new Error(t('插槽「{0}」上没有嵌套骨架 display（先用 nestArmature 把别的骨架挂上来）', slot.name))
   }
   const clip = options.clip ?? ''
   // 0 与负数都表示循环（负数写法让人一眼看出不是 1 次），这里只做取整
   const playTimes = Math.round(options.playTimes ?? 0)
   const offset = options.offset ?? 0
   const speed = options.speed ?? 1
-  if (!Number.isFinite(offset)) throw new Error(`offset 必须是数字（秒），收到 ${offset}`)
-  if (!Number.isFinite(speed) || speed < 0) throw new Error(`speed 必须是不小于 0 的数字，收到 ${speed}`)
+  if (!Number.isFinite(offset)) throw new Error(t('offset 必须是数字（秒），收到 {0}', offset))
+  if (!Number.isFinite(speed) || speed < 0) {
+    throw new Error(t('speed 必须是不小于 0 的数字，收到 {0}', speed))
+  }
   keySlotSubArmature(anim, slot.name, time, { animation: clip, playTimes, offset, speed })
   return { animation: anim.name, slot: slot.name, time, clip, playTimes, offset, speed }
 }
@@ -255,11 +269,13 @@ export function keyDrawOrderFrame(
   if (options.order && options.order.length > 0) {
     const known = new Set(doc.slots.map((slot) => slot.name))
     const unknown = options.order.filter((name) => !known.has(name))
-    if (unknown.length > 0) throw new Error(`绘制顺序里有不存在的插槽：${unknown.join(' / ')}（用 listSlots 查）`)
+    if (unknown.length > 0) {
+      throw new Error(t('绘制顺序里有不存在的插槽：{0}（用 listSlots 查）', unknown.join(' / ')))
+    }
     const missing = doc.slots.filter((slot) => !options.order!.includes(slot.name)).map((slot) => slot.name)
     if (missing.length > 0) {
       // 绘制顺序帧是「完整顺序」的整帧：漏掉插槽会让它们在这帧之后消失
-      throw new Error(`绘制顺序必须是完整序列，漏了：${missing.join(' / ')}`)
+      throw new Error(t('绘制顺序必须是完整序列，漏了：{0}', missing.join(' / ')))
     }
     order = [...options.order]
   } else {
@@ -295,14 +311,21 @@ export function keyDeformFrame(
     attachment.type !== 'clipping'
   ) {
     throw new Error(
-      `附件「${options.attachment}」不是网格/遮罩，打不了 FFD（网格先用 convertToMesh；遮罩用 createMask / convertToMask）`
+      t(
+        '附件「{0}」不是网格/遮罩，打不了 FFD（网格先用 convertToMesh；遮罩用 createMask / convertToMask）',
+        options.attachment
+      )
     )
   }
   const vertexCount = attachment.vertices.length
   if (options.offsets.length !== vertexCount * 2) {
     // 长度对不上会写出一帧错位的 FFD，播放时网格直接变形错乱 —— 这里必须挡住
     throw new Error(
-      `offsets 长度必须是点数的 2 倍：该附件有 ${vertexCount} 个点（网格顶点 / 遮罩控制点），需要 ${vertexCount * 2} 个数字，收到 ${options.offsets.length}`
+      t('offsets 长度必须是点数的 2 倍：该附件有 {0} 个点（网格顶点 / 遮罩控制点），需要 {1} 个数字，收到 {2}', [
+        vertexCount,
+        vertexCount * 2,
+        options.offsets.length
+      ])
     )
   }
   keyDeform(anim, slot.name, options.attachment, time, options.offsets)
@@ -343,22 +366,24 @@ function framesOf(
   if (kind === 'drawOrder') return anim.drawOrder as unknown as Frames
   if (kind === 'bone') {
     const track = anim.bones.find((item) => item.bone === target)
-    if (!track) throw new Error(`动画「${anim.name}」里没有骨骼「${target}」的轨道`)
+    if (!track) throw new Error(t('动画「{0}」里没有骨骼「{1}」的轨道', [anim.name, target]))
     return track[channel as BoneChannel] as unknown as Frames
   }
   if (kind === 'slot') {
-    if (!doc.slots.some((slot) => slot.name === target)) throw new Error(`插槽不存在：${target}`)
+    if (!doc.slots.some((slot) => slot.name === target)) throw new Error(t('插槽不存在：{0}', target))
     const track = anim.slots.find((item) => item.slot === target)
-    if (!track) throw new Error(`动画「${anim.name}」里没有插槽「${target}」的轨道`)
+    if (!track) throw new Error(t('动画「{0}」里没有插槽「{1}」的轨道', [anim.name, target]))
     if (channel === 'display') return track.displayIndex as unknown as Frames
     if (channel === 'color') return track.color as unknown as Frames
     if (channel === 'visible') return track.visible as unknown as Frames
     // 嵌套骨架通道：帧是对象（动画名 + 次数 / 偏移 / 倍速），但「按时间定位」的语义与其它轨道一致
     if (channel === 'subArmature') return (track.subArmature ?? []) as unknown as Frames
-    throw new Error(`插槽通道只能是 display / color / visible / subArmature，收到 ${channel}`)
+    throw new Error(t('插槽通道只能是 display / color / visible / subArmature，收到 {0}', channel))
   }
   const track = anim.deforms.find((item) => item.slot === target && item.attachment === (attachment ?? ''))
-  if (!track) throw new Error(`动画「${anim.name}」里没有 ${target} / ${attachment ?? ''} 的 FFD 轨道`)
+  if (!track) {
+    throw new Error(t('动画「{0}」里没有 {1} / {2} 的 FFD 轨道', [anim.name, target, attachment ?? '']))
+  }
   return track.frames as unknown as Frames
 }
 
@@ -393,7 +418,7 @@ export function moveKeyframe(
   const to = requireTime(options.to)
   const frames = framesOf(doc, anim, options.kind, options.target ?? '', options.channel ?? '', options.attachment)
   const index = frames.findIndex((frame) => Math.abs(frame.time - from) < 1e-4)
-  if (index < 0) throw new Error(`没有落在 ${from} 秒的关键帧`)
+  if (index < 0) throw new Error(t('没有落在 {0} 秒的关键帧', from))
   if (Math.abs(from - to) < 1e-4) return { moved: false, from, to, animation: anim.name }
 
   if (options.kind === 'slot' && options.channel === 'display') {
@@ -449,11 +474,13 @@ export function setKeyEasing(
   const time = requireTime(options.time)
   const frames = framesOf(doc, anim, options.kind, options.target ?? '', options.channel ?? '', options.attachment)
   const frame = frames.find((item) => Math.abs(item.time - time) < 1e-4)
-  if (!frame) throw new Error(`没有落在 ${time} 秒的关键帧`)
+  if (!frame) throw new Error(t('没有落在 {0} 秒的关键帧', time))
   const easing = EASING_BY_NAME[options.easing]
-  if (easing === undefined) throw new Error(`easing 只能是 linear / stepped / bezier，收到 ${options.easing}`)
+  if (easing === undefined) {
+    throw new Error(t('easing 只能是 linear / stepped / bezier，收到 {0}', options.easing))
+  }
   if (easing === Easing.Bezier && (!options.curve || options.curve.length !== 4)) {
-    throw new Error('easing = bezier 时必须给 curve：[cx1, cy1, cx2, cy2]（4 个数字）')
+    throw new Error(t('easing = bezier 时必须给 curve：[cx1, cy1, cx2, cy2]（4 个数字）'))
   }
   frame.easing = easing
   frame.curve = easing === Easing.Bezier ? [...options.curve!] : null
@@ -501,5 +528,5 @@ function findAttachmentOrThrow(doc: EditorDocument, slotName: string, attachment
     const found = skinSlot?.attachments.find((item) => item.name === attachmentName)
     if (found) return found
   }
-  throw new Error(`找不到附件：${slotName} / ${attachmentName}（用 listDisplays 查插槽下的附件名）`)
+  throw new Error(t('找不到附件：{0} / {1}（用 listDisplays 查插槽下的附件名）', [slotName, attachmentName]))
 }

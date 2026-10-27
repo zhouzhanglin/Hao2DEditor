@@ -5,6 +5,7 @@ import { BlendMode } from '@core/model/types'
 import { getActiveScene } from '../activeScene'
 import { moveBone, moveSlot } from './hierarchyCommands'
 import { addImageDisplay, deleteAttachment, patchAttachment, uniqueName } from './authoringCommands'
+import { t } from '@i18n'
 
 /**
  * 创建 / 设置类命令的**纯文档操作**。
@@ -58,9 +59,15 @@ export function asBoneChain(doc: EditorDocument, names: readonly string[]): stri
   return []
 }
 
-function requireBone(doc: EditorDocument, name: string, role: string): AuthoringBone {
+function requireBone(doc: EditorDocument, name: string, role?: string): AuthoringBone {
   const bone = doc.bones.find((item) => item.name === name)
-  if (!bone) throw new Error(`${role}不存在：${name}（用 listBones 查现有骨骼名）`)
+  if (!bone) {
+    throw new Error(
+      role
+        ? t('{0}不存在：{1}（用 listBones 查现有骨骼名）', [t(role), name])
+        : t('骨骼不存在：{0}（用 listBones 查现有骨骼名）', name)
+    )
+  }
   return bone
 }
 
@@ -121,7 +128,7 @@ export interface SetBoneTransformOptions {
 
 /** 一次性写入骨骼的一组属性（只写传了的字段，没传的保持原样） */
 export function setBoneTransform(doc: EditorDocument, options: SetBoneTransformOptions): void {
-  const bone = requireBone(doc, options.bone, '骨骼')
+  const bone = requireBone(doc, options.bone)
   if (options.localPosition) bone.localPosition = { ...options.localPosition }
   if (options.rotation !== undefined) bone.rotation = options.rotation
   if (options.localScale) bone.localScale = { ...options.localScale }
@@ -138,7 +145,7 @@ export function setBoneTransform(doc: EditorDocument, options: SetBoneTransformO
    */
   if (options.parent !== undefined) {
     const result = moveBone(doc, bone.name, options.parent, 'inside', { worldMatrixOf: worldMatrixOfBone })
-    if (!result.ok) throw new Error(result.message || `换父级失败：${options.parent}`)
+    if (!result.ok) throw new Error(result.message || t('换父级失败：{0}', options.parent))
   }
 }
 
@@ -163,7 +170,7 @@ export interface AddSlotResult {
 /** 新建插槽。插槽必须挂在骨骼上，宿主默认取层级根骨骼 */
 export function addSlot(doc: EditorDocument, options: AddSlotOptions = {}): AddSlotResult {
   const bone = options.bone ?? rootBoneName(doc.bones)
-  if (!bone) throw new Error('骨架里还没有骨骼，插槽必须挂在骨骼上：先用 addBone 建一根')
+  if (!bone) throw new Error(t('骨架里还没有骨骼，插槽必须挂在骨骼上：先用 addBone 建一根'))
   requireBone(doc, bone, '宿主骨骼')
   const name = uniqueName(doc.slots.map((slot) => slot.name), options.name?.trim() || 'slot')
   doc.slots.push(
@@ -197,7 +204,7 @@ export interface SetSlotPropsOptions {
 /** 写入插槽的非层级属性（换宿主骨骼 / 调层序请用 moveSlot / setSlotOrder，那些要保持全局位姿） */
 export function setSlotProps(doc: EditorDocument, options: SetSlotPropsOptions): void {
   const slot = doc.slots.find((item) => item.name === options.slot)
-  if (!slot) throw new Error(`插槽不存在：${options.slot}（用 listSlots 查现有插槽名）`)
+  if (!slot) throw new Error(t('插槽不存在：{0}（用 listSlots 查现有插槽名）', options.slot))
   if (options.color !== undefined) slot.color = options.color
   if (options.blendMode !== undefined) {
     // 字符串枚举名换成枚举值：AI 记不住数字，直接给 'normal' / 'additive' 更不容易错
@@ -205,7 +212,7 @@ export function setSlotProps(doc: EditorDocument, options: SetSlotPropsOptions):
     const mode = table[options.blendMode]
     if (typeof mode !== 'number') {
       const names = Object.keys(table).filter((key) => Number.isNaN(Number(key)))
-      throw new Error(`blendMode 不合法：${options.blendMode}（只能是 ${names.join(' / ')}）`)
+      throw new Error(t('blendMode 不合法：{0}（只能是 {1}）', [options.blendMode, names.join(' / ')]))
     }
     slot.blendMode = mode as typeof slot.blendMode
   }
@@ -222,11 +229,11 @@ export function setSlotProps(doc: EditorDocument, options: SetSlotPropsOptions):
  */
 export function setSlotHost(doc: EditorDocument, slotName: string, boneName: string): void {
   if (!doc.slots.some((item) => item.name === slotName)) {
-    throw new Error(`插槽不存在：${slotName}（用 listSlots 查现有插槽名）`)
+    throw new Error(t('插槽不存在：{0}（用 listSlots 查现有插槽名）', slotName))
   }
   requireBone(doc, boneName, '新宿主骨骼')
   const result = moveSlot(doc, slotName, boneName, null, { worldMatrixOf: worldMatrixOfBone })
-  if (!result.ok) throw new Error(result.message || `换宿主失败：${slotName} → ${boneName}`)
+  if (!result.ok) throw new Error(result.message || t('换宿主失败：{0} → {1}', [slotName, boneName]))
 }
 
 // ---------------- 约束 ----------------
@@ -265,7 +272,7 @@ export function addConstraint(doc: EditorDocument, options: AddConstraintOptions
   if (kind !== 'ik') {
     // 变换 / 路径的宿主是第一根被驱动骨；来源骨 / 路径骨在属性面板里再选
     const host = picked[0] ?? rootBoneName(doc.bones)
-    if (!host) throw new Error('骨架里还没有骨骼：先用 addBone 建一根')
+    if (!host) throw new Error(t('骨架里还没有骨骼：先用 addBone 建一根'))
     requireBone(doc, host, '宿主骨骼')
     if (options.target) requireBone(doc, options.target, '目标骨骼')
     const name = uniqueName(doc.constraints.map((item) => item.name), options.name?.trim() || kind)
@@ -285,8 +292,8 @@ export function addConstraint(doc: EditorDocument, options: AddConstraintOptions
   if (chain.length === 0) {
     throw new Error(
       picked.length >= 2
-        ? `IK 的骨链必须「父 → 子」连续：${picked.join(' / ')} 不构成一条链（顺序给反了会自动翻转）`
-        : 'IK 至少需要一根被驱动的骨骼，并且必须是父 → 子连续的链'
+        ? t('IK 的骨链必须「父 → 子」连续：{0} 不构成一条链（顺序给反了会自动翻转）', picked.join(' / '))
+        : t('IK 至少需要一根被驱动的骨骼，并且必须是父 → 子连续的链')
     )
   }
   const tail = chain[chain.length - 1]
@@ -342,7 +349,7 @@ export interface AddDisplayOptions {
  */
 export function addDisplay(doc: EditorDocument, options: AddDisplayOptions): { slot: string; attachment: string } {
   const image = doc.images.find((item) => item.name === options.image)
-  if (!image) throw new Error(`图片不存在：${options.image}（用 listImages 查图片池）`)
+  if (!image) throw new Error(t('图片不存在：{0}（用 listImages 查图片池）', options.image))
   const result = addImageDisplay(doc, {
     image: image.name,
     slot: options.slot,
@@ -353,7 +360,7 @@ export function addDisplay(doc: EditorDocument, options: AddDisplayOptions): { s
     ...(options.skin ? { skin: options.skin } : {})
   })
   // addImageDisplay 返回 null 只有「插槽不存在」这一种可能（图片刚校验过）
-  if (!result) throw new Error(`插槽不存在：${options.slot}（用 listSlots 查现有插槽名）`)
+  if (!result) throw new Error(t('插槽不存在：{0}（用 listSlots 查现有插槽名）', options.slot))
   return result
 }
 
@@ -362,7 +369,9 @@ export function deleteDisplay(doc: EditorDocument, slotName: string, attachmentN
   const exists = doc.skins.some((skin) =>
     skin.slots.some((item) => item.slot === slotName && item.attachments.some((a) => a.name === attachmentName))
   )
-  if (!exists) throw new Error(`找不到附件：${slotName} / ${attachmentName}（用 listDisplays 查插槽下的附件名）`)
+  if (!exists) {
+    throw new Error(t('找不到附件：{0} / {1}（用 listDisplays 查插槽下的附件名）', [slotName, attachmentName]))
+  }
   deleteAttachment(doc, slotName, attachmentName)
   const slot = doc.slots.find((item) => item.name === slotName)
   // setup pose 指着一个已经不存在的附件，渲染时会查不到 —— 清空它
@@ -387,7 +396,7 @@ export interface SetAttachmentTransformOptions {
 /** 一次性写入附件的一组属性（跨所有皮肤同步改，避免同名附件在不同皮肤里不一致） */
 export function setAttachmentTransform(doc: EditorDocument, options: SetAttachmentTransformOptions): void {
   if (options.image !== undefined && !doc.images.some((item) => item.name === options.image)) {
-    throw new Error(`图片不存在：${options.image}（用 listImages 查图片池）`)
+    throw new Error(t('图片不存在：{0}（用 listImages 查图片池）', options.image))
   }
   let hits = 0
   const apply = (attachment: AuthoringAttachment): void => {
@@ -400,7 +409,9 @@ export function setAttachmentTransform(doc: EditorDocument, options: SetAttachme
     if (options.image !== undefined) attachment.image = options.image
   }
   patchAttachment(doc, options.slot, options.attachment, apply)
-  if (hits === 0) throw new Error(`找不到附件：${options.slot} / ${options.attachment}（用 listDisplays 查插槽下的附件名）`)
+  if (hits === 0) {
+    throw new Error(t('找不到附件：{0} / {1}（用 listDisplays 查插槽下的附件名）', [options.slot, options.attachment]))
+  }
 }
 
 export interface SetNestedArmatureOptions {
@@ -461,9 +472,11 @@ export function setNestedArmature(
     }
   }
   patchAttachment(doc, options.slot, options.attachment, apply)
-  if (hits === 0) throw new Error(`找不到附件：${options.slot} / ${options.attachment}（用 listDisplays 查插槽下的附件名）`)
+  if (hits === 0) {
+    throw new Error(t('找不到附件：{0} / {1}（用 listDisplays 查插槽下的附件名）', [options.slot, options.attachment]))
+  }
   if (changedFields.length === 0) {
-    throw new Error('至少要给一个要改的字段：armature / animation / playTimes / offset / speed')
+    throw new Error(t('至少要给一个要改的字段：armature / animation / playTimes / offset / speed'))
   }
   return { slot: options.slot, attachment: options.attachment, changedFields }
 }
@@ -488,7 +501,7 @@ export function addAnimation(doc: EditorDocument, options: AddAnimationOptions =
 
 export function removeAnimation(doc: EditorDocument, animationName: string): void {
   const index = doc.animations.findIndex((anim) => anim.name === animationName)
-  if (index < 0) throw new Error(`动画不存在：${animationName}（用 listAnimations 查现有动画名）`)
+  if (index < 0) throw new Error(t('动画不存在：{0}（用 listAnimations 查现有动画名）', animationName))
   doc.animations.splice(index, 1)
   // 删掉的正好是当前编辑动画：往后顺延一个，没有就退回空串
   if (doc.editorMeta.activeAnimation === animationName) {
@@ -498,11 +511,11 @@ export function removeAnimation(doc: EditorDocument, animationName: string): voi
 
 export function renameAnimation(doc: EditorDocument, animationName: string, nextName: string): { name: string } {
   const anim = doc.animations.find((item) => item.name === animationName)
-  if (!anim) throw new Error(`动画不存在：${animationName}（用 listAnimations 查现有动画名）`)
+  if (!anim) throw new Error(t('动画不存在：{0}（用 listAnimations 查现有动画名）', animationName))
   const next = nextName.trim()
-  if (!next) throw new Error('新动画名不能为空')
+  if (!next) throw new Error(t('新动画名不能为空'))
   if (next !== animationName && doc.animations.some((item) => item.name === next)) {
-    throw new Error(`动画名已被占用：${next}`)
+    throw new Error(t('动画名已被占用：{0}', next))
   }
   anim.name = next
   if (doc.editorMeta.activeAnimation === animationName) doc.editorMeta.activeAnimation = next
@@ -516,8 +529,10 @@ export function setAnimationDuration(
 ): { name: string; duration: number } {
   const name = animationName || doc.editorMeta.activeAnimation
   const anim = doc.animations.find((item) => item.name === name)
-  if (!anim) throw new Error(`动画不存在：${name}（用 listAnimations 查现有动画名）`)
-  if (!Number.isFinite(duration) || duration < 0) throw new Error('duration 必须是不小于 0 的数字（单位：秒）')
+  if (!anim) throw new Error(t('动画不存在：{0}（用 listAnimations 查现有动画名）', name))
+  if (!Number.isFinite(duration) || duration < 0) {
+    throw new Error(t('duration 必须是不小于 0 的数字（单位：秒）'))
+  }
   anim.duration = duration
   return { name: anim.name, duration: anim.duration }
 }
@@ -525,7 +540,7 @@ export function setAnimationDuration(
 /** 切换当前编辑动画（时间轴与视口会跟着换） */
 export function setActiveAnimation(doc: EditorDocument, animationName: string): { name: string } {
   const anim = doc.animations.find((item) => item.name === animationName)
-  if (!anim) throw new Error(`动画不存在：${animationName}（用 listAnimations 查现有动画名）`)
+  if (!anim) throw new Error(t('动画不存在：{0}（用 listAnimations 查现有动画名）', animationName))
   doc.editorMeta.activeAnimation = anim.name
   return { name: anim.name }
 }

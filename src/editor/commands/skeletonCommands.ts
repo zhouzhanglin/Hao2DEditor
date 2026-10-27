@@ -1,6 +1,7 @@
 import { compact, need, optBool, optNum, optText, optTextList, optVec, requireSomeField } from './args'
 import { deleteBone, deleteSlot } from './authoringCommands'
 import { changed, defineWrite } from './registry'
+import { t } from '@i18n'
 import {
   addAnimation,
   addBone,
@@ -60,7 +61,10 @@ export function registerSkeletonCommands(): void {
           color: optText(args, 'color')
         })
       )
-      return changed(result, `已新建骨骼 ${result.name}（父级：${result.parent || '无'}）`)
+      return changed(
+        result,
+        t('已新建骨骼 {0}（父级：{1}）', [result.name, result.parent || t('无')])
+      )
     }
   )
 
@@ -104,7 +108,10 @@ export function registerSkeletonCommands(): void {
       const fields = Object.keys(options).filter((key) => key !== 'bone')
       requireSomeField(fields)
       setBoneTransform(draft, options)
-      return changed({ bone, changedFields: fields }, `已更新骨骼 ${bone} 的 ${fields.join(' / ')}`)
+      return changed(
+        { bone, changedFields: fields },
+        t('已更新骨骼 {0} 的 {1}', [bone, fields.join(' / ')])
+      )
     }
   )
 
@@ -121,10 +128,10 @@ export function registerSkeletonCommands(): void {
     (draft, args) => {
       const bone = need(args, 'bone')
       if (!draft.bones.some((item) => item.name === bone)) {
-        throw new Error(`骨骼不存在：${bone}（用 listBones 查现有骨骼名）`)
+        throw new Error(t('骨骼不存在：{0}（用 listBones 查现有骨骼名）', bone))
       }
       deleteBone(draft, bone)
-      return changed({ bone }, `已删除骨骼 ${bone}`)
+      return changed({ bone }, t('已删除骨骼 {0}', bone))
     }
   )
 
@@ -157,7 +164,10 @@ export function registerSkeletonCommands(): void {
           locked: optBool(args, 'locked')
         })
       )
-      return changed(result, `已新建插槽 ${result.name}（宿主骨骼：${result.bone}）`)
+      return changed(
+        result,
+        t('已新建插槽 {0}（宿主骨骼：{1}）', [result.name, result.bone])
+      )
     }
   )
 
@@ -190,7 +200,10 @@ export function registerSkeletonCommands(): void {
       const fields = Object.keys(options).filter((key) => key !== 'slot')
       requireSomeField(fields)
       setSlotProps(draft, options)
-      return changed({ slot, changedFields: fields }, `已更新插槽 ${slot} 的 ${fields.join(' / ')}`)
+      return changed(
+        { slot, changedFields: fields },
+        t('已更新插槽 {0} 的 {1}', [slot, fields.join(' / ')])
+      )
     }
   )
 
@@ -209,7 +222,7 @@ export function registerSkeletonCommands(): void {
       const slot = need(args, 'slot')
       const bone = need(args, 'bone')
       setSlotHost(draft, slot, bone)
-      return changed({ slot, bone }, `已把插槽 ${slot} 挂到 ${bone} 下（全局位姿保持不变）`)
+      return changed({ slot, bone }, t('已把插槽 {0} 挂到 {1} 下（全局位姿保持不变）', [slot, bone]))
     }
   )
 
@@ -226,10 +239,10 @@ export function registerSkeletonCommands(): void {
     (draft, args) => {
       const slot = need(args, 'slot')
       if (!draft.slots.some((item) => item.name === slot)) {
-        throw new Error(`插槽不存在：${slot}（用 listSlots 查现有插槽名）`)
+        throw new Error(t('插槽不存在：{0}（用 listSlots 查现有插槽名）', slot))
       }
       deleteSlot(draft, slot)
-      return changed({ slot }, `已删除插槽 ${slot}`)
+      return changed({ slot }, t('已删除插槽 {0}', slot))
     }
   )
 
@@ -254,7 +267,7 @@ export function registerSkeletonCommands(): void {
     (draft, args) => {
       const kind = need(args, 'kind')
       if (kind !== 'ik' && kind !== 'transform' && kind !== 'path') {
-        throw new Error(`kind 只能是 ik / transform / path，收到 ${kind}`)
+        throw new Error(t('kind 只能是 ik / transform / path，收到 {0}', kind))
       }
       const result = addConstraint(
         draft,
@@ -267,8 +280,16 @@ export function registerSkeletonCommands(): void {
           nodeName: optText(args, 'nodeName')
         })
       )
-      const tail = result.nodeBone ? `，并新建了节点骨 ${result.nodeBone}` : ''
-      return changed(result, `已新建 ${kind} 约束 ${result.name}（骨链：${result.bones.join(' → ')}${tail}）`)
+      const tail = result.nodeBone ? t('，并新建了节点骨 {0}', result.nodeBone) : ''
+      return changed(
+        result,
+        t('已新建 {0} 约束 {1}（骨链：{2}{3}）', [
+          kind,
+          result.name,
+          result.bones.join(' → '),
+          tail
+        ])
+      )
     }
   )
 
@@ -289,7 +310,9 @@ export function registerSkeletonCommands(): void {
     (draft, args) => {
       const name = need(args, 'constraint')
       const constraint = draft.constraints.find((item) => item.name === name)
-      if (!constraint) throw new Error(`约束不存在：${name}（用 listConstraints 查现有约束名）`)
+      if (!constraint) {
+        throw new Error(t('约束不存在：{0}（用 listConstraints 查现有约束名）', name))
+      }
       const fields: string[] = []
       const enabled = optBool(args, 'enabled')
       if (enabled !== undefined) {
@@ -298,7 +321,9 @@ export function registerSkeletonCommands(): void {
       }
       const target = optText(args, 'target')
       if (target !== undefined) {
-        if (!draft.bones.some((bone) => bone.name === target)) throw new Error(`目标骨骼不存在：${target}`)
+        if (!draft.bones.some((bone) => bone.name === target)) {
+          throw new Error(t('目标骨骼不存在：{0}', target))
+        }
         constraint.target = target
         fields.push('target')
       }
@@ -309,14 +334,23 @@ export function registerSkeletonCommands(): void {
       }
       const bones = optTextList(args, 'bones')
       if (bones !== undefined) {
-        if (constraint.type !== 'ik') throw new Error('只有 IK 约束能改骨链（变换 / 路径约束的第一根就是宿主骨）')
+        if (constraint.type !== 'ik') {
+          throw new Error(t('只有 IK 约束能改骨链（变换 / 路径约束的第一根就是宿主骨）'))
+        }
         const chain = asBoneChain(draft, bones)
-        if (chain.length === 0) throw new Error(`IK 骨链必须「父 → 子」连续：${bones.join(' / ')} 不构成一条链`)
+        if (chain.length === 0) {
+          throw new Error(
+            t('IK 骨链必须「父 → 子」连续：{0} 不构成一条链', bones.join(' / '))
+          )
+        }
         constraint.bones = chain
         fields.push('bones')
       }
       requireSomeField(fields)
-      return changed({ constraint: name, changedFields: fields }, `已更新约束 ${name} 的 ${fields.join(' / ')}`)
+      return changed(
+        { constraint: name, changedFields: fields },
+        t('已更新约束 {0} 的 {1}', [name, fields.join(' / ')])
+      )
     }
   )
 
@@ -333,9 +367,9 @@ export function registerSkeletonCommands(): void {
     (draft, args) => {
       const name = need(args, 'constraint')
       const index = draft.constraints.findIndex((item) => item.name === name)
-      if (index < 0) throw new Error(`约束不存在：${name}（用 listConstraints 查现有约束名）`)
+      if (index < 0) throw new Error(t('约束不存在：{0}（用 listConstraints 查现有约束名）', name))
       draft.constraints.splice(index, 1)
-      return changed({ constraint: name }, `已删除约束 ${name}`)
+      return changed({ constraint: name }, t('已删除约束 {0}', name))
     }
   )
 
@@ -374,7 +408,10 @@ export function registerSkeletonCommands(): void {
             `参考图装配中：调 getDisplayWorldBounds {slot:'${result.slot}', attachment:'${result.attachment}'} 读世界包围盒，与底图量出的目标框对比，不对就 setDisplayTransform 修到重合；对齐这个部件再挂下一个`
           ]
         : undefined
-      return changed({ ...result, next }, `已给插槽 ${result.slot} 加上附件 ${result.attachment}`)
+      return changed(
+        { ...result, next },
+        t('已给插槽 {0} 加上附件 {1}', [result.slot, result.attachment])
+      )
     }
   )
 
@@ -468,7 +505,7 @@ export function registerSkeletonCommands(): void {
       const slot = need(args, 'slot')
       const attachment = need(args, 'attachment')
       deleteDisplay(draft, slot, attachment)
-      return changed({ slot, attachment }, `已删除附件 ${slot} / ${attachment}`)
+      return changed({ slot, attachment }, t('已删除附件 {0} / {1}', [slot, attachment]))
     }
   )
 
@@ -496,7 +533,7 @@ export function registerSkeletonCommands(): void {
           activate: optBool(args, 'activate')
         })
       )
-      return changed(result, `已新建动画 ${result.name}（时长 ${result.duration} 秒）`)
+      return changed(result, t('已新建动画 {0}（时长 {1} 秒）', [result.name, result.duration]))
     }
   )
 
@@ -513,7 +550,7 @@ export function registerSkeletonCommands(): void {
     (draft, args) => {
       const animation = need(args, 'animation')
       removeAnimation(draft, animation)
-      return changed({ animation }, `已删除动画 ${animation}`)
+      return changed({ animation }, t('已删除动画 {0}', animation))
     }
   )
 
@@ -531,7 +568,7 @@ export function registerSkeletonCommands(): void {
     (draft, args) => {
       const animation = need(args, 'animation')
       const result = renameAnimation(draft, animation, need(args, 'next'))
-      return changed(result, `已把动画 ${animation} 改名为 ${result.name}`)
+      return changed(result, t('已把动画 {0} 改名为 {1}', [animation, result.name]))
     }
   )
 
@@ -548,9 +585,9 @@ export function registerSkeletonCommands(): void {
     },
     (draft, args) => {
       const duration = optNum(args, 'duration')
-      if (duration === undefined) throw new Error('缺少参数 duration（数字，单位秒）')
+      if (duration === undefined) throw new Error(t('缺少参数 duration（数字，单位秒）'))
       const result = setAnimationDuration(draft, optText(args, 'animation') ?? '', duration)
-      return changed(result, `动画 ${result.name} 的时长已设为 ${result.duration} 秒`)
+      return changed(result, t('动画 {0} 的时长已设为 {1} 秒', [result.name, result.duration]))
     }
   )
 
@@ -566,7 +603,7 @@ export function registerSkeletonCommands(): void {
     },
     (draft, args) => {
       const result = setActiveAnimation(draft, need(args, 'animation'))
-      return changed(result, `已切换到动画 ${result.name}`)
+      return changed(result, t('已切换到动画 {0}', result.name))
     }
   )
 }

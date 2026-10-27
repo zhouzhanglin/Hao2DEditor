@@ -1560,11 +1560,569 @@ export const en: Record<string, string> = {
     'Move bone "{0}" {1} · drag the bone origin circle',
   '{0}骨骼「{1}」{2} · {3}{4}': '{0} bone "{1}" {2} · {3}{4}',
   '斜切骨骼「{0}」{1} · 拖动包围盒{2}{3}':
-    'Shear bone "{0}" {1} · drag the box{2}{3}',
+    'Shear bone "{0}" {1} · drag the {2} of the box{3}',
   '拖动距离太短，未生成骨骼': 'Drag distance too short; no bone was created',
   '「{0}」要先选中一个网格附件（Region 可右键「转为网格」再改）':
     '"{0}": select a mesh attachment first (right-click a Region and choose "Convert to Mesh")',
   '「{0}」改的是绑定网格：请切到 Pose 状态（Animate 态拖顶点写的是 FFD 帧）':
     '"{0}" edits the setup mesh: switch to Pose (dragging vertices in Animate writes FFD frames)',
 
+  // ── 状态栏提示的拼接片段（作为 t() 的参数传入） ────────────────────────
+  '（写入关键帧）': '(keyed)',
+  '（修改 setup）': '(setup)',
+  '（同时作用于 {0} 根选中骨骼）': ' (applies to {0} selected bones)',
+  '整体': 'whole',
+  '{0} 轴': '{0} axis',
+  '上边': 'top edge',
+  '下边': 'bottom edge',
+  '左边': 'left edge',
+  '右边': 'right edge',
+
+  // ── 视口交互状态提示（描边 / 权重刷 / 画骨骼 / 顶点 / 边界） ──────────
+  '修改遮罩失败': 'Failed to modify the mask',
+  '创建遮罩失败': 'Failed to create the mask',
+  '没有新增的遮罩点可撤销（原多边形未变）；按 Esc 取消本次绘制':
+    'No new mask points to undo (the original polygon is unchanged); press Esc to cancel this drawing',
+  '还没有落下遮罩点：单击继续，Esc 取消':
+    'No mask points placed yet: click to continue, Esc to cancel',
+  '顶点 #{0}（{1} / {2}）': 'Vertex #{0} ({1} / {2})',
+  '顶点 #{0} 等 {1} 个（{2} / {3}）：拖动整组移动':
+    'Vertex #{0} (group of {1}) ({2} / {3}): drag to move the group',
+  '{0}：在层级树里选一根骨骼后按住拖动即可刷权重':
+    '{0}: select a bone in the hierarchy, then drag to paint weights',
+  '请先在层级树里选中要刷权重的骨骼': 'Select the bone to paint in the hierarchy first',
+  '平滑权重（朝邻居平均）': 'smooth weights (averaged toward neighbours)',
+  '{0}「{1}」的权重': '{0} weights of "{1}"',
+  '权重刷「{0}」': 'Weight brush "{0}"',
+  '{0}：按住拖动{1}': '{0}: hold and drag to {1}',
+  '（Mode {0} / Size {1}px / Hardness {2}{3}；临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长）':
+    ' (Mode {0} / Size {1}px / Hardness {2}{3}; temporary direction: Alt=subtract / Shift=replace / Ctrl=smooth / Ctrl+Shift=grow)',
+  ' / Normalize 关': ' / Normalize off',
+  '增加': 'Add',
+  '增长': 'Grow',
+  '减少': 'Subtract',
+  '覆盖': 'Replace',
+  '平滑': 'Smooth',
+  '已吸附到「{0}」的骨骼端点：拖动决定长度与方向，松开生成（一根接一根就是骨骼链）':
+    'Snapped to the bone tip of "{0}": drag to set length and direction, release to create (chain them one after another)',
+  '从「{0}」接着画：拖动决定长度与方向，松开生成（可以一根接一根拖成骨骼链）':
+    'Continuing from "{0}": drag to set length and direction, release to create (drag one after another to build a chain)',
+  '拖动决定长度与方向，松开生成骨骼（挂在根骨骼下；从骨骼上起笔才会挂到它下面）':
+    'Drag to set length and direction, release to create a bone (parented to the root bone; start the drag on a bone to parent it there)',
+  '；拖到插槽上松手会把该插槽挂过来（锁定中的插槽除外）':
+    '; drop it on a slot to attach that slot to it (locked slots excluded)',
+  '已选中 {0} 个顶点（Shift+点击加选 / 减选；拖任意一个即整组移动）':
+    'Selected {0} vertices (Shift+click to add / remove; drag any of them to move the group)',
+  '已取消顶点选择': 'Vertex selection cleared',
+  '已新建骨骼「{0}」{1} · 长度 {2}': 'Created bone "{0}" {1} · length {2}',
+  '，挂在「{0}」下': '(parented to "{0}")',
+  ' · 插槽「{0}」已挂到它下面': ' · slot "{0}" is now attached to it',
+  '已平滑 {0} 个顶点的权重': 'Smoothed weights of {0} vertices',
+  '已为 {0} 个顶点刷上「{1}」的权重': 'Painted weights of "{1}" onto {0} vertices',
+  '框选顶点（Shift：加进当前选择）：拖出矩形，松手选中框内的顶点；右键取消选择':
+    'Box select vertices (Shift: add to current selection): drag a rectangle, release to select the vertices inside; right-click to cancel',
+  '框选顶点：拖出矩形，松手选中框内的顶点；右键取消选择':
+    'Box select vertices: drag a rectangle, release to select the vertices inside; right-click to cancel',
+  '；该点在图片范围外，已贴到最近的框边':
+    '; the point was outside the image bounds and was clamped to the nearest edge',
+  '边界点 {0}：继续点（至少 3 个点，点回起点或右键收尾）；点错了按 Ctrl+Z 撤回上一个{1}':
+    'Boundary point {0}: keep clicking (at least 3 points; click the start point or right-click to finish); press Ctrl+Z to undo the last one{1}',
+  '边界点 {0}：点回起点（第一个大圆点）或按右键收尾闭合；点错了按 Ctrl+Z 撤回上一个{1}':
+    'Boundary point {0}: click the start point (the first large dot) or right-click to close; press Ctrl+Z to undo the last one{1}',
+
+  // ── 撤销 / 历史面板里的命令名 ─────────────────────────────────────────
+  '修改遮罩多边形': 'Modify mask polygon',
+  '创建遮罩': 'Create mask',
+  '移动遮罩控制点': 'Move mask control point',
+  '删除遮罩控制点': 'Delete mask control point',
+  '插入遮罩控制点': 'Insert mask control point',
+  '编辑 FFD': 'Edit FFD',
+  '移动顶点': 'Move vertex',
+  '编辑网格顶点': 'Edit mesh vertex',
+  '移动骨骼': 'Move bone',
+  '斜切骨骼': 'Shear bone',
+  '旋转附件': 'Rotate attachment',
+  '缩放附件': 'Scale attachment',
+  '移动附件': 'Move attachment',
+  '插槽挂到新骨骼': 'Attach slot to new bone',
+  '自动权重（绑定骨骼）': 'Auto weights (bind bones)',
+  '重绘网格边界': 'Redraw mesh boundary',
+  '生成轮廓网格': 'Generate outline mesh',
+  '粘贴节点': 'Paste node',
+  '粘贴关键帧': 'Paste keyframe',
+  'Region 转网格': 'Region to mesh',
+  'AI：按轮廓生成网格': 'AI: generate mesh from outline',
+  'AI：自动权重': 'AI: auto weights',
+  '删除皮肤': 'Delete skin',
+  '调整舞台参考图': 'Adjust stage reference image',
+  '打关键帧': 'Key frame',
+  '打显示关键帧': 'Key display frame',
+  '添加事件帧': 'Add event frame',
+  '删除关键帧': 'Delete keyframe',
+  '删除动画通道': 'Delete animation channel',
+  '清理帧': 'Clean up frames',
+
+  // ── 命令执行结果（状态栏 message）─────────────────────────────────────
+  // 动画 / 关键帧
+  'value 必须是 {x,y}（{0} 通道），也可以传单个数字表示 x = y':
+    'Value must be {x,y} (the {0} channel); a single number means x = y',
+  'bone 轨道的 channel 只能是 {0}，收到 {1}':
+    'A bone track channel must be one of {0}; received {1}',
+  'slot 轨道的 channel 只能是 {0}，收到 {1}':
+    'A slot track channel must be one of {0}; received {1}',
+  'deform 轨道的 channel 只能是 frames，收到 {0}':
+    'A deform track channel must be frames; received {0}',
+  'drawOrder 轨道的 channel 只能是 order，收到 {0}':
+    'A drawOrder track channel must be order; received {0}',
+  '已给骨骼 {0} 的 {1} 在 {2} 秒打了一帧': 'Keyed {1} of bone {0} at {2}s',
+  '那根骨骼在 {0} 秒本来就没有这个通道的关键帧':
+    'That bone has no keyframe for this channel at {0}s',
+  '已删除该关键帧': 'Deleted the keyframe',
+  '缺少参数 attachment（附件名；空串表示不显示）':
+    'Missing parameter attachment (attachment name; an empty string means "not shown")',
+  '插槽 {0} 在 {1} 秒起显示「{2}」': 'Slot {0} shows "{2}" from {1}s',
+  '插槽 {0} 在 {1} 秒起显示': 'Slot {0} is shown from {1}s',
+  '插槽 {0} 在 {1} 秒起隐藏': 'Slot {0} is hidden from {1}s',
+  '缺少参数 visible（true / false）': 'Missing parameter visible (true / false)',
+  '插槽 {0} 在 {1} 秒的颜色设为 {2}': 'Color of slot {0} at {1}s set to {2}',
+  '已在 {0} 秒打了一帧绘制顺序（{1}）': 'Keyed draw order at {0}s ({1})',
+  '缺少参数 offsets（数字数组，长度 = 顶点数 × 2）':
+    'Missing parameter offsets (number array, length = vertex count × 2)',
+  '已给 {0} / {1}（{2} 顶点）在 {3} 秒打了 FFD 帧':
+    'Keyed FFD for {0} / {1} ({2} vertices) at {3}s',
+  '这个时间点本来就没有 FFD 帧': 'There is no FFD frame at this time',
+  '已删除该 FFD 帧': 'Deleted the FFD frame',
+  '两个时间点一样（都是 {0} 秒），不用挪': 'Both times are the same ({0}s); nothing to move',
+  '已把关键帧从 {0} 秒挪到 {1} 秒': 'Moved the keyframe from {0}s to {1}s',
+  '已把该帧缓动改为 {0}': 'Changed the frame easing to {0}',
+  '这条轨道上本来就没有关键帧': 'This track has no keyframes',
+  '已清掉 {0} 帧': 'Cleared {0} keyframes',
+  '已清空动画 {0} 的全部关键帧': 'Cleared all keyframes of animation {0}',
+
+  // 面板 / 视图开关
+  '「{0}」叠加层已显示': '"{0}" overlay shown',
+  '「{0}」叠加层已隐藏': '"{0}" overlay hidden',
+  '洋葱皮已开启': 'Onion skin on',
+  '洋葱皮已关闭': 'Onion skin off',
+  '智能过滤已开启': 'Smart filter on',
+  '智能过滤已关闭': 'Smart filter off',
+  '时间轴缩放已设为 {0}×': 'Timeline zoom set to {0}×',
+  '已复制 {0} 个节点': 'Copied {0} node(s)',
+  '已复制 {0} 个关键帧': 'Copied {0} keyframe(s)',
+
+  // 层级 / 插槽 / 附件
+  '找不到骨骼「{0}」': 'Bone "{0}" not found',
+  '骨骼不能拖到它自己下面': 'A bone cannot be dragged under itself',
+  '「{0}」是层级根骨骼：其他骨骼都在它之下，它自己不能移动':
+    '"{0}" is the hierarchy root bone: everything else sits below it, so it cannot be moved',
+  '「{0}」在「{1}」的子树里，拖进去会形成环':
+    '"{0}" is inside the subtree of "{1}"; dropping it there would create a cycle',
+  '插槽必须挂在某根骨骼下': 'A slot must be attached to a bone',
+  '插槽「{0}」已挂到骨骼「{1}」下': 'Slot "{0}" is now attached to bone "{1}"',
+  '工程里还没有骨骼：插槽必须挂在某根骨骼下':
+    'The project has no bones yet: a slot must be attached to a bone',
+  '工程里没有皮肤': 'The project has no skins',
+  '找不到对应的插槽附件清单': 'Could not find the matching slot attachment list',
+  '插槽「{0}」里没有 display「{1}」': 'Slot "{0}" has no display "{1}"',
+  '已调整 display「{0}」的顺序': 'Reordered display "{0}"',
+  'display「{0}」已移到插槽「{1}」下': 'Display "{0}" moved under slot "{1}"',
+
+  // 网格生成
+  '生成 / 重设网格改的是绑定网格：请切到 Pose 状态':
+    'Generating / resetting a mesh edits the setup mesh: switch to Pose',
+  '先在层级树里选中要生成网格的图片附件':
+    'Select the image attachment to mesh in the hierarchy first',
+  '只有图片（Region）能转为规则栅格网格；已经是网格的请用「自动生成网格」按密度重设':
+    'Only images (Region) can be converted to a regular grid mesh; if it is already a mesh, use "Auto-generate mesh" to reset its density',
+  '已生成规则网格（{0}×{1}）：{2} 顶点 / {3} 三角面':
+    'Generated a regular grid mesh ({0}×{1}): {2} vertices / {3} triangles',
+  '生成失败：附件类型不是 Region': 'Generation failed: the attachment is not a Region',
+  '视口尚未就绪，稍后再试': 'The viewport is not ready yet; try again in a moment',
+  '找不到附件「{0}」': 'Attachment "{0}" not found',
+  '只有图片（Region）或由图片转来的网格能自动生成轮廓网格':
+    'Only images (Region) or meshes converted from images can auto-generate an outline mesh',
+  '图片「{0}」还没解码完成，稍后再试':
+    'Image "{0}" has not finished decoding; try again in a moment',
+  '已自动生成轮廓网格：{0} 顶点 / {1} 三角面（贴合轮廓，孔洞已忽略）':
+    'Auto-generated an outline mesh: {0} vertices / {1} triangles (fit to the outline, holes ignored)',
+  '自动生成失败：图片没有可用的不透明像素区域':
+    'Auto-generation failed: the image has no usable opaque pixels',
+
+  // 工程 / 骨架 / 皮肤
+  '工程还没有保存路径：先调 createProject 指定 dir，或给 saveProject 传 path':
+    'The project has no save path yet: call createProject with dir, or pass path to saveProject',
+  '工程名不能为空': 'Project name cannot be empty',
+  '工程名已经是「{0}」': 'The project name is already "{0}"',
+  '工程已重命名为「{0}」（保存后写进工程文件）':
+    'Project renamed to "{0}" (written to the project file on save)',
+  '缺少参数 paths（图片绝对路径数组，不能为空）':
+    'Missing parameter paths (array of absolute image paths; cannot be empty)',
+  '骨架下标越界：{0}（现有 {1} 个，用 getProjectState 查）':
+    'Armature index out of range: {0} (there are {1}; check with getProjectState)',
+  '骨架下标越界：{0}（现有 {1} 个）': 'Armature index out of range: {0} (there are {1})',
+  '已经在这个骨架上了：{0}': 'Already on this armature: {0}',
+  '已新建皮肤「{0}」': 'Created skin "{0}"',
+  '皮肤不存在：{0}（用 listSkins 查现有皮肤名）':
+    'Skin not found: {0} (use listSkins to see existing skin names)',
+  '已有同名皮肤：{0}': 'A skin with that name already exists: {0}',
+  '皮肤已重命名为「{0}」': 'Skin renamed to "{0}"',
+  '不能删除默认皮肤 default': 'The default skin cannot be deleted',
+  '已切换到皮肤「{0}」': 'Switched to skin "{0}"',
+  'time 必须不小于 0（秒），收到 {0}': 'time must be >= 0 (seconds); received {0}',
+  '播放头已移到 {0} 秒': 'Playhead moved to {0}s',
+  '没有可播放的动画：先用 addAnimation 建一条':
+    'No animation to play: create one with addAnimation first',
+  '开始播放': 'Playing',
+  '已暂停': 'Paused',
+  '动画「{0}」在 {1}s 没有事件帧（用 getAnimationKeys 查现有事件）':
+    'Animation "{0}" has no event frame at {1}s (use getAnimationKeys to see existing events)',
+  '已更新事件帧': 'Event frame updated',
+  '动画「{0}」在 {1}s 没有匹配的事件帧':
+    'Animation "{0}" has no matching event frame at {1}s',
+  '已删除事件帧「{0}」': 'Deleted event frame "{0}"',
+
+  // 导出 / 撤销
+  'mode 只能是 runtime / unity / spine，收到 {0}':
+    'mode must be runtime / unity / spine; received {0}',
+  '没有导出目录：给 exportProject 传 dir，或先把工程存到磁盘（saveProject）':
+    'No export directory: pass dir to exportProject, or save the project to disk first (saveProject)',
+  'atlasScope 只能是 all / selected，收到 {0}':
+    'atlasScope must be all / selected; received {0}',
+  'scale 必须大于 0，收到 {0}': 'scale must be greater than 0; received {0}',
+  '导出缩放已设为 {0}': 'Export scale set to {0}',
+  '没有可撤销的操作': 'Nothing to undo',
+  '已撤销「{0}」': 'Undid "{0}"',
+  '没有可重做的操作': 'Nothing to redo',
+  '已重做「{0}」': 'Redid "{0}"',
+
+  // 视口 / 舞台参考图
+  'kind 只能是 bone / slot / display / constraint，收到 {0}':
+    'kind must be bone / slot / display / constraint; received {0}',
+  'kind = display 时需要同时给 slot（附件所在的插槽名）':
+    'kind = display also requires slot (the slot that owns the attachment)',
+  '场景未就绪：视口还没挂载好，稍后再试':
+    'Scene not ready: the viewport is not mounted yet; try again in a moment',
+  '聚焦失败：找不到 {0}「{1}」（名字可能不对，或该节点没有可框取的尺寸）':
+    'Focus failed: {0} "{1}" not found (the name may be wrong, or the node has no size to frame)',
+  '视口已聚焦到 {0}「{1}」': 'Viewport focused on {0} "{1}"',
+  '视口已平移（dx={0}px, dy={1}px）': 'Viewport panned (dx={0}px, dy={1}px)',
+  'zoom 必须大于 0，收到 {0}': 'zoom must be greater than 0; received {0}',
+  '视口缩放已设为 {0}': 'Viewport zoom set to {0}',
+  '视口已居中到世界坐标 ({0}, {1})': 'Viewport centered on world coordinates ({0}, {1})',
+  '参考图后缀不在支持范围（{0}），收到 .{1}':
+    'Reference image extension not supported ({0}); received .{1}',
+  '请先保存工程：参考图要落到工程目录的 stage/ 下（先 createProject 或 saveProject）':
+    "Save the project first: reference images go under the project's stage/ folder (createProject or saveProject first)",
+  '读不到图片文件：{0}': 'Could not read the image file: {0}',
+  '已更换舞台参考图「{0}」': 'Replaced the stage reference image with "{0}"',
+  '已设置舞台参考图「{0}」': 'Set the stage reference image to "{0}"',
+  '还没有舞台参考图：先调 setStage，或让用户用「舞台」弹窗选一张':
+    'No stage reference image yet: call setStage, or have the user pick one in the "Stage" dialog',
+  'width 必须大于 0，收到 {0}': 'width must be greater than 0; received {0}',
+  'height 必须大于 0，收到 {0}': 'height must be greater than 0; received {0}',
+  '舞台参考图在调整中消失了': 'The stage reference image disappeared while adjusting',
+  '已调整舞台参考图': 'Stage reference image adjusted',
+  '本来就没有舞台参考图': 'There was no stage reference image',
+  '已删除舞台参考图「{0}」': 'Deleted stage reference image "{0}"',
+
+  // 导入 / 复制粘贴 / 事务 / 嵌套骨架
+  'data 不是合法 base64': 'data is not valid base64',
+  '参数 zone 只能是 inside / above / below，收到 {0}':
+    'zone must be inside / above / below; received {0}',
+  '参数 side 只能是 before / after，收到 {0}': 'side must be before / after; received {0}',
+  '给了 side 就要一并给 anchorSlot（排序锚点的插槽名）':
+    'Providing side also requires anchorSlot (the slot used as the ordering anchor)',
+  '插槽「{0}」不存在或骨架名无效': 'Slot "{0}" does not exist, or the armature name is invalid',
+  '已把骨架「{0}」嵌到插槽「{1}」': 'Nested armature "{0}" into slot "{1}"',
+  '缺少参数 order（插槽名数组，第 0 个最先画；用 listSlots 可以拿到当前顺序）':
+    'Missing parameter order (array of slot names, index 0 draws first; use listSlots to get the current order)',
+  'order 里有重复的插槽名': 'order contains duplicate slot names',
+  'order 里有不存在的插槽：{0}（用 listSlots 查现有插槽名）':
+    'order contains unknown slots: {0} (use listSlots to see existing slot names)',
+  'order 少了 {0} 个插槽：{1}（必须给出全部插槽名）':
+    'order is missing {0} slot(s): {1} (all slot names must be provided)',
+  '已重排 {0} 个插槽的绘制顺序': "Reordered {0} slots' draw order",
+  '附件改名要带上 slot（附件所在插槽名；用 listDisplays 查）':
+    'Renaming an attachment requires slot (the slot that owns it; use listDisplays)',
+  '改不了：找不到{0}「{1}」（用 listBones / listSlots / listDisplays / listConstraints 核对）':
+    'Cannot rename: {0} "{1}" not found (check with listBones / listSlots / listDisplays / listConstraints)',
+  '已把「{0}」改名为「{1}」': 'Renamed "{0}" to "{1}"',
+  '图片不存在：{0}（用 listImages 查图片池）':
+    'Image not found: {0} (use listImages to see the image pool)',
+  '已删除图片「{0}」{1}': 'Deleted image "{0}"{1}',
+  '（清空了 {0} 处引用）': ' (cleared {0} reference(s))',
+  '已替换图片「{0}」的来源与尺寸': 'Replaced the source and size of image "{0}"',
+  '已在 {0} 状态': 'Already in {0} mode',
+  '当前不在 Animate 状态：请先调用 setMode 切到 animate 再做动画编辑':
+    'Not in Animate mode: call setMode with animate before editing animation',
+  '没有这个动画：{0}（用 listAnimations 查全部动画名）':
+    'No such animation: {0} (use listAnimations to list all animation names)',
+  '已切换到动画「{0}」': 'Switched to animation "{0}"',
+  '视口还没就绪：等编辑器窗口画完一帧再试':
+    'Viewport not ready: wait until the editor window has drawn a frame',
+  'zoom 必须是正数': 'zoom must be a positive number',
+  '没有指定动画：传 animation 参数，或先 setMode 切到 animate（会自动选中一个动画）':
+    'No animation specified: pass the animation argument, or call setMode with animate (which selects one automatically)',
+  '没有可复制的内容：先用 setSelection 选中骨骼（kind=bone）或插槽（kind=slot）':
+    'Nothing to copy: use setSelection to select a bone (kind=bone) or a slot (kind=slot) first',
+  '粘贴失败：剪贴板为空，或没有合适的落点。先 copyNodes，再用 setSelection 选中目标骨骼':
+    'Paste failed: the clipboard is empty or there is no suitable target. Use copyNodes, then setSelection to select the target bone',
+  '已粘贴 {0} 个节点': 'Pasted {0} node(s)',
+  '没有可复制的选择：先用 setSelection 选中骨骼或插槽（关键帧的复制请用 copyKeyframes）':
+    'Nothing selected to copy: use setSelection to select a bone or slot first (use copyKeyframes to copy keyframes)',
+  '已复制并粘贴 {0} 个节点': 'Copied and pasted {0} node(s)',
+  '没有选中的关键帧：这一步需要在时间轴上手动选中（或直接改用 keyBoneFrame / moveKeyframe 逐个编辑）':
+    'No keyframes selected: select them on the timeline first (or use keyBoneFrame / moveKeyframe to edit them one by one)',
+  '粘贴失败：剪贴板里没有关键帧（先 copyKeyframes），或目标动画不存在':
+    'Paste failed: the clipboard has no keyframes (use copyKeyframes first), or the target animation does not exist',
+  '已粘贴 {0} 个关键帧': 'Pasted {0} keyframe(s)',
+  '视口还没就绪，取不到图片像素。等编辑器窗口画完一帧再试':
+    'Viewport not ready, image pixels are unavailable. Wait until the editor window has drawn a frame',
+  '找不到附件：{0} / {1}（用 listDisplays 查）':
+    'Attachment not found: {0} / {1} (check with listDisplays)',
+  '只有图片（Region）或由图片转来的网格能生成轮廓网格；纯网格请用 convertToMesh 的规则栅格':
+    'Only images (Region) or meshes converted from images can generate an outline mesh; for a pure mesh use convertToMesh with a regular grid',
+  '生成失败：图片没有可用的不透明像素区域（可能整张图都是透明的）':
+    'Generation failed: the image has no usable opaque pixels (it may be fully transparent)',
+  '没有正在进行的事务（rollbackTransaction 要跟在 beginTransaction 之后）':
+    'No transaction in progress (rollbackTransaction must follow beginTransaction)',
+  '已回滚到批量操作前的状态': 'Rolled back to the state before the batch operation',
+  '请先保存或创建工程：导入的图片要落到工程目录的 images/ 下（可先调用 createProject 或 saveProject）':
+    "Save or create the project first: imported images go under the project's images/ folder (call createProject or saveProject first)",
+  '必须给 data（base64 / dataURL）或 path（本地图片绝对路径）其中一个':
+    'Provide either data (base64 / dataURL) or path (absolute local image path)',
+  '读不到图片字节（data 解码失败或 path 文件不存在）':
+    'Could not read image bytes (data decoding failed, or the path does not exist)',
+  '已导入图片 {0}（{1}×{2}）': 'Imported image {0} ({1}×{2})',
+
+  // 网格 / 顶点 / 权重绑定
+  '转不了：{0} / {1} 不是图片（Region）附件（已经转过网格，或用 listDisplays 看它的 type）':
+    'Cannot convert: {0} / {1} is not an image (Region) attachment (it may already be a mesh; check its type with listDisplays)',
+  '已转为网格：{0} 顶点 / {1} 三角形': 'Converted to a mesh: {0} vertices / {1} triangles',
+  '找不到附件 {0} / {1}（用 listDisplays 查）':
+    'Attachment {0} / {1} not found (check with listDisplays)',
+  '只能对 Region 附件（或带快照的网格）用：先用 addDisplay 加碎图，或 convertToRegion 还原':
+    'Only works on Region attachments (or meshes with a snapshot): add a piece with addDisplay first, or restore it with convertToRegion',
+  '附件引用的图片「{0}」不在图片池（先用 importImage 导入）':
+    'The image referenced by the attachment ("{0}") is not in the image pool (import it with importImage first)',
+  '读不到图片「{0}」的像素，无法生成轮廓':
+    'Cannot read pixels of image "{0}", so no outline can be generated',
+  '生成网格失败：附件不是有效的 Region / 网格，或图片没有不透明像素':
+    'Mesh generation failed: the attachment is not a valid Region / mesh, or the image has no opaque pixels',
+  '转不了：{0} / {1} 不是网格（用 listDisplays 看它的 type）':
+    'Cannot convert: {0} / {1} is not a mesh (check its type with listDisplays)',
+  '已把 {0} / {1} 转回图片': 'Converted {0} / {1} back to an image',
+  '缺少参数 point（附件局部坐标 {x,y}）':
+    'Missing parameter point (attachment-local coordinates {x,y})',
+  '已在边上插入顶点（新下标 {0}）': 'Inserted a vertex on the edge (new index {0})',
+  '删不掉：目标不是网格、下标越界，或者删完会只剩不到 3 个顶点':
+    'Cannot delete: the target is not a mesh, the index is out of range, or fewer than 3 vertices would remain',
+  '已删除顶点 {0}': 'Deleted vertex {0}',
+  '移动绑定网格顶点要在 Pose 态做：先 setMode 切到 pose（Animate 态改顶点形变请用 keyDeformFrame）':
+    'Moving setup-mesh vertices must happen in Pose: call setMode with pose first (in Animate, use keyDeformFrame to key deformations)',
+  '{0} / {1} 不是网格附件（用 listDisplays 看它的 type，Region 先 convertToMesh）':
+    '{0} / {1} is not a mesh attachment (check its type with listDisplays; convert a Region with convertToMesh first)',
+  '顶点下标越界：合法范围 0 ~ {0}（用 getAttachmentVertices 核对）':
+    'Vertex index out of range: valid range is 0 ~ {0} (check with getAttachmentVertices)',
+  '顶点本来就在这个位置': 'The vertex is already at that position',
+  '绑不上：目标不是网格、骨骼名不存在，或者它已经被绑过了':
+    'Cannot bind: the target is not a mesh, the bone name does not exist, or it is already bound',
+  '已把 {0} / {1} 绑到骨骼 {2}': 'Bound {0} / {1} to bone {2}',
+  '解绑不了：目标不是网格，或者它本来就没绑这根骨骼':
+    'Cannot unbind: the target is not a mesh, or it was not bound to this bone',
+  '已解绑骨骼 {0}': 'Unbound bone {0}',
+  'weight 必须在 0 ~ 1 之间，收到 {0}': 'weight must be between 0 and 1; received {0}',
+  '写不进去：目标不是网格、顶点下标越界，或者骨骼名不存在':
+    'Cannot write: the target is not a mesh, the vertex index is out of range, or the bone name does not exist',
+  '视口还没就绪，取不到顶点的世界坐标。等编辑器窗口画完一帧再试':
+    'Viewport not ready, vertex world coordinates are unavailable. Wait until the editor window has drawn a frame',
+  '没有可用的骨骼参与加权（层级根骨骼不参与，不然每个顶点都会被它抢走）':
+    'No bones available for weighting (the hierarchy root bone is excluded, otherwise it would take every vertex)',
+  '没有顶点被改动': 'No vertices were changed',
+  'points 至少需要 3 个点才能围成一圈边界':
+    'points needs at least 3 points to enclose a boundary',
+  '重绘不了：{0} / {1} 不是网格（用 listDisplays 看它的 type），或 points 不足以围成闭合多边形':
+    'Cannot rebuild: {0} / {1} is not a mesh (check its type with listDisplays), or points cannot form a closed polygon',
+  '已在顶点 #{0} 与 #{1} 之间连上线': 'Connected vertices #{0} and #{1}',
+  '参数 {0} 必须是点数组 [{x,y}…]': 'Parameter {0} must be an array of points [{x,y}…]',
+  '参数 {0} 里每项必须是 {x,y}': 'Every item in parameter {0} must be {x,y}',
+  '参数 {0} 里的点 x / y 必须是数字': 'Point x / y in parameter {0} must be numbers',
+
+  // 骨骼 / 插槽 / 约束 / 动画的增删改
+  '已新建骨骼 {0}（父级：{1}）': 'Created bone {0} (parent: {1})',
+  '无': 'none',
+  '已更新骨骼 {0} 的 {1}': 'Updated {1} of bone {0}',
+  '骨骼不存在：{0}（用 listBones 查现有骨骼名）':
+    'Bone not found: {0} (use listBones to see existing bone names)',
+  '已删除骨骼 {0}': 'Deleted bone {0}',
+  '已新建插槽 {0}（宿主骨骼：{1}）': 'Created slot {0} (host bone: {1})',
+  '已更新插槽 {0} 的 {1}': 'Updated {1} of slot {0}',
+  '已把插槽 {0} 挂到 {1} 下（全局位姿保持不变）':
+    'Attached slot {0} under {1} (global pose unchanged)',
+  '插槽不存在：{0}（用 listSlots 查现有插槽名）':
+    'Slot not found: {0} (use listSlots to see existing slot names)',
+  '已删除插槽 {0}': 'Deleted slot {0}',
+  'kind 只能是 ik / transform / path，收到 {0}':
+    'kind must be ik / transform / path; received {0}',
+  '，并新建了节点骨 {0}': ', and created node bone {0}',
+  '已新建 {0} 约束 {1}（骨链：{2}{3}）': 'Created {0} constraint {1} (bone chain: {2}{3})',
+  '约束不存在：{0}（用 listConstraints 查现有约束名）':
+    'Constraint not found: {0} (use listConstraints to see existing constraint names)',
+  '目标骨骼不存在：{0}': 'Target bone not found: {0}',
+  '只有 IK 约束能改骨链（变换 / 路径约束的第一根就是宿主骨）':
+    'Only IK constraints can change the bone chain (for transform / path constraints the first bone is the host bone)',
+  'IK 骨链必须「父 → 子」连续：{0} 不构成一条链':
+    'An IK bone chain must be continuous parent → child: {0} is not a chain',
+  '已更新约束 {0} 的 {1}': 'Updated {1} of constraint {0}',
+  '已删除约束 {0}': 'Deleted constraint {0}',
+  '已给插槽 {0} 加上附件 {1}': 'Added attachment {1} to slot {0}',
+  '已删除附件 {0} / {1}': 'Deleted attachment {0} / {1}',
+  '已新建动画 {0}（时长 {1} 秒）': 'Created animation {0} ({1}s long)',
+  '已删除动画 {0}': 'Deleted animation {0}',
+  '已把动画 {0} 改名为 {1}': 'Renamed animation {0} to {1}',
+  '缺少参数 duration（数字，单位秒）': 'Missing parameter duration (a number, in seconds)',
+  '动画 {0} 的时长已设为 {1} 秒': 'Duration of animation {0} set to {1}s',
+  '已切换到动画 {0}': 'Switched to animation {0}',
+
+  // 遮罩命令
+  '找不到插槽「{0}」（用 listSlots 查现有插槽名）':
+    'Slot "{0}" not found (use listSlots to see existing slot names)',
+  '缺少参数 points（数组 [{x,y}, ...]，至少 3 个点，坐标是插槽骨骼局部坐标）':
+    'Missing parameter points (array of [{x,y}, ...], at least 3 points, in slot-bone local coordinates)',
+  'points 至少需要 3 个点，收到 {0} 个': 'points needs at least 3 points; received {0}',
+  'points[{0}] 必须是 {x,y}': 'points[{0}] must be {x,y}',
+  'points[{0}] 的 x / y 必须是有限数字': 'x / y of points[{0}] must be finite numbers',
+  '找不到皮肤「{0}」（用 listSkins 查）': 'Skin "{0}" not found (use listSkins)',
+  '找不到遮罩附件「{0} / {1}」（用 listMasks 查）':
+    'Mask attachment "{0} / {1}" not found (use listMasks)',
+  '找不到附件「{0} / {1}」（用 listDisplays 查）':
+    'Attachment "{0} / {1}" not found (use listDisplays)',
+  '结束插槽「{0}」不存在（用 listSlots 查）': 'End slot "{0}" does not exist (use listSlots)',
+  '结束插槽不能是遮罩自己；要裁到末尾就把 endSlot 留空':
+    'The end slot cannot be the mask itself; to clip to the end, leave endSlot empty',
+  '创建遮罩失败：插槽「{0}」或皮肤不存在，或点数不足 3（用 listSlots / listSkins 查）':
+    'Mask creation failed: slot "{0}" or the skin does not exist, or there are fewer than 3 points (use listSlots / listSkins)',
+  '已创建遮罩 {0} / {1}（{2} 个点）': 'Created mask {0} / {1} ({2} points)',
+  '附件「{0} / {1}」已经是遮罩（用 getMask 查它）':
+    'Attachment "{0} / {1}" is already a mask (inspect it with getMask)',
+  '遮罩控制点没有变化': 'Mask control points unchanged',
+  '设置遮罩控制点失败：附件或皮肤已变化':
+    'Failed to set mask control points: the attachment or skin changed',
+  '已更新遮罩 {0} / {1}（{2} 个点）': 'Updated mask {0} / {1} ({2} points)',
+  '缺少参数 point（新位置 {x,y}，插槽骨骼局部坐标）':
+    'Missing parameter point (new position {x,y}, in slot-bone local coordinates)',
+  'index 越界：该遮罩有 {0} 个点，index 应在 0..{1}':
+    'index out of range: the mask has {0} points, index must be 0..{1}',
+  '移动遮罩控制点失败：附件或皮肤已变化':
+    'Failed to move the mask control point: the attachment or skin changed',
+  '缺少参数 point（新点 {x,y}，插槽骨骼局部坐标）':
+    'Missing parameter point (new point {x,y}, in slot-bone local coordinates)',
+  'index 越界：该遮罩有 {0} 个点，index 应在 -1..{1}':
+    'index out of range: the mask has {0} points, index must be -1..{1}',
+  '插入遮罩控制点失败：附件或皮肤已变化':
+    'Failed to insert the mask control point: the attachment or skin changed',
+  '遮罩至少保留 3 个控制点，当前删不了':
+    'A mask must keep at least 3 control points, so this one cannot be deleted',
+  '已更新遮罩选项（{0}）': 'Updated mask options ({0})',
+
+  // 参数校验 / 查询命令的报错
+  '缺少参数 {0}（字符串）': 'Missing parameter {0} (string)',
+  '参数 {0} 必须是数字': 'Parameter {0} must be a number',
+  '缺少参数 {0}（数字）': 'Missing parameter {0} (number)',
+  '参数 {0} 必须是 {x,y}': 'Parameter {0} must be {x,y}',
+  '参数 {0} 的 x / y 必须是数字': 'x / y of parameter {0} must be numbers',
+  '参数 {0} 必须是数组': 'Parameter {0} must be an array',
+  '参数 {0} 里有不合法的一项：{1}': 'Parameter {0} contains an invalid item: {1}',
+  '参数 {0} 只能是 {1}，收到 {2}': 'Parameter {0} must be one of {1}; received {2}',
+  '至少要给一个要改的字段': 'Provide at least one field to change',
+  '动画不存在：{0}（用 listAnimations 查现有动画名）':
+    'Animation not found: {0} (use listAnimations to see existing animation names)',
+  '视口场景还没就绪，取不到世界坐标（动画播放中或窗口未打开时会这样）':
+    'The viewport scene is not ready, so world coordinates are unavailable (this happens while an animation is playing or when the window is not open)',
+  '找不到插槽：{0}（用 listSlots 查）': 'Slot not found: {0} (use listSlots)',
+  '视口场景还没就绪，取不到世界坐标（窗口未打开或正在初始化时会这样）':
+    'The viewport scene is not ready, so world coordinates are unavailable (this happens when the window is not open or is still initializing)',
+  '视口还没就绪（窗口未打开或正在初始化）':
+    'The viewport is not ready (the window is not open or is still initializing)',
+  'slot 与 attachment 都必须给（用 listDisplays 查）':
+    'Both slot and attachment are required (use listDisplays)',
+  '找不到附件：{0} / {1}（用 listDisplays 查插槽下的附件名）':
+    'Attachment not found: {0} / {1} (use listDisplays to see the attachment names of that slot)',
+  '命令重复注册：{0}': 'Command registered twice: {0}',
+  'args 必须是对象（按参数名传，例如 {"name":"arm"}）':
+    'args must be an object (passed by parameter name, e.g. {"name":"arm"})',
+
+  // 关键帧操作（animOps）的报错
+  '还没有任何动画：先用 addAnimation 建一条':
+    'There is no animation yet: create one with addAnimation first',
+  '(空)': '(empty)',
+  '(无)': '(none)',
+  '动画不存在：{0}（现有：{1}）': 'Animation not found: {0} (existing: {1})',
+  'time 必须是不小于 0 的数字（单位：秒），收到 {0}':
+    'time must be a number greater than or equal to 0 (in seconds); received {0}',
+  'rotate 通道的 value 要传数字（度）': 'The value of the rotate channel must be a number (degrees)',
+  '{0} 通道的 value 要传 {x,y} 或单个数字':
+    'The value of the {0} channel must be {x,y} or a single number',
+  '插槽「{0}」在皮肤「{1}」里没有附件「{2}」（用 listDisplays 查该插槽下的附件名）':
+    'Slot "{0}" has no attachment "{2}" in skin "{1}" (use listDisplays to see the attachment names of that slot)',
+  '插槽「{0}」上没有嵌套骨架 display（先用 nestArmature 把别的骨架挂上来）':
+    'Slot "{0}" has no nested-armature display (use nestArmature to attach another skeleton first)',
+  'offset 必须是数字（秒），收到 {0}': 'offset must be a number (in seconds); received {0}',
+  'speed 必须是不小于 0 的数字，收到 {0}':
+    'speed must be a number greater than or equal to 0; received {0}',
+  '绘制顺序里有不存在的插槽：{0}（用 listSlots 查）':
+    'The draw order contains slots that do not exist: {0} (use listSlots)',
+  '绘制顺序必须是完整序列，漏了：{0}':
+    'The draw order must be the complete sequence; missing: {0}',
+  '附件「{0}」不是网格/遮罩，打不了 FFD（网格先用 convertToMesh；遮罩用 createMask / convertToMask）':
+    'Attachment "{0}" is not a mesh/mask, so FFD cannot be keyed (convert to mesh with convertToMesh first; for masks use createMask / convertToMask)',
+  'offsets 长度必须是点数的 2 倍：该附件有 {0} 个点（网格顶点 / 遮罩控制点），需要 {1} 个数字，收到 {2}':
+    'offsets length must be twice the vertex count: this attachment has {0} points (mesh vertices / mask control points), so it needs {1} numbers; received {2}',
+  '动画「{0}」里没有骨骼「{1}」的轨道':
+    'Animation "{0}" has no track for bone "{1}"',
+  '插槽不存在：{0}': 'Slot not found: {0}',
+  '动画「{0}」里没有插槽「{1}」的轨道':
+    'Animation "{0}" has no track for slot "{1}"',
+  '插槽通道只能是 display / color / visible / subArmature，收到 {0}':
+    'Slot channels must be display / color / visible / subArmature; received {0}',
+  '动画「{0}」里没有 {1} / {2} 的 FFD 轨道':
+    'Animation "{0}" has no FFD track for {1} / {2}',
+  '没有落在 {0} 秒的关键帧': 'No keyframe at {0}s',
+  'easing 只能是 linear / stepped / bezier，收到 {0}':
+    'easing must be linear / stepped / bezier; received {0}',
+  'easing = bezier 时必须给 curve：[cx1, cy1, cx2, cy2]（4 个数字）':
+    'easing = bezier requires curve: [cx1, cy1, cx2, cy2] (4 numbers)',
+
+  // 创建 / 设置类命令（skeletonOps）的报错
+  '父骨骼': 'Parent bone',
+  '宿主骨骼': 'Host bone',
+  '新宿主骨骼': 'New host bone',
+  '被驱动骨骼': 'Driven bone',
+  '目标骨骼': 'Target bone',
+  'IK 目标骨骼': 'IK target bone',
+  '{0}不存在：{1}（用 listBones 查现有骨骼名）':
+    '{0} not found: {1} (use listBones to see existing bone names)',
+  '换父级失败：{0}': 'Failed to change the parent: {0}',
+  '换宿主失败：{0} → {1}': 'Failed to change the host: {0} → {1}',
+  '骨架里还没有骨骼，插槽必须挂在骨骼上：先用 addBone 建一根':
+    'The skeleton has no bones yet, and a slot must be attached to a bone: create one with addBone first',
+  '骨架里还没有骨骼：先用 addBone 建一根':
+    'The skeleton has no bones yet: create one with addBone first',
+  'blendMode 不合法：{0}（只能是 {1}）': 'Invalid blendMode: {0} (must be one of {1})',
+  'IK 的骨链必须「父 → 子」连续：{0} 不构成一条链（顺序给反了会自动翻转）':
+    'An IK bone chain must be continuous parent → child: {0} is not a chain (reversed order is flipped automatically)',
+  'IK 至少需要一根被驱动的骨骼，并且必须是父 → 子连续的链':
+    'IK needs at least one driven bone, and they must form a continuous parent → child chain',
+  '至少要给一个要改的字段：armature / animation / playTimes / offset / speed':
+    'Provide at least one field to change: armature / animation / playTimes / offset / speed',
+  '新动画名不能为空': 'The new animation name cannot be empty',
+  '动画名已被占用：{0}': 'Animation name already taken: {0}',
+  'duration 必须是不小于 0 的数字（单位：秒）':
+    'duration must be a number greater than or equal to 0 (in seconds)',
+
+  // 命令执行 / 查找的报错
+  '用 GET /commands 查全部命令名': 'Use GET /commands to list all command names',
+  '没有这个命令：{0}（是不是想用 {1}？{2}）':
+    'No such command: {0} (did you mean {1}? {2})',
+  '没有这个命令：{0}（{1}）': 'No such command: {0} ({1})',
 }

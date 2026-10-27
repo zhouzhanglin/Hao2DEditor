@@ -106,7 +106,7 @@ export async function importPsdLayers(
 
   // ---- ② 一个撤销事务：登记图片 +（可选）按 PSD 位置建插槽 ----
   let slotCount = 0
-  store.update('导入 PSD', (draft) => {
+  store.update(t('导入 PSD'), (draft) => {
     for (const item of written) {
       draft.images.push({
         name: item.name,

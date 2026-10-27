@@ -1,6 +1,7 @@
 import type { EditorDocument } from '@core/model/authoring'
 import type { CommandKind, CommandResponse, CommandSpec } from '@shared/commandTypes'
 import { useProjectStore } from '../store/projectStore'
+import { t } from '@i18n'
 
 /**
  * 命令注册表：把「编辑器能做的每一件事」变成带名字、带参数描述、可序列化的调用。
@@ -48,7 +49,7 @@ interface Entry {
 const table = new Map<string, Entry>()
 
 export function registerCommand(spec: CommandSpec, run: Runner): void {
-  if (table.has(spec.name)) throw new Error(`命令重复注册：${spec.name}`)
+  if (table.has(spec.name)) throw new Error(t('命令重复注册：{0}', spec.name))
   table.set(spec.name, { spec, run })
 }
 
@@ -65,7 +66,8 @@ export function defineRead(spec: Omit<CommandSpec, 'kind'>, run: (args: Args) =>
  */
 export function defineWrite(
   spec: Omit<CommandSpec, 'kind'>,
-  run: (draft: EditorDocument, args: Args) => CommandOutcome | Promise<CommandOutcome>
+  // 必须是同步的：runCommand 在深拷贝草稿上同步跑完再决定是否记账，async 会把提交时机打乱
+  run: (draft: EditorDocument, args: Args) => CommandOutcome
 ): void {
   registerCommand({ ...spec, kind: 'write' }, (args) => {
     let outcome: CommandOutcome = {}
@@ -105,11 +107,13 @@ export async function executeCommand(name: string, args?: unknown): Promise<Omit
   const entry = table.get(name)
   if (!entry) {
     const guess = nearestName(name)
-    const hint = '用 GET /commands 查全部命令名'
+    const hint = t('用 GET /commands 查全部命令名')
     return {
       ok: false,
       changed: false,
-      error: guess ? `没有这个命令：${name}（是不是想用 ${guess}？${hint}）` : `没有这个命令：${name}（${hint}）`
+      error: guess
+        ? t('没有这个命令：{0}（是不是想用 {1}？{2}）', [name, guess, hint])
+        : t('没有这个命令：{0}（{1}）', [name, hint])
     }
   }
   try {
@@ -133,7 +137,7 @@ export async function executeCommand(name: string, args?: unknown): Promise<Omit
 function asArgs(args: unknown): Args {
   if (args === null || args === undefined) return {}
   if (typeof args !== 'object' || Array.isArray(args)) {
-    throw new Error('args 必须是对象（按参数名传，例如 {"name":"arm"}）')
+    throw new Error(t('args 必须是对象（按参数名传，例如 {"name":"arm"}）'))
   }
   return args as Args
 }

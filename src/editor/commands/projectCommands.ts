@@ -22,6 +22,7 @@ import { need, needNum, optBool, optNum, optNumList, optText, optTextList, rawTe
 import { syncDuration } from '../timeline/model'
 import type { AuthoringAnimData } from '@core/model/authoring'
 import type { EventKeyframe } from '@core/model/animation'
+import { t } from '@i18n'
 
 /**
  * 补齐「编辑器有、AI 没有」的那批操作：工程文件生命周期、多骨架管理、皮肤、播放头 /
@@ -153,7 +154,9 @@ export function registerProjectCommands(): void {
       const explicit = optText(args, 'path')
       if (explicit && explicit !== store.projectPath) store.setProjectInfo({ projectPath: explicit })
       if (!explicit && !store.projectPath) {
-        throw new Error('工程还没有保存路径：先调 createProject 指定 dir，或给 saveProject 传 path')
+        throw new Error(
+          t('工程还没有保存路径：先调 createProject 指定 dir，或给 saveProject 传 path')
+        )
       }
       const result = await saveProject(false)
       if (!result.ok) throw new Error(result.message)
@@ -176,13 +179,16 @@ export function registerProjectCommands(): void {
     },
     async (args) => {
       const name = need(args, 'name').trim()
-      if (!name) throw new Error('工程名不能为空')
+      if (!name) throw new Error(t('工程名不能为空'))
       const store = useProjectStore.getState()
-      if (name === store.projectName) return unchanged(`工程名已经是「${name}」`)
+      if (name === store.projectName) return unchanged(t('工程名已经是「{0}」', name))
       store.setProjectInfo({ projectName: name })
       // 工程名会写进 .proj，属于要落盘的改动：标脏，提醒保存
       useProjectStore.setState({ dirty: true })
-      return changed({ projectName: name }, `工程已重命名为「${name}」（保存后写进工程文件）`)
+      return changed(
+        { projectName: name },
+        t('工程已重命名为「{0}」（保存后写进工程文件）', name)
+      )
     }
   )
 
@@ -243,7 +249,9 @@ export function registerProjectCommands(): void {
     },
     async (args) => {
       const paths = optTextList(args, 'paths')
-      if (!paths || paths.length === 0) throw new Error('缺少参数 paths（图片绝对路径数组，不能为空）')
+      if (!paths || paths.length === 0) {
+        throw new Error(t('缺少参数 paths（图片绝对路径数组，不能为空）'))
+      }
       const before = useProjectStore.getState().document.images.length
       const result = await importImagesFlow(paths)
       if (!result.ok) throw new Error(result.message)
@@ -296,10 +304,15 @@ export function registerProjectCommands(): void {
     },
     async (args) => {
       const store = useProjectStore.getState()
-      if (store.skeletons.length <= 1) throw new Error('项目里至少保留一个骨架')
+      if (store.skeletons.length <= 1) throw new Error(t('项目里至少保留一个骨架'))
       const index = optNum(args, 'index') ?? store.activeSkeleton
       if (index < 0 || index >= store.skeletons.length) {
-        throw new Error(`骨架下标越界：${index}（现有 ${store.skeletons.length} 个，用 getProjectState 查）`)
+        throw new Error(
+          t('骨架下标越界：{0}（现有 {1} 个，用 getProjectState 查）', [
+            index,
+            store.skeletons.length
+          ])
+        )
       }
       const name = store.skeletons[index]?.armatureName ?? String(index)
       store.removeSkeleton(index)
@@ -328,10 +341,12 @@ export function registerProjectCommands(): void {
       const store = useProjectStore.getState()
       const index = optNum(args, 'index') ?? store.activeSkeleton
       if (index < 0 || index >= store.skeletons.length) {
-        throw new Error(`骨架下标越界：${index}（现有 ${store.skeletons.length} 个）`)
+        throw new Error(
+          t('骨架下标越界：{0}（现有 {1} 个）', [index, store.skeletons.length])
+        )
       }
       store.renameSkeleton(index, name)
-      return changed({ index, name }, `骨架已重命名为「${name}」`)
+      return changed({ index, name }, t('骨架已重命名为「{0}」', name))
     }
   )
 
@@ -347,15 +362,17 @@ export function registerProjectCommands(): void {
       const index = needNum(args, 'index')
       const store = useProjectStore.getState()
       if (index < 0 || index >= store.skeletons.length) {
-        throw new Error(`骨架下标越界：${index}（现有 ${store.skeletons.length} 个）`)
+        throw new Error(
+          t('骨架下标越界：{0}（现有 {1} 个）', [index, store.skeletons.length])
+        )
       }
       if (index === store.activeSkeleton) {
-        return unchanged(`已经在这个骨架上了：${store.document.armatureName}`)
+        return unchanged(t('已经在这个骨架上了：{0}', store.document.armatureName))
       }
       const name = store.skeletons[index]?.armatureName ?? String(index)
       store.setActiveSkeleton(index)
       resetForSkeletonChange()
-      return changed({ name, activeSkeleton: index }, `已切换到骨架「${name}」`)
+      return changed({ name, activeSkeleton: index }, t('已切换到骨架「{0}」', name))
     }
   )
 
@@ -376,7 +393,7 @@ export function registerProjectCommands(): void {
       let index = 2
       while (taken.has(name)) name = `${base}${index++}`
       draft.skins.push({ name, slots: draft.slots.map((slot) => ({ slot: slot.name, attachments: [] })) })
-      return changed({ name }, `已新建皮肤「${name}」`)
+      return changed({ name }, t('已新建皮肤「{0}」', name))
     }
   )
 
@@ -395,11 +412,13 @@ export function registerProjectCommands(): void {
       const name = need(args, 'name')
       const newName = need(args, 'newName')
       const skin = draft.skins.find((item) => item.name === name)
-      if (!skin) throw new Error(`皮肤不存在：${name}（用 listSkins 查现有皮肤名）`)
-      if (draft.skins.some((item) => item.name === newName)) throw new Error(`已有同名皮肤：${newName}`)
+      if (!skin) throw new Error(t('皮肤不存在：{0}（用 listSkins 查现有皮肤名）', name))
+      if (draft.skins.some((item) => item.name === newName)) {
+        throw new Error(t('已有同名皮肤：{0}', newName))
+      }
       skin.name = newName
       if (draft.editorMeta.activeSkin === name) draft.editorMeta.activeSkin = newName
-      return changed({ name, newName }, `皮肤已重命名为「${newName}」`)
+      return changed({ name, newName }, t('皮肤已重命名为「{0}」', newName))
     }
   )
 
@@ -415,10 +434,10 @@ export function registerProjectCommands(): void {
       const name = need(args, 'name')
       const before = useProjectStore.getState()
       if (!before.document.skins.some((skin) => skin.name === name)) {
-        throw new Error(`皮肤不存在：${name}（用 listSkins 查现有皮肤名）`)
+        throw new Error(t('皮肤不存在：{0}（用 listSkins 查现有皮肤名）', name))
       }
-      if (name === 'default') throw new Error('不能删除默认皮肤 default')
-      before.update('删除皮肤', (draft) => {
+      if (name === 'default') throw new Error(t('不能删除默认皮肤 default'))
+      before.update(t('删除皮肤'), (draft) => {
         draft.skins = draft.skins.filter((skin) => skin.name !== name)
         if (draft.editorMeta.activeSkin === name) draft.editorMeta.activeSkin = ''
       })
@@ -442,13 +461,13 @@ export function registerProjectCommands(): void {
       const raw = optText(args, 'name') ?? ''
       const skin = raw === 'default' ? '' : raw
       if (skin && !useProjectStore.getState().document.skins.some((item) => item.name === skin)) {
-        throw new Error(`皮肤不存在：${skin}（用 listSkins 查现有皮肤名）`)
+        throw new Error(t('皮肤不存在：{0}（用 listSkins 查现有皮肤名）', skin))
       }
       useProjectStore.getState().setActiveSkin(skin)
       return {
         changed: false,
         data: { skin },
-        message: `已切换到皮肤「${skin || 'default'}」`
+        message: t('已切换到皮肤「{0}」', skin || 'default')
       }
     }
   )
@@ -465,9 +484,9 @@ export function registerProjectCommands(): void {
     },
     async (args) => {
       const time = needNum(args, 'time')
-      if (time < 0) throw new Error(`time 必须不小于 0（秒），收到 ${time}`)
+      if (time < 0) throw new Error(t('time 必须不小于 0（秒），收到 {0}', time))
       useTimelineStore.getState().setTime(time)
-      return { changed: false, data: { time }, message: `播放头已移到 ${time} 秒` }
+      return { changed: false, data: { time }, message: t('播放头已移到 {0} 秒', time) }
     }
   )
 
@@ -489,7 +508,7 @@ export function registerProjectCommands(): void {
       const store = useProjectStore.getState()
       if (playing && !timeline.currentAnimation) {
         const first = store.document.animations[0]?.name
-        if (!first) throw new Error('没有可播放的动画：先用 addAnimation 建一条')
+        if (!first) throw new Error(t('没有可播放的动画：先用 addAnimation 建一条'))
         timeline.setAnimation(first)
       }
       if (loop !== undefined) {
@@ -499,7 +518,7 @@ export function registerProjectCommands(): void {
       return {
         changed: false,
         data: { playing, animation: useTimelineStore.getState().currentAnimation },
-        message: playing ? '开始播放' : '已暂停'
+        message: playing ? t('开始播放') : t('已暂停')
       }
     }
   )
@@ -558,7 +577,12 @@ export function registerProjectCommands(): void {
       const time = needNum(args, 'time')
       const event = findEvent(animation, Math.round(time * 1e4) / 1e4)
       if (!event) {
-        return unchanged(`动画「${animation.name}」在 ${time}s 没有事件帧（用 getAnimationKeys 查现有事件）`)
+        return unchanged(
+          t('动画「{0}」在 {1}s 没有事件帧（用 getAnimationKeys 查现有事件）', [
+            animation.name,
+            time
+          ])
+        )
       }
       const name = optText(args, 'name')
       const stringParam = rawText(args, 'stringParam')
@@ -568,7 +592,16 @@ export function registerProjectCommands(): void {
       if (stringParam !== undefined) event.stringParam = stringParam
       if (intParam !== undefined) event.intParam = intParam
       if (floatParam !== undefined) event.floatParam = floatParam
-      return changed({ time: event.time, name: event.name, stringParam: event.stringParam, intParam: event.intParam, floatParam: event.floatParam }, '已更新事件帧')
+      return changed(
+        {
+          time: event.time,
+          name: event.name,
+          stringParam: event.stringParam,
+          intParam: event.intParam,
+          floatParam: event.floatParam
+        },
+        t('已更新事件帧')
+      )
     }
   )
 
@@ -591,9 +624,14 @@ export function registerProjectCommands(): void {
       const index = animation.events.findIndex(
         (event) => Math.abs(event.time - at) < 1e-4 && (optText(args, 'name') === undefined || event.name === optText(args, 'name'))
       )
-      if (index < 0) return unchanged(`动画「${animation.name}」在 ${at}s 没有匹配的事件帧`)
+      if (index < 0) {
+        return unchanged(t('动画「{0}」在 {1}s 没有匹配的事件帧', [animation.name, at]))
+      }
       const [removed] = animation.events.splice(index, 1)
-      return changed({ removed: removed.name, animation: animation.name, time: at }, `已删除事件帧「${removed.name}」`)
+      return changed(
+        { removed: removed.name, animation: animation.name, time: at },
+        t('已删除事件帧「{0}」', removed.name)
+      )
     }
   )
 
@@ -629,16 +667,18 @@ export function registerProjectCommands(): void {
     async (args) => {
       const rawMode = optText(args, 'mode') ?? 'runtime'
       if (rawMode !== 'runtime' && rawMode !== 'unity' && rawMode !== 'spine') {
-        throw new Error(`mode 只能是 runtime / unity / spine，收到 ${rawMode}`)
+        throw new Error(t('mode 只能是 runtime / unity / spine，收到 {0}', rawMode))
       }
       const mode = rawMode
       const store = useProjectStore.getState()
       const dir = optText(args, 'dir') ?? dirName(store.projectPath ?? '')
-      if (!dir) throw new Error('没有导出目录：给 exportProject 传 dir，或先把工程存到磁盘（saveProject）')
+      if (!dir) {
+        throw new Error(t('没有导出目录：给 exportProject 传 dir，或先把工程存到磁盘（saveProject）'))
+      }
 
       const rawScope = optText(args, 'atlasScope') ?? 'all'
       if (rawScope !== 'all' && rawScope !== 'selected') {
-        throw new Error(`atlasScope 只能是 all / selected，收到 ${rawScope}`)
+        throw new Error(t('atlasScope 只能是 all / selected，收到 {0}', rawScope))
       }
       const scale = optNum(args, 'scale') ?? store.document.editorMeta.exportScale ?? 1
       const maxSize = optNum(args, 'maxSize') ?? 2048
@@ -650,7 +690,7 @@ export function registerProjectCommands(): void {
         skeletons: mode === 'spine' ? (selected ?? [store.activeSkeleton]) : selected,
         atlasScope: rawScope
       })
-      if (plan.skeletons.length === 0) throw new Error('没有可导出的骨架')
+      if (plan.skeletons.length === 0) throw new Error(t('没有可导出的骨架'))
 
       const atlasTxt = useSettingsStore.getState().spineAtlasTxt
       const result =
@@ -678,9 +718,9 @@ export function registerProjectCommands(): void {
     },
     async (args) => {
       const scale = needNum(args, 'scale')
-      if (scale <= 0) throw new Error(`scale 必须大于 0，收到 ${scale}`)
+      if (scale <= 0) throw new Error(t('scale 必须大于 0，收到 {0}', scale))
       useProjectStore.getState().setExportScale(scale)
-      return { changed: false, data: { scale }, message: `导出缩放已设为 ${scale}` }
+      return { changed: false, data: { scale }, message: t('导出缩放已设为 {0}', scale) }
     }
   )
 
@@ -697,14 +737,14 @@ export function registerProjectCommands(): void {
     },
     async () => {
       const store = useProjectStore.getState()
-      if (!store.canUndo) return unchanged('没有可撤销的操作')
+      if (!store.canUndo) return unchanged(t('没有可撤销的操作'))
       const label = store.undoLabel
       store.undo()
       const after = useProjectStore.getState()
       return {
         changed: true,
         data: { canUndo: after.canUndo, canRedo: after.canRedo, label },
-        message: label ? `已撤销「${label}」` : '已撤销'
+        message: label ? t('已撤销「{0}」', label) : t('已撤销')
       }
     }
   )
@@ -720,14 +760,14 @@ export function registerProjectCommands(): void {
     },
     async () => {
       const store = useProjectStore.getState()
-      if (!store.canRedo) return unchanged('没有可重做的操作')
+      if (!store.canRedo) return unchanged(t('没有可重做的操作'))
       const label = store.redoLabel
       store.redo()
       const after = useProjectStore.getState()
       return {
         changed: true,
         data: { canUndo: after.canUndo, canRedo: after.canRedo, label },
-        message: label ? `已重做「${label}」` : '已重做'
+        message: label ? t('已重做「{0}」', label) : t('已重做')
       }
     }
   )

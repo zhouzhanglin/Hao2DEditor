@@ -384,7 +384,7 @@ function commitMaskDraft(host: ToolHost): boolean {
   }
   let name = draftPath.target
   const editing = Boolean(name)
-  const ok = useProjectStore.getState().runCommand(editing ? '修改遮罩多边形' : '创建遮罩', (draft) => {
+  const ok = useProjectStore.getState().runCommand(editing ? t('修改遮罩多边形') : t('创建遮罩'), (draft) => {
     if (editing) return setClippingVertices(draft, draftPath.slot, name, local)
     const attachment = createClippingAttachment(draft, draftPath.slot, { points: local })
     if (!attachment) return false
@@ -392,7 +392,7 @@ function commitMaskDraft(host: ToolHost): boolean {
     return true
   })
   if (!ok || !name) {
-    host.status(editing ? '修改遮罩失败' : '创建遮罩失败')
+    host.status(editing ? t('修改遮罩失败') : t('创建遮罩失败'))
     return false
   }
   host.scene.setViewState({ pendingMaskPath: null, maskPoint: null })
@@ -438,8 +438,8 @@ export function undoMaskDraftPoint(scene: EditorScene, status?: (text: string) =
   if (draft.points.length <= base) {
     status?.(
       base > 0
-        ? '没有新增的遮罩点可撤销（原多边形未变）；按 Esc 取消本次绘制'
-        : '还没有落下遮罩点：单击继续，Esc 取消'
+        ? t('没有新增的遮罩点可撤销（原多边形未变）；按 Esc 取消本次绘制')
+        : t('还没有落下遮罩点：单击继续，Esc 取消')
     )
     return true
   }
@@ -497,7 +497,7 @@ export function deleteSelectedMaskPoint(scene: EditorScene, status?: (text: stri
   }
 
   let removed = false
-  const ok = useProjectStore.getState().runCommand('删除遮罩控制点', (draft) => {
+  const ok = useProjectStore.getState().runCommand(t('删除遮罩控制点'), (draft) => {
     removed = deleteClippingPoint(draft, picked.slot, picked.attachment, picked.index)
     return removed
   })
@@ -559,7 +559,7 @@ function maskPointerDown(host: ToolHost, info: PointerInfo): boolean {
       })
       if (info.alt) {
         let removed = false
-        useProjectStore.getState().runCommand('删除遮罩控制点', (draft) => {
+        useProjectStore.getState().runCommand(t('删除遮罩控制点'), (draft) => {
           removed = deleteClippingPoint(draft, mask.slot, mask.attachment, index)
           return removed
         })
@@ -591,7 +591,7 @@ function maskPointerDown(host: ToolHost, info: PointerInfo): boolean {
         vertex: index,
         lastWorld: { ...info.world }
       }
-      storeHandler.begin('移动遮罩控制点')
+      storeHandler.begin(t('移动遮罩控制点'))
       host.status(t('已选中遮罩控制点 #{0}：拖动移动，Delete 删除', [index + 1]))
       return true
     }
@@ -605,7 +605,7 @@ function maskPointerDown(host: ToolHost, info: PointerInfo): boolean {
         return true
       }
       let inserted = false
-      const ok = useProjectStore.getState().runCommand('插入遮罩控制点', (draft) => {
+      const ok = useProjectStore.getState().runCommand(t('插入遮罩控制点'), (draft) => {
         inserted = insertClippingPoint(draft, mask.slot, mask.attachment, edge.index, local)
         return inserted
       })
@@ -628,7 +628,7 @@ function maskPointerDown(host: ToolHost, info: PointerInfo): boolean {
         vertex: indexAfterInsert,
         lastWorld: { ...info.world }
       }
-      storeHandler.begin('移动遮罩控制点')
+      storeHandler.begin(t('移动遮罩控制点'))
       host.status(t('已在遮罩边上插入控制点：拖动调整，Delete 删除'))
       return true
     }
@@ -683,7 +683,9 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
         vertex: ref.vertex
       })
     }
-    const vertexLabel = ref ? `顶点 #${ref.vertex}（${ref.slot} / ${ref.attachment}）` : null
+    const vertexLabel = ref
+      ? t('顶点 #{0}（{1} / {2}）', [ref.vertex, ref.slot, ref.attachment])
+      : null
     /*
      * 刷哪根骨骼取自 store 的 `bone` 字段（**不看 kind**）：选中顶点会把 kind 改成
      * attachment，若仍按 kind 判定，点完顶点就没法接着拖刷了 —— 而「先选骨骼、再点顶点、
@@ -695,8 +697,8 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     if (!bone && paintMode !== 'smooth') {
       host.status(
         vertexLabel
-          ? `${vertexLabel}：在层级树里选一根骨骼后按住拖动即可刷权重`
-          : '请先在层级树里选中要刷权重的骨骼'
+          ? t('{0}：在层级树里选一根骨骼后按住拖动即可刷权重', [vertexLabel])
+          : t('请先在层级树里选中要刷权重的骨骼')
       )
       return true
     }
@@ -714,14 +716,23 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     }
     // 平滑平均的是全部骨骼的权重，说「刷某根骨骼」会误导
     const action =
-      paintMode === 'smooth' ? '平滑权重（朝邻居平均）' : `${BRUSH_ACTION[paintMode]}「${bone}」的权重`
-    const target = paintMode === 'smooth' ? `权重刷` : `权重刷「${bone}」`
+      paintMode === 'smooth'
+        ? t('平滑权重（朝邻居平均）')
+        : t('{0}「{1}」的权重', [t(BRUSH_ACTION[paintMode]).toLowerCase(), bone])
+    const target = paintMode === 'smooth' ? t('权重刷') : t('权重刷「{0}」', bone)
+    const brushParams = t(
+      '（Mode {0} / Size {1}px / Hardness {2}{3}；临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长）',
+      [
+        tools.brush.mode,
+        tools.brush.size,
+        tools.brush.hardness,
+        tools.brush.normalize ? '' : t(' / Normalize 关')
+      ]
+    )
     host.status(
       vertexLabel
-        ? `${vertexLabel}：按住拖动${action}`
-        : `${target}：按住拖动${action}` +
-            `（Mode ${tools.brush.mode} / Size ${tools.brush.size}px / Hardness ${tools.brush.hardness}` +
-            `${tools.brush.normalize ? '' : ' / Normalize 关'}；临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长）`
+        ? t('{0}：按住拖动{1}', [vertexLabel, action])
+        : t('{0}：按住拖动{1}', [target, action]) + brushParams
     )
     drag = { ...IDLE, kind: 'paint', bone, paintMode, lastPaint: { ...info.world } }
     return true
@@ -747,14 +758,14 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       createEnd: start
     }
     scene.setViewState({ pendingBone: { x1: start.x, y1: start.y, x2: start.x, y2: start.y } })
-    storeHandler.begin('新建骨骼')
+    storeHandler.begin(t('新建骨骼'))
     host.status(
       (endpoint
-        ? `已吸附到「${parent}」的骨骼端点：拖动决定长度与方向，松开生成（一根接一根就是骨骼链）`
+        ? t('已吸附到「{0}」的骨骼端点：拖动决定长度与方向，松开生成（一根接一根就是骨骼链）', parent)
         : parent
-          ? `从「${parent}」接着画：拖动决定长度与方向，松开生成（可以一根接一根拖成骨骼链）`
-          : '拖动决定长度与方向，松开生成骨骼（挂在根骨骼下；从骨骼上起笔才会挂到它下面）') +
-        '；拖到插槽上松手会把该插槽挂过来（锁定中的插槽除外）'
+          ? t('从「{0}」接着画：拖动决定长度与方向，松开生成（可以一根接一根拖成骨骼链）', parent)
+          : t('拖动决定长度与方向，松开生成骨骼（挂在根骨骼下；从骨骼上起笔才会挂到它下面）')) +
+        t('；拖到插槽上松手会把该插槽挂过来（锁定中的插槽除外）')
     )
     return true
   }
@@ -822,8 +833,11 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
         })
         host.status(
           list.length > 0
-            ? `已选中 ${list.length} 个顶点（Shift+点击加选 / 减选；拖任意一个即整组移动）`
-            : '已取消顶点选择'
+            ? t(
+                '已选中 {0} 个顶点（Shift+点击加选 / 减选；拖任意一个即整组移动）',
+                list.length
+              )
+            : t('已取消顶点选择')
         )
         return true
       }
@@ -868,7 +882,9 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
         uvField: uvFields.find((item) => item.index === resolved.vertex)?.field ?? null,
         uvFields
       }
-      storeHandler.begin(host.mode === 'animate' ? '编辑 FFD' : poseEdit ? '移动顶点' : '编辑网格顶点')
+      storeHandler.begin(
+        host.mode === 'animate' ? t('编辑 FFD') : poseEdit ? t('移动顶点') : t('编辑网格顶点')
+      )
       useSelectionStore.getState().select({
         kind: 'attachment',
         slot: resolved.slot,
@@ -879,8 +895,13 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       })
       host.status(
         localIndices.length > 1
-          ? `顶点 #${resolved.vertex} 等 ${localIndices.length} 个（${resolved.slot} / ${resolved.attachment}）：拖动整组移动`
-          : `顶点 #${resolved.vertex}（${resolved.slot} / ${resolved.attachment}）`
+          ? t('顶点 #{0} 等 {1} 个（{2} / {3}）：拖动整组移动', [
+              resolved.vertex,
+              localIndices.length,
+              resolved.slot,
+              resolved.attachment
+            ])
+          : t('顶点 #{0}（{1} / {2}）', [resolved.vertex, resolved.slot, resolved.attachment])
       )
       return true
     }
@@ -1025,7 +1046,14 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
           host.status(t('斜切不支持附件：「{0}」请用移动 / 旋转 / 缩放，或斜切它所在的骨骼', [att.attachment]))
         } else {
           beginAttachmentGizmoDrag(host, att.slot, att.attachment, 'center', mode, info.world)
-          if (isNew) host.status(t('已选中附件「{0}」（{1}）：拖动即可{2}', [att.attachment, att.slot, GIZMO_LABEL[mode]]))
+          if (isNew)
+            host.status(
+              t('已选中附件「{0}」（{1}）：拖动即可{2}', [
+                att.attachment,
+                att.slot,
+                t(GIZMO_LABEL[mode]).toLowerCase()
+              ])
+            )
         }
         return true
       }
@@ -1080,8 +1108,8 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     startPointerLocal: parentWorld ? mulPoint(invert(parentWorld), info.world) : { x: info.world.x, y: info.world.y },
     startDistance: Math.max(1e-4, Math.hypot(info.world.x - origin.x, info.world.y - origin.y))
   }
-  storeHandler.begin('移动骨骼')
-  const suffix = host.mode === 'animate' ? '（写入关键帧）' : '（修改 setup）'
+  storeHandler.begin(t('移动骨骼'))
+  const suffix = host.mode === 'animate' ? t('（写入关键帧）') : t('（修改 setup）')
   host.status(t('移动骨骼「{0}」{1} · 拖动骨骼原点圆圈', [bone.name, suffix]))
   return true
 }
@@ -1218,11 +1246,11 @@ function beginGizmoDrag(
     scaleAxis: part === 'center' ? 'both' : part
   }
   const label = GIZMO_LABEL[mode]
-  storeHandler.begin(label)
-  const suffix = host.mode === 'animate' ? '（写入关键帧）' : '（修改 setup）'
-  const partLabel = part === 'center' ? '整体' : `${part.toUpperCase()} 轴`
-  const together = bones.length > 1 ? `（同时作用于 ${bones.length} 根选中骨骼）` : ''
-  host.status(t('{0}骨骼「{1}」{2} · {3}{4}', [label, boneName, suffix, partLabel, together]))
+  storeHandler.begin(t(label))
+  const suffix = host.mode === 'animate' ? t('（写入关键帧）') : t('（修改 setup）')
+  const partLabel = part === 'center' ? t('整体') : t('{0} 轴', part.toUpperCase())
+  const together = bones.length > 1 ? t('（同时作用于 {0} 根选中骨骼）', bones.length) : ''
+  host.status(t('{0}骨骼「{1}」{2} · {3}{4}', [t(label), boneName, suffix, partLabel, together]))
   return true
 }
 
@@ -1269,10 +1297,12 @@ function beginShearBoxDrag(host: ToolHost, boneName: string, edge: ShearEdge, wo
     shearEdge: edge,
     shearBox: { minX: box.minX, minY: box.minY, maxX: box.maxX, maxY: box.maxY }
   }
-  storeHandler.begin('斜切骨骼')
-  const suffix = host.mode === 'animate' ? '（写入关键帧）' : '（修改 setup）'
-  const edgeLabel = edge === 'top' ? '上边' : edge === 'bottom' ? '下边' : edge === 'left' ? '左边' : '右边'
-  const together = bones.length > 1 ? `（同时作用于 ${bones.length} 根选中骨骼）` : ''
+  storeHandler.begin(t('斜切骨骼'))
+  const suffix = host.mode === 'animate' ? t('（写入关键帧）') : t('（修改 setup）')
+  const edgeLabel = t(
+    edge === 'top' ? '上边' : edge === 'bottom' ? '下边' : edge === 'left' ? '左边' : '右边'
+  )
+  const together = bones.length > 1 ? t('（同时作用于 {0} 根选中骨骼）', bones.length) : ''
   host.status(t('斜切骨骼「{0}」{1} · 拖动包围盒{2}{3}', [boneName, suffix, edgeLabel, together]))
   return true
 }
@@ -1489,7 +1519,9 @@ function beginAttachmentGizmoDrag(
     startProject: (world.x - frame.ox) * axisWorld.x + (world.y - frame.oy) * axisWorld.y,
     startDistance: Math.hypot(world.x - frame.ox, world.y - frame.oy)
   }
-  storeHandler.begin(mode === 'rotate' ? '旋转附件' : mode === 'scale' ? '缩放附件' : '移动附件')
+  storeHandler.begin(
+    mode === 'rotate' ? t('旋转附件') : mode === 'scale' ? t('缩放附件') : t('移动附件')
+  )
   return true
 }
 
@@ -1796,7 +1828,7 @@ function moveActiveDrag(host: ToolHost, info: PointerInfo): void {
     } else {
       // 撤销事务在**第一次真正开刷**时才开：单击只是选中顶点看权重，不该留下空的撤销记录
       drag.paintStarted = true
-      storeHandler.begin('权重刷')
+      storeHandler.begin(t('权重刷'))
     }
     drag.lastPaint = { ...info.world }
     paintAt(host, info.world)
@@ -2039,7 +2071,7 @@ function createBoneFromDrag(
   const length = Math.max(0.02, distance / (parentScale > 1e-6 ? parentScale : 1))
 
   let created = ''
-  useProjectStore.getState().update('新建骨骼', (draft) => {
+  useProjectStore.getState().update(t('新建骨骼'), (draft) => {
     created = uniqueName(draft.bones.map((item) => item.name), 'bone')
     draft.bones.push(
       createAuthoringBone({
@@ -2069,7 +2101,7 @@ function createBoneFromDrag(
     if (!check.ok) note = ` · ${check.message}`
     else {
       let result: MoveResult = check
-      useProjectStore.getState().update('插槽挂到新骨骼', (draft) => {
+      useProjectStore.getState().update(t('插槽挂到新骨骼'), (draft) => {
         result = moveSlot(draft, targetSlot, created, null, {
           worldMatrixOf: (name) => scene.worldMatrixOf(name)
         })
@@ -2083,8 +2115,11 @@ function createBoneFromDrag(
   scene.setDocument(useProjectStore.getState().document, host.selection.skin)
   scene.refresh()
   host.status(
-    `已新建骨骼「${created}」${parent ? `，挂在「${parent}」下` : '（根骨骼）'} · 长度 ${length.toFixed(2)}` +
-      (moved ? ` · 插槽「${moved}」已挂到它下面` : note)
+    t('已新建骨骼「{0}」{1} · 长度 {2}', [
+      created,
+      parent ? t('，挂在「{0}」下', parent) : t('（根骨骼）'),
+      length.toFixed(2)
+    ]) + (moved ? t(' · 插槽「{0}」已挂到它下面', moved) : note)
   )
 }
 
@@ -2127,7 +2162,7 @@ export function runAutoWeightsForBones(
   if (segments.length === 0) return 0
 
   let touched = 0
-  useProjectStore.getState().update('自动权重（绑定骨骼）', (draft) => {
+  useProjectStore.getState().update(t('自动权重（绑定骨骼）'), (draft) => {
     touched = autoWeights(draft, samples, segments, { falloff, maxBones: 4 })
   })
   scene.setDocument(useProjectStore.getState().document, host.selection.skin)
@@ -2205,8 +2240,8 @@ function paintAt(host: ToolHost, world: Vec2): void {
   // 平滑动的是「全部骨骼」的权重，说刷某根骨骼会误导
   host.status(
     drag.paintMode === 'smooth'
-      ? `已平滑 ${touched} 个顶点的权重`
-      : `已为 ${touched} 个顶点刷上「${drag.bone}」的权重`
+      ? t('已平滑 {0} 个顶点的权重', touched)
+      : t('已为 {0} 个顶点刷上「{1}」的权重', [touched, drag.bone])
   )
 }
 
@@ -2251,8 +2286,8 @@ function startVertexBox(host: ToolHost, info: PointerInfo): void {
   host.scene.markDirty()
   host.status(
     info.shift
-      ? '框选顶点（Shift：加进当前选择）：拖出矩形，松手选中框内的顶点；右键取消选择'
-      : '框选顶点：拖出矩形，松手选中框内的顶点；右键取消选择'
+      ? t('框选顶点（Shift：加进当前选择）：拖出矩形，松手选中框内的顶点；右键取消选择')
+      : t('框选顶点：拖出矩形，松手选中框内的顶点；右键取消选择')
   )
 }
 
@@ -2549,7 +2584,7 @@ function addMeshVertexByTool(host: ToolHost, target: MeshTarget, world: Vec2): b
   }
   let created: number | null = null
   // runCommand：点不在网格内部时草稿丢掉，不留空的撤销记录
-  useProjectStore.getState().runCommand('插入网格顶点', (draft) => {
+  useProjectStore.getState().runCommand(t('插入网格顶点'), (draft) => {
     const index = insertMeshVertex(draft, target.slot, target.attachment, local as Vec2)
     if (index === null) return false
     created = index
@@ -2575,7 +2610,7 @@ function removeMeshVertexByTool(host: ToolHost, target: MeshTarget, world: Vec2)
   }
   let removed = false
   // runCommand：删不动（会剩不到一个三角形）时不写撤销记录
-  useProjectStore.getState().runCommand('删除网格顶点', (draft) => {
+  useProjectStore.getState().runCommand(t('删除网格顶点'), (draft) => {
     const ok = deleteMeshVertex(draft, ref.slot, ref.attachment, ref.vertex)
     if (!ok) return false
     removed = true
@@ -2627,11 +2662,17 @@ function boundaryPointerDown(host: ToolHost, target: MeshTarget, world: Vec2): b
   scene.setViewState({
     pendingMeshPath: { slot: target.slot, attachment: target.attachment, points, cursor: point }
   })
-  const suffix = clamped ? '；该点在图片范围外，已贴到最近的框边' : ''
+  const suffix = clamped ? t('；该点在图片范围外，已贴到最近的框边') : ''
   host.status(
     points.length < 3
-      ? `边界点 ${points.length}：继续点（至少 3 个点，点回起点或右键收尾）；点错了按 Ctrl+Z 撤回上一个${suffix}`
-      : `边界点 ${points.length}：点回起点（第一个大圆点）或按右键收尾闭合；点错了按 Ctrl+Z 撤回上一个${suffix}`
+      ? t(
+          '边界点 {0}：继续点（至少 3 个点，点回起点或右键收尾）；点错了按 Ctrl+Z 撤回上一个{1}',
+          [points.length, suffix]
+        )
+      : t('边界点 {0}：点回起点（第一个大圆点）或按右键收尾闭合；点错了按 Ctrl+Z 撤回上一个{1}', [
+          points.length,
+          suffix
+        ])
   )
   return true
 }
@@ -2698,7 +2739,7 @@ export function closeMeshBoundaryOn(scene: EditorScene, status: (message: string
   }
   let built: { vertices: number; triangles: number } | null = null
   // 用 runCommand：重建失败（点共线 / 已不是网格）时**不写撤销记录**，免得白留一条空的
-  useProjectStore.getState().runCommand('重绘网格边界', (draft) => {
+  useProjectStore.getState().runCommand(t('重绘网格边界'), (draft) => {
     const rebuilt = rebuildMeshBoundary(draft, path.slot, path.attachment, path.points)
     if (!rebuilt) return false
     built = rebuilt
@@ -2896,7 +2937,7 @@ function rewireDragEnd(host: ToolHost, session: DragSession): void {
   // runCommand：连线跑不通（已经连着 / 没横穿内部）时草稿直接丢掉，不留空的撤销记录
   const committed = useProjectStore
     .getState()
-    .runCommand('自定义布线', (draft) =>
+    .runCommand(t('自定义布线'), (draft) =>
       connectMeshVertices(draft, session.slot, session.attachment, session.vertex, ref.vertex)
     )
   if (!committed) {

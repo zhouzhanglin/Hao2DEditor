@@ -9,6 +9,7 @@ import { useTimelineStore } from '../store/timelineStore'
 import { useModeStore } from '../store/modeStore'
 import { useTreeUiStore } from '../store/treeUiStore'
 import { findKeyframe, pasteKeyframes as pasteKeyframesInto, type PasteKeyEntry } from '../timeline/model'
+import { t } from '@i18n'
 
 /**
  * 复制 / 粘贴 / 直接复制（Ctrl+C / Ctrl+V / Ctrl+D）。
@@ -95,7 +96,7 @@ export function pasteNodes(): number {
    * 复制 root 本身（连它整棵子树）不能粘出第二根与它平级的顶层骨骼。
    */
   const fallbackParent = rootBoneName(useProjectStore.getState().document.bones)
-  useProjectStore.getState().update('粘贴节点', (draft) => {
+  useProjectStore.getState().update(t('粘贴节点'), (draft) => {
     const existingBones = draft.bones.map((b) => b.name)
     const existingSlots = draft.slots.map((s) => s.name)
 
@@ -210,7 +211,7 @@ export function pasteKeyframes(targetTime?: number): number {
   }))
 
   let count = 0
-  useProjectStore.getState().update('粘贴关键帧', (draft) => {
+  useProjectStore.getState().update(t('粘贴关键帧'), (draft) => {
     count = pasteKeyframesInto(draft, targetAnim, newEntries)
   })
 

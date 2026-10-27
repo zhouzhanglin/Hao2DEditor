@@ -120,7 +120,7 @@ export function keyframeTargetsNow(targets: readonly KeyframeTarget[], label = '
   if (targets.length === 0) return { ok: false, message: t('没有可打关键帧的目标') }
 
   let count = 0
-  useProjectStore.getState().update('打关键帧', (draft) => {
+  useProjectStore.getState().update(t('打关键帧'), (draft) => {
     count = keyframeTargets(draft, animationName, snapshotPose(bundle), targets, timeline.time)
   })
   if (count > 0) {
@@ -175,7 +175,7 @@ export function keySlotDisplayNow(slotName: string, attachmentName: string): Act
   if (attachmentName && index < 0) return { ok: false, message: t('当前皮肤里没有「{0}」', attachmentName) }
 
   const at = timeline.time
-  useProjectStore.getState().update('打显示关键帧', (draft) => {
+  useProjectStore.getState().update(t('打显示关键帧'), (draft) => {
     const animation = draft.animations.find((item) => item.name === animationName)
     if (animation) keySlotDisplay(animation, slotName, at, index, attachmentName)
   })
@@ -233,7 +233,7 @@ export function keySlotSubArmatureNow(
     offset: overrides?.offset ?? current?.offset ?? armature.subOffset,
     speed: overrides?.speed ?? current?.speed ?? armature.subSpeed
   }
-  useProjectStore.getState().update('打子骨架控制帧', (draft) => {
+  useProjectStore.getState().update(t('打子骨架控制帧'), (draft) => {
     const animation = draft.animations.find((item) => item.name === animationName)
     if (!animation) return
     keySlotSubArmature(animation, slotName, at, params)
@@ -277,7 +277,7 @@ export function keyEventNow(): ActionResult {
   // 与 dope sheet 新建关键帧同一取整口径（4 位小数），保证键 id / 选中判定稳定
   const at = Math.round(useTimelineStore.getState().time * 1e4) / 1e4
   let name = ''
-  useProjectStore.getState().update('添加事件帧', (draft) => {
+  useProjectStore.getState().update(t('添加事件帧'), (draft) => {
     const animation = draft.animations.find((item) => item.name === animScope)
     if (!animation) return
     name = nextEventName(animation.events)
@@ -330,7 +330,7 @@ export function keyframeNow(): ActionResult {
     : ''
 
   let count = 0
-  useProjectStore.getState().update('打关键帧', (draft) => {
+  useProjectStore.getState().update(t('打关键帧'), (draft) => {
     count = keyframeTargets(draft, animationName, snapshotPose(bundle), targets, timeline.time)
   })
   if (count > 0) {
@@ -353,7 +353,7 @@ export function removeSelectedKeys(): ActionResult {
   const timeline = useTimelineStore.getState()
   if (timeline.selectedKeys.length === 0) return { ok: false, message: t('先在 dope sheet 里选中关键帧') }
   let removed = 0
-  useProjectStore.getState().update('删除关键帧', (draft) => {
+  useProjectStore.getState().update(t('删除关键帧'), (draft) => {
     removed = deleteKeys(draft, timeline.currentAnimation, timeline.selectedKeys)
   })
   timeline.setSelectedKeys([])
@@ -415,7 +415,7 @@ export function deleteTrack(focus: KeySelector): ActionResult {
 
   let removed = 0
   // runCommand：一帧都没删掉时不写撤销记录
-  useProjectStore.getState().runCommand('删除动画通道', (draft) => {
+  useProjectStore.getState().runCommand(t('删除动画通道'), (draft) => {
     removed = deleteKeys(draft, timeline.currentAnimation, selectors)
     // 删光后把空轨道也清掉：否则工程文件里会留下一条「0 帧但存在」的插槽/骨骼轨道
     const target = draft.animations.find((item) => item.name === timeline.currentAnimation)
@@ -443,7 +443,7 @@ export function cleanupEmptyTracks(): ActionResult {
   if (!animation) return { ok: false, message: noAnimationMessage() }
 
   let removed = 0
-  useProjectStore.getState().runCommand('清理帧', (draft) => {
+  useProjectStore.getState().runCommand(t('清理帧'), (draft) => {
     const target = draft.animations.find((item) => item.name === timeline.currentAnimation)
     if (!target) return false
     const before = countTrackEntries(target)
@@ -479,7 +479,7 @@ export function setBoneChannelNow(bone: string, channel: BoneChannel, value: num
   const at = useTimelineStore.getState().time
   const label = trackLabelOf({ kind: 'bone', target: bone, channel })
   let written = false
-  useProjectStore.getState().update(`${label}关键帧`, (draft) => {
+  useProjectStore.getState().update(t('{0}关键帧', label), (draft) => {
     const animation = draft.animations.find((item) => item.name === animScope)
     if (!animation) return
     keyBoneChannel(animation, bone, channel, at, value)

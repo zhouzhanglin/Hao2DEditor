@@ -16,6 +16,7 @@ import {
 import { need, needNum, needOneOf, optNum, optNumList, optText, optTextList, optVec, rawText } from './args'
 import { changed, defineWrite } from './registry'
 import type { Args } from './registry'
+import { t } from '@i18n'
 
 /**
  * 关键帧命令：打帧 / 删帧 / 挪帧 / 改缓动 / 清轨道。
@@ -40,7 +41,7 @@ function transformValue(args: Args, channel: BoneChannelName): number | { x: num
   if (typeof value === 'number' && Number.isFinite(value)) return { x: value, y: value }
   const pair = optVec(args, 'value')
   if (pair) return pair
-  throw new Error(`value 必须是 {x,y}（${channel} 通道），也可以传单个数字表示 x = y`)
+  throw new Error(t('value 必须是 {x,y}（{0} 通道），也可以传单个数字表示 x = y', channel))
 }
 
 /** 定位到一条轨道所需的参数（bone / slot / deform / drawOrder 共用） */
@@ -62,16 +63,16 @@ function targetArgs() {
 function channelOf(args: Args, kind: string): string {
   const channel = need(args, 'channel')
   if (kind === 'bone' && !(BONE_CHANNELS as readonly string[]).includes(channel)) {
-    throw new Error(`bone 轨道的 channel 只能是 ${BONE_CHANNELS.join(' / ')}，收到 ${channel}`)
+    throw new Error(t('bone 轨道的 channel 只能是 {0}，收到 {1}', [BONE_CHANNELS.join(' / '), channel]))
   }
   if (kind === 'slot' && !(SLOT_CHANNELS as readonly string[]).includes(channel)) {
-    throw new Error(`slot 轨道的 channel 只能是 ${SLOT_CHANNELS.join(' / ')}，收到 ${channel}`)
+    throw new Error(t('slot 轨道的 channel 只能是 {0}，收到 {1}', [SLOT_CHANNELS.join(' / '), channel]))
   }
   if (kind === 'deform' && channel !== 'frames') {
-    throw new Error(`deform 轨道的 channel 只能是 frames，收到 ${channel}`)
+    throw new Error(t('deform 轨道的 channel 只能是 frames，收到 {0}', channel))
   }
   if (kind === 'drawOrder' && channel !== 'order') {
-    throw new Error(`drawOrder 轨道的 channel 只能是 order，收到 ${channel}`)
+    throw new Error(t('drawOrder 轨道的 channel 只能是 order，收到 {0}', channel))
   }
   return channel
 }
@@ -101,7 +102,10 @@ export function registerAnimCommands(): void {
         time: needNum(args, 'time'),
         value: transformValue(args, channel)
       })
-      return changed(result, `已给骨骼 ${result.bone} 的 ${result.channel} 在 ${result.time} 秒打了一帧`)
+      return changed(
+        result,
+        t('已给骨骼 {0} 的 {1} 在 {2} 秒打了一帧', [result.bone, result.channel, result.time])
+      )
     }
   )
 
@@ -125,8 +129,13 @@ export function registerAnimCommands(): void {
         channel: needOneOf(args, 'channel', BONE_CHANNELS),
         time: needNum(args, 'time')
       })
-      if (!result.removed) return { changed: false, message: `那根骨骼在 ${needNum(args, 'time')} 秒本来就没有这个通道的关键帧` }
-      return changed(result, '已删除该关键帧')
+      if (!result.removed) {
+        return {
+          changed: false,
+          message: t('那根骨骼在 {0} 秒本来就没有这个通道的关键帧', needNum(args, 'time'))
+        }
+      }
+      return changed(result, t('已删除该关键帧'))
     }
   )
 
@@ -147,7 +156,7 @@ export function registerAnimCommands(): void {
     },
     (draft, args) => {
       const attachment = rawText(args, 'attachment')
-      if (attachment === undefined) throw new Error('缺少参数 attachment（附件名；空串表示不显示）')
+      if (attachment === undefined) throw new Error(t('缺少参数 attachment（附件名；空串表示不显示）'))
       const result = keySlotDisplayFrame(draft, {
         animation: optText(args, 'animation'),
         slot: need(args, 'slot'),
@@ -156,7 +165,10 @@ export function registerAnimCommands(): void {
         skin: optText(args, 'skin')
       })
       const shown = result.attachment ? result.attachment : '不显示'
-      return changed(result, `插槽 ${result.slot} 在 ${result.time} 秒起显示「${shown}」`)
+      return changed(
+        result,
+        t('插槽 {0} 在 {1} 秒起显示「{2}」', [result.slot, result.time, shown])
+      )
     }
   )
 
@@ -214,14 +226,19 @@ export function registerAnimCommands(): void {
       returns: '{ animation, slot, time, visible }'
     },
     (draft, args) => {
-      if (typeof args.visible !== 'boolean') throw new Error('缺少参数 visible（true / false）')
+      if (typeof args.visible !== 'boolean') throw new Error(t('缺少参数 visible（true / false）'))
       const result = keySlotVisibleFrame(draft, {
         animation: optText(args, 'animation'),
         slot: need(args, 'slot'),
         time: needNum(args, 'time'),
         visible: args.visible
       })
-      return changed(result, `插槽 ${result.slot} 在 ${result.time} 秒起${result.visible ? '显示' : '隐藏'}`)
+      return changed(
+        result,
+        result.visible
+          ? t('插槽 {0} 在 {1} 秒起显示', [result.slot, result.time])
+          : t('插槽 {0} 在 {1} 秒起隐藏', [result.slot, result.time])
+      )
     }
   )
 
@@ -246,7 +263,10 @@ export function registerAnimCommands(): void {
         time: needNum(args, 'time'),
         color: need(args, 'color')
       })
-      return changed(result, `插槽 ${result.slot} 在 ${result.time} 秒的颜色设为 ${result.color}`)
+      return changed(
+        result,
+        t('插槽 {0} 在 {1} 秒的颜色设为 {2}', [result.slot, result.time, result.color])
+      )
     }
   )
 
@@ -268,7 +288,10 @@ export function registerAnimCommands(): void {
         time: needNum(args, 'time'),
         order: optTextList(args, 'order')
       })
-      return changed(result, `已在 ${result.time} 秒打了一帧绘制顺序（${result.order.join(' → ')}）`)
+      return changed(
+        result,
+        t('已在 {0} 秒打了一帧绘制顺序（{1}）', [result.time, result.order.join(' → ')])
+      )
     }
   )
 
@@ -289,7 +312,7 @@ export function registerAnimCommands(): void {
     },
     (draft, args) => {
       const offsets = optNumList(args, 'offsets')
-      if (!offsets) throw new Error('缺少参数 offsets（数字数组，长度 = 顶点数 × 2）')
+      if (!offsets) throw new Error(t('缺少参数 offsets（数字数组，长度 = 顶点数 × 2）'))
       const result = keyDeformFrame(draft, {
         animation: optText(args, 'animation'),
         slot: need(args, 'slot'),
@@ -297,7 +320,15 @@ export function registerAnimCommands(): void {
         time: needNum(args, 'time'),
         offsets
       })
-      return changed(result, `已给 ${result.slot} / ${result.attachment}（${result.vertexCount} 顶点）在 ${result.time} 秒打了 FFD 帧`)
+      return changed(
+        result,
+        t('已给 {0} / {1}（{2} 顶点）在 {3} 秒打了 FFD 帧', [
+          result.slot,
+          result.attachment,
+          result.vertexCount,
+          result.time
+        ])
+      )
     }
   )
 
@@ -321,8 +352,8 @@ export function registerAnimCommands(): void {
         attachment: need(args, 'attachment'),
         time: needNum(args, 'time')
       })
-      if (!result.removed) return { changed: false, message: '这个时间点本来就没有 FFD 帧' }
-      return changed(result, '已删除该 FFD 帧')
+      if (!result.removed) return { changed: false, message: t('这个时间点本来就没有 FFD 帧') }
+      return changed(result, t('已删除该 FFD 帧'))
     }
   )
 
@@ -349,8 +380,10 @@ export function registerAnimCommands(): void {
         from: needNum(args, 'from'),
         to: needNum(args, 'to')
       })
-      if (!result.moved) return { changed: false, message: `两个时间点一样（都是 ${result.from} 秒），不用挪` }
-      return changed(result, `已把关键帧从 ${result.from} 秒挪到 ${result.to} 秒`)
+      if (!result.moved) {
+        return { changed: false, message: t('两个时间点一样（都是 {0} 秒），不用挪', result.from) }
+      }
+      return changed(result, t('已把关键帧从 {0} 秒挪到 {1} 秒', [result.from, result.to]))
     }
   )
 
@@ -380,7 +413,7 @@ export function registerAnimCommands(): void {
         easing,
         curve: optNumList(args, 'curve')
       })
-      return changed(result, `已把该帧缓动改为 ${result.easing}`)
+      return changed(result, t('已把该帧缓动改为 {0}', result.easing))
     }
   )
 
@@ -405,8 +438,8 @@ export function registerAnimCommands(): void {
         attachment: optText(args, 'attachment'),
         time: optNum(args, 'time')
       })
-      if (result.cleared === 0) return { changed: false, message: '这条轨道上本来就没有关键帧' }
-      return changed(result, `已清掉 ${result.cleared} 帧`)
+      if (result.cleared === 0) return { changed: false, message: t('这条轨道上本来就没有关键帧') }
+      return changed(result, t('已清掉 {0} 帧', result.cleared))
     }
   )
 
@@ -422,7 +455,7 @@ export function registerAnimCommands(): void {
     },
     (draft, args) => {
       const result = clearAnimation(draft, optText(args, 'animation'))
-      return changed(result, `已清空动画 ${result.animation} 的全部关键帧`)
+      return changed(result, t('已清空动画 {0} 的全部关键帧', result.animation))
     }
   )
 }

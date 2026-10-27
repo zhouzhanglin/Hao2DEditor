@@ -25,6 +25,7 @@ import type { Vec2 } from '@core/math/matrix'
 import type { AlphaMask } from '@core/mesh/autoMesh'
 import { getPlatform } from '../platform'
 import { loadImageBitmap } from '../services/pngEncoder'
+import { t } from '@i18n'
 
 /**
  * 网格与蒙皮命令：转网格、编辑顶点、绑骨骼、刷权重。
@@ -123,9 +124,17 @@ export function registerMeshCommands(): void {
       const divisions = Math.max(1, Math.min(16, Math.round(optNum(args, 'divisions') ?? 2)))
       const result = convertRegionToMesh(draft, slot, attachment, divisions)
       if (!result) {
-        throw new Error(`转不了：${slot} / ${attachment} 不是图片（Region）附件（已经转过网格，或用 listDisplays 看它的 type）`)
+        throw new Error(
+          t('转不了：{0} / {1} 不是图片（Region）附件（已经转过网格，或用 listDisplays 看它的 type）', [
+            slot,
+            attachment
+          ])
+        )
       }
-      return changed({ slot, attachment, ...result }, `已转为网格：${result.vertices} 顶点 / ${result.triangles} 三角形`)
+      return changed(
+        { slot, attachment, ...result },
+        t('已转为网格：{0} 顶点 / {1} 三角形', [result.vertices, result.triangles])
+      )
     }
   )
 
@@ -147,22 +156,26 @@ export function registerMeshCommands(): void {
       const attachment = need(args, 'attachment')
       const document = useProjectStore.getState().document
       const att = resolveAttachment(document, slot, attachment)
-      if (!att) throw new Error(`找不到附件 ${slot} / ${attachment}（用 listDisplays 查）`)
+      if (!att) throw new Error(t('找不到附件 {0} / {1}（用 listDisplays 查）', [slot, attachment]))
       if (att.type !== 'region' && !(att.type === 'mesh' && att.regionSnapshot)) {
-        throw new Error('只能对 Region 附件（或带快照的网格）用：先用 addDisplay 加碎图，或 convertToRegion 还原')
+        throw new Error(
+          t('只能对 Region 附件（或带快照的网格）用：先用 addDisplay 加碎图，或 convertToRegion 还原')
+        )
       }
       const image = document.images.find((item) => item.name === att.image)
-      if (!image) throw new Error(`附件引用的图片「${att.image}」不在图片池（先用 importImage 导入）`)
+      if (!image) {
+        throw new Error(t('附件引用的图片「{0}」不在图片池（先用 importImage 导入）', att.image))
+      }
       const mask = await imageAlphaMask(image.path)
-      if (!mask) throw new Error(`读不到图片「${image.name}」的像素，无法生成轮廓`)
+      if (!mask) throw new Error(t('读不到图片「{0}」的像素，无法生成轮廓', image.name))
       const divisions = Math.max(1, Math.min(64, Math.round(optNum(args, 'divisions') ?? 8)))
       let result: { vertices: number; triangles: number; coverage: number } | null = null
-      const committed = useProjectStore.getState().runCommand('AI：按轮廓生成网格', (draft) => {
+      const committed = useProjectStore.getState().runCommand(t('AI：按轮廓生成网格'), (draft) => {
         result = autoGenerateRegionMesh(draft, slot, attachment, mask, divisions)
         return result !== null
       })
       if (!committed || !result) {
-        throw new Error('生成网格失败：附件不是有效的 Region / 网格，或图片没有不透明像素')
+        throw new Error(t('生成网格失败：附件不是有效的 Region / 网格，或图片没有不透明像素'))
       }
       const scene = getActiveScene()
       if (scene) {
@@ -192,9 +205,11 @@ export function registerMeshCommands(): void {
       const slot = need(args, 'slot')
       const attachment = need(args, 'attachment')
       if (!convertMeshToRegion(draft, slot, attachment)) {
-        throw new Error(`转不了：${slot} / ${attachment} 不是网格（用 listDisplays 看它的 type）`)
+        throw new Error(
+          t('转不了：{0} / {1} 不是网格（用 listDisplays 看它的 type）', [slot, attachment])
+        )
       }
-      return changed({ slot, attachment }, `已把 ${slot} / ${attachment} 转回图片`)
+      return changed({ slot, attachment }, t('已把 {0} / {1} 转回图片', [slot, attachment]))
     }
   )
 
@@ -215,14 +230,17 @@ export function registerMeshCommands(): void {
       const slot = need(args, 'slot')
       const attachment = need(args, 'attachment')
       const point = optVec(args, 'point')
-      if (!point) throw new Error('缺少参数 point（附件局部坐标 {x,y}）')
+      if (!point) throw new Error(t('缺少参数 point（附件局部坐标 {x,y}）'))
       const index = insertMeshVertex(draft, slot, attachment, point)
       if (index === null) {
         throw new Error(
           '插不进去：目标不是网格，或者点位不在任何一条边上（顶点只能插在边上 —— 先读 getAttachmentVertices 拿现有顶点坐标）'
         )
       }
-      return changed({ slot, attachment, vertexIndex: index }, `已在边上插入顶点（新下标 ${index}）`)
+      return changed(
+        { slot, attachment, vertexIndex: index },
+        t('已在边上插入顶点（新下标 {0}）', index)
+      )
     }
   )
 
@@ -243,9 +261,9 @@ export function registerMeshCommands(): void {
       const attachment = need(args, 'attachment')
       const vertexIndex = needNum(args, 'vertexIndex')
       if (!deleteMeshVertex(draft, slot, attachment, vertexIndex)) {
-        throw new Error('删不掉：目标不是网格、下标越界，或者删完会只剩不到 3 个顶点')
+        throw new Error(t('删不掉：目标不是网格、下标越界，或者删完会只剩不到 3 个顶点'))
       }
-      return changed({ slot, attachment, vertexIndex }, `已删除顶点 ${vertexIndex}`)
+      return changed({ slot, attachment, vertexIndex }, t('已删除顶点 {0}', vertexIndex))
     }
   )
 
@@ -265,22 +283,31 @@ export function registerMeshCommands(): void {
     },
     (draft, args) => {
       if (useModeStore.getState().mode !== 'pose') {
-        throw new Error('移动绑定网格顶点要在 Pose 态做：先 setMode 切到 pose（Animate 态改顶点形变请用 keyDeformFrame）')
+        throw new Error(
+          t('移动绑定网格顶点要在 Pose 态做：先 setMode 切到 pose（Animate 态改顶点形变请用 keyDeformFrame）')
+        )
       }
       const slot = need(args, 'slot')
       const attachment = need(args, 'attachment')
       const vertexIndex = needNum(args, 'vertexIndex')
       const point = optVec(args, 'point')
-      if (!point) throw new Error('缺少参数 point（附件局部坐标 {x,y}）')
+      if (!point) throw new Error(t('缺少参数 point（附件局部坐标 {x,y}）'))
       const att = findAttachment(draft, slot, attachment)
       if (!att || att.type !== 'mesh') {
-        throw new Error(`${slot} / ${attachment} 不是网格附件（用 listDisplays 看它的 type，Region 先 convertToMesh）`)
+        throw new Error(
+          t('{0} / {1} 不是网格附件（用 listDisplays 看它的 type，Region 先 convertToMesh）', [
+            slot,
+            attachment
+          ])
+        )
       }
       if (vertexIndex < 0 || vertexIndex >= att.vertices.length) {
-        throw new Error(`顶点下标越界：合法范围 0 ~ ${att.vertices.length - 1}（用 getAttachmentVertices 核对）`)
+        throw new Error(
+          t('顶点下标越界：合法范围 0 ~ {0}（用 getAttachmentVertices 核对）', att.vertices.length - 1)
+        )
       }
       const current = att.vertices[vertexIndex]
-      if (current.x === point.x && current.y === point.y) return unchanged('顶点本来就在这个位置')
+      if (current.x === point.x && current.y === point.y) return unchanged(t('顶点本来就在这个位置'))
       // 原地改 x / y：整个对象换掉会把已绑好的 weights 一起丢掉
       current.x = point.x
       current.y = point.y
@@ -317,9 +344,12 @@ export function registerMeshCommands(): void {
       const attachment = need(args, 'attachment')
       const bone = need(args, 'bone')
       if (!addWeightBone(draft, slot, attachment, bone)) {
-        throw new Error('绑不上：目标不是网格、骨骼名不存在，或者它已经被绑过了')
+        throw new Error(t('绑不上：目标不是网格、骨骼名不存在，或者它已经被绑过了'))
       }
-      return changed({ slot, attachment, bone }, `已把 ${slot} / ${attachment} 绑到骨骼 ${bone}`)
+      return changed(
+        { slot, attachment, bone },
+        t('已把 {0} / {1} 绑到骨骼 {2}', [slot, attachment, bone])
+      )
     }
   )
 
@@ -340,9 +370,9 @@ export function registerMeshCommands(): void {
       const attachment = need(args, 'attachment')
       const bone = need(args, 'bone')
       if (!removeWeightBone(draft, slot, attachment, bone)) {
-        throw new Error('解绑不了：目标不是网格，或者它本来就没绑这根骨骼')
+        throw new Error(t('解绑不了：目标不是网格，或者它本来就没绑这根骨骼'))
       }
-      return changed({ slot, attachment, bone }, `已解绑骨骼 ${bone}`)
+      return changed({ slot, attachment, bone }, t('已解绑骨骼 {0}', bone))
     }
   )
 
@@ -367,9 +397,9 @@ export function registerMeshCommands(): void {
       const vertexIndex = needNum(args, 'vertexIndex')
       const bone = need(args, 'bone')
       const weight = needNum(args, 'weight')
-      if (weight < 0 || weight > 1) throw new Error(`weight 必须在 0 ~ 1 之间，收到 ${weight}`)
+      if (weight < 0 || weight > 1) throw new Error(t('weight 必须在 0 ~ 1 之间，收到 {0}', weight))
       if (!setVertexWeight(draft, slot, attachment, vertexIndex, bone, weight)) {
-        throw new Error('写不进去：目标不是网格、顶点下标越界，或者骨骼名不存在')
+        throw new Error(t('写不进去：目标不是网格、顶点下标越界，或者骨骼名不存在'))
       }
       return changed(
         { slot, attachment, vertexIndex, bone, weight },
@@ -399,7 +429,7 @@ export function registerMeshCommands(): void {
       const attachment = need(args, 'attachment')
       const scene = getActiveScene()
       if (!scene) {
-        throw new Error('视口还没就绪，取不到顶点的世界坐标。等编辑器窗口画完一帧再试')
+        throw new Error(t('视口还没就绪，取不到顶点的世界坐标。等编辑器窗口画完一帧再试'))
       }
       const samples = samplesFor(slot, attachment)
       if (samples.length === 0) {
@@ -411,16 +441,18 @@ export function registerMeshCommands(): void {
       const requested = optTextList(args, 'bones') ?? document.bones.map((bone) => bone.name).filter(Boolean)
       const segments = boneSegments(requested.filter((name) => name !== rootBoneName(document.bones)))
       if (segments.length === 0) {
-        throw new Error('没有可用的骨骼参与加权（层级根骨骼不参与，不然每个顶点都会被它抢走）')
+        throw new Error(
+          t('没有可用的骨骼参与加权（层级根骨骼不参与，不然每个顶点都会被它抢走）')
+        )
       }
       const falloff = Math.max(1, Math.round(optNum(args, 'falloff') ?? 2))
       const maxBones = Math.max(1, Math.min(4, Math.round(optNum(args, 'maxBones') ?? 4)))
       let touched = 0
-      const committed = useProjectStore.getState().runCommand('AI：自动权重', (draft) => {
+      const committed = useProjectStore.getState().runCommand(t('AI：自动权重'), (draft) => {
         touched = autoWeights(draft, samples, segments, { falloff, maxBones })
         return touched > 0
       })
-      if (!committed) return { changed: false, message: '没有顶点被改动' }
+      if (!committed) return { changed: false, message: t('没有顶点被改动') }
       // 权重是运行期算蒙皮矩阵时读的，写完必须把文档推回场景再重画
       const next = useProjectStore.getState().document
       scene.setDocument(next, next.editorMeta.activeSkin)
@@ -453,10 +485,15 @@ export function registerMeshCommands(): void {
       const slot = need(args, 'slot')
       const attachment = need(args, 'attachment')
       const points = parsePoints(args, 'points')
-      if (points.length < 3) throw new Error('points 至少需要 3 个点才能围成一圈边界')
+      if (points.length < 3) throw new Error(t('points 至少需要 3 个点才能围成一圈边界'))
       const result = rebuildMeshBoundary(draft, slot, attachment, points)
       if (!result) {
-        throw new Error(`重绘不了：${slot} / ${attachment} 不是网格（用 listDisplays 看它的 type），或 points 不足以围成闭合多边形`)
+        throw new Error(
+          t('重绘不了：{0} / {1} 不是网格（用 listDisplays 看它的 type），或 points 不足以围成闭合多边形', [
+            slot,
+            attachment
+          ])
+        )
       }
       return changed(
         { slot, attachment, ...result },
@@ -489,7 +526,10 @@ export function registerMeshCommands(): void {
           `连不上：两点相同 / 下标越界 / 目标不是网格，或这条线段没有横穿网格内部（已经连着线、或正好擦过顶点都会连不通）。用 getAttachmentVertices 核对下标`
         )
       }
-      return changed({ slot, attachment, from, to }, `已在顶点 #${from} 与 #${to} 之间连上线`)
+      return changed(
+        { slot, attachment, from, to },
+        t('已在顶点 #{0} 与 #{1} 之间连上线', [from, to])
+      )
     }
   )
 }
@@ -497,15 +537,15 @@ export function registerMeshCommands(): void {
 /** 解析一组 {x,y} 点：来自 AI 的 JSON 数组，形状不对就给出能看懂的报错 */
 function parsePoints(args: Args, key: string): Vec2[] {
   const value = args[key]
-  if (!Array.isArray(value)) throw new Error(`参数 ${key} 必须是点数组 [{x,y}…]`)
+  if (!Array.isArray(value)) throw new Error(t('参数 {0} 必须是点数组 [{x,y}…]', key))
   const points: Vec2[] = []
   for (const item of value) {
     if (typeof item !== 'object' || item === null || Array.isArray(item)) {
-      throw new Error(`参数 ${key} 里每项必须是 {x,y}`)
+      throw new Error(t('参数 {0} 里每项必须是 {x,y}', key))
     }
     const { x, y } = item as { x?: unknown; y?: unknown }
     if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) {
-      throw new Error(`参数 ${key} 里的点 x / y 必须是数字`)
+      throw new Error(t('参数 {0} 里的点 x / y 必须是数字', key))
     }
     points.push({ x, y })
   }

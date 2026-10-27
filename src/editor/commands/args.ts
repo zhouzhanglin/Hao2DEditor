@@ -1,4 +1,5 @@
 import type { Args } from './registry'
+import { t } from '@i18n'
 
 /**
  * 命令参数读取工具。
@@ -14,7 +15,9 @@ import type { Args } from './registry'
 /** 必填空字符串参数 */
 export function need(args: Args, key: string): string {
   const value = args[key]
-  if (typeof value !== 'string' || value.trim() === '') throw new Error(`缺少参数 ${key}（字符串）`)
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(t('缺少参数 {0}（字符串）', key))
+  }
   return value.trim()
 }
 
@@ -33,14 +36,16 @@ export function rawText(args: Args, key: string): string | undefined {
 export function optNum(args: Args, key: string): number | undefined {
   const value = args[key]
   if (value === undefined || value === null) return undefined
-  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`参数 ${key} 必须是数字`)
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(t('参数 {0} 必须是数字', key))
+  }
   return value
 }
 
 /** 必填数字 */
 export function needNum(args: Args, key: string): number {
   const value = optNum(args, key)
-  if (value === undefined) throw new Error(`缺少参数 ${key}（数字）`)
+  if (value === undefined) throw new Error(t('缺少参数 {0}（数字）', key))
   return value
 }
 
@@ -53,10 +58,12 @@ export function optBool(args: Args, key: string): boolean | undefined {
 export function optVec(args: Args, key: string): { x: number; y: number } | undefined {
   const value = args[key]
   if (value === undefined || value === null) return undefined
-  if (typeof value !== 'object' || Array.isArray(value)) throw new Error(`参数 ${key} 必须是 {x,y}`)
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(t('参数 {0} 必须是 {x,y}', key))
+  }
   const { x, y } = value as { x?: unknown; y?: unknown }
   if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) {
-    throw new Error(`参数 ${key} 的 x / y 必须是数字`)
+    throw new Error(t('参数 {0} 的 x / y 必须是数字', key))
   }
   return { x, y }
 }
@@ -74,11 +81,13 @@ export function optNumList(args: Args, key: string): number[] | undefined {
 function optList<T>(args: Args, key: string, pick: (item: unknown) => T | null): T[] | undefined {
   const value = args[key]
   if (value === undefined || value === null) return undefined
-  if (!Array.isArray(value)) throw new Error(`参数 ${key} 必须是数组`)
+  if (!Array.isArray(value)) throw new Error(t('参数 {0} 必须是数组', key))
   const result: T[] = []
   for (const item of value) {
     const picked = pick(item)
-    if (picked === null) throw new Error(`参数 ${key} 里有不合法的一项：${JSON.stringify(item)}`)
+    if (picked === null) {
+      throw new Error(t('参数 {0} 里有不合法的一项：{1}', [key, JSON.stringify(item)]))
+    }
     result.push(picked)
   }
   return result
@@ -97,12 +106,12 @@ export function compact<T extends object>(source: T): T {
 export function needOneOf<T extends string>(args: Args, key: string, allowed: readonly T[]): T {
   const value = need(args, key)
   if (!(allowed as readonly string[]).includes(value)) {
-    throw new Error(`参数 ${key} 只能是 ${allowed.join(' / ')}，收到 ${value}`)
+    throw new Error(t('参数 {0} 只能是 {1}，收到 {2}', [key, allowed.join(' / '), value]))
   }
   return value as T
 }
 
 /** 一个可选字段都没给：不当成一次编辑，免得白记一条撤销 */
 export function requireSomeField(fields: readonly string[]): void {
-  if (fields.length === 0) throw new Error('至少要给一个要改的字段')
+  if (fields.length === 0) throw new Error(t('至少要给一个要改的字段'))
 }

@@ -7,6 +7,7 @@ import { useModeStore } from '../store/modeStore'
 import { useTimelineStore } from '../store/timelineStore'
 import { defineRead } from './registry'
 import type { Args } from './registry'
+import { t } from '@i18n'
 
 /**
  * 查询命令：让 AI **先看见再动手**。
@@ -306,7 +307,9 @@ export function registerQueryCommands(): void {
       const document = doc()
       const name = str(args, 'animation') || document.editorMeta.activeAnimation
       const anim = document.animations.find((item) => item.name === name)
-      if (!anim) throw new Error(`动画不存在：${name || '(空)'}（用 listAnimations 查现有动画名）`)
+      if (!anim) {
+        throw new Error(t('动画不存在：{0}（用 listAnimations 查现有动画名）', name || '(空)'))
+      }
       const boneFilter = str(args, 'bone')
       const slotFilter = str(args, 'slot')
       return {
@@ -444,11 +447,11 @@ export function registerQueryCommands(): void {
     (args) => {
       const name = str(args, 'bone')
       if (!doc().bones.some((bone) => bone.name === name)) {
-        throw new Error(`骨骼不存在：${name}（用 listBones 查现有骨骼名）`)
+        throw new Error(t('骨骼不存在：{0}（用 listBones 查现有骨骼名）', name))
       }
       const matrix = getActiveScene()?.worldMatrixOf(name) ?? null
       if (!matrix || matrix.length < 16) {
-        throw new Error('视口场景还没就绪，取不到世界坐标（动画播放中或窗口未打开时会这样）')
+        throw new Error(t('视口场景还没就绪，取不到世界坐标（动画播放中或窗口未打开时会这样）'))
       }
       return {
         bone: name,
@@ -480,10 +483,10 @@ export function registerQueryCommands(): void {
       const document = doc()
       const att = findAttachment(document, slotName, attachmentName, str(args, 'skin'))
       const slot = document.slots.find((item) => item.name === slotName)
-      if (!slot) throw new Error(`找不到插槽：${slotName}（用 listSlots 查）`)
+      if (!slot) throw new Error(t('找不到插槽：{0}（用 listSlots 查）', slotName))
       const matrix = getActiveScene()?.worldMatrixOf(slot.bone) ?? null
       if (!matrix || matrix.length < 16) {
-        throw new Error('视口场景还没就绪，取不到世界坐标（窗口未打开或正在初始化时会这样）')
+        throw new Error(t('视口场景还没就绪，取不到世界坐标（窗口未打开或正在初始化时会这样）'))
       }
       // 附件局部空间采样点：Mesh 用绑定姿态顶点；Region 用内容四角
       // （局部 = position + R(rotation) · S(scale) · (contentOffset ± size/2)，与 setDisplayTransform 语义一致）
@@ -545,7 +548,7 @@ export function registerQueryCommands(): void {
       const scene = getActiveScene()
       const vp = scene?.viewport
       const document = doc()
-      if (!scene || !vp) throw new Error('视口还没就绪（窗口未打开或正在初始化）')
+      if (!scene || !vp) throw new Error(t('视口还没就绪（窗口未打开或正在初始化）'))
       const w = vp.width
       const h = vp.height
       const corners = [vp.screenToWorld(0, 0), vp.screenToWorld(w, 0), vp.screenToWorld(0, h), vp.screenToWorld(w, h)]
@@ -597,7 +600,7 @@ export function registerQueryCommands(): void {
     },
     () => {
       const scene = getActiveScene()
-      if (!scene) throw new Error('视口还没就绪（窗口未打开或正在初始化）')
+      if (!scene) throw new Error(t('视口还没就绪（窗口未打开或正在初始化）'))
       const dataUrl = scene.captureViewport()
       if (!dataUrl) {
         throw new Error(
@@ -708,12 +711,16 @@ function frames<T extends { time: number; value: unknown; easing: number }>(list
 }
 
 function findAttachment(document: EditorDocument, slotName: string, attachmentName: string, skinName: string) {
-  if (!slotName || !attachmentName) throw new Error('slot 与 attachment 都必须给（用 listDisplays 查）')
+  if (!slotName || !attachmentName) {
+    throw new Error(t('slot 与 attachment 都必须给（用 listDisplays 查）'))
+  }
   const skins = skinName ? document.skins.filter((skin) => skin.name === skinName) : document.skins
   for (const skin of skins) {
     const skinSlot = skin.slots.find((item) => item.slot === slotName)
     const found = skinSlot?.attachments.find((item) => item.name === attachmentName)
     if (found) return found
   }
-  throw new Error(`找不到附件：${slotName} / ${attachmentName}（用 listDisplays 查插槽下的附件名）`)
+  throw new Error(
+    t('找不到附件：{0} / {1}（用 listDisplays 查插槽下的附件名）', [slotName, attachmentName])
+  )
 }

@@ -145,6 +145,13 @@ export interface SceneViewState {
    */
   weightBones: string[]
   /**
+   * 权重刷 / 直接拖动的**目标骨骼**名（'' = 没有）。
+   *
+   * 与 `selectedBone` 分开：选了顶点后 `kind` 变成 `attachment`、`selectedBones` 变空，
+   * 但「正在改哪根骨骼的权重」并没有变 —— 这根必须一直画出来，否则用户不知道在给谁调权重。
+   */
+  weightTargetBone: string
+  /**
    * 网格工具（`ffd`）的隔离目标：**只渲染这个插槽的附件**，其余全部隐藏。
    * 空串 = 不隔离（未选中网格 / 其它工具时显示全部）。
    */
@@ -298,6 +305,7 @@ export class EditorScene {
     selectedDisplay: null,
     hoveredDisplay: null,
     weightBones: [],
+    weightTargetBone: '',
     pendingMeshPath: null,
     boundaryTarget: null,
     pendingMaskPath: null,
@@ -504,7 +512,8 @@ export class EditorScene {
       patch.selectedBone !== undefined ||
       selectedBonesChanged ||
       patch.hoveredBone !== undefined ||
-      patch.weightBones !== undefined
+      patch.weightBones !== undefined ||
+      patch.weightTargetBone !== undefined
     ) {
       void previousSelected
       this.markDirty()
@@ -1898,6 +1907,8 @@ export class EditorScene {
     const weightBoneColors = bundle
       ? weightBoneColorMap(state.weightBones, bundle.boneIndex)
       : new Map<number, number>()
+    // 权重刷 / 直接拖动的目标骨骼：只影响画法（高亮描边），不参与选中态
+    const weightTargetIndex = bundle ? (bundle.boneIndex[state.weightTargetBone] ?? -1) : -1
     this.boneStroke.visible = showBoneLayer
     this.boneFill.visible = showBoneLayer
     /*
@@ -1914,6 +1925,7 @@ export class EditorScene {
         selectedBones: selectedBoneIndices,
         hoveredBone: bundle.boneIndex[state.hoveredBone] ?? -1,
         weightBoneColors,
+        targetBone: weightTargetIndex,
         showBones: showSkeleton,
         showConstraints,
         showSlots: false,

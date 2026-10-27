@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Brush, Crosshair, Grid3x3, Layers, RotateCcw, Trash2 } from 'lucide-react'
+import { Brush, Crosshair, Grid3x3, RotateCcw, Trash2 } from 'lucide-react'
 import { t } from '@i18n'
 import { BlendMode } from '@core/model/types'
 import { curvePercent } from '@core/anim/interpolation'
@@ -19,15 +19,22 @@ import {
   checkRename,
   convertAttachmentToClipping,
   convertMeshToRegion,
+  copyVertexWeights,
+  countOverInfluenced,
   deleteAttachment,
   deleteMeshVertex,
+  pasteVertexWeights,
   patchAttachment,
   PPU,
+  previewTrimWeights,
   removeWeightBone,
   resolveAttachment,
   setVertexWeight,
+  swapWeightBones,
+  trimVertexWeights,
   weightBonesOf
 } from '@editor/commands/authoringCommands'
+import type { AutoWeightMethod } from '@editor/commands/authoringCommands'
 import { runAutoWeightsForBones } from '@editor/tools/authoringTools'
 import { buildGridMesh, buildOutlineMesh } from '@editor/commands/meshActions'
 import type { RenameKind } from '@editor/commands/authoringCommands'
@@ -470,12 +477,10 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   const currentAnimation = useTimelineStore((s) => s.currentAnimation)
   /** Animate 态切显示附件 = 打 displayIndex 关键帧；Pose 态才是改绑定姿态 */
   const animating = mode === 'animate' && !!currentAnimation
-  /**
-   * 整体染色（场景级、不进文档）：用本地状态回显当前染色值。
-   * 否则受控的 `<input type="color">` 一直是写死的 `#FFFFFFFF`，拾色后会被拽回白色，
-   * 看上去"改了没反应"。染色是场景全局状态，切选中对象时保持即可。
-   */
-  const [tintColor, setTintColor] = useState('#FFFFFFFF')
+  /** 「交换骨骼权重」选的两根骨骼（空串 = 用权重列表的前两根兜底） */
+  const [swapBones, setSwapBones] = useState<{ a: string; b: string }>({ a: '', b: '' })
+  /** 权重剪贴板里有几组（粘贴按钮据此启用；剪贴板本身在命令模块里） */
+  const [clipboardCount, setClipboardCount] = useState(0)
   /** 「定位」：让层级树滚到某根骨骼并闪一下（只提示位置，不改选中 —— 见 locateBone） */
   const revealBone = useRevealStore((s) => s.revealBone)
 
@@ -545,10 +550,11 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   const brushBone = selection.bone
 
   /**
-   * 「工具选项」面板（已删除）里原本剩下的两块设置，并到属性面板底部。
+   * 「工具选项」面板（已删除）里原本剩下的这两块设置，并到属性面板底部。
    *
    * - **权重刷**：只在权重刷工具 + Pose 态显示 —— 工具本身只在 Pose 态可用，其余时候摆出来是噪音；
-   * - **显示 / 整体染色**：随时可调，用来快速检查插槽色 / 附件色的叠加效果。
+   * - **整体染色**：已再挪到视口右上角的浮动面板（`ViewportOverlays`）—— 它改的是「怎么看画面」，
+   *   与选中了谁无关，贴着画布才调得顺手，属性面板也就不必再背这一段。
    *
    * 原面板里另外两块 ——「重置当前时间点的 FFD」与「权重刷 / 网格 / Pose 属于绑定工具」的提示 ——
    * **没有搬**：它们只在 Animate 态 / 非 Pose 态出现，而 Animate 态整个右栏是收起的（见 App），
@@ -620,24 +626,6 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
           </p>
         </FieldGroup>
       ) : null}
-      <FieldGroup title={t('显示')}>
-        <ColorField
-          label={t('整体染色')}
-          value={tintColor}
-          onChange={(value) => {
-            const scene = getActiveScene()
-            if (!scene) return
-            const hex = value.replace('#', '')
-            const at = (i: number): number => parseInt(hex.slice(i, i + 2), 16) / 255
-            scene.setTint({ r: at(0), g: at(2), b: at(4), a: hex.length >= 8 ? at(6) : 1 })
-            setTintColor(value)
-          }}
-        />
-        <p className="flex items-center gap-1 text-3xs text-content-lo">
-          <Layers size={10} />
-          {t('染色与插槽色、附件色相乘，用于快速检查叠加效果')}
-        </p>
-      </FieldGroup>
     </>
   )
 
@@ -873,6 +861,158 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
     const pickingWeightBone =
       tools.pendingWeightBone?.slot === selection.slot &&
       tools.pendingWeightBone?.attachment === selection.attachment
+
+    const meshAttachment = attachment && attachment.type === 'mesh' ? attachment : null
+    /**
+     * 修剪的范围：有选中顶点时只处理它们（与画笔「选了顶点就只刷这些」同一套规则）。
+     *
+     * `selection.vertices` 是**共享顶点缓冲**下标，必须经 `scene.vertexRefAt` 换算成附件内下标 ——
+     * 直接拿下标去索引 `attachment.vertices` 会串到别的附件上（画笔那边也是同样换算，见 selectedVertexKeys）。
+     */
+    const trimScope = ((): number[] | null => {
+      if (!meshAttachment) return null
+      if (selection.kind !== 'attachment' || selection.vertices.length === 0) return null
+      const scene = getActiveScene()
+      const indices: number[] = []
+      for (const index of selection.vertices) {
+        const ref = scene?.vertexRefAt(index)
+        if (ref && ref.slot === slot.name && ref.attachment === meshAttachment.name) indices.push(ref.vertex)
+      }
+      return indices
+    })()
+    /**
+     * 修剪的**计数预览**（不写文档）：Spine 的 Prune 是滑块一动就实时预览，
+     * 我们只预览数字，点按钮才提交 —— 拖滑块时往撤销栈里塞记录不是好买卖。
+     */
+    const trimPreview =
+      meshAttachment && trimScope?.length !== 0
+        ? previewTrimWeights(document, slot.name, meshAttachment.name, {
+            maxInfluences: tools.trim.maxInfluences,
+            threshold: tools.trim.threshold / 100,
+            vertices: trimScope ?? undefined
+          })
+        : null
+    /**
+     * 受超过 4 根骨骼影响的顶点数（Spine 权重工具的黄叹号口径，不写文档）。
+     * 有选中顶点时按选中范围统计 —— 警告说几个，下面那把「锤子」就修剪几个，不会对不上。
+     */
+    const overInfluenced = meshAttachment ? countOverInfluenced(meshAttachment, 4, trimScope ?? undefined) : 0
+
+    /** 执行一次修剪：Pose 校验、范围换算、状态栏回报都在这里（警告条与主按钮共用） */
+    const runTrim = (maxInfluences: number, threshold: number): void => {
+      if (!meshAttachment) return
+      if (mode !== 'pose') {
+        onStatus(t('修剪权重改的是绑定姿态：请切到 Pose 状态'))
+        return
+      }
+      if (trimScope && trimScope.length === 0) {
+        onStatus(t('选中的顶点不在这个网格上：请重新框选，或点空白取消选择'))
+        return
+      }
+      let result = { touched: 0, removed: 0, capped: 0 }
+      useProjectStore.getState().runCommand(t('修剪权重'), (draft) => {
+        result = trimVertexWeights(draft, slot.name, meshAttachment.name, {
+          maxInfluences,
+          threshold,
+          normalize: true,
+          vertices: trimScope ?? undefined
+        })
+        return result.touched > 0
+      })
+      if (result.touched === 0) {
+        onStatus(
+          threshold > 0
+            ? t('没有顶点需要修剪：都在 {0} 根骨骼以内，也没有小于 {1}% 的权重', [
+                maxInfluences,
+                Math.round(threshold * 100)
+              ])
+            : t('没有顶点需要修剪：受超过 {0} 根骨骼影响的顶点不在当前选择里', maxInfluences)
+        )
+        return
+      }
+      onStatus(
+        threshold > 0
+          ? t('已修剪 {0} 个顶点：丢掉 {1} 个骨骼影响，{2} 个顶点压到 {3} 根骨骼以内', [
+              result.touched,
+              result.removed,
+              result.capped,
+              maxInfluences
+            ])
+          : t('已把 {0} 个顶点修剪到 {1} 根骨骼以内（丢掉 {2} 个骨骼影响）', [
+              result.touched,
+              maxInfluences,
+              result.removed
+            ])
+      )
+    }
+
+    /** 交换 / 复制 / 粘贴的作用范围：与修剪一致 —— 选中顶点优先，否则整块网格 */
+    const scopeOrWhole = (): number[] | undefined =>
+      trimScope && trimScope.length > 0 ? trimScope : undefined
+
+    /** 交换两根骨骼的权重（Spine 的 Swap） */
+    const runSwap = (): void => {
+      if (!meshAttachment) return
+      if (mode !== 'pose') {
+        onStatus(t('交换权重改的是绑定数据：请切到 Pose 状态'))
+        return
+      }
+      const a = swapBones.a || weightBones[0] || ''
+      const b = swapBones.b || weightBones[1] || ''
+      if (!a || !b || a === b) {
+        onStatus(t('先选两根不同的骨骼再交换'))
+        return
+      }
+      if (trimScope && trimScope.length === 0) {
+        onStatus(t('选中的顶点不在这个网格上：请重新框选，或点空白取消选择'))
+        return
+      }
+      let touched = 0
+      useProjectStore.getState().runCommand(t('交换骨骼权重'), (draft) => {
+        touched = swapWeightBones(draft, slot.name, meshAttachment.name, a, b, scopeOrWhole())
+        return touched > 0
+      })
+      onStatus(
+        touched > 0
+          ? t('已在 {0} 个顶点上交换「{1}」与「{2}」的权重', [touched, a, b])
+          : t('没有可交换的权重：「{0}」与「{1}」在这些顶点上没有区别', [a, b])
+      )
+    }
+
+    /** 复制选中顶点的权重（Spine 的 ctrl+C） */
+    const runCopyWeights = (): void => {
+      if (!meshAttachment) return
+      const count = copyVertexWeights(document, slot.name, meshAttachment.name, scopeOrWhole() ?? [])
+      setClipboardCount(count)
+      onStatus(count > 0 ? t('已复制 {0} 个顶点的权重', count) : t('没有可复制的顶点：先在视口里点选或框选'))
+    }
+
+    /** 粘贴权重（Spine 的 ctrl+V）：骨骼名对不上的会被丢掉，剩下的重新归一 */
+    const runPasteWeights = (): void => {
+      if (!meshAttachment) return
+      if (mode !== 'pose') {
+        onStatus(t('粘贴权重改的是绑定数据：请切到 Pose 状态'))
+        return
+      }
+      if (clipboardCount === 0) {
+        onStatus(t('剪贴板是空的：先复制一批顶点的权重'))
+        return
+      }
+      if (trimScope && trimScope.length === 0) {
+        onStatus(t('选中的顶点不在这个网格上：请重新框选，或点空白取消选择'))
+        return
+      }
+      let touched = 0
+      useProjectStore.getState().runCommand(t('粘贴顶点权重'), (draft) => {
+        touched = pasteVertexWeights(draft, slot.name, meshAttachment.name, scopeOrWhole() ?? [])
+        return touched > 0
+      })
+      onStatus(
+        touched > 0
+          ? t('已粘贴 {0} 个顶点的权重', touched)
+          : t('粘贴没有改动任何顶点：骨骼名对不上，或权重本来就一样')
+      )
+    }
 
     return (
       <div className="flex flex-col">
@@ -1232,24 +1372,126 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                         onStatus(t('自动计算权重写的是绑定姿态：请切到 Pose 状态'))
                         return
                       }
-                      const touched = runAutoWeightsForBones(
+                      const result = runAutoWeightsForBones(
                         { scene, selection, tools, mode, time, status: onStatus },
                         slot.name,
                         attachment.name,
                         weightBones,
                         2
                       )
-                      onStatus(
+                      const touched = result.touched
+                      // 有选中顶点时只重算它们（Spine 的 Auto 口径），状态栏要说明，免得以为坏了
+                      const scoped = trimScope !== null && trimScope.length > 0
+                      const message =
                         touched > 0
-                          ? t('已按绑定骨骼重算 {0} 个顶点的权重', touched)
+                          ? scoped
+                            ? t('已按绑定骨骼重算选中的 {0} 个顶点', touched)
+                            : t('已按绑定骨骼重算 {0} 个顶点的权重', touched)
                           : weightBones.length < 2
                             ? t('权重没有变化：列表里只有 {0} 根骨骼，结果就是全部 100%。先点「添加绑定骨骼」把相关骨骼加进来再算', weightBones.length)
                             : t('权重没有变化：当前权重已是最新结果')
+                      // 降级要说出来：用户选了热扩散却拿到表面距离，不说会以为算法没生效
+                      onStatus(
+                        result.degraded
+                          ? `${message}${t('（网格较大，本次实际用表面距离计算）')}`
+                          : message
                       )
                     }}
                   >
                     {t('自动计算权重')}
                   </button>
+                </div>
+                {/*
+                  自动权重的算法口径（三选一）：
+                  热扩散最接近参考编辑器的效果，表面距离是省时版本，直线距离只作兜底。
+                  说明文字跟着选中项变 —— 三种口径的差别（快慢 / 是否串味）才是用户要判断的东西，
+                  一段话把三条都写上，选中谁看起来都像是没生效。
+                */}
+                <SelectField
+                  label={t('自动权重算法')}
+                  value={tools.autoMethod}
+                  options={[
+                    { value: 'heat', label: t('热扩散（默认）') },
+                    { value: 'geodesic', label: t('表面距离') },
+                    { value: 'distance', label: t('直线距离') }
+                  ]}
+                  onChange={(value) => tools.setAutoMethod(value as AutoWeightMethod)}
+                />
+                <p className="text-3xs leading-relaxed text-content-lo">
+                  {tools.autoMethod === 'heat'
+                    ? t('热扩散：沿网格表面平滑扩散，骨骼弯曲处也连续；最慢，网格太大时自动退回「表面距离」')
+                    : tools.autoMethod === 'geodesic'
+                      ? t('表面距离：沿网格表面量距离再按 1/d 衰减分配，比热扩散快，骨骼弯曲处过渡会有突跳')
+                      : t('直线距离：按空间直线距离衰减，最快；手臂贴着身体这类贴身部件会串味，只作兜底')}
+                </p>
+                {/*
+                  Spine 的 Prune：丢掉过小的权重 + 把每顶点影响数压到上限。
+                  导出/运行时每顶点只有 4 槽（compile.normalizeWeights → hao2dWriter），
+                  所以上限默认就是 4 —— 面板百分比与导出结果从此对得上。
+                  与 Spine 的差别：不实时改文档，只显示「将移除 N 个影响」的计数预览，点按钮才提交。
+                */}
+                <div className="flex flex-col gap-1">
+                  {overInfluenced > 0 ? (
+                    <div className="flex flex-col gap-1 rounded border border-warn/40 bg-warn/10 px-1.5 py-1">
+                      <span className="text-3xs leading-relaxed text-warn">
+                        {t('{0} 个顶点受超过 {1} 根骨骼影响：导出/运行时只保留权重最高的 {1} 根', [overInfluenced, 4])}
+                      </span>
+                      <button
+                        type="button"
+                        className="hao-btn h-[18px] w-full px-2 text-3xs"
+                        title={t('只按上限修剪、不动阈值：直接把每顶点的影响骨骼数压到上限')}
+                        onClick={() => runTrim(4, 0)}
+                      >
+                        {t('一键修剪到 {0} 根', 4)}
+                      </button>
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="hao-btn h-[20px] w-full px-2 text-3xs"
+                    disabled={!attachment.vertices.some((vertex) => vertex.weights.length > 0)}
+                    title={t('修剪：丢掉小于阈值的权重，并把每个顶点的影响骨骼数压到上限；有选中顶点时只处理选中的那些。移除的权重按比例分给剩下的骨骼')}
+                    onClick={() => runTrim(tools.trim.maxInfluences, tools.trim.threshold / 100)}
+                  >
+                    {t('修剪权重（{0} 骨）', tools.trim.maxInfluences)}
+                  </button>
+                  <div className="flex items-center gap-1 px-1">
+                    <span className="shrink-0 text-3xs text-content-lo">{t('上限')}</span>
+                    <CommitTextField
+                      className="hao-field h-[18px] w-[34px] shrink-0 text-right font-mono text-3xs"
+                      value={String(tools.trim.maxInfluences)}
+                      inputMode="numeric"
+                      scrub
+                      title={t('每顶点最多保留几根骨骼（1~4）：运行时与导出固定只有 4 槽，调小是给「骨骼越少越省」的管线留余量')}
+                      sanitize={(raw) => {
+                        const next = Math.round(Number(raw))
+                        return Number.isFinite(next) ? String(Math.min(4, Math.max(1, next))) : null
+                      }}
+                      onCommit={(next) => tools.setTrim({ maxInfluences: Number(next) })}
+                    />
+                    <span className="shrink-0 text-3xs text-content-lo">{t('阈值')}</span>
+                    <CommitTextField
+                      className="hao-field h-[18px] w-[40px] shrink-0 text-right font-mono text-3xs"
+                      value={String(tools.trim.threshold)}
+                      inputMode="numeric"
+                      scrub
+                      title={t('丢掉小于这个百分比的权重（0 = 只按上限截断）；每个顶点至少保留权重最大的一项')}
+                      sanitize={(raw) => {
+                        const next = Math.round(Number(raw))
+                        return Number.isFinite(next) ? String(Math.min(100, Math.max(0, next))) : null
+                      }}
+                      onCommit={(next) => tools.setTrim({ threshold: Number(next) })}
+                    />
+                    <span className="shrink-0 text-3xs text-content-lo">%</span>
+                  </div>
+                  <p className="text-3xs leading-relaxed text-content-lo">
+                    {trimPreview && trimPreview.touched > 0
+                      ? t('将移除 {0} 个骨骼影响，{1} 个顶点会被改写（点上面的按钮才生效）', [
+                          trimPreview.removed,
+                          trimPreview.touched
+                        ])
+                      : t('导出/运行时每顶点只取 4 根骨骼：先在这里修剪，刷出来的百分比才和导出结果一致')}
+                  </p>
                 </div>
                 {/*
                   不加高度上限、也不给滚动条：绑定骨骼可能十几根，列表被截断的话
@@ -1373,6 +1615,60 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                     })
                   )}
                 </div>
+              </FieldGroup>
+            ) : null}
+
+            {/*
+              Spine 权重工具里的三个辅助动作：Swap / 复制 / 粘贴。
+              范围与修剪一致 —— 选中顶点优先，否则整块网格（Spine 也是这个口径）。
+            */}
+            {attachment.type === 'mesh' ? (
+              <FieldGroup title={t('权重操作')}>
+                <SelectField
+                  label={t('交换 A')}
+                  value={swapBones.a || weightBones[0] || ''}
+                  options={weightBones.map((name) => ({ value: name, label: name }))}
+                  onChange={(value) => setSwapBones((prev) => ({ ...prev, a: value }))}
+                />
+                <SelectField
+                  label={t('交换 B')}
+                  value={swapBones.b || weightBones[1] || ''}
+                  options={weightBones.map((name) => ({ value: name, label: name }))}
+                  onChange={(value) => setSwapBones((prev) => ({ ...prev, b: value }))}
+                />
+                <button
+                  type="button"
+                  className="hao-btn h-[20px] w-full px-2 text-3xs"
+                  disabled={weightBones.length < 2}
+                  title={t('在选中顶点上交换这两根骨骼的权重；没选顶点时改整块网格')}
+                  onClick={runSwap}
+                >
+                  {t('交换这两根骨骼的权重')}
+                </button>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    className="hao-btn h-[20px] flex-1 px-2 text-3xs"
+                    title={t('复制选中顶点的权重（没选就整块网格），可粘到别的顶点或别的网格；目标网格没绑的骨骼会被丢掉')}
+                    onClick={runCopyWeights}
+                  >
+                    {t('复制顶点权重')}
+                  </button>
+                  <button
+                    type="button"
+                    className="hao-btn h-[20px] flex-1 px-2 text-3xs"
+                    disabled={clipboardCount === 0}
+                    title={t('把剪贴板按顺序贴到选中顶点；数量不一致时只贴前面能对上的那些')}
+                    onClick={runPasteWeights}
+                  >
+                    {t('粘贴顶点权重')}
+                  </button>
+                </div>
+                <p className="text-3xs leading-relaxed text-content-lo">
+                  {clipboardCount > 0
+                    ? t('剪贴板里有 {0} 个顶点的权重（不写进工程文件）', clipboardCount)
+                    : t('交换 / 粘贴都只改绑定姿态下的权重；复制的内容不写进工程文件')}
+                </p>
               </FieldGroup>
             ) : null}
 

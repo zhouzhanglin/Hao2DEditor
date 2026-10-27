@@ -25,7 +25,7 @@ import { useProjectStore } from '@editor/store/projectStore'
 import { executeCommand } from '@editor/commands'
 import { createSampleDocument } from '@core/sample'
 import { useSelectionStore } from '@editor/store/selectionStore'
-import { useToolStore } from '@editor/store/toolStore'
+import { isMeshEditTool, useToolStore } from '@editor/store/toolStore'
 import type { EditorTool, GizmoMode } from '@editor/store/toolStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { playheadTime } from '@editor/store/playheadStore'
@@ -686,6 +686,10 @@ export default function App() {
         if (useToolStore.getState().pendingWeightBone) {
           useToolStore.getState().setPendingWeightBone(null)
           flash(t('已结束绑定骨骼'))
+        } else if (useSelectionStore.getState().vertices.length > 0) {
+          // 取消顶点选择（与 Spine 权重工具的 space / esc 同义；这里 space 已经是播放/暂停）
+          useSelectionStore.getState().selectVertices([])
+          flash(t('已取消顶点选择'))
         }
       } else if (event.key === 'Tab') {
         event.preventDefault()
@@ -748,6 +752,27 @@ export default function App() {
         handleCommand('anim:prevFrame')
       } else if (event.key === 'ArrowRight') {
         handleCommand('anim:nextFrame')
+      } else if (mod && event.key.toLowerCase() === 'a') {
+        /*
+         * Ctrl/Cmd+A：全选当前网格的顶点（Spine 权重工具的 ctrl+A 同款）。
+         * 只在「顶点有意义的工具」（权重刷 / 网格 / 顶点）且选中网格附件时接管，
+         * 别的场合不拦默认行为 —— 否则选中骨骼时按 Ctrl+A 会白亮一圈顶点。
+         */
+        const pick = useSelectionStore.getState()
+        const tool = useToolStore.getState().tool
+        const scene = getActiveScene()
+        const mesh = scene?.meshResult
+        if (!scene || !mesh || pick.kind !== 'attachment' || !(tool === 'weight' || isMeshEditTool(tool))) return
+        // 选中的是**共享缓冲**下标：反查每个下标属于哪个插槽 / 附件，只收这个网格的
+        const indices: number[] = []
+        for (let index = 0; index < mesh.vertexCount; index++) {
+          const ref = scene.vertexRefAt(index)
+          if (ref && ref.slot === pick.slot && ref.attachment === pick.attachment) indices.push(index)
+        }
+        if (indices.length === 0) return
+        event.preventDefault()
+        useSelectionStore.getState().selectVertices(indices)
+        flash(t('已选中「{0}」的全部 {1} 个顶点', [pick.attachment, indices.length]))
       } else if (mod && event.key.toLowerCase() === 's') {
         event.preventDefault()
         handleCommand(event.shiftKey ? 'project:saveAs' : 'project:save')

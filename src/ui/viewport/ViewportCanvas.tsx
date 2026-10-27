@@ -23,10 +23,12 @@ import {
   maskDraftClose,
   meshSubtoolCancel,
   meshSubtoolHover,
+  runAutoWeightsForBones,
   slotLocked,
   toolPointerDown,
   toolPointerMove,
-  toolPointerUp
+  toolPointerUp,
+  weightTargetBoneFor
 } from '@editor/tools/authoringTools'
 import { meshSubtoolCursor } from './MeshSubtoolBar'
 import type { ToolHost } from '@editor/tools/authoringTools'
@@ -356,6 +358,11 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         // 权重着色（饼图）跟着工具走：顶部「权重」开关已移除
         weightTool: tools.tool === 'weight',
         weightBones,
+        /*
+         * 权重刷 / 直接拖动的目标骨骼：选了顶点之后 `kind` 变成 attachment、`selectedBones` 变空，
+         * 但这根骨骼仍是「正在调权重的那根」—— 单独给一条通道画高亮，否则用户看不出在改谁。
+         */
+        weightTargetBone: weightTargetBoneFor(tools.tool, selection),
         selectedVertices: selection.vertices,
         selectedAttachment,
         // 选中 display 的轮廓：与操作器不同，**任何模式 / 工具下都给**（动画态也要看得出选的是谁）
@@ -646,15 +653,44 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         return
       }
       const boneName = scene.runtime.asset.bones[hitBone.boneIndex]?.name ?? ''
+      /*
+       * Spine：**第一次**给网格绑骨骼时会自动算一遍权重（之后手调的结果不会被覆盖）。
+       * 判据是「这块网格还一个权重都没有」—— 老工程可能没有显式骨骼列表，但权重能推断出列表。
+       */
+      const skin = useSelectionStore.getState().skin
+      const before = resolveAttachment(useProjectStore.getState().document, pending.slot, pending.attachment, skin)
+      const untouched = !before || !before.vertices.some((vertex) => vertex.weights.length > 0)
       let added = false
       useProjectStore.getState().update(t('绑定权重骨骼'), (draft) => {
         added = addWeightBone(draft, pending.slot, pending.attachment, boneName)
       })
       scene.setDocument(useProjectStore.getState().document, useSelectionStore.getState().skin)
       scene.refresh()
+      let autoWeighted = 0
+      if (added && untouched) {
+        const attachment = resolveAttachment(
+          useProjectStore.getState().document,
+          pending.slot,
+          pending.attachment,
+          skin
+        )
+        const host = buildHost()
+        if (attachment && attachment.type === 'mesh' && host) {
+          autoWeighted = runAutoWeightsForBones(
+            host,
+            pending.slot,
+            pending.attachment,
+            weightBonesOf(attachment),
+            2,
+            false
+          ).touched
+        }
+      }
       onStatus(
         added
-          ? t('已绑定「{0}」；可继续点选其它骨骼，完成后右键或再点按钮结束', boneName)
+          ? autoWeighted > 0
+            ? t('已绑定「{0}」并自动算好 {1} 个顶点的权重；可继续点选其它骨骼', [boneName, autoWeighted])
+            : t('已绑定「{0}」；可继续点选其它骨骼，完成后右键或再点按钮结束', boneName)
           : t('「{0}」已在列表里；继续点选，或右键结束绑定', boneName)
       )
       return
@@ -866,6 +902,22 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
        */
       if (tools.weightSubtool === 'box') {
         if (event.currentTarget.style.cursor !== 'crosshair') event.currentTarget.style.cursor = 'crosshair'
+        if (scene.state.brushRing) scene.setViewState({ brushRing: null })
+        if (isDragging()) {
+          const host = buildHost()
+          if (host) toolPointerMove(host, { world, shift: event.shiftKey, ctrl: event.ctrlKey, alt: event.altKey })
+        }
+        return
+      }
+      /*
+       * 子工具「直接拖动」：**不画刷子圈、也不换刷子光标** —— 这里拖是上下调权重，
+       * 给上下箭头光标（ns-resize）才对得上手感；圈会让人以为点下去是在刷。
+       * 悬在骨骼上仍是 pointer（点一下换目标骨骼）。
+       */
+      if (tools.weightSubtool === 'direct') {
+        const overBone = !scene.pickVertexAt(world.x, world.y) && scene.pickBoneAt(world.x, world.y) !== null
+        const cursor = overBone ? 'pointer' : 'ns-resize'
+        if (event.currentTarget.style.cursor !== cursor) event.currentTarget.style.cursor = cursor
         if (scene.state.brushRing) scene.setViewState({ brushRing: null })
         if (isDragging()) {
           const host = buildHost()

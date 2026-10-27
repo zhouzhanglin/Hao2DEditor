@@ -138,8 +138,14 @@ interface WeightEntry {
   w3: number
 }
 
-/** 权重色点半径（屏幕像素）：比普通顶点大一圈，它是这个模式下唯一的信息载体 */
-const WEIGHT_DOT_RADIUS = 5.5
+/**
+ * 权重饼图半径（**屏幕像素**，不随视口缩放变化）。
+ *
+ * 它承载的是「这根顶点各骨骼占多少」的全部信息，太小就只看得出一团颜色：
+ * 直径约 16px 时，一瓣 10% 也有 1.6px 的弧长，肉眼能分辨；
+ * 再大就会在密集网格上互相压住（每个顶点都画一个），所以到此为止。
+ */
+const WEIGHT_DOT_RADIUS = 8
 
 /**
  * 权重着色：每个顶点画成**饼图** —— 每一瓣的角宽 = 那根骨骼的权重，颜色取自调色板。
@@ -214,8 +220,8 @@ function weightSlices(entry: WeightEntry, boneColors: ReadonlyMap<number, number
 /**
  * 饼图模式下的选中 / 悬停标记：画成**圆环**而不是实心点。
  *
- * 实心大点会把 11px 的饼整个盖住 —— 那样"选中了哪个顶点"和"它的权重怎么分"就对立了；
- * 圆环（半径比饼大 2px）两者兼顾。画在描边层，即使压在饼下面也不影响判读。
+ * 实心大点会把饼整个盖住 —— 那样"选中了哪个顶点"和"它的权重怎么分"就对立了；
+ * 圆环（半径比饼大 2.5px）两者兼顾。画在描边层，即使压在饼下面也不影响判读。
  */
 function drawVertexRings(
   g: Graphics,
@@ -225,7 +231,7 @@ function drawVertexRings(
   onlySlot: number,
   w: number
 ): void {
-  const radius = (WEIGHT_DOT_RADIUS + 2) * w
+  const radius = (WEIGHT_DOT_RADIUS + 2.5) * w
   const ring = (hit: (index: number) => boolean, color: number): void => {
     let any = false
     for (let i = 0; i < result.vertexCount; i++) {

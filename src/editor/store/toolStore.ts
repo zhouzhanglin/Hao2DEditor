@@ -1,5 +1,6 @@
 
 import { create } from 'zustand'
+import type { AutoWeightMethod } from '@editor/commands/authoringCommands'
 import { t } from '@i18n'
 
 /**
@@ -74,6 +75,20 @@ export interface BrushState {
 }
 
 /**
+ * 权重修剪（Spine 的 Prune）的参数，面板见检查器「权重骨骼列表」里的「修剪权重」一行。
+ *
+ * - `maxInfluences`：每顶点最多保留几根骨骼。运行时与导出**固定 4 槽**
+ *   （见 `compile.normalizeWeights` / `hao2dWriter`），所以这里也只允许 1~4；
+ * - `threshold`：丢掉小于这个百分比（%）的权重；0 = 只按上限截断。
+ *
+ * 只存在工具状态里（不进文档）：这是「怎么裁」的一次性参数，不该跟着工程存档走。
+ */
+export interface WeightTrimState {
+  maxInfluences: number
+  threshold: number
+}
+
+/**
  * 权重刷的**子工具**：决定左键拖动是刷权重还是框选顶点。
  *
  * 权重刷的左键拖动本来只有一个含义（刷），要加框选就必须二选一 —— 用视口左下角的小工具条切换，
@@ -81,8 +96,9 @@ export interface BrushState {
  *
  * - `paint`：刷权重（默认）
  * - `box`：拉矩形框选顶点（Shift 追加）；框选只改选择，之后再刷只影响这些顶点
+ * - `direct`：Spine 的 Direct —— 选中顶点后在视口里上下拖动，改它们在某根骨骼上的权重
  */
-export type WeightSubtool = 'paint' | 'box'
+export type WeightSubtool = 'paint' | 'box' | 'direct'
 
 /** 权重刷子工具图标条的顺序与文案（工具条、状态提示共用一处，改一处即可） */
 export function weightSubtools(): Array<{ id: WeightSubtool; label: string; hint: string }> {
@@ -96,6 +112,11 @@ export function weightSubtools(): Array<{ id: WeightSubtool; label: string; hint
       id: 'box',
       label: t('框选顶点'),
       hint: t('框选顶点：拖出矩形选中顶点（Shift 追加）；之后刷权重只影响这些顶点，点空白处取消选择')
+    },
+    {
+      id: 'direct',
+      label: t('直接拖动'),
+      hint: t('直接拖动：先在视口里点选 / 框选顶点，再按住上下拖动调整它们在这根骨骼上的权重（上=加 / 下=减）')
     }
   ]
 }
@@ -238,6 +259,15 @@ export interface ToolState {
    * 免得下次切回权重刷时鼠标还停在「框选」上、按下去以为是刷。
    */
   weightSubtool: WeightSubtool
+  /** 权重修剪参数（丢小权重 + 每顶点影响数上限） */
+  trim: WeightTrimState
+  /**
+   * 自动权重的算法口径（见 `AutoWeightMethod`）：
+   * - `heat`：逐骨骼在网格表面热扩散，结果连续（默认）；
+   * - `geodesic`：沿表面算距离再按 1/d^k 分配，快但有突跳；
+   * - `distance`：纯直线距离，贴身部件会串味，仅作兜底/对比。
+   */
+  autoMethod: AutoWeightMethod
   setTool: (tool: EditorTool) => void
   setGizmo: (mode: GizmoMode) => void
   setMeshSubtool: (subtool: MeshSubtool) => void
@@ -245,6 +275,8 @@ export interface ToolState {
   setOverlay: (overlay: OverlayState) => void
   toggleOverlay: (key: keyof OverlayState) => void
   setBrush: (brush: Partial<BrushState>) => void
+  setTrim: (trim: Partial<WeightTrimState>) => void
+  setAutoMethod: (value: AutoWeightMethod) => void
   setGridDivisions: (value: number) => void
   setPendingWeightBone: (target: { slot: string; attachment: string } | null) => void
 }
@@ -265,6 +297,13 @@ export const useToolStore = create<ToolState>((set, get) => ({
   pendingWeightBone: null,
   meshSubtool: 'edit',
   weightSubtool: 'paint',
+  /*
+   * 修剪默认就按导出/运行时的口径来：每顶点 4 根骨骼、丢掉小于 1% 的权重。
+   * 与子工具不同，它不随换工具复位 —— 用户调好的阈值应该一直用得上。
+   */
+  trim: { maxInfluences: 4, threshold: 1 },
+  // 默认热扩散：结果连续，贴身部件不会被对侧骨骼抢走权重
+  autoMethod: 'heat',
 
   /**
    * 换工具**不再改任何显示层**：网格线框与顶点、FFD、权重着色都由工具与选中项驱动
@@ -292,10 +331,21 @@ export const useToolStore = create<ToolState>((set, get) => ({
   setOverlay: (overlay) => set({ overlay }),
   toggleOverlay: (key) => set({ overlay: { ...get().overlay, [key]: !get().overlay[key] } }),
   setBrush: (brush) => set({ brush: { ...get().brush, ...brush } }),
+  // 夹在合法区间：上限 1~4（运行时只有 4 槽），阈值 0~100%
+  setTrim: (trim) => {
+    const next = { ...get().trim, ...trim }
+    set({
+      trim: {
+        maxInfluences: Math.max(1, Math.min(4, Math.round(next.maxInfluences))),
+        threshold: Math.max(0, Math.min(100, Math.round(next.threshold)))
+      }
+    })
+  },
   setGridDivisions: (value) => set({ gridDivisions: Math.max(1, Math.min(24, Math.round(value))) }),
   setPendingWeightBone: (target) => set({ pendingWeightBone: target }),
   setMeshSubtool: (meshSubtool) => set({ meshSubtool }),
-  setWeightSubtool: (weightSubtool) => set({ weightSubtool })
+  setWeightSubtool: (weightSubtool) => set({ weightSubtool }),
+  setAutoMethod: (autoMethod) => set({ autoMethod })
 }))
 
 export function currentTools(): ToolState {

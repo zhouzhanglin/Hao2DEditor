@@ -1011,9 +1011,108 @@ export const en: Record<string, string> = {
     'Normalize painted vertex weights to 1; when off, only the target bone changes and the weight sum may not equal 1',
   'Strength = 一笔能刷到的权重上限；Feather = 边缘衰减占笔刷半径的比例（0 = 硬边）；按住修饰键临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长':
     'Strength = the maximum weight one stroke can reach; Feather = share of the brush radius used to fade out (0 = hard edge); hold a modifier to change direction: Alt = subtract / Shift = replace / Ctrl = smooth / Ctrl+Shift = grow',
+  // ── 权重修剪 ──
+  '修剪权重': 'Prune weights',
+  '修剪权重（{0} 骨）': 'Prune weights ({0} bones)',
+  '上限': 'Max',
+  '阈值': 'Threshold',
+  '修剪：丢掉小于阈值的权重，并把每个顶点的影响骨骼数压到上限；有选中顶点时只处理选中的那些。移除的权重按比例分给剩下的骨骼':
+    'Prune: drop weights below the threshold and cap the influences per vertex; when vertices are selected only those are processed. Removed weight is shared out to the remaining bones',
+  '每顶点最多保留几根骨骼（1~4）：运行时与导出固定只有 4 槽，调小是给「骨骼越少越省」的管线留余量':
+    'How many bones to keep per vertex (1–4): runtime and export only have 4 slots, so lowering it leaves headroom for pipelines that prefer fewer bones',
+  '丢掉小于这个百分比的权重（0 = 只按上限截断）；每个顶点至少保留权重最大的一项':
+    'Drop weights below this percentage (0 = only cap the influence count); the largest weight of each vertex is always kept',
+  '导出/运行时每顶点只取 4 根骨骼：先在这里修剪，刷出来的百分比才和导出结果一致':
+    'Runtime and export take only the top 4 bones per vertex: prune here first so the painted percentages match the export',
+  '{0} 个顶点受超过 {1} 根骨骼影响：导出/运行时只保留权重最高的 {1} 根':
+    '{0} vertices are influenced by more than {1} bones: export and runtime keep only the {1} heaviest',
+  '一键修剪到 {0} 根': 'Prune to {0} bones',
+  '只按上限修剪、不动阈值：直接把每顶点的影响骨骼数压到上限':
+    'Prune to the cap only, ignoring the threshold: forces each vertex within the influence limit',
+  '将移除 {0} 个骨骼影响，{1} 个顶点会被改写（点上面的按钮才生效）':
+    'Will remove {0} bone influences and rewrite {1} vertices (nothing changes until you press the button)',
+  '修剪权重改的是绑定姿态：请切到 Pose 状态': 'Pruning weights edits the bind pose: switch to Pose mode first',
+  '已修剪 {0} 个顶点：丢掉 {1} 个骨骼影响，{2} 个顶点压到 {3} 根骨骼以内':
+    'Pruned {0} vertices: dropped {1} bone influences, {2} vertices were capped to {3} bones',
+  '已把 {0} 个顶点修剪到 {1} 根骨骼以内（丢掉 {2} 个骨骼影响）':
+    'Pruned {0} vertices down to {1} bones (dropped {2} bone influences)',
+  '没有顶点需要修剪：都在 {0} 根骨骼以内，也没有小于 {1}% 的权重':
+    'Nothing to prune: every vertex is within {0} bones and no weight is below {1}%',
+  '没有顶点需要修剪：受超过 {0} 根骨骼影响的顶点不在当前选择里':
+    'Nothing to prune: the vertices influenced by more than {0} bones are not in the current selection',
+  '选中的顶点不在这个网格上：请重新框选，或点空白取消选择':
+    'The selected vertices are not on this mesh: box-select again, or click empty space to clear',
+  '裁不了：{0} / {1} 不是网格附件': 'Cannot prune: {0} / {1} is not a mesh attachment',
+  // ── 权重刷的子工具「直接拖动」 ──
+  '直接拖动': 'Direct drag',
+  '直接拖动：先在视口里点选 / 框选顶点，再按住上下拖动调整它们在这根骨骼上的权重（上=加 / 下=减）':
+    'Direct drag: select vertices in the viewport, then drag up or down to adjust their weight for this bone (up = add / down = subtract)',
+  '直接拖动属于绑定编辑：切到 Pose 状态再用': 'Direct drag edits the bind pose: switch to Pose mode first',
+  '已取消顶点选择：再点选顶点后可上下拖动调权重':
+    'Vertex selection cleared: pick vertices again, then drag up or down to adjust weights',
+  '直接拖动：先在层级树里选一根骨骼，再上下拖动调整选中顶点的权重':
+    'Direct drag: select a bone in the hierarchy first, then drag up or down to adjust the selected vertices',
+  '直接拖动：先在视口里点选或框选要调的顶点': 'Direct drag: pick or box-select the vertices to adjust first',
+  '直接拖动「{0}」的权重：按住上下拖（上=加 / 下=减），共 {1} 个顶点':
+    'Direct drag for "{0}": hold and drag up or down (up = add / down = subtract), {1} vertices',
+  '「{0}」的权重：{1}%（上下拖动调整；点空白取消选择）':
+    'Weight for "{0}": {1}% (drag up or down to adjust; click empty space to clear)',
+  '调整顶点权重': 'Adjust vertex weights',
+  // ── 自动权重 ──
+  '自动权重算法': 'Auto-weight algorithm',
+  '热扩散（默认）': 'Heat diffusion (default)',
+  '表面距离': 'Surface distance',
+  '直线距离': 'Straight-line distance',
+  '热扩散：沿网格表面平滑扩散，骨骼弯曲处也连续；最慢，网格太大时自动退回「表面距离」':
+    'Heat diffusion: spreads smoothly across the mesh surface and stays continuous around bent bones; slowest, and large meshes fall back to "surface distance"',
+  '表面距离：沿网格表面量距离再按 1/d 衰减分配，比热扩散快，骨骼弯曲处过渡会有突跳':
+    'Surface distance: measures distance along the surface and allocates by a 1/d falloff; faster than heat diffusion, but the transition can jump around bent bones',
+  '直线距离：按空间直线距离衰减，最快；手臂贴着身体这类贴身部件会串味，只作兜底':
+    'Straight-line distance: falls off by straight-line distance in space, fastest; neighbouring parts such as an arm resting on the body may bleed into each other, so use it only as a fallback',
+  '（网格较大，本次实际用表面距离计算）': ' (mesh is large, surface distance was used this time)',
+  '已绑定「{0}」并自动算好 {1} 个顶点的权重；可继续点选其它骨骼':
+    'Bound "{0}" and computed weights for {1} vertices; keep clicking other bones to bind more',
+  '已按绑定骨骼重算选中的 {0} 个顶点': 'Recomputed weights for the {0} selected vertices',
+  // ── 权重操作（交换 / 复制粘贴） ──
+  '权重操作': 'Weight actions',
+  '交换 A': 'Swap A',
+  '交换 B': 'Swap B',
+  '在选中顶点上交换这两根骨骼的权重；没选顶点时改整块网格':
+    'Swap the weights of these two bones on the selected vertices; with nothing selected the whole mesh is changed',
+  '交换这两根骨骼的权重': 'Swap these two bones',
+  '复制选中顶点的权重（没选就整块网格），可粘到别的顶点或别的网格；目标网格没绑的骨骼会被丢掉':
+    'Copy the weights of the selected vertices (whole mesh when nothing is selected); you can paste onto other vertices or meshes — bones not bound to the target are dropped',
+  '复制顶点权重': 'Copy weights',
+  '把剪贴板按顺序贴到选中顶点；数量不一致时只贴前面能对上的那些':
+    'Paste the clipboard onto the selected vertices in order; when the counts differ only the first matching ones are pasted',
+  '粘贴顶点权重': 'Paste weights',
+  '剪贴板里有 {0} 个顶点的权重（不写进工程文件）':
+    'Clipboard holds weights for {0} vertices (not saved into the project file)',
+  '交换 / 粘贴都只改绑定姿态下的权重；复制的内容不写进工程文件':
+    'Swap and paste only change the bind-pose weights; copied data is never written into the project file',
+  '交换权重改的是绑定数据：请切到 Pose 状态': 'Swapping weights edits bind data: switch to Pose mode first',
+  '先选两根不同的骨骼再交换': 'Pick two different bones before swapping',
+  '交换骨骼权重': 'Swap bone weights',
+  '已在 {0} 个顶点上交换「{1}」与「{2}」的权重': 'Swapped "{1}" and "{2}" weights on {0} vertices',
+  '没有可交换的权重：「{0}」与「{1}」在这些顶点上没有区别':
+    'Nothing to swap: "{0}" and "{1}" are identical on these vertices',
+  '没有可交换的权重：两根骨骼都要在该网格的权重列表里，且至少一个顶点上两者权重不同':
+    'Nothing to swap: both bones must be in the mesh\'s weight list and differ on at least one vertex',
+  '已复制 {0} 个顶点的权重': 'Copied weights of {0} vertices',
+  '没有可复制的顶点：先在视口里点选或框选': 'Nothing to copy: pick or box-select vertices in the viewport first',
+  '粘贴权重改的是绑定数据：请切到 Pose 状态': 'Pasting weights edits bind data: switch to Pose mode first',
+  '剪贴板是空的：先复制一批顶点的权重': 'Clipboard is empty: copy some vertex weights first',
+  '已粘贴 {0} 个顶点的权重': 'Pasted weights onto {0} vertices',
+  '粘贴没有改动任何顶点：骨骼名对不上，或权重本来就一样':
+    'Paste changed nothing: the bone names do not match, or the weights were already the same',
+  'vertices 里没有落在这个网格上的顶点下标': 'None of the indices in vertices belong to this mesh',
+  '已交换 {0} 个顶点的「{1}」与「{2}」权重': 'Swapped "{1}" and "{2}" weights on {0} vertices',
+  // ── 顶点选择的快捷键 ──
+  '已选中「{0}」的全部 {1} 个顶点': 'Selected all {1} vertices of "{0}"',
   '整体染色': 'Global tint',
-  '染色与插槽色、附件色相乘，用于快速检查叠加效果':
-    'Tint multiplies with slot and attachment colors; handy for quickly checking the blended result',
+  '整体染色（与插槽色、附件色相乘）；双击复位为白色':
+    'Global tint (multiplies with slot and attachment colors); double-click to reset to white',
+  '染色透明度': 'Tint opacity',
   '未选中对象': 'Nothing selected',
   '在层级树或视口中选中骨骼、插槽、附件或约束后，可在此编辑其属性。':
     'Select a bone, slot, attachment or constraint in the hierarchy tree or viewport to edit its properties here.',

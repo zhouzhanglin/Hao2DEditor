@@ -16,6 +16,7 @@ import {
 } from '../services/projectIo'
 import { prepareRuntimeExport, writeHao2dExport, writeRuntimeExport } from '../services/exportService'
 import { writeSpineExport } from '../services/spineExport'
+import { clearWeightClipboard } from './authoringCommands'
 import { requireAnimation } from './animOps'
 import { changed, defineAction, defineWrite, unchanged } from './registry'
 import { need, needNum, optBool, optNum, optNumList, optText, optTextList, rawText } from './args'
@@ -44,6 +45,8 @@ function resetForSkeletonChange(): void {
   useSelectionStore.getState().clear()
   useSelectionStore.getState().select({ skin })
   useToolStore.getState().setPendingWeightBone(null)
+  // 权重剪贴板里是旧骨架的骨骼名，对新骨架没有意义（粘贴会全部被过滤掉）
+  clearWeightClipboard()
   useTimelineStore.getState().setAnimation(null)
   getActiveScene()?.fit()
 }

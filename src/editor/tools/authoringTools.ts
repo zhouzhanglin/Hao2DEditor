@@ -22,6 +22,7 @@ import { t } from '@i18n'
 import { moveSlot, validateSlotMove } from '../commands/hierarchyCommands'
 import type { MoveResult } from '../commands/hierarchyCommands'
 import {
+  applyVertexWeight,
   autoWeights,
   createClippingAttachment,
   deleteClippingPoint,
@@ -38,7 +39,7 @@ import {
   weightBonesOf
 } from '../commands/authoringCommands'
 import type { BrushMode, VertexSample } from '../commands/authoringCommands'
-import type { BrushModeSetting, MeshSubtool } from '../store/toolStore'
+import type { BrushModeSetting, EditorTool, MeshSubtool } from '../store/toolStore'
 import { meshSubtools, useToolStore } from '../store/toolStore'
 import { fitUvField, isInteriorVertex, polygonUvs, triangulatePolygon } from '@core/mesh/triangulate'
 
@@ -67,6 +68,8 @@ type DragKind =
   /** 顶点工具的框选：在空白处拖出一个矩形，松手选中框内顶点 */
   | 'vertex-box'
   | 'paint'
+  /** 权重刷子工具「直接拖动」：选中顶点后上下拖动，改它们在这根骨骼上的权重（Spine 的 Direct） */
+  | 'weight-direct'
   | 'attachment'
   /** 网格子工具「自定义布线」：从一个顶点拖到另一个顶点，松手连线 */
   | 'mesh-rewire'
@@ -177,6 +180,13 @@ interface DragSession {
    * 否则叠加次数取决于鼠标事件频率，手感会随速度飘（慢慢挪会一遍遍叠加、飞快划过反而只叠一两次）。
    */
   lastPaint: Vec2
+  /**
+   * 「直接拖动」的目标顶点与**按下时的权重快照**。
+   *
+   * 每帧都从快照重算再整体替换：Normalize 打开时 `applyVertexWeight` 会动其它骨骼的比例，
+   * 在上一帧结果上继续叠加会让分配越拖越偏。
+   */
+  directTargets: Array<{ slot: string; attachment: string; vertex: number; weights: Array<{ bone: string; weight: number }> }>
   /** 新建骨骼：起点（已吸附）、当前终点与父骨骼名，松开时按起点→终点生成 */
   createStart: Vec2
   createEnd: Vec2
@@ -232,6 +242,7 @@ const IDLE: DragSession = {
   moved: false,
   paintStarted: false,
   lastPaint: { x: 0, y: 0 },
+  directTargets: [],
   createStart: { x: 0, y: 0 },
   createEnd: { x: 0, y: 0 },
   createParent: '',
@@ -281,6 +292,18 @@ export function baseBrushMode(mode: BrushModeSetting): BrushMode {
   if (mode === 'growShrink') return 'grow'
   if (mode === 'smooth') return 'smooth'
   return 'add'
+}
+
+/**
+ * 权重刷 / 直接拖动正在调的**目标骨骼**（视口据此把它画成高亮）。
+ *
+ * 为什么不能直接用 `selectedBones`：`select()` 切到 `attachment`（选顶点）时会把 `bones` 清空
+ *（见 selectionStore「切到非骨骼对象时集合一律清空」），而视口的高亮是按 `kind === 'bone'` 算的 ——
+ * 于是「先选骨骼、再选顶点」之后骨骼高亮整个消失，用户看不出自己在给哪根骨骼调权重。
+ * `selection.bone` 这时仍然保留（paintAt / directTargets 都靠它），所以只要在用权重工具就把它画出来。
+ */
+export function weightTargetBoneFor(tool: EditorTool, selection: Pick<Selection, 'bone'>): string {
+  return tool === 'weight' ? selection.bone : ''
 }
 
 /** 状态栏里的动作名（与 brushModeFor 一一对应） */
@@ -667,6 +690,52 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
         return true
       }
       startVertexBox(host, info)
+      return true
+    }
+    /*
+     * 子工具「直接拖动」（Spine 的 Direct）：点顶点选中它，按住上下拖动改权重。
+     * 与刷权重共用「选中顶点」这套选择：先框选一批，再一个个微调。
+     */
+    if (tools.weightSubtool === 'direct') {
+      if (host.mode !== 'pose') {
+        host.status(t('直接拖动属于绑定编辑：切到 Pose 状态再用'))
+        return true
+      }
+      const hit = scene.pickVertexAt(info.world.x, info.world.y)
+      const ref = hit ? scene.vertexRefAt(hit.vertexIndex) : null
+      if (hit && ref) {
+        const selected = useSelectionStore.getState()
+        if (!selected.vertices.includes(hit.vertexIndex)) {
+          useSelectionStore.getState().select({
+            kind: 'attachment',
+            slot: ref.slot,
+            attachment: ref.attachment,
+            vertices: [hit.vertexIndex],
+            vertex: ref.vertex
+          })
+        }
+      } else if (scene.pickBoneAt(info.world.x, info.world.y)) {
+        // 点在骨骼上 = 换目标骨骼：交回视口的骨骼选择，别把刚框好的顶点清掉
+        return false
+      } else if (useSelectionStore.getState().vertices.length > 0) {
+        useSelectionStore.getState().select({ vertices: [], vertex: -1 })
+        host.status(t('已取消顶点选择：再点选顶点后可上下拖动调权重'))
+        return true
+      }
+      const bone = useSelectionStore.getState().bone
+      if (!bone) {
+        host.status(t('直接拖动：先在层级树里选一根骨骼，再上下拖动调整选中顶点的权重'))
+        return true
+      }
+      const targets = directTargets(host)
+      if (targets.length === 0) {
+        host.status(t('直接拖动：先在视口里点选或框选要调的顶点'))
+        return true
+      }
+      drag = { ...IDLE, kind: 'weight-direct', bone, startWorld: { ...info.world }, directTargets: targets }
+      host.status(
+        t('直接拖动「{0}」的权重：按住上下拖（上=加 / 下=减），共 {1} 个顶点', [bone, targets.length])
+      )
       return true
     }
     /*
@@ -1854,6 +1923,16 @@ function moveActiveDrag(host: ToolHost, info: PointerInfo): void {
     return
   }
 
+  if (drag.kind === 'weight-direct') {
+    // 撤销事务在第一次真正拖动时才开：只点一下不该留下空的记录
+    if (!drag.paintStarted) {
+      drag.paintStarted = true
+      storeHandler.begin(t('调整顶点权重'))
+    }
+    moveDirectWeights(host, info.world)
+    return
+  }
+
   if (drag.kind === 'bone-create') {
     // 收笔同样吸端点：拖到目标骨骼的根端 / 末端时精确对接（端点优先于轴线投影）
     const end = snapToBoneEndpoint(host, info.world)?.point ?? snapToBoneAxis(host, info.world)
@@ -2142,6 +2221,12 @@ function createBoneFromDrag(
   )
 }
 
+/** 自动权重的执行结果：改了几个顶点 + 是否因为网格太大把热扩散换成了表面距离 */
+export interface AutoWeightsRunResult {
+  touched: number
+  degraded: boolean
+}
+
 /**
  * 自动权重（检查器「权重骨骼列表」的按钮调用）：只对**列表里绑定的骨骼**算权重。
  *
@@ -2153,13 +2238,23 @@ export function runAutoWeightsForBones(
   slotName: string,
   attachmentName: string,
   boneNames: readonly string[],
-  falloff: number
-): number {
+  falloff: number,
+  /** 是否遵守顶点选择（Spine 的 Auto 口径）；第一次绑骨骼时传 false，整块重算 */
+  respectVertexSelection = true
+): AutoWeightsRunResult {
+  const idle: AutoWeightsRunResult = { touched: 0, degraded: false }
   const scene = host.scene
   const bundle = scene.runtime
-  if (!bundle || host.mode !== 'pose' || boneNames.length === 0) return 0
-  const samples = samplesFor(host, slotName, attachmentName)
-  if (samples.length === 0) return 0
+  if (!bundle || host.mode !== 'pose' || boneNames.length === 0) return idle
+  const all = samplesFor(host, slotName, attachmentName)
+  if (all.length === 0) return idle
+  /*
+   * Spine 的 Auto：选了顶点就**只算这些顶点**（修局部权重时不破坏手调过的其它部分）。
+   * 选中的顶点不属于这个网格时忽略范围退回整块 —— 否则按钮点了毫无反应，像坏了。
+   */
+  const keys = respectVertexSelection ? selectedVertexKeys(host, host.selection.vertices) : null
+  const scoped = keys ? all.filter((sample) => keys.has(vertexSampleKey(sample))) : all
+  const samples = scoped.length > 0 ? scoped : all
 
   const segments = boneNames
     .map((name) => ({ name, index: bundle.boneIndex[name] ?? -1 }))
@@ -2178,15 +2273,23 @@ export function runAutoWeightsForBones(
         by: oy + Math.sin(angle) * length
       }
     })
-  if (segments.length === 0) return 0
+  if (segments.length === 0) return idle
 
   let touched = 0
+  let degraded = false
   useProjectStore.getState().update(t('自动权重（绑定骨骼）'), (draft) => {
-    touched = autoWeights(draft, samples, segments, { falloff, maxBones: 4 })
+    touched = autoWeights(draft, samples, segments, {
+      falloff,
+      maxBones: 4,
+      method: host.tools.autoMethod,
+      onDegrade: () => {
+        degraded = true
+      }
+    })
   })
   scene.setDocument(useProjectStore.getState().document, host.selection.skin)
   scene.refresh()
-  return touched
+  return { touched, degraded }
 }
 
 const storeHandler = {
@@ -2528,6 +2631,61 @@ function selectedVertexKeys(host: ToolHost, indices: readonly number[]): Set<str
     if (ref) keys.add(`${ref.slot}\u0000${ref.attachment}\u0000${ref.vertex}`)
   }
   return keys.size > 0 ? keys : null
+}
+
+/** 直接拖动：拖满 0 → 100% 需要的屏幕像素（用 pixelsToWorld 换算，视口缩放时手感一致） */
+const DIRECT_DRAG_PIXELS = 120
+
+/**
+ * 「直接拖动」的目标：选中顶点 → 附件内下标 + **按下时的权重快照**。
+ * 快照是为了每帧从同一基准重算（Normalize 打开时会动其它骨骼的比例，叠加会越拖越偏）。
+ */
+function directTargets(host: ToolHost): DragSession['directTargets'] {
+  const document = useProjectStore.getState().document
+  const targets: DragSession['directTargets'] = []
+  // 读 store 而不是 host.selection：按下时刚点选的那个顶点还没进 host 的快照
+  for (const index of useSelectionStore.getState().vertices) {
+    const ref = host.scene.vertexRefAt(index)
+    if (!ref) continue
+    const attachment = findAttachment(document, ref.slot, ref.attachment)
+    const vertex = attachment?.vertices[ref.vertex]
+    if (!vertex) continue
+    targets.push({
+      slot: ref.slot,
+      attachment: ref.attachment,
+      vertex: ref.vertex,
+      weights: vertex.weights.map((entry) => ({ bone: entry.bone, weight: entry.weight }))
+    })
+  }
+  return targets
+}
+
+/**
+ * 直接拖动（Spine 的 Direct）：指针上下移动改权重，上=加、下=减。
+ * 不新增其它骨骼：`applyVertexWeight` 在 Normalize 打开时按比例分配，关掉就只改这一根。
+ */
+function moveDirectWeights(host: ToolHost, world: Vec2): void {
+  if (drag.directTargets.length === 0) return
+  const span = host.scene.viewport.pixelsToWorld(DIRECT_DRAG_PIXELS)
+  const delta = span > 1e-6 ? (drag.startWorld.y - world.y) / span : 0
+  const brush = host.tools.brush
+  let value = 0
+  useProjectStore.getState().updateSilent((draft) => {
+    for (const target of drag.directTargets) {
+      const attachment = findAttachment(draft, target.slot, target.attachment)
+      const vertex = attachment?.vertices[target.vertex]
+      if (!vertex) continue
+      const start = target.weights.find((entry) => entry.bone === drag.bone)?.weight ?? 0
+      const next = Math.max(0, Math.min(1, start + delta))
+      value = next
+      vertex.weights = target.weights.map((entry) => ({ bone: entry.bone, weight: entry.weight }))
+      applyVertexWeight(vertex.weights, drag.bone, next, brush.normalize)
+    }
+  })
+  const store = useProjectStore.getState()
+  host.scene.setDocument(store.document, host.selection.skin)
+  host.scene.refresh()
+  host.status(t('「{0}」的权重：{1}%（上下拖动调整；点空白取消选择）', [drag.bone, Math.round(value * 100)]))
 }
 
 /** 共享顶点下标 → 附件顶点（权重 / FFD 工具用） */

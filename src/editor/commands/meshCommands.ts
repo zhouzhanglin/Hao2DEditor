@@ -14,12 +14,14 @@ import {
   meshVertexSamples,
   removeWeightBone,
   resolveAttachment,
-  setVertexWeight
+  setVertexWeight,
+  swapWeightBones,
+  trimVertexWeights
 } from './authoringCommands'
-import type { VertexSample } from './authoringCommands'
+import type { AutoWeightMethod, VertexSample } from './authoringCommands'
 import { changed, defineAction, defineWrite, unchanged } from './registry'
 import type { Args } from './registry'
-import { need, needNum, optNum, optTextList, optVec } from './args'
+import { need, needNum, optNum, optNumList, optText, optTextList, optVec } from './args'
 import { connectMeshVertices, prepareUvField, rebuildMeshBoundary } from '../tools/authoringTools'
 import type { Vec2 } from '@core/math/matrix'
 import type { AlphaMask } from '@core/mesh/autoMesh'
@@ -408,6 +410,84 @@ export function registerMeshCommands(): void {
     }
   )
 
+  defineWrite(
+    {
+      name: 'swapWeightBones',
+      title: '交换骨骼权重',
+      description:
+        '交换两根骨骼在这块网格上的权重。两根骨骼都要已绑到该网格；不传顶点就改整块网格',
+      args: {
+        slot: { type: 'string', description: '插槽名', required: true },
+        attachment: { type: 'string', description: '网格附件名', required: true },
+        boneA: { type: 'string', description: '第一根骨骼名', required: true },
+        boneB: { type: 'string', description: '第二根骨骼名', required: true },
+        vertices: { type: 'array', description: '只改这些顶点下标；不传则整块网格' }
+      },
+      returns: '{ slot, attachment, boneA, boneB, touched }'
+    },
+    (draft, args) => {
+      const slot = need(args, 'slot')
+      const attachment = need(args, 'attachment')
+      const boneA = need(args, 'boneA')
+      const boneB = need(args, 'boneB')
+      const touched = swapWeightBones(draft, slot, attachment, boneA, boneB, optNumList(args, 'vertices'))
+      if (touched === 0) {
+        return unchanged(t('没有可交换的权重：两根骨骼都要在该网格的权重列表里，且至少一个顶点上两者权重不同'))
+      }
+      return changed(
+        { slot, attachment, boneA, boneB, touched },
+        t('已交换 {0} 个顶点的「{1}」与「{2}」权重', [touched, boneA, boneB])
+      )
+    }
+  )
+
+  defineWrite(
+    {
+      name: 'trimWeights',
+      title: '修剪权重',
+      description:
+        '权重修剪：丢掉过小的骨骼权重，并把每个顶点的影响骨骼数压到上限以内（默认丢掉 < 1%、每顶点最多 4 根，与导出/运行时一致）。同名骨骼会先合并，移除的权重按比例分给剩下的骨骼',
+      args: {
+        slot: { type: 'string', description: '插槽名', required: true },
+        attachment: { type: 'string', description: '网格附件名', required: true },
+        maxInfluences: { type: 'number', description: '每顶点最多保留几根骨骼（1~4），默认 4', default: 4 },
+        threshold: { type: 'number', description: '丢掉小于这个值的权重（0~1），默认 0.01', default: 0.01 },
+        vertices: { type: 'array', description: '只处理这些顶点下标；不传则处理整块网格' }
+      },
+      returns: '{ slot, attachment, touched, removed, capped }',
+      example: { slot: 'torso', attachment: 'body_art', maxInfluences: 4, threshold: 0.01 }
+    },
+    (draft, args) => {
+      const slot = need(args, 'slot')
+      const attachment = need(args, 'attachment')
+      const maxInfluences = Math.max(1, Math.min(4, Math.round(optNum(args, 'maxInfluences') ?? 4)))
+      const threshold = Math.max(0, Math.min(1, optNum(args, 'threshold') ?? 0.01))
+      const vertices = optNumList(args, 'vertices')
+      const found = findAttachment(draft, slot, attachment)
+      if (!found || found.type !== 'mesh') {
+        throw new Error(t('裁不了：{0} / {1} 不是网格附件', [slot, attachment]))
+      }
+      const result = trimVertexWeights(draft, slot, attachment, {
+        maxInfluences,
+        threshold,
+        normalize: true,
+        vertices
+      })
+      if (result.touched === 0) {
+        return unchanged(t('没有顶点需要修剪：都在 {0} 根骨骼以内，也没有小于 {1}% 的权重', [maxInfluences, Math.round(threshold * 100)]))
+      }
+      return changed(
+        { slot, attachment, ...result },
+        t('已修剪 {0} 个顶点：丢掉 {1} 个骨骼影响，{2} 个顶点压到 {3} 根骨骼以内', [
+          result.touched,
+          result.removed,
+          result.capped,
+          maxInfluences
+        ])
+      )
+    }
+  )
+
   defineAction(
     {
       name: 'autoWeightMesh',
@@ -419,7 +499,13 @@ export function registerMeshCommands(): void {
         attachment: { type: 'string', description: '网格附件名', required: true },
         bones: { type: 'array', description: '参与加权的骨骼名数组；不传则用除层级根外的全部骨骼' },
         falloff: { type: 'number', description: '距离衰减指数，越大越「硬」，默认 2', default: 2 },
-        maxBones: { type: 'number', description: '每个顶点最多绑几根骨骼（最多 4），默认 4', default: 4 }
+        maxBones: { type: 'number', description: '每个顶点最多绑几根骨骼（最多 4），默认 4', default: 4 },
+        method: {
+          type: 'string',
+          description: '算法：heat（表面热扩散，默认）/ geodesic（表面距离 + 1/d^k）/ distance（直线距离）',
+          default: 'heat'
+        },
+        vertices: { type: 'array', description: '只重算这些顶点下标；不传则整块网格' }
       },
       returns: '{ slot, attachment, touched, bones }',
       example: { slot: 'torso', attachment: 'body_art', falloff: 2, maxBones: 4 }
@@ -431,12 +517,17 @@ export function registerMeshCommands(): void {
       if (!scene) {
         throw new Error(t('视口还没就绪，取不到顶点的世界坐标。等编辑器窗口画完一帧再试'))
       }
-      const samples = samplesFor(slot, attachment)
-      if (samples.length === 0) {
+      const all = samplesFor(slot, attachment)
+      if (all.length === 0) {
         throw new Error(
           `取不到 ${slot} / ${attachment} 的顶点样本：确认它是网格、并且在当前显示的附件就是它（getAttachmentVertices 可以核对）`
         )
       }
+      // 只重算指定顶点（与面板「选了顶点只算选中的」同一口径）
+      const limited = optNumList(args, 'vertices')
+      const scope = limited ? new Set(limited) : null
+      const samples = scope ? all.filter((sample) => scope.has(sample.vertex)) : all
+      if (samples.length === 0) throw new Error(t('vertices 里没有落在这个网格上的顶点下标'))
       const document = useProjectStore.getState().document
       const requested = optTextList(args, 'bones') ?? document.bones.map((bone) => bone.name).filter(Boolean)
       const segments = boneSegments(requested.filter((name) => name !== rootBoneName(document.bones)))
@@ -447,9 +538,11 @@ export function registerMeshCommands(): void {
       }
       const falloff = Math.max(1, Math.round(optNum(args, 'falloff') ?? 2))
       const maxBones = Math.max(1, Math.min(4, Math.round(optNum(args, 'maxBones') ?? 4)))
+      const method: AutoWeightMethod =
+        (optText(args, 'method') as AutoWeightMethod | undefined) ?? 'heat'
       let touched = 0
       const committed = useProjectStore.getState().runCommand(t('AI：自动权重'), (draft) => {
-        touched = autoWeights(draft, samples, segments, { falloff, maxBones })
+        touched = autoWeights(draft, samples, segments, { falloff, maxBones, method })
         return touched > 0
       })
       if (!committed) return { changed: false, message: t('没有顶点被改动') }

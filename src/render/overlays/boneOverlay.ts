@@ -23,6 +23,13 @@ export interface BoneOverlayOptions {
    * 「顶点饼图里的哪一瓣」用的是同一个色，一眼对得上。
    */
   weightBoneColors?: ReadonlyMap<number, number>
+  /**
+   * 权重刷 / 直接拖动的**目标骨骼**索引（不传 = 没有）。
+   *
+   * 它已经按「权重骨骼列表」的配色画着，这里只把描边与原点圈换成选中色：
+   * 「这批彩色骨骼里我正在改哪一根」一眼可见，又不跟真正的选中骨骼（整根高亮填充）混淆。
+   */
+  targetBone?: number
   /** 需要画成空心的骨骼名（来自编辑期模型的 hollow 选项，默认全是实心） */
   hollowBones?: ReadonlySet<string>
   /** 拖拽新建骨骼时的预览（世界坐标两点） */
@@ -369,10 +376,12 @@ export function drawBoneOverlay(
     const y = skeleton.world[o + 13]
     const length = skeleton.asset.bones[i].length
     const isSelected = options.selectedBones.has(i)
+    /** 权重刷 / 直接拖动的目标骨骼：填充保持列表配色，只把描边与原点圈提亮 */
+    const isTarget = i === options.targetBone
     const isHovered = i === options.hoveredBone
     /*
      * Spine 风格的状态色：普通 = 浅灰（绑定了权重的骨骼仍用「权重骨骼列表」的色，
-     * 与面板 / 饼图对上）；选中 = 整根换成高亮色；悬停只压实透明度。
+     * 与面板 / 饼图对上）；选中 = 整根换成高亮色；权重目标 = 保留配色 + 高亮描边；悬停只压实透明度。
      */
     const weightColor = options.weightBoneColors?.get(i)
     const isWeight = weightColor !== undefined
@@ -414,24 +423,24 @@ export function drawBoneOverlay(
       const hollow = options.hollowBones?.has(skeleton.asset.bones[i].name) ?? false
       // 选中接近实心（0.95）、悬停次之（0.75）、普通用设置里的默认透明度 —— 三个档位只看透明度就知道谁被选中
       if (!hollow) fills.poly(quad).fill({ color, alpha: isSelected ? 0.95 : isHovered ? 0.75 : fillAlpha })
-      // 描边色与填充色分开设（默认同色）：普通骨骼浅灰描边，选中整根高亮色
+      // 描边色与填充色分开设（默认同色）：普通骨骼浅灰描边，选中整根高亮色，权重目标高亮描边 + 略粗
       strokes.poly(quad).stroke({
-        width: w * (isSelected ? 2.2 : isWeight ? 1.5 : 1.2),
-        color: isSelected ? selectedColor : (weightColor ?? strokeColor),
-        alpha: hollow || isSelected || isHovered ? 1 : strokeAlpha
+        width: w * (isSelected ? 2.2 : isTarget ? 2.6 : isWeight ? 1.5 : 1.2),
+        color: isSelected || isTarget ? selectedColor : (weightColor ?? strokeColor),
+        alpha: hollow || isSelected || isTarget || isHovered ? 1 : strokeAlpha
       })
 
     }
 
     // 原点（骨骼头）画一个圈：空心环（Spine 风格），选中换成高亮色并画粗一点。
     // 半径取设置里的「原点圈大小」（屏幕像素），与拾取容差同一个值（拖这个圈 = 移动骨骼）
-    const r = (isSelected ? jointRadius + 1.5 : jointRadius - 0.5) * w
+    const r = (isSelected || isTarget ? jointRadius + 1.5 : jointRadius - 0.5) * w
     strokes
       .poly(circlePolygon(x, y, r))
       .stroke({
-        width: w * (isSelected ? 2.2 : 1.8),
-        color: isSelected ? selectedColor : (weightColor ?? strokeColor),
-        alpha: isSelected || isHovered ? 1 : strokeAlpha
+        width: w * (isSelected ? 2.2 : isTarget ? 2.6 : 1.8),
+        color: isSelected || isTarget ? selectedColor : (weightColor ?? strokeColor),
+        alpha: isSelected || isTarget || isHovered ? 1 : strokeAlpha
       })
   }
 

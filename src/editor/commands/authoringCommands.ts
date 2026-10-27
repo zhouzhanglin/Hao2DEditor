@@ -1344,42 +1344,570 @@ export function applyVertexWeight(
   weights.push(...next)
 }
 
+interface BoneSegment {
+  name: string
+  ax: number
+  ay: number
+  bx: number
+  by: number
+}
+
 /**
- * 自动权重：按顶点到骨骼线段的距离衰减分配（距离越近权重越大），取最近的若干根骨骼。
- * setup 世界坐标由调用方传入（Pose 态下取自当前网格结果）。
+ * 网格表面的邻接图（边权 = 世界距离）。只连 samples 覆盖到的顶点 ——
+ * 没有世界坐标的顶点（比如当前没显示的附件）不参与，免得算出一堆 0 距离边。
  */
-export function autoWeights(
-  doc: EditorDocument,
-  samples: readonly VertexSample[],
-  bones: ReadonlyArray<{ name: string; ax: number; ay: number; bx: number; by: number }>,
-  options: { falloff?: number; maxBones?: number } = {}
-): number {
-  if (bones.length === 0) return 0
-  const falloff = Math.max(1, options.falloff ?? 2)
+function surfaceGraph(
+  triangles: readonly number[],
+  positionOf: (index: number) => { x: number; y: number } | undefined
+): Map<number, Array<{ to: number; len: number }>> {
+  const graph = new Map<number, Array<{ to: number; len: number }>>()
+  const link = (a: number, b: number): void => {
+    const pa = positionOf(a)
+    const pb = positionOf(b)
+    if (!pa || !pb) return
+    const len = Math.hypot(pb.x - pa.x, pb.y - pa.y)
+    const listA = graph.get(a) ?? []
+    const listB = graph.get(b) ?? []
+    listA.push({ to: b, len })
+    listB.push({ to: a, len })
+    graph.set(a, listA)
+    graph.set(b, listB)
+  }
+  for (let i = 0; i + 2 < triangles.length; i += 3) {
+    link(triangles[i], triangles[i + 1])
+    link(triangles[i + 1], triangles[i + 2])
+    link(triangles[i + 2], triangles[i])
+  }
+  return graph
+}
+
+/**
+ * 多源 Dijkstra：把「每个顶点到骨骼线段的直线距离」当初始距离，
+ * 边权是表面边长 —— 结果近似「沿网格表面走到骨骼的最短距离」。
+ *
+ * 这就是 Spine 的 Auto 考虑「网格地形」的核心：手臂贴在身体上时，
+ * 直线距离很近，但沿表面绕过去要经过肩膀，所以不会被对侧骨骼抢走权重。
+ */
+function geodesicDistances(
+  graph: Map<number, Array<{ to: number; len: number }>>,
+  seeds: Map<number, number>
+): Map<number, number> {
+  const dist = new Map<number, number>(seeds)
+  const heap: Array<{ d: number; v: number }> = []
+  const push = (d: number, v: number): void => {
+    heap.push({ d, v })
+    let index = heap.length - 1
+    while (index > 0) {
+      const parent = (index - 1) >> 1
+      if (heap[parent].d <= heap[index].d) break
+      const swap = heap[parent]
+      heap[parent] = heap[index]
+      heap[index] = swap
+      index = parent
+    }
+  }
+  const pop = (): { d: number; v: number } => {
+    const top = heap[0]
+    const last = heap.pop() as { d: number; v: number }
+    if (heap.length > 0) {
+      heap[0] = last
+      let index = 0
+      for (;;) {
+        const left = index * 2 + 1
+        const right = left + 1
+        let smallest = index
+        if (left < heap.length && heap[left].d < heap[smallest].d) smallest = left
+        if (right < heap.length && heap[right].d < heap[smallest].d) smallest = right
+        if (smallest === index) break
+        const swap = heap[smallest]
+        heap[smallest] = heap[index]
+        heap[index] = swap
+        index = smallest
+      }
+    }
+    return top
+  }
+
+  for (const [vertex, distance] of seeds) push(distance, vertex)
+  while (heap.length > 0) {
+    const { d, v } = pop()
+    if (d > (dist.get(v) ?? Number.POSITIVE_INFINITY) + 1e-9) continue
+    for (const edge of graph.get(v) ?? []) {
+      const next = d + edge.len
+      if (next + 1e-9 < (dist.get(edge.to) ?? Number.POSITIVE_INFINITY)) {
+        dist.set(edge.to, next)
+        push(next, edge.to)
+      }
+    }
+  }
+  return dist
+}
+
+/** 自动权重的算法口径 */
+export type AutoWeightMethod = 'heat' | 'geodesic' | 'distance'
+
+/** 热扩散的默认算力上限（骨骼数 × 三角面数）；超了就退回 `geodesic`，见 `autoWeights` */
+const DEFAULT_HEAT_BUDGET = 3_300_000
+
+/** 热扩散被迫降级时的回执：调用方据此告诉用户「算法被换掉了」，而不是静默降级 */
+export interface AutoWeightDegrade {
+  slot: string
+  attachment: string
+  vertices: number
+  triangles: number
+}
+
+/** `autoWeights` 的可选参数 */
+export interface AutoWeightOptions {
+  /** 距离衰减指数，越大越「硬」；≤0 按 1 处理 */
+  falloff?: number
+  /** 每顶点最多几根骨骼（上限 4，与运行时权重槽位数一致） */
+  maxBones?: number
+  /** 算法口径，默认 `heat` */
+  method?: AutoWeightMethod
+  /** 热扩散的算力上限（骨骼数 × 三角面数），默认 330 万；低配机器或测试可以调小 */
+  heatBudget?: number
+  /** 选了热扩散但网格太大、实际按表面距离算时回调 */
+  onDegrade?: (info: AutoWeightDegrade) => void
+}
+
+/** 线段上离某点最近的点（visibility 需要它算视线方向） */
+function closestOnSegment(
+  px: number,
+  py: number,
+  bone: BoneSegment
+): { x: number; y: number; distance: number } {
+  const dx = bone.bx - bone.ax
+  const dy = bone.by - bone.ay
+  const lengthSq = dx * dx + dy * dy
+  const t = lengthSq > 1e-12 ? Math.max(0, Math.min(1, ((px - bone.ax) * dx + (py - bone.ay) * dy) / lengthSq)) : 0
+  const x = bone.ax + dx * t
+  const y = bone.ay + dy * t
+  return { x, y, distance: Math.hypot(px - x, py - y) }
+}
+
+/**
+ * 网格边的空间索引：用来判「骨骼能不能看见这个顶点」。
+ *
+ * 只对**离骨骼足够近的候选顶点**做遮挡测试，所以查询线段一般很短，
+ * 按线段包围盒取几个格子就够，不需要真正的射线步进。
+ */
+interface EdgeIndex {
+  cell: number
+  buckets: Map<number, number[]>
+  /** 每条边 4 个分量：ax, ay, bx, by */
+  edges: number[]
+}
+
+function cellKey(ix: number, iy: number): number {
+  // ±32768 个格子够用；位运算避免字符串键的开销
+  return ((ix + 32768) << 16) | ((iy + 32768) & 0xffff)
+}
+
+function buildEdgeIndex(
+  triangles: readonly number[],
+  positionOf: (index: number) => { x: number; y: number } | undefined,
+  cell: number
+): EdgeIndex | null {
+  const edges: number[] = []
+  const buckets = new Map<number, number[]>()
+  const seen = new Set<number>()
+  const push = (a: number, b: number): void => {
+    const pa = positionOf(a)
+    const pb = positionOf(b)
+    if (!pa || !pb) return
+    const key = Math.min(a, b) * 1_000_000 + Math.max(a, b)
+    if (seen.has(key)) return
+    seen.add(key)
+    const id = edges.length / 4
+    edges.push(pa.x, pa.y, pb.x, pb.y)
+    const x0 = Math.floor(Math.min(pa.x, pb.x) / cell)
+    const x1 = Math.floor(Math.max(pa.x, pb.x) / cell)
+    const y0 = Math.floor(Math.min(pa.y, pb.y) / cell)
+    const y1 = Math.floor(Math.max(pa.y, pb.y) / cell)
+    for (let ix = x0; ix <= x1; ix++) {
+      for (let iy = y0; iy <= y1; iy++) {
+        const key2 = cellKey(ix, iy)
+        const list = buckets.get(key2) ?? []
+        list.push(id)
+        buckets.set(key2, list)
+      }
+    }
+  }
+  for (let i = 0; i + 2 < triangles.length; i += 3) {
+    push(triangles[i], triangles[i + 1])
+    push(triangles[i + 1], triangles[i + 2])
+    push(triangles[i + 2], triangles[i])
+  }
+  if (edges.length === 0) return null
+  return { cell, buckets, edges }
+}
+
+/** 两条线段是否**真正**相交（端点相触不算 —— 顶点本来就在自己的边端上） */
+function segmentsCross(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  cx: number,
+  cy: number,
+  dx: number,
+  dy: number
+): boolean {
+  const o1 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+  const o2 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax)
+  const o3 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx)
+  const o4 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx)
+  return ((o1 > 0 && o2 < 0) || (o1 < 0 && o2 > 0)) && ((o3 > 0 && o4 < 0) || (o3 < 0 && o4 > 0))
+}
+
+/** 顶点到骨骼的视线是否被网格自己的边挡住 */
+function blocked(
+  index: EdgeIndex | null,
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number
+): boolean {
+  if (!index) return false
+  const { cell, buckets, edges } = index
+  const x0 = Math.floor(Math.min(fromX, toX) / cell)
+  const x1 = Math.floor(Math.max(fromX, toX) / cell)
+  const y0 = Math.floor(Math.min(fromY, toY) / cell)
+  const y1 = Math.floor(Math.max(fromY, toY) / cell)
+  for (let ix = x0; ix <= x1; ix++) {
+    for (let iy = y0; iy <= y1; iy++) {
+      const list = buckets.get(cellKey(ix, iy))
+      if (!list) continue
+      for (const id of list) {
+        const offset = id * 4
+        if (segmentsCross(fromX, fromY, toX, toY, edges[offset], edges[offset + 1], edges[offset + 2], edges[offset + 3])) {
+          return true
+        }
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * 每根骨骼自己的影响半径：**只跟骨骼自身长度和整体尺寸有关**。
+ *
+ * 刻意不掺「平均边长」：网格粗细是分辨率，不是骨骼的影响范围 ——
+ * 掺进去会让粗网格（几个大三角面）退化成「整个网格都是源点」，等于没做拓扑。
+ */
+function boneRadius(bone: BoneSegment, diagonal: number): number {
+  const length = Math.hypot(bone.bx - bone.ax, bone.by - bone.ay)
+  return Math.max(length * 0.12, diagonal * 0.004, 1e-3)
+}
+
+/**
+ * 一根骨骼的源点：**它看得见、且离它足够近**的那一圈顶点。
+ *
+ * 与「固定半径」的区别就在 `blocked`：骨骼在手臂背面时，直线距离很近，
+ * 但视线穿不过网格，这圈顶点就不该是它的源点（这正是贴身部件串味的来源）。
+ * 半径内一个可见顶点都没有时，退到「最近的可见顶点」，再退到「最近的顶点」。
+ */
+function boneSeeds(
+  bone: BoneSegment,
+  positions: Map<number, { x: number; y: number }>,
+  radius: number,
+  edges: EdgeIndex | null
+): Map<number, number> {
+  const hits = new Map<number, { x: number; y: number; distance: number }>()
+  let nearestIndex = -1
+  let nearestDistance = Number.POSITIVE_INFINITY
+  for (const [index, point] of positions) {
+    const hit = closestOnSegment(point.x, point.y, bone)
+    hits.set(index, hit)
+    if (hit.distance < nearestDistance) {
+      nearestDistance = hit.distance
+      nearestIndex = index
+    }
+  }
+  const seeds = new Map<number, number>()
+  for (const [index, hit] of hits) {
+    if (hit.distance > radius) continue
+    const point = positions.get(index)
+    if (!point) continue
+    if (blocked(edges, point.x, point.y, hit.x, hit.y)) continue
+    seeds.set(index, hit.distance)
+  }
+  if (seeds.size > 0) return seeds
+
+  /*
+   * 半径内一个可见顶点都没有（短骨骼 / 粗网格很常见）：退到「离它最近的可见顶点」。
+   * 取最近距离 1.5 倍以内的一小圈，别让源点退化成一个孤点 —— 单点源会让权重掉得极陡。
+   */
+  const fallbackCut = nearestDistance * 1.5 + 1e-9
+  for (const [index, hit] of hits) {
+    if (hit.distance > fallbackCut) continue
+    const point = positions.get(index)
+    if (!point) continue
+    if (blocked(edges, point.x, point.y, hit.x, hit.y)) continue
+    seeds.set(index, hit.distance)
+  }
+  // 全被挡住（骨骼埋在网格里）：宁可给它最近那个，也别让这根骨骼完全没有权重
+  if (seeds.size === 0 && nearestIndex >= 0) seeds.set(nearestIndex, nearestDistance)
+  return seeds
+}
+
+/** 网格尺寸统计：包围盒对角线 + 中位边长（骨骼半径要用） */
+function surfaceMetrics(
+  triangles: readonly number[],
+  positions: Map<number, { x: number; y: number }>
+): { diagonal: number; medianEdge: number } {
+  let minX = Number.POSITIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  for (const point of positions.values()) {
+    minX = Math.min(minX, point.x)
+    minY = Math.min(minY, point.y)
+    maxX = Math.max(maxX, point.x)
+    maxY = Math.max(maxY, point.y)
+  }
+  const diagonal = Math.hypot(maxX - minX, maxY - minY)
+  const lengths: number[] = []
+  const step = Math.max(1, Math.floor(triangles.length / 300))
+  for (let i = 0; i + 2 < triangles.length; i += 3 * step) {
+    const a = positions.get(triangles[i])
+    const b = positions.get(triangles[i + 1])
+    if (a && b) lengths.push(Math.hypot(b.x - a.x, b.y - a.y))
+  }
+  lengths.sort((left, right) => left - right)
+  const medianEdge = lengths.length > 0 ? lengths[Math.floor(lengths.length / 2)] : diagonal * 0.02
+  return { diagonal, medianEdge }
+}
+
+/**
+ * 逐个骨骼的热扩散（bone heat）：解 `(L + λI) u = λ · seed`，L 是表面图的均匀拉普拉斯。
+ *
+ * 为什么比「1/距离^k」好：
+ * - 结果在表面上是**连续的**（调和函数的内点满足极值原理，不会出现突跳）；
+ * - 只受图连通性与源点影响，不受「顶点密度 / 欧氏距离」左右，
+ *   骨骼弯曲或网格疏密不均时也不会出现某一侧权重忽然塌掉。
+ *
+ * 用 Gauss-Seidel 迭代求解（收敛快、不需要线性代数库）；
+ * 源点是软约束（λ 越大越硬），所以不会像硬约束那样在边界产生尖峰。
+ */
+function heatWeights(
+  attachment: AuthoringAttachment,
+  positions: Map<number, { x: number; y: number }>,
+  bones: readonly BoneSegment[],
+  options: { power?: number; iterations?: number; tolerance?: number; lambda?: number; maxBones?: number } = {}
+): Map<number, Array<{ bone: string; weight: number }>> {
+  const result = new Map<number, Array<{ bone: string; weight: number }>>()
+  if (positions.size === 0 || bones.length === 0) return result
+
+  const power = Math.max(1, options.power ?? 2)
+  const iterations = Math.max(20, options.iterations ?? 240)
+  const tolerance = options.tolerance ?? 1e-4
+  const lambda = Math.max(0.05, options.lambda ?? 1)
   const maxBones = Math.max(1, Math.min(4, options.maxBones ?? 4))
 
-  let touched = 0
-  for (const sample of samples) {
-    const attachment = findAttachment(doc, sample.slot, sample.attachment)
-    const vertex = attachment?.vertices[sample.vertex]
-    if (!vertex) continue
+  const graph = surfaceGraph(attachment.triangles, (index) => positions.get(index))
+  const indices = [...positions.keys()].sort((left, right) => left - right)
+  const localOf = new Map<number, number>()
+  indices.forEach((vertex, local) => localOf.set(vertex, local))
+  const count = indices.length
 
-    const scored = bones.map((bone) => {
-      const distance = distanceToSegment(sample.x, sample.y, bone.ax, bone.ay, bone.bx, bone.by)
-      return { bone: bone.name, score: 1 / Math.pow(Math.max(1e-4, distance), falloff) }
+  // CSR：邻接表压成 offsets + neighbors，Gauss-Seidel 每轮只做一次线性扫描
+  const offsets = new Int32Array(count + 1)
+  for (let i = 0; i < count; i++) offsets[i + 1] = offsets[i] + (graph.get(indices[i])?.length ?? 0)
+  const neighbors = new Int32Array(offsets[count])
+  for (let i = 0; i < count; i++) {
+    let cursor = offsets[i]
+    for (const edge of graph.get(indices[i]) ?? []) {
+      const local = localOf.get(edge.to)
+      if (local === undefined) continue
+      neighbors[cursor++] = local
+    }
+    offsets[i + 1] = cursor
+  }
+
+  const { diagonal, medianEdge } = surfaceMetrics(attachment.triangles, positions)
+  const edgeIndex = buildEdgeIndex(attachment.triangles, (index) => positions.get(index), Math.max(1e-3, medianEdge * 2))
+
+  const fields: Float32Array[] = []
+  for (const bone of bones) {
+    const seeds = boneSeeds(bone, positions, boneRadius(bone, diagonal), edgeIndex)
+    const u = new Float32Array(count)
+    const source = new Float32Array(count)
+    for (const vertex of seeds.keys()) {
+      const local = localOf.get(vertex)
+      if (local === undefined) continue
+      u[local] = 1
+      source[local] = 1
+    }
+    for (let iter = 0; iter < iterations; iter++) {
+      let delta = 0
+      for (let i = 0; i < count; i++) {
+        const start = offsets[i]
+        const end = offsets[i + 1]
+        const degree = end - start
+        if (degree === 0) continue
+        let sum = 0
+        for (let k = start; k < end; k++) sum += u[neighbors[k]]
+        const next = (lambda * source[i] + sum) / (degree + lambda)
+        const diff = Math.abs(next - u[i])
+        if (diff > delta) delta = diff
+        u[i] = next
+      }
+      if (delta <= tolerance) break
+    }
+    fields.push(u)
+  }
+
+  for (let i = 0; i < count; i++) {
+    let best = 0
+    const scores: number[] = []
+    for (const field of fields) {
+      const value = Math.pow(field[i], power)
+      scores.push(value)
+      if (value > best) best = value
+    }
+    // 远到离谱的骨骼会留下 1e-9 量级的脏数据：按最大值的 0.5% 砍掉，别让它占着面板里的滑块
+    const floor = best * 0.005
+    const top = scores
+      .map((score, boneIndex) => ({ bone: bones[boneIndex].name, score }))
+      .filter((item) => item.score > floor)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, maxBones)
+    const total = top.reduce((sum, item) => sum + item.score, 0)
+    if (total <= 1e-9) continue
+    result.set(
+      indices[i],
+      top.map((item) => ({ bone: item.bone, weight: item.score / total }))
+    )
+  }
+  return result
+}
+
+/** 按「沿表面到骨骼的距离」算一个附件的权重（拓扑感知的老口径，留作对比与兜底） */
+function topologyWeights(
+  attachment: AuthoringAttachment,
+  positions: Map<number, { x: number; y: number }>,
+  bones: readonly BoneSegment[],
+  falloff: number,
+  maxBones: number
+): Map<number, Array<{ bone: string; weight: number }>> {
+  const result = new Map<number, Array<{ bone: string; weight: number }>>()
+  if (positions.size === 0) return result
+
+  const graph = surfaceGraph(attachment.triangles, (index) => positions.get(index))
+  const { diagonal, medianEdge } = surfaceMetrics(attachment.triangles, positions)
+  const edgeIndex = buildEdgeIndex(attachment.triangles, (index) => positions.get(index), Math.max(1e-3, medianEdge * 2))
+
+  const distances = bones.map((bone) => {
+    const seeds = boneSeeds(bone, positions, boneRadius(bone, diagonal), edgeIndex)
+    return geodesicDistances(graph, seeds)
+  })
+
+  for (const index of positions.keys()) {
+    const scored = bones.map((bone, boneIndex) => {
+      const distance = distances[boneIndex].get(index) ?? Number.POSITIVE_INFINITY
+      return {
+        bone: bone.name,
+        score: Number.isFinite(distance) ? 1 / Math.pow(Math.max(1e-4, distance), falloff) : 0
+      }
     })
     scored.sort((a, b) => b.score - a.score)
     const top = scored.slice(0, maxBones).filter((item) => item.score > 0)
     const total = top.reduce((sum, item) => sum + item.score, 0)
     if (total <= 0) continue
+    result.set(
+      index,
+      top.map((item) => ({ bone: item.bone, weight: item.score / total }))
+    )
+  }
+  return result
+}
 
-    const next = top.map((item) => ({ bone: item.bone, weight: item.score / total }))
-    // 只在结果**确实变了**时才计数：调用方据此区分「重算完成」和「本来就是这个结果」
-    //（比如列表里只有宿主骨骼一根时，顶点权重必然是它 100%，点了也看不出变化）
-    if (!sameWeights(vertex.weights, next)) {
-      vertex.weights = next
-      touched++
+/**
+ * 自动权重：给每个顶点分配「离它最近的若干根骨骼」，和恒为 1。
+ * setup 世界坐标由调用方传入（Pose 态下取自当前网格结果）。
+ *
+ * 三种口径：
+ * - `heat`（默认）：逐骨骼在网格表面做热扩散，结果连续、不受顶点疏密影响；
+ * - `geodesic`：沿表面算距离再按 `1/d^k` 分配，比热扩散快，但在骨骼弯曲处有突跳；
+ * - `distance`：纯直线距离，最快，贴身部件会串味（仅作兜底/对比）。
+ *
+ * 热扩散在大网格上是有成本的（`骨骼数 × 迭代 × 边数`），超过预算（`heatBudget`，默认 330 万次
+ * 「骨骼 × 三角面」）时**自动退回 geodesic**，保证「第一次绑骨骼」这种隐式触发不会卡住界面；
+ * 降级不是静默的 —— 会先调 `onDegrade`，调用方据此在状态栏说明算法被换掉了。
+ */
+export function autoWeights(
+  doc: EditorDocument,
+  samples: readonly VertexSample[],
+  bones: ReadonlyArray<BoneSegment>,
+  options: AutoWeightOptions = {}
+): number {
+  if (bones.length === 0) return 0
+  const falloff = Math.max(1, options.falloff ?? 2)
+  const maxBones = Math.max(1, Math.min(4, options.maxBones ?? 4))
+  const method = options.method ?? 'heat'
+  const heatBudget = Math.max(0, options.heatBudget ?? DEFAULT_HEAT_BUDGET)
+
+  let touched = 0
+  /** 只在结果**确实变了**时才计数：调用方据此区分「重算完成」和「本来就是这个结果」 */
+  const assign = (attachment: AuthoringAttachment, index: number, next: Array<{ bone: string; weight: number }>): void => {
+    const vertex = attachment.vertices[index]
+    if (!vertex || sameWeights(vertex.weights, next)) return
+    vertex.weights = next
+    touched++
+  }
+
+  if (method === 'distance') {
+    for (const sample of samples) {
+      const attachment = findAttachment(doc, sample.slot, sample.attachment)
+      if (!attachment || !attachment.vertices[sample.vertex]) continue
+
+      const scored = bones.map((bone) => {
+        const distance = distanceToSegment(sample.x, sample.y, bone.ax, bone.ay, bone.bx, bone.by)
+        return { bone: bone.name, score: 1 / Math.pow(Math.max(1e-4, distance), falloff) }
+      })
+      scored.sort((a, b) => b.score - a.score)
+      const top = scored.slice(0, maxBones).filter((item) => item.score > 0)
+      const total = top.reduce((sum, item) => sum + item.score, 0)
+      if (total <= 0) continue
+
+      assign(attachment, sample.vertex, top.map((item) => ({ bone: item.bone, weight: item.score / total })))
     }
+    return touched
+  }
+
+  // 图算法只能在一块网格里做：按附件把样本分组
+  const groups = new Map<string, { slot: string; name: string; positions: Map<number, { x: number; y: number }> }>()
+  for (const sample of samples) {
+    if (!sample.slot || !sample.attachment) continue
+    const key = `${sample.slot}\u0000${sample.attachment}`
+    let group = groups.get(key)
+    if (!group) {
+      group = { slot: sample.slot, name: sample.attachment, positions: new Map() }
+      groups.set(key, group)
+    }
+    group.positions.set(sample.vertex, { x: sample.x, y: sample.y })
+  }
+  for (const group of groups.values()) {
+    const attachment = findAttachment(doc, group.slot, group.name)
+    if (!attachment) continue
+    const triangleCount = Math.floor(attachment.triangles.length / 3)
+    // 预算：约 5e6 次「边 × 骨骼」更新 ≈ 几十毫秒；超了就退回 geodesic
+    const tooHeavy = group.positions.size > 20000 || bones.length * triangleCount > heatBudget
+    if (method === 'heat' && tooHeavy) {
+      options.onDegrade?.({
+        slot: group.slot,
+        attachment: group.name,
+        vertices: group.positions.size,
+        triangles: triangleCount
+      })
+    }
+    const plan =
+      method === 'heat' && !tooHeavy
+        ? heatWeights(attachment, group.positions, bones, { maxBones, power: falloff })
+        : topologyWeights(attachment, group.positions, bones, falloff, maxBones)
+    for (const [index, next] of plan) assign(attachment, index, next)
   }
   return touched
 }
@@ -1510,6 +2038,284 @@ export function removeWeightBone(
     vertex.weights = fallback ? [{ bone: fallback, weight: 1 }] : []
   }
   return true
+}
+
+/** 取出要处理的顶点下标：给了范围就用范围（过滤越界），否则整块网格 */
+function vertexTargets(attachment: AuthoringAttachment, vertices?: readonly number[]): number[] {
+  if (!vertices || vertices.length === 0) return attachment.vertices.map((_, index) => index)
+  return vertices.filter((index) => index >= 0 && index < attachment.vertices.length)
+}
+
+/**
+ * 两根骨骼在指定顶点上**互换**权重（Spine 的 Swap）。
+ *
+ * `vertices` 不传 = 整块网格。某根骨骼在这个顶点上不存在时按 0 处理
+ *（所以「把 A 的权重全挪给 B」也用它：A 有值、B 没有 → 换完 A 变 0 被丢掉）。
+ * 两根骨骼都必须在附件的权重骨骼列表里，否则不动（返回 0）。
+ */
+export function swapWeightBones(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  boneA: string,
+  boneB: string,
+  vertices?: readonly number[]
+): number {
+  if (!boneA || !boneB || boneA === boneB) return 0
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment || attachment.type !== 'mesh') return 0
+  const bound = weightBonesOf(attachment)
+  if (!bound.includes(boneA) || !bound.includes(boneB)) return 0
+
+  let touched = 0
+  for (const index of vertexTargets(attachment, vertices)) {
+    const vertex = attachment.vertices[index]
+    const weightA = vertex.weights.find((entry) => entry.bone === boneA)?.weight ?? 0
+    const weightB = vertex.weights.find((entry) => entry.bone === boneB)?.weight ?? 0
+    if (Math.abs(weightA - weightB) <= 1e-9) continue
+
+    const next = vertex.weights.map((entry) => {
+      if (entry.bone === boneA) return { bone: boneA, weight: weightB }
+      if (entry.bone === boneB) return { bone: boneB, weight: weightA }
+      return { bone: entry.bone, weight: entry.weight }
+    })
+    const cleaned = [
+      ...next.filter((entry) => entry.bone !== boneA && entry.bone !== boneB),
+      ...(weightB > 1e-9 ? [{ bone: boneA, weight: weightB }] : []),
+      ...(weightA > 1e-9 ? [{ bone: boneB, weight: weightA }] : [])
+    ]
+    if (sameWeights(vertex.weights, cleaned)) continue
+    vertex.weights = cleaned
+    touched++
+  }
+  return touched
+}
+
+/**
+ * 顶点权重剪贴板（Spine 的 ctrl+C / ctrl+V）。
+ *
+ * 刻意放在模块里而不是文档里：它是**编辑期的临时数据**，不该跟着工程存档，
+ * 也不该进撤销栈（撤销的是粘贴进文档的那一步）。跨附件 / 跨工具都保留。
+ */
+let weightClipboard: Array<Array<{ bone: string; weight: number }>> = []
+
+/** 剪贴板里有几组权重（面板据此启用「粘贴」） */
+export function weightClipboardSize(): number {
+  return weightClipboard.length
+}
+
+/** 清空权重剪贴板（换工程 / 新建工程时调用：上一个工程的骨骼名对新工程没有意义） */
+export function clearWeightClipboard(): void {
+  weightClipboard = []
+}
+
+/** 复制这些顶点（附件内下标）的权重；返回复制了几个顶点 */
+export function copyVertexWeights(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  vertices: readonly number[]
+): number {
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment || attachment.type !== 'mesh') return 0
+  const targets = vertexTargets(attachment, vertices)
+  if (targets.length === 0) return 0
+  weightClipboard = targets.map((index) =>
+    attachment.vertices[index].weights.map((entry) => ({ bone: entry.bone, weight: entry.weight }))
+  )
+  return weightClipboard.length
+}
+
+/**
+ * 把剪贴板按顺序贴到这些顶点上；返回真正粘贴了几个。
+ *
+ * 目标附件没有绑的骨骼会被丢掉（不凭空给网格加骨骼），剩下的重新归一到 1。
+ * 剪贴板与目标顶点数不一致时只贴前 min(两者) 个 —— 调用方据此提示数量不符。
+ */
+export function pasteVertexWeights(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  vertices: readonly number[]
+): number {
+  if (weightClipboard.length === 0) return 0
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment || attachment.type !== 'mesh') return 0
+  const targets = vertexTargets(attachment, vertices)
+  const bound = new Set(weightBonesOf(attachment))
+  const count = Math.min(targets.length, weightClipboard.length)
+
+  let touched = 0
+  for (let i = 0; i < count; i++) {
+    const vertex = attachment.vertices[targets[i]]
+    const kept = weightClipboard[i]
+      .filter((entry) => entry.weight > 0 && (bound.size === 0 || bound.has(entry.bone)))
+      .map((entry) => ({ bone: entry.bone, weight: entry.weight }))
+    const total = kept.reduce((sum, entry) => sum + entry.weight, 0)
+    // 一根都不剩（目标附件没绑这些骨骼）就跳过这个顶点，不要把它的权重清空
+    if (total <= 1e-6) continue
+    const next = kept.map((entry) => ({ bone: entry.bone, weight: entry.weight / total }))
+    if (sameWeights(vertex.weights, next)) continue
+    vertex.weights = next
+    touched++
+  }
+  return touched
+}
+
+/**
+ * 权重修剪（Spine 的 Prune）的参数。
+ *
+ * - `maxInfluences`：每顶点最多保留几根骨骼。导出 / 运行时固定 **4 槽**
+ *   （见 `compile.normalizeWeights` 与 `hao2dWriter`），所以上限也只有 4；
+ *   调小是给「骨骼越少越省」的管线留余量。
+ * - `threshold`：丢掉小于这个权重的骨骼（0~1）。0 = 只按上限截断。
+ * - `normalize`：裁完把每个顶点重新归一到 1（面板百分比加起来正好 100%）。
+ * - `vertices`：只处理这些顶点（权重刷框选的结果）；不传 = 整块网格。
+ */
+export interface TrimWeightsOptions {
+  maxInfluences?: number
+  threshold?: number
+  normalize?: boolean
+  vertices?: readonly number[]
+}
+
+export interface TrimWeightsResult {
+  /** 真正被改动的顶点数 */
+  touched: number
+  /** 丢掉的骨骼影响条数（低于阈值 + 超出上限 + 合并掉的重复项） */
+  removed: number
+  /** 因为超过影响数上限而被截断的顶点数 */
+  capped: number
+}
+
+/**
+ * 单个顶点的修剪结果（**纯计算**，不改入参）。
+ *
+ * 规则与导出口径（`compile.normalizeWeights`）保持一致：
+ * - 同名骨骼先合并（手刷 / 导入可能留下重复条目，重复项还会白占一个名额）；
+ * - 按权重从大到小排序，丢掉小于 `threshold` 的，**至少保留最大的那一项**
+ *   —— 阈值比所有权重都大时也不该让顶点突然失去全部影响；
+ * - 只留前 `maxInfluences` 根；
+ * - `normalize` 打开时重新归一到 1（等效于 Spine Prune 的「移除的权重分给其它骨骼」）。
+ */
+function trimmedWeights(
+  weights: readonly { bone: string; weight: number }[],
+  maxInfluences: number,
+  threshold: number,
+  normalize: boolean
+): { next: Array<{ bone: string; weight: number }>; removed: number; capped: boolean } {
+  if (weights.length === 0) return { next: [], removed: 0, capped: false }
+
+  const merged = new Map<string, number>()
+  for (const entry of weights) {
+    if (!Number.isFinite(entry.weight) || entry.weight <= 0) continue
+    merged.set(entry.bone, (merged.get(entry.bone) ?? 0) + entry.weight)
+  }
+  const ranked = [...merged]
+    .map(([bone, weight]) => ({ bone, weight }))
+    .sort((a, b) => b.weight - a.weight)
+
+  let kept = threshold > 0 ? ranked.filter((entry) => entry.weight >= threshold) : ranked
+  // 阈值把唯一的影响也滤掉了：留最大的一项兜底，空表只该来自「手动刷到 0」
+  if (kept.length === 0 && ranked.length > 0) kept = ranked.slice(0, 1)
+
+  const capped = kept.length > maxInfluences
+  const sliced = capped ? kept.slice(0, maxInfluences) : kept
+  let next = sliced
+  if (normalize) {
+    const total = sliced.reduce((sum, entry) => sum + entry.weight, 0)
+    if (total > 1e-6) next = sliced.map((entry) => ({ bone: entry.bone, weight: entry.weight / total }))
+  }
+  return { next, removed: Math.max(0, weights.length - next.length), capped }
+}
+
+/**
+ * 权重修剪（Spine 的 Prune）：丢掉过小的骨骼影响，并把每顶点的影响数压到上限以内。
+ *
+ * 导出时 `compile.normalizeWeights` 本来就会取 top-4 并归一化，那为什么还要在编辑器里做？
+ * 1. **所见即所得**：面板百分比、视口权重饼图与导出/运行时对不上时，调权重就是在猜；
+ * 2. 第 5 根以后的骨骼导出会丢，但它们**占着检查器的滑块**，也让「只绑了一根骨骼」这类判断失灵；
+ * 3. 小于 1% 的权重对形变几乎没影响，却让每个顶点多算几条蒙皮矩阵。
+ *
+ * `capped` 只统计「因为超过上限被截断」的顶点数（阈值过滤不算），
+ * 所以「超过 4 骨警告」与「修剪结果」用的是同一个口径。
+ */
+export function trimVertexWeights(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  options: TrimWeightsOptions = {}
+): TrimWeightsResult {
+  return trimScan(doc, slotName, attachmentName, options, true)
+}
+
+/**
+ * 预览修剪结果（**不写文档**）：拖「上限 / 阈值」时用它算「将移除 N 个影响、M 个顶点会被改」。
+ *
+ * Spine 的 Prune 是实时预览（滑块一动视口就变）；我们退一步只做计数预览，
+ * 点按钮才提交 —— 这样不会在拖滑块时往撤销栈里塞几十条记录。
+ */
+export function previewTrimWeights(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  options: TrimWeightsOptions = {}
+): TrimWeightsResult {
+  return trimScan(doc, slotName, attachmentName, options, false)
+}
+
+/** 修剪的共用扫描：`apply = false` 只统计，不改文档 */
+function trimScan(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  options: TrimWeightsOptions,
+  apply: boolean
+): TrimWeightsResult {
+  const result: TrimWeightsResult = { touched: 0, removed: 0, capped: 0 }
+  const attachment = findAttachment(doc, slotName, attachmentName)
+  if (!attachment || attachment.type !== 'mesh') return result
+
+  const maxInfluences = Math.max(1, Math.min(4, Math.round(options.maxInfluences ?? 4)))
+  const threshold = Math.max(0, Math.min(1, options.threshold ?? 0.01))
+  const normalize = options.normalize ?? true
+  const scope = options.vertices && options.vertices.length > 0 ? new Set(options.vertices) : null
+
+  attachment.vertices.forEach((vertex, index) => {
+    if (scope && !scope.has(index)) return
+    const plan = trimmedWeights(vertex.weights, maxInfluences, threshold, normalize)
+    // 没变化就不写：调用方据此区分「修剪了 N 个顶点」和「本来就已经够干净」
+    if (sameWeights(vertex.weights, plan.next)) return
+    result.removed += plan.removed
+    if (plan.capped) result.capped++
+    if (apply) vertex.weights = plan.next
+    result.touched++
+  })
+  return result
+}
+
+/**
+ * 受超过 `max` 根骨骼影响的顶点数（Spine 权重工具那条「>4 影响」黄叹号的判定）。
+ *
+ * 口径与修剪完全一致：同名骨骼先合并、0 权重不计，否则警告数会和点下去修剪掉的数量对不上。
+ */
+export function countOverInfluenced(
+  attachment: AuthoringAttachment,
+  max = 4,
+  /** 只统计这些顶点（权重刷框选的结果）；不传 = 整块网格 */
+  vertices?: readonly number[]
+): number {
+  const scope = vertices && vertices.length > 0 ? new Set(vertices) : null
+  let count = 0
+  attachment.vertices.forEach((vertex, index) => {
+    if (scope && !scope.has(index)) return
+    const bones = new Set<string>()
+    for (const entry of vertex.weights) {
+      if (entry.weight > 0 && Number.isFinite(entry.weight)) bones.add(entry.bone)
+    }
+    if (bones.size > max) count++
+  })
+  return count
 }
 
 /**

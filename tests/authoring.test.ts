@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { baseBrushMode, brushModeFor, wrapDegrees } from '@editor/tools/authoringTools'
+import { baseBrushMode, brushModeFor, weightTargetBoneFor, wrapDegrees } from '@editor/tools/authoringTools'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import {
   createGridMesh,
@@ -32,7 +32,15 @@ import {
   applyVertexWeight,
   setVertexWeight,
   toggleSlotDisplay,
-  weightBonesOf
+  clearWeightClipboard,
+  copyVertexWeights,
+  countOverInfluenced,
+  pasteVertexWeights,
+  previewTrimWeights,
+  swapWeightBones,
+  trimVertexWeights,
+  weightBonesOf,
+  weightClipboardSize
 } from '@editor/commands/authoringCommands'
 import { parseDocument, serializeDocument } from '@core/codec/projectJson'
 import { compileDocument } from '@core/codec/compile'
@@ -755,6 +763,190 @@ describe('顶点权重：面板里改单根骨骼的权重（setVertexWeight）'
   })
 })
 
+describe('权重修剪（Spine 的 Prune）', () => {
+  const setup = () => {
+    const doc = createEmptyDocument('w')
+    doc.bones.push(
+      requireBone('root'),
+      requireBone('arm'),
+      requireBone('hand'),
+      requireBone('leg'),
+      requireBone('tail')
+    )
+    createRegionFromImage(doc, { image: 'x.png', bone: 'root', width: 100, height: 100, slotName: 's', attachmentName: 'a' })
+    convertRegionToMesh(doc, 's', 'a', 1)
+    const mesh = findAttachment(doc, 's', 'a')!
+    mesh.bones = ['root', 'arm', 'hand', 'leg', 'tail']
+    return { doc, mesh }
+  }
+
+  const total = (weights: ReadonlyArray<{ bone: string; weight: number }>): number =>
+    weights.reduce((sum, entry) => sum + entry.weight, 0)
+
+  it('超过 4 根骨骼：按权重降序只留前 4 根并重新归一化', () => {
+    const { doc, mesh } = setup()
+    mesh.vertices[0].weights = [
+      { bone: 'root', weight: 0.3 },
+      { bone: 'arm', weight: 0.25 },
+      { bone: 'hand', weight: 0.2 },
+      { bone: 'leg', weight: 0.15 },
+      { bone: 'tail', weight: 0.1 }
+    ]
+
+    const result = trimVertexWeights(doc, 's', 'a', { maxInfluences: 4, threshold: 0 })
+
+    expect(result).toEqual({ touched: 1, removed: 1, capped: 1 })
+    expect(mesh.vertices[0].weights.map((w) => w.bone)).toEqual(['root', 'arm', 'hand', 'leg'])
+    expect(total(mesh.vertices[0].weights)).toBeCloseTo(1, 5)
+  })
+
+  it('阈值以下的影响被丢掉；阈值比所有权重都大时至少留最大的一项', () => {
+    const { doc, mesh } = setup()
+    mesh.vertices[0].weights = [
+      { bone: 'root', weight: 0.5 },
+      { bone: 'arm', weight: 0.3 },
+      { bone: 'hand', weight: 0.008 },
+      { bone: 'leg', weight: 0.004 }
+    ]
+
+    const result = trimVertexWeights(doc, 's', 'a', { threshold: 0.01 })
+
+    expect(result.touched).toBe(1)
+    expect(result.removed).toBe(2)
+    expect(mesh.vertices[0].weights.map((w) => w.bone)).toEqual(['root', 'arm'])
+    expect(total(mesh.vertices[0].weights)).toBeCloseTo(1, 5)
+
+    // 全部小于阈值：不该裁成空表（那会让顶点失去蒙皮），留最大的一项
+    mesh.vertices[1].weights = [
+      { bone: 'arm', weight: 0.004 },
+      { bone: 'hand', weight: 0.002 }
+    ]
+    trimVertexWeights(doc, 's', 'a', { threshold: 0.05, vertices: [1] })
+    expect(mesh.vertices[1].weights).toEqual([{ bone: 'arm', weight: 1 }])
+  })
+
+  it('本来就已经够干净时不动（touched 0，也不重排数组）', () => {
+    const { doc, mesh } = setup()
+    const clean = [
+      { bone: 'arm', weight: 0.5 },
+      { bone: 'root', weight: 0.5 }
+    ]
+    mesh.vertices[0].weights = clean.map((entry) => ({ ...entry }))
+
+    const result = trimVertexWeights(doc, 's', 'a')
+
+    expect(result).toEqual({ touched: 0, removed: 0, capped: 0 })
+    expect(mesh.vertices[0].weights).toEqual(clean)
+  })
+
+  it('同名骨骼先合并：重复条目不会白占一个名额', () => {
+    const { doc, mesh } = setup()
+    mesh.vertices[0].weights = [
+      { bone: 'arm', weight: 0.5 },
+      { bone: 'arm', weight: 0.3 },
+      { bone: 'root', weight: 0.2 }
+    ]
+
+    const result = trimVertexWeights(doc, 's', 'a', { threshold: 0 })
+
+    expect(result.touched).toBe(1)
+    expect(mesh.vertices[0].weights).toHaveLength(2)
+    expect(mesh.vertices[0].weights[0].bone).toBe('arm')
+    expect(mesh.vertices[0].weights[0].weight).toBeCloseTo(0.8, 5)
+    expect(mesh.vertices[0].weights[1].bone).toBe('root')
+    expect(mesh.vertices[0].weights[1].weight).toBeCloseTo(0.2, 5)
+  })
+
+  it('只裁指定的顶点（框选之后只处理选中的那些）', () => {
+    const { doc, mesh } = setup()
+    for (const vertex of mesh.vertices) {
+      vertex.weights = [
+        { bone: 'root', weight: 0.4 },
+        { bone: 'arm', weight: 0.3 },
+        { bone: 'hand', weight: 0.2 },
+        { bone: 'leg', weight: 0.06 },
+        { bone: 'tail', weight: 0.04 }
+      ]
+    }
+
+    const result = trimVertexWeights(doc, 's', 'a', { vertices: [2] })
+
+    expect(result.touched).toBe(1)
+    expect(mesh.vertices[2].weights).toHaveLength(4)
+    expect(mesh.vertices[0].weights).toHaveLength(5)
+  })
+
+  it('空权重表保持空，也不会把 0 权重的条目留下', () => {
+    const { doc, mesh } = setup()
+    mesh.vertices[0].weights = []
+    mesh.vertices[1].weights = [
+      { bone: 'root', weight: 1 },
+      { bone: 'arm', weight: 0 }
+    ]
+
+    expect(trimVertexWeights(doc, 's', 'a').touched).toBe(1)
+    expect(mesh.vertices[0].weights).toEqual([])
+    expect(mesh.vertices[1].weights).toEqual([{ bone: 'root', weight: 1 }])
+  })
+
+  it('不是网格附件时安全返回', () => {
+    const doc = createEmptyDocument('w')
+    doc.bones.push(requireBone('root'))
+    createRegionFromImage(doc, { image: 'x.png', bone: 'root', width: 100, height: 100, slotName: 's', attachmentName: 'a' })
+
+    expect(trimVertexWeights(doc, 's', 'a')).toEqual({ touched: 0, removed: 0, capped: 0 })
+  })
+
+  it('预览只统计数字，不改文档（点按钮才生效）', () => {
+    const { doc, mesh } = setup()
+    mesh.vertices[0].weights = [
+      { bone: 'root', weight: 0.3 },
+      { bone: 'arm', weight: 0.25 },
+      { bone: 'hand', weight: 0.2 },
+      { bone: 'leg', weight: 0.15 },
+      { bone: 'tail', weight: 0.1 }
+    ]
+
+    const preview = previewTrimWeights(doc, 's', 'a', { maxInfluences: 4, threshold: 0 })
+
+    expect(preview).toEqual({ touched: 1, removed: 1, capped: 1 })
+    expect(mesh.vertices[0].weights).toHaveLength(5)
+  })
+
+  it('countOverInfluenced：按合并后的骨骼数判定（0 权重与重复项不算）', () => {
+    const { mesh } = setup()
+    mesh.vertices[0].weights = [
+      { bone: 'root', weight: 0.3 },
+      { bone: 'arm', weight: 0.25 },
+      { bone: 'hand', weight: 0.2 },
+      { bone: 'leg', weight: 0.15 },
+      { bone: 'tail', weight: 0.1 }
+    ]
+    // 4 根有效 + 1 条 0 权重：不算超标
+    mesh.vertices[1].weights = [
+      { bone: 'root', weight: 0.4 },
+      { bone: 'arm', weight: 0.3 },
+      { bone: 'hand', weight: 0.2 },
+      { bone: 'leg', weight: 0.1 },
+      { bone: 'tail', weight: 0 }
+    ]
+    // 3 根有效 + 2 条重复：合并后仍是 3 根
+    mesh.vertices[2].weights = [
+      { bone: 'root', weight: 0.4 },
+      { bone: 'arm', weight: 0.3 },
+      { bone: 'hand', weight: 0.2 },
+      { bone: 'root', weight: 0.05 },
+      { bone: 'arm', weight: 0.05 }
+    ]
+
+    expect(countOverInfluenced(mesh, 4)).toBe(1)
+    expect(countOverInfluenced(mesh, 3)).toBe(2)
+    // 给了顶点范围就只统计范围内的（面板上警告数与「一键修剪」的作用范围一致）
+    expect(countOverInfluenced(mesh, 4, [1, 2])).toBe(0)
+    expect(countOverInfluenced(mesh, 4, [0, 1])).toBe(1)
+  })
+})
+
 describe('权重骨骼列表', () => {
   const setup = () => {
     const doc = createEmptyDocument('w')
@@ -1225,3 +1417,351 @@ describe('骨骼多选', () => {
   })
 
 })
+
+describe('权重工具的目标骨骼（选顶点后仍要能看出在改哪根骨骼）', () => {
+  const selection = () => useSelectionStore.getState()
+
+  beforeEach(() => {
+    useSelectionStore.getState().clear()
+  })
+
+  it('选了顶点之后 bones 被清空，但主选中骨骼仍在 —— 权重工具据此高亮', () => {
+    selection().selectBone('armL')
+    selection().select({ kind: 'attachment', slot: 'head', attachment: 'mesh', vertices: [3], vertex: 3 })
+
+    const after = selection()
+    // 前提：视口的 selectedBones 是按 kind === 'bone' 算的，所以这里已经空了（高亮会消失）
+    expect(after.kind).toBe('attachment')
+    expect(after.bones).toEqual([])
+    // 但「正在改哪根骨骼」没变：paintAt / directTargets 读的就是它
+    expect(after.bone).toBe('armL')
+    expect(weightTargetBoneFor('weight', after)).toBe('armL')
+  })
+
+  it('只有权重工具把主选中骨骼当目标，其它工具返回空串（不额外高亮）', () => {
+    expect(weightTargetBoneFor('select', { bone: 'armL' })).toBe('')
+    expect(weightTargetBoneFor('ffd', { bone: 'armL' })).toBe('')
+    expect(weightTargetBoneFor('weight', { bone: '' })).toBe('')
+  })
+})
+
+describe('自动权重：热扩散 / 表面距离 / 直线距离', () => {
+  // left 骨骼在下带下方，right 骨骼在上带上方
+  const bones = [
+    { name: 'left', ax: 0.3, ay: -0.3, bx: 0.5, by: -0.3 },
+    { name: 'right', ax: 1.2, ay: 0.55, bx: 1.6, by: 0.55 }
+  ]
+
+  /**
+   * 发夹形网格：上下两条平行的横带，只在**右端**连在一起。
+   *
+   * 左上角那个顶点（索引 8）在空间上离 left 骨骼很近，但要沿表面绕到右端再折回来才能到它 ——
+   * 这正是「手臂贴着身体」「衣摆折回来叠在一起」的缩影：直线距离和表面距离会给出相反答案。
+   */
+  const setup = () => {
+    const doc = createEmptyDocument('w')
+    doc.bones.push(requireBone('root'), requireBone('left'), requireBone('right'))
+    createRegionFromImage(doc, { image: 'x.png', bone: 'root', width: 100, height: 100, slotName: 's', attachmentName: 'a' })
+    convertRegionToMesh(doc, 's', 'a', 1)
+    const mesh = findAttachment(doc, 's', 'a')!
+    const xs = [0, 1, 2, 3]
+    const points: Array<{ x: number; y: number }> = []
+    // 0..3 下带底边 / 4..7 下带顶边 / 8..11 上带底边 / 12..15 上带顶边
+    for (const y of [0, 0.1, 0.25, 0.35]) for (const x of xs) points.push({ x, y })
+    mesh.vertices = points.map((point) => ({ ...point, weights: [] }))
+    const quad = (a: number, b: number, c: number, d: number): number[] => [a, b, c, a, c, d]
+    mesh.triangles = [
+      ...quad(0, 1, 5, 4),
+      ...quad(1, 2, 6, 5),
+      ...quad(2, 3, 7, 6),
+      ...quad(8, 9, 13, 12),
+      ...quad(9, 10, 14, 13),
+      ...quad(10, 11, 15, 14),
+      // 右端把上下两条带连起来（L3' — U3 — U3'）
+      7, 11, 15
+    ]
+    mesh.uvs = points.flatMap((point) => [point.x / 3, point.y])
+    mesh.bones = ['left', 'right']
+    const samples = points.map((point, vertex) => ({ slot: 's', attachment: 'a', vertex, x: point.x, y: point.y }))
+    return { doc, mesh, samples }
+  }
+  const weightOf = (
+    mesh: { vertices: Array<{ weights: Array<{ bone: string; weight: number }> }> },
+    index: number,
+    bone: string
+  ): number => mesh.vertices[index].weights.find((entry) => entry.bone === bone)?.weight ?? 0
+
+  it('空间上贴着 left、沿表面却要绕到右端的顶点归 right（直线距离会判给 left）', () => {
+    const near = setup()
+    autoWeights(near.doc, near.samples, bones, { method: 'distance' })
+    expect(weightOf(near.mesh, 8, 'left')).toBeGreaterThan(0.6)
+
+    for (const method of ['geodesic', 'heat'] as const) {
+      const fold = setup()
+      autoWeights(fold.doc, fold.samples, bones, { method })
+      expect(weightOf(fold.mesh, 8, 'left'), method).toBeLessThan(0.3)
+      for (const vertex of fold.mesh.vertices) {
+        expect(vertex.weights.reduce((sum, entry) => sum + entry.weight, 0)).toBeCloseTo(1, 5)
+        expect(vertex.weights.length).toBeLessThanOrEqual(4)
+      }
+    }
+  })
+
+  it('热扩散的结果沿下带单调过渡（不会来回跳）', () => {
+    const { doc, mesh, samples } = setup()
+    autoWeights(doc, samples, bones, { method: 'heat' })
+    // 下带底边 0→1→2→3 离 left 骨骼越来越远：权重单调不增
+    for (let index = 0; index < 3; index++) {
+      expect(weightOf(mesh, index, 'left'), `顶点 ${index}→${index + 1}`).toBeGreaterThanOrEqual(
+        weightOf(mesh, index + 1, 'left') - 1e-6
+      )
+    }
+    expect(weightOf(mesh, 0, 'left')).toBeGreaterThan(0.5)
+    expect(weightOf(mesh, 15, 'left')).toBeLessThan(0.5)
+  })
+
+  it('同一份输入重算一次返回 0（结果稳定，面板据此提示「没有变化」）', () => {
+    for (const method of ['heat', 'geodesic', 'distance'] as const) {
+      const { doc, samples } = setup()
+      expect(autoWeights(doc, samples, bones, { method }), method).toBeGreaterThan(0)
+      expect(autoWeights(doc, samples, bones, { method }), method).toBe(0)
+    }
+  })
+
+  it('网格断开的两块各归自己的骨骼（热扩散不会跨缝扩散）', () => {
+    const doc = createEmptyDocument('w')
+    doc.bones.push(requireBone('root'), requireBone('left'), requireBone('right'))
+    createRegionFromImage(doc, { image: 'x.png', bone: 'root', width: 100, height: 100, slotName: 's', attachmentName: 'a' })
+    convertRegionToMesh(doc, 's', 'a', 1)
+    const mesh = findAttachment(doc, 's', 'a')!
+    // 两块互不相连的三角形：左块在 x≈0，右块在 x≈2
+    mesh.vertices = [
+      { x: 0, y: 0, weights: [] },
+      { x: 0.4, y: 0, weights: [] },
+      { x: 0.4, y: 0.4, weights: [] },
+      { x: 2, y: 0, weights: [] },
+      { x: 2.4, y: 0, weights: [] },
+      { x: 2.4, y: 0.4, weights: [] }
+    ]
+    mesh.triangles = [0, 1, 2, 3, 4, 5]
+    mesh.uvs = mesh.vertices.flatMap((vertex) => [vertex.x / 3, vertex.y])
+    mesh.bones = ['left', 'right']
+    const samples = mesh.vertices.map((vertex, index) => ({
+      slot: 's',
+      attachment: 'a',
+      vertex: index,
+      x: vertex.x,
+      y: vertex.y
+    }))
+
+    autoWeights(doc, samples, [
+      { name: 'left', ax: 0.2, ay: -0.2, bx: 0.2, by: 0.2 },
+      { name: 'right', ax: 2.2, ay: -0.2, bx: 2.2, by: 0.2 }
+    ], { method: 'heat' })
+
+    for (const index of [0, 1, 2]) {
+      expect(mesh.vertices[index].weights.map((entry) => entry.bone)).toEqual(['left'])
+    }
+    for (const index of [3, 4, 5]) {
+      expect(mesh.vertices[index].weights.map((entry) => entry.bone)).toEqual(['right'])
+    }
+  })
+
+  it('没有骨骼或没有顶点样本时直接返回 0，一个顶点都不动', () => {
+    const { doc, mesh, samples } = setup()
+    expect(autoWeights(doc, samples, [])).toBe(0)
+    expect(autoWeights(doc, [], bones)).toBe(0)
+    for (const vertex of mesh.vertices) expect(vertex.weights).toEqual([])
+  })
+
+  it('样本指向不存在的附件 / 越界顶点时跳过，不写坏网格', () => {
+    const { doc, mesh } = setup()
+    const ghost = [{ slot: 's', attachment: 'nope', vertex: 0, x: 0, y: 0 }]
+    const overflow = [{ slot: 's', attachment: 'a', vertex: 999, x: 0, y: 0 }]
+    for (const method of ['heat', 'geodesic', 'distance'] as const) {
+      expect(autoWeights(doc, ghost, bones, { method }), method).toBe(0)
+      // 越界顶点内部会被算出一个结果，但写回时要被丢掉 —— 不能凭空给附件塞顶点
+      expect(autoWeights(doc, overflow, bones, { method }), method).toBe(0)
+    }
+    expect(mesh.vertices).toHaveLength(16)
+    for (const vertex of mesh.vertices) expect(vertex.weights).toEqual([])
+  })
+
+  it('只有一根骨骼时所有顶点都归它（权重 1）', () => {
+    const only = [{ name: 'left', ax: 0.3, ay: -0.3, bx: 0.5, by: -0.3 }]
+    for (const method of ['heat', 'geodesic', 'distance'] as const) {
+      const { doc, mesh, samples } = setup()
+      expect(autoWeights(doc, samples, only, { method }), method).toBeGreaterThan(0)
+      for (const vertex of mesh.vertices) {
+        expect(vertex.weights, method).toHaveLength(1)
+        expect(vertex.weights[0].bone, method).toBe('left')
+        expect(vertex.weights[0].weight, method).toBeCloseTo(1, 6)
+      }
+    }
+  })
+
+  it('零长度骨骼（起终点重合）不会算崩，三种口径都给出和为 1 的权重', () => {
+    const dot = [{ name: 'dot', ax: 0.6, ay: 0.05, bx: 0.6, by: 0.05 }]
+    for (const method of ['heat', 'geodesic', 'distance'] as const) {
+      const { doc, mesh, samples } = setup()
+      expect(autoWeights(doc, samples, dot, { method }), method).toBeGreaterThan(0)
+      for (const vertex of mesh.vertices) {
+        expect(vertex.weights.length, method).toBeGreaterThan(0)
+        expect(vertex.weights.reduce((sum, entry) => sum + entry.weight, 0), method).toBeCloseTo(1, 5)
+      }
+    }
+  })
+
+  it('maxBones 上限 4：给 8 根骨骼也只留 4 根', () => {
+    const { doc, mesh, samples } = setup()
+    const many = Array.from({ length: 8 }, (_, index) => ({
+      name: `b${index}`,
+      ax: index * 0.4,
+      ay: 0.6,
+      bx: index * 0.4 + 0.2,
+      by: 0.6
+    }))
+    autoWeights(doc, samples, many, { method: 'distance', maxBones: 99 })
+    for (const vertex of mesh.vertices) {
+      expect(vertex.weights.length).toBeLessThanOrEqual(4)
+      expect(vertex.weights.reduce((sum, entry) => sum + entry.weight, 0)).toBeCloseTo(1, 5)
+    }
+  })
+
+  it('falloff 传 0 或负数时按 1 兜底，权重仍是合法分布', () => {
+    for (const method of ['heat', 'geodesic', 'distance'] as const) {
+      const { doc, mesh, samples } = setup()
+      autoWeights(doc, samples, bones, { method, falloff: -3 })
+      for (const vertex of mesh.vertices) {
+        expect(vertex.weights.reduce((sum, entry) => sum + entry.weight, 0), method).toBeCloseTo(1, 5)
+        for (const entry of vertex.weights) expect(entry.weight, method).toBeGreaterThanOrEqual(0)
+      }
+    }
+  })
+
+  it('热扩散超出算力预算时退回表面距离，并且通过 onDegrade 说出来（不静默降级）', () => {
+    const seen: Array<{ slot: string; attachment: string; vertices: number; triangles: number }> = []
+    const heavy = setup()
+    expect(
+      autoWeights(heavy.doc, heavy.samples, bones, {
+        method: 'heat',
+        heatBudget: 0,
+        onDegrade: (info) => seen.push(info)
+      })
+    ).toBeGreaterThan(0)
+    // 每块网格只报一次，带上「为什么降级」的规模信息
+    expect(seen).toEqual([
+      { slot: 's', attachment: 'a', vertices: 16, triangles: Math.floor(heavy.mesh.triangles.length / 3) }
+    ])
+    // 降级后必须和直接用 geodesic 的结果逐顶点一致 —— 否则「退回」只是嘴上说说
+    const explicit = setup()
+    autoWeights(explicit.doc, explicit.samples, bones, { method: 'geodesic' })
+    expect(heavy.mesh.vertices.map((vertex) => vertex.weights)).toEqual(
+      explicit.mesh.vertices.map((vertex) => vertex.weights)
+    )
+  })
+
+  it('预算充足时热扩散照常跑，不会误报降级', () => {
+    const { doc, samples } = setup()
+    let degraded = 0
+    autoWeights(doc, samples, bones, {
+      method: 'heat',
+      onDegrade: () => {
+        degraded++
+      }
+    })
+    expect(degraded).toBe(0)
+  })
+})
+
+describe('权重交换 / 复制粘贴（Spine 的 Swap、ctrl+C / ctrl+V）', () => {
+  const setup = () => {
+    const doc = createEmptyDocument('w')
+    doc.bones.push(requireBone('root'), requireBone('arm'), requireBone('hand'))
+    createRegionFromImage(doc, { image: 'x.png', bone: 'root', width: 100, height: 100, slotName: 's', attachmentName: 'a' })
+    convertRegionToMesh(doc, 's', 'a', 1)
+    const mesh = findAttachment(doc, 's', 'a')!
+    mesh.bones = ['root', 'arm', 'hand']
+    // 起点干净：convertRegionToMesh 会给每个顶点塞 {root: 1}，会干扰「改了几个顶点」的断言
+    for (const vertex of mesh.vertices) vertex.weights = []
+    return { doc, mesh }
+  }
+  const weightsAt = (mesh: { vertices: Array<{ weights: Array<{ bone: string; weight: number }> }> }, index: number) =>
+    Object.fromEntries(mesh.vertices[index].weights.map((entry) => [entry.bone, entry.weight]))
+
+  it('交换两根骨骼的权重', () => {
+    const { doc, mesh } = setup()
+    mesh.vertices[0].weights = [
+      { bone: 'root', weight: 0.7 },
+      { bone: 'arm', weight: 0.3 }
+    ]
+
+    expect(swapWeightBones(doc, 's', 'a', 'root', 'arm')).toBe(1)
+    expect(weightsAt(mesh, 0)).toEqual({ arm: 0.7, root: 0.3 })
+  })
+
+  it('一根骨骼没有权重时，交换等于把权重整体挪过去', () => {
+    const { doc, mesh } = setup()
+    mesh.vertices[0].weights = [{ bone: 'root', weight: 1 }]
+
+    expect(swapWeightBones(doc, 's', 'a', 'root', 'arm')).toBe(1)
+    expect(weightsAt(mesh, 0)).toEqual({ arm: 1 })
+  })
+
+  it('同名的 / 没绑的 / 两边一样的一律不动作', () => {
+    const { doc, mesh } = setup()
+    mesh.vertices[0].weights = [
+      { bone: 'root', weight: 0.5 },
+      { bone: 'arm', weight: 0.5 }
+    ]
+
+    expect(swapWeightBones(doc, 's', 'a', 'root', 'root')).toBe(0)
+    expect(swapWeightBones(doc, 's', 'a', 'root', 'nope')).toBe(0)
+    expect(swapWeightBones(doc, 's', 'a', 'root', 'arm')).toBe(0)
+  })
+
+  it('复制按顺序粘贴；数量不一致只贴前面能对上的那些', () => {
+    const { doc, mesh } = setup()
+    mesh.vertices[0].weights = [
+      { bone: 'root', weight: 0.6 },
+      { bone: 'arm', weight: 0.4 }
+    ]
+    mesh.vertices[1].weights = [{ bone: 'arm', weight: 1 }]
+
+    expect(copyVertexWeights(doc, 's', 'a', [0, 1])).toBe(2)
+    expect(weightClipboardSize()).toBe(2)
+    expect(pasteVertexWeights(doc, 's', 'a', [2, 3])).toBe(2)
+    expect(weightsAt(mesh, 2)).toEqual({ root: 0.6, arm: 0.4 })
+    expect(weightsAt(mesh, 3)).toEqual({ arm: 1 })
+
+    // 只给一个目标顶点：只贴剪贴板的第一组
+    expect(pasteVertexWeights(doc, 's', 'a', [1])).toBe(1)
+    expect(weightsAt(mesh, 1)).toEqual({ root: 0.6, arm: 0.4 })
+  })
+
+  it('粘贴会丢掉目标网格没绑的骨骼，并重新归一', () => {
+    const { doc, mesh } = setup()
+    mesh.vertices[0].weights = [
+      { bone: 'root', weight: 0.5 },
+      { bone: 'hand', weight: 0.5 }
+    ]
+    mesh.vertices[2].weights = [{ bone: 'arm', weight: 1 }]
+    copyVertexWeights(doc, 's', 'a', [0])
+
+    mesh.bones = ['root']
+    expect(pasteVertexWeights(doc, 's', 'a', [2])).toBe(1)
+    expect(weightsAt(mesh, 2)).toEqual({ root: 1 })
+  })
+
+  it('剪贴板清空后粘贴不动作', () => {
+    const { doc, mesh } = setup()
+    mesh.vertices[0].weights = [{ bone: 'root', weight: 1 }]
+    copyVertexWeights(doc, 's', 'a', [0])
+    clearWeightClipboard()
+
+    expect(weightClipboardSize()).toBe(0)
+    mesh.vertices[1].weights = [{ bone: 'arm', weight: 1 }]
+    expect(pasteVertexWeights(doc, 's', 'a', [1])).toBe(0)
+  })
+})
+

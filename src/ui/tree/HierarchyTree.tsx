@@ -1014,6 +1014,16 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     if (canEditBinding()) action()
   }
 
+  /**
+   * 行尾删除按钮：**只在 Pose 态给**，Animate 态整颗按钮不出现。
+   *
+   * 删除改的是绑定数据，Animate 态点了只会得到「切到 Pose」那句提示 —— 一个挂着、按不动的按钮
+   * 比没有更容易让人以为坏了。右键菜单里的「删除」仍然保留（那里有禁用态与说明，见 `deleteItem`），
+   * 所以「Animate 态不能删」这件事在菜单里依旧说得清楚。
+   */
+  const rowDelete = (action: () => void): (() => void) | undefined =>
+    mode === 'pose' ? action : undefined
+
   /** 资源面板拖进来的图片：作为新的 display 追加到该插槽，并立即切换显示 */
   const addDisplay = (slotName: string, imageNames: string[]): void => {
     if (!canEditBinding()) return
@@ -1820,10 +1830,10 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
               if (target) target.locked = !target.locked
             })
         }}
-        // 层级根骨骼不显示删除按钮（同右键菜单：root 不能删）
+        // 层级根骨骼不显示删除按钮（同右键菜单：root 不能删）；Animate 态整颗都不给（见 rowDelete）
         onDelete={
           document.bones.length > 1 && bone.name !== rootName
-            ? poseOnly(() =>
+            ? rowDelete(() =>
                 update(t('删除骨骼'), (draft) => {
                   deleteBone(draft, bone.name)
                 })
@@ -1933,7 +1943,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             attachment: attachment.name
           })
         }}
-        onDelete={poseOnly(() =>
+        onDelete={rowDelete(() =>
           update(t('删除 display'), (draft) => deleteAttachment(draft, slot.name, attachment.name))
         )}
       />
@@ -2002,7 +2012,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
               if (target) target.locked = !target.locked
             })
         }}
-        onDelete={poseOnly(() =>
+        onDelete={rowDelete(() =>
           update(t('删除插槽'), (draft) => {
             deleteSlot(draft, slot.name)
           })
@@ -2036,7 +2046,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       onContextMenu={(event) =>
         openMenu(event, { kind: 'constraint', name: constraint.name, bone: constraint.bones[0] ?? '' })
       }
-      onDelete={poseOnly(() => removeConstraint(update, constraint.name))}
+      onDelete={rowDelete(() => removeConstraint(update, constraint.name))}
     />
   )
 

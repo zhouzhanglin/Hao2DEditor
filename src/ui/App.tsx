@@ -108,8 +108,10 @@ import {
   lastProject,
   openProject,
   openProjectAt,
-  saveProject
+  saveProject,
+  setImportTargetDialogOpener
 } from '@editor/services/projectIo'
+import type { ImportTarget } from '@editor/services/projectIo'
 import ExportDialog from '@ui/widgets/ExportDialog'
 import type { ExportMode } from '@ui/widgets/ExportDialog'
 import NewProjectDialog from '@ui/widgets/NewProjectDialog'
@@ -117,6 +119,7 @@ import SettingsDialog from '@ui/widgets/SettingsDialog'
 import AiIntegrationDialog from '@ui/widgets/AiIntegrationDialog'
 import PsdImportDialog from '@ui/widgets/PsdImportDialog'
 import StageDialog from '@ui/widgets/StageDialog'
+import ImportTargetDialog from '@ui/widgets/ImportTargetDialog'
 import { importPsdLayers, pickAndParsePsd, setPsdDialogOpener } from '@editor/services/psdImport'
 import type { ParsedPsd } from '@importers/psdImport'
 import { deleteSelectedTrack, keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
@@ -180,6 +183,36 @@ export default function App() {
     setPsdDialogOpener(setPsdImport)
     return () => setPsdDialogOpener(null)
   }, [])
+
+  /**
+   * 「导入到哪儿」弹窗（Spine / DragonBones）：
+   * `resolve` 就是服务层 `importSpineFlow` / `importDragonBonesFlow` 里那个 Promise 的回调 ——
+   * 选中或关闭即兑现（null = 取消）。
+   */
+  const [importTargetRequest, setImportTargetRequest] = useState<{
+    kind: string
+    resolve: (target: ImportTarget | null) => void
+  } | null>(null)
+
+  // 与服务层共用同一个弹窗：菜单、拖入都经这个 opener 打开（同 PSD 那套）
+  useEffect(() => {
+    setImportTargetDialogOpener(
+      (kind) =>
+        new Promise<ImportTarget | null>((resolve) => {
+          setImportTargetRequest({ kind, resolve })
+        })
+    )
+    return () => setImportTargetDialogOpener(null)
+  }, [])
+
+  /** 结束一次「导入到哪儿」询问：null = 取消（导入流程会返回「已取消导入」） */
+  const settleImportTarget = useCallback(
+    (target: ImportTarget | null) => {
+      importTargetRequest?.resolve(target)
+      setImportTargetRequest(null)
+    },
+    [importTargetRequest]
+  )
 
   const booted = useRef(false)
 
@@ -911,6 +944,14 @@ export default function App() {
 
       {psdImport ? (
         <PsdImportDialog parsed={psdImport} onConfirm={confirmPsdImport} onClose={() => setPsdImport(null)} />
+      ) : null}
+      {importTargetRequest ? (
+        <ImportTargetDialog
+          kind={importTargetRequest.kind}
+          dirty={dirty}
+          onChoose={settleImportTarget}
+          onClose={() => settleImportTarget(null)}
+        />
       ) : null}
       {stageOpen ? <StageDialog onClose={() => setStageOpen(false)} onStatus={flash} /> : null}
     </div>

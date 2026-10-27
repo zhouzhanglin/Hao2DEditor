@@ -2125,4 +2125,30 @@ export const en: Record<string, string> = {
   '没有这个命令：{0}（是不是想用 {1}？{2}）':
     'No such command: {0} (did you mean {1}? {2})',
   '没有这个命令：{0}（{1}）': 'No such command: {0} ({1})',
+
+  // ── 导入外部骨架（Spine / DragonBones）：选择「新建工程 / 并入当前工程」 ──
+  '导入 {0}': 'Import {0}',
+  '请选择这份资源要导入到哪里：': 'Choose where this asset should go:',
+  '创建新工程': 'Create a new project',
+  '用导入的资源替换当前工程，适合把一个 Spine / DragonBones 资源单独做成工程':
+    'Replace the current project with the imported asset — best when one Spine / DragonBones asset should become its own project',
+  '导入当前工程': 'Import into the current project',
+  '把导入的骨架加进当前工程，成为工程里的新骨架；图片池共享，可在顶部骨架栏切换':
+    'Add the imported skeleton to the current project as a new skeleton; the image pool is shared and you can switch skeletons in the top bar',
+  '当前工程有未保存的改动：创建新工程会整份替换当前文档，这些改动不会保留。':
+    'The current project has unsaved changes: creating a new project replaces the whole document and those changes will not be kept.',
+  '导入后仍可 Ctrl+Z 撤销': 'You can still undo the import with Ctrl+Z',
+  '已取消导入': 'Import cancelled',
+  '已把 Spine 骨架「{0}」并入当前工程：{1} 骨骼 / {2} 插槽 / {3} 动画':
+    'Added the Spine skeleton "{0}" to the current project: {1} bones / {2} slots / {3} animations',
+  '已把 Spine 骨架「{0}」并入当前工程：{1} 骨骼 / {2} 动画':
+    'Added the Spine skeleton "{0}" to the current project: {1} bones / {2} animations',
+  '已把 DragonBones 骨架「{0}」并入当前工程：{1} 骨骼 / {2} 插槽 / {3} 动画':
+    'Added the DragonBones skeleton "{0}" to the current project: {1} bones / {2} slots / {3} animations',
+  '已把 {0} 个 DragonBones 骨架并入当前工程（{1}），当前编辑「{2}」':
+    'Added {0} DragonBones skeletons to the current project ({1}); now editing "{2}"',
+  '骨架「{0}」与现有骨架重名，已重命名为「{1}」':
+    'The skeleton name "{0}" is already taken, so it was renamed to "{1}"',
+  '图片「{0}」与现有图片重名，已重命名为「{1}」':
+    'The image name "{0}" is already taken, so it was renamed to "{1}"',
 }

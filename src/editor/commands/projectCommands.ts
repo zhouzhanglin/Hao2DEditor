@@ -199,13 +199,13 @@ export function registerProjectCommands(): void {
       name: 'importSpine',
       title: '导入 Spine',
       description:
-        '按路径导入 Spine 骨骼 JSON（**整份替换**当前文档）。同目录需有 .atlas 图集文件，会被自动读取',
+        '按路径导入 Spine 骨骼 JSON（**整份替换**当前文档，不弹「新建工程 / 并入当前工程」确认框）。同目录需有 .atlas 图集文件，会被自动读取',
       args: { jsonPath: { type: 'string', description: 'Spine 骨骼 JSON 的绝对路径', required: true } },
       returns: '{ bones, slots, animations }'
     },
     async (args) => {
       const jsonPath = need(args, 'jsonPath')
-      const result = await importSpineFlow(jsonPath)
+      const result = await importSpineFlow(jsonPath, 'newProject')
       if (!result.ok) throw new Error(result.message)
       const doc = useProjectStore.getState().document
       return changed(
@@ -220,13 +220,13 @@ export function registerProjectCommands(): void {
       name: 'importDragonBones',
       title: '导入 DragonBones',
       description:
-        '按路径导入 DragonBones 骨骼 JSON（**整份替换**当前文档）。同目录的 texture_*.json 图集会被自动收集',
+        '按路径导入 DragonBones 骨骼 JSON（**整份替换**当前文档，不弹「新建工程 / 并入当前工程」确认框）。同目录的 texture_*.json 图集会被自动收集',
       args: { jsonPath: { type: 'string', description: 'DragonBones 骨骼 JSON 的绝对路径', required: true } },
       returns: '{ bones, slots, animations }'
     },
     async (args) => {
       const jsonPath = need(args, 'jsonPath')
-      const result = await importDragonBonesFlow(jsonPath)
+      const result = await importDragonBonesFlow(jsonPath, 'newProject')
       if (!result.ok) throw new Error(result.message)
       const doc = useProjectStore.getState().document
       return changed(

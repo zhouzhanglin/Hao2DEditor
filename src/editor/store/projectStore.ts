@@ -52,6 +52,15 @@ export interface ProjectState {
   ) => void
   /** 新建一个空骨架并切过去（图片池沿用当前的，动到的是「骨架」而不是资源） */
   addSkeleton: (name?: string) => void
+  /**
+   * **导入外部骨架**（Spine / DragonBones）到当前工程：把一批骨架追加进 `skeletons`，
+   * 切到第一个新骨架，图片池与现有骨架合并后共享（同名不同文件自动改名并改写引用）。
+   * 返回新骨架的下标；传入空数组时返回当前下标。
+   *
+   * 与 `setProject` 的区别：那是「整份替换」（新建工程 / 打开工程），这里是「并入」——
+   * 当前工程已有的骨架、项目名、保存路径都不动。
+   */
+  appendSkeletons: (skeletons: EditorDocument[]) => number
   /** 删除某个骨架（至少保留一个） */
   removeSkeleton: (index: number) => void
   /** 重命名某个骨架（改它的 `armatureName`） */
@@ -170,6 +179,56 @@ function shareImages(skeletons: EditorDocument[], active: number): EditorDocumen
     return { ...skeleton, images: pool }
   })
   return changed ? next : skeletons
+}
+
+/**
+ * 给重名的图片找个不冲突的名字，**保留扩展名**（`atlas.png` → `atlas_2.png`）。
+ *
+ * 不用 `uniqueName` 直接加后缀：那会得到 `atlas.png_2`，导出图集 / 资源面板里的名字都很别扭。
+ */
+function uniqueImageName(existing: readonly string[], name: string): string {
+  const dot = name.lastIndexOf('.')
+  const stem = dot > 0 ? name.slice(0, dot) : name
+  const ext = dot > 0 ? name.slice(dot) : ''
+  let index = 2
+  while (existing.includes(`${stem}_${index}${ext}`)) index++
+  return `${stem}_${index}${ext}`
+}
+
+/**
+ * 追加骨架时的图片池合并（导入外部骨架用）：现有池原样保留，新骨架的图按名字并入。
+ *
+ * - 同名同路径 = 同一张图，直接复用，不重复入池；
+ * - 同名不同文件（两个工程都有一张 `atlas.png`）**改名**成 `atlas_2.png`，
+ *   改名记进 `renamed`，由调用方改写新骨架里附件的 `image` 引用 ——
+ *   不改引用的话，新骨架会指向老工程的同名图（画错贴图）。
+ */
+function mergeImagePools(
+  existing: readonly AuthoringImage[],
+  additions: readonly EditorDocument[]
+): { pool: AuthoringImage[]; renamed: Map<string, string> } {
+  const pool = [...existing]
+  const byName = new Map(pool.map((image) => [image.name, image]))
+  const renamed = new Map<string, string>()
+  for (const document of additions) {
+    // DragonBones 一份 JSON 的多个 armature 共享同一个 images 数组：并过的图在这里会被跳过
+    for (const image of document.images) {
+      const current = renamed.get(image.name) ?? image.name
+      const same = byName.get(current)
+      if (same) {
+        if (same.path === image.path) continue
+        const name = uniqueImageName([...byName.keys()], current)
+        renamed.set(image.name, name)
+        const copy = { ...image, name }
+        byName.set(name, copy)
+        pool.push(copy)
+        continue
+      }
+      byName.set(current, image)
+      pool.push(image)
+    }
+  }
+  return { pool, renamed }
 }
 
 /**
@@ -365,6 +424,92 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       dirty: true,
       ...syncFlags(state)
     })
+  },
+
+  appendSkeletons: (skeletons) => {
+    const state = get()
+    if (skeletons.length === 0) return state.activeSkeleton
+    history.push('导入骨架', snapshotOf(state))
+    // 与 setProject 同一套兜底修复，只跑新增的这几个（现有骨架已经在内存里修过了）
+    const additions = skeletons.map((skeleton) => {
+      const copy = cloneDocument(skeleton)
+      repairAnimationDurations(copy)
+      repairDisplayNames(copy)
+      return copy
+    })
+    /*
+     * 骨架名是嵌套引用（`attachment.subArmature`）与导出的唯一键：与现有骨架重名会让
+     * 「引用谁」变得不确定（运行期按 `armatureName` 解析），导入时自动加后缀；
+     * 同一批新骨架之间重名同理。改名后把这批骨架里的嵌套 display 一起改指过去。
+     */
+    const taken = state.skeletons.map((skeleton) => skeleton.armatureName)
+    const skeletonRenames = new Map<string, string>()
+    /** 改名提示：静默改用户数据最难排查，这里要和导入结果一起报到状态栏 */
+    const notes: string[] = []
+    for (const skeleton of additions) {
+      const base = skeleton.armatureName
+      if (!taken.includes(base)) {
+        taken.push(base)
+        continue
+      }
+      let suffix = 2
+      while (taken.includes(`${base}_${suffix}`)) suffix++
+      const name = `${base}_${suffix}`
+      skeletonRenames.set(base, name)
+      notes.push(t('骨架「{0}」与现有骨架重名，已重命名为「{1}」', [base, name]))
+      taken.push(name)
+      skeleton.armatureName = name
+    }
+    if (skeletonRenames.size > 0) {
+      for (const skeleton of additions) {
+        for (const skin of skeleton.skins) {
+          for (const slot of skin.slots) {
+            for (const attachment of slot.attachments) {
+              if (attachment.type !== 'armature') continue
+              const next = skeletonRenames.get(attachment.subArmature)
+              if (next) attachment.subArmature = next
+            }
+          }
+        }
+      }
+    }
+
+    const { pool, renamed } = mergeImagePools(state.document.images, additions)
+    for (const [oldName, newName] of renamed) {
+      notes.push(t('图片「{0}」与现有图片重名，已重命名为「{1}」', [oldName, newName]))
+    }
+    for (const document of additions) {
+      if (renamed.size > 0) {
+        for (const skin of document.skins) {
+          for (const slot of skin.slots) {
+            for (const attachment of slot.attachments) {
+              const next = renamed.get(attachment.image)
+              if (next) attachment.image = next
+            }
+          }
+        }
+      }
+      document.images = pool
+    }
+    // 现有骨架也指向同一个池（`shareImages` 的同一约定），否则切回旧骨架看不到新导入的图
+    const list: EditorDocument[] = [
+      ...state.skeletons.map((skeleton) => (skeleton.images === pool ? skeleton : { ...skeleton, images: pool })),
+      ...additions
+    ]
+    // 新旧骨架之间也可能有嵌套引用（DragonBones 的多 armature），整份再校验一次
+    const nested = sanitizeNestRefs(list)
+    const notice = [...notes, ...nested.warnings]
+    const index = state.skeletons.length
+    set({
+      document: list[index],
+      skeletons: list,
+      activeSkeleton: index,
+      // 项目名 / 保存路径沿用当前工程：这是「并入」而不是新建工程
+      dirty: true,
+      warnings: notice.length > 0 ? notice : get().warnings,
+      ...syncFlags(get())
+    })
+    return index
   },
 
   removeSkeleton: (index) => {

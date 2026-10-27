@@ -19,6 +19,7 @@ import { DEFAULT_PROJECT_NAME, useProjectStore } from '../store/projectStore'
 import { useModeStore } from '../store/modeStore'
 import { useSelectionStore } from '../store/selectionStore'
 import { useTimelineStore } from '../store/timelineStore'
+import { useToolStore } from '../store/toolStore'
 import { getActiveScene } from '../activeScene'
 import { releaseDocumentAssets } from './assetCache'
 
@@ -26,6 +27,34 @@ export interface IoResult {
   ok: boolean
   message: string
   warnings?: string[]
+}
+
+/**
+ * 导入外部骨架（Spine / DragonBones）的落点：
+ *
+ * - `newProject`：整份替换当前文档（老行为，也是没得选时的默认）；
+ * - `currentProject`：**并入当前工程**，追加成新骨架（多骨架工程的骨架栏里能看到）。
+ */
+export type ImportTarget = 'newProject' | 'currentProject'
+
+type ImportTargetOpener = (kind: string) => Promise<ImportTarget | null>
+
+let importTargetOpener: ImportTargetOpener | null = null
+
+/**
+ * 注册「导入到哪儿」弹窗（App 挂载时注册，传 null 注销）。
+ *
+ * 服务层拿不到 React 状态，用回调把选择交回 UI —— 与 `setPsdDialogOpener` 同一套路，
+ * 这样菜单、拖入、AI 三条入口共用同一份确认逻辑。
+ */
+export function setImportTargetDialogOpener(opener: ImportTargetOpener | null): void {
+  importTargetOpener = opener
+}
+
+/** 问用户落到哪儿；没注册弹窗（无 UI / 测试）时按老行为「新建工程」 */
+async function askImportTarget(kind: string): Promise<ImportTarget | null> {
+  if (!importTargetOpener) return 'newProject'
+  return importTargetOpener(kind)
 }
 
 /**
@@ -324,7 +353,7 @@ export async function saveProject(saveAs: boolean): Promise<IoResult> {
   return { ok: true, message, warnings: copied.warnings.length > 0 ? copied.warnings : undefined }
 }
 
-export async function importSpineFlow(sourcePath?: string): Promise<IoResult> {
+export async function importSpineFlow(sourcePath?: string, forcedTarget?: ImportTarget): Promise<IoResult> {
   const platform = getPlatform()
   // 调用方（AI 命令）直接给路径时不弹对话框；同目录的 .atlas 仍需存在（下面会找）
   const picked = sourcePath ? [sourcePath] : await platform.pickFiles({
@@ -360,21 +389,34 @@ export async function importSpineFlow(sourcePath?: string): Promise<IoResult> {
     pageImages,
     atlasText
   })
-  const document = finishImport(result.asset, pageImages, pageSizes, jsonPath)
-  const warnings = [...parsed.warnings, ...result.warnings]
+  // 解析成功后再问「新建工程 / 并入当前工程」：文件不对时不必先做一次选择
+  const target = forcedTarget ?? (await askImportTarget('Spine'))
+  if (!target) return { ok: false, message: t('已取消导入') }
+  const document = finishImport(result.asset, pageImages, pageSizes, jsonPath, target)
+  // 并入时 finishImport 已经写过提示（骨架 / 图片重名改名、嵌套引用），合并而不是覆盖
+  const appendedWarnings = target === 'currentProject' ? useProjectStore.getState().warnings : []
+  const warnings = [...appendedWarnings, ...parsed.warnings, ...result.warnings]
   useProjectStore.getState().setWarnings(warnings)
   return {
     ok: true,
-    message: t('已导入 Spine：{0} 骨骼 / {1} 插槽 / {2} 动画', [
-      document.bones.length,
-      document.slots.length,
-      document.animations.length
-    ]),
+    message:
+      target === 'currentProject'
+        ? t('已把 Spine 骨架「{0}」并入当前工程：{1} 骨骼 / {2} 插槽 / {3} 动画', [
+            document.armatureName,
+            document.bones.length,
+            document.slots.length,
+            document.animations.length
+          ])
+        : t('已导入 Spine：{0} 骨骼 / {1} 插槽 / {2} 动画', [
+            document.bones.length,
+            document.slots.length,
+            document.animations.length
+          ]),
     warnings
   }
 }
 
-export async function importDragonBonesFlow(sourcePath?: string): Promise<IoResult> {
+export async function importDragonBonesFlow(sourcePath?: string, forcedTarget?: ImportTarget): Promise<IoResult> {
   const platform = getPlatform()
   // 调用方（AI 命令）直接给路径时不弹对话框；同目录的 texture_*.json 图集仍会被自动收集
   const picked = sourcePath ? [sourcePath] : await platform.pickFiles({
@@ -431,17 +473,23 @@ export async function importDragonBonesFlow(sourcePath?: string): Promise<IoResu
   // 一份 DB 骨骼 JSON 里可能有好几个 armature（父子骨架 + 被嵌套的子骨架）：
   // 全部导成工程内的骨架，嵌套 display 才按名字引用得到目标
   const project = importDragonBoneProject({ json: json as never, subTextures, pageSizes, pageImages })
+  // 解析成功后再问「新建工程 / 并入当前工程」：文件不对时不必先做一次选择
+  const target = forcedTarget ?? (await askImportTarget('DragonBones'))
+  if (!target) return { ok: false, message: t('已取消导入') }
   const document = finishImportProject(
     project.assets,
     pageImages,
     pageSizes,
     jsonPath,
     0,
-    project.defaultAnimations
+    project.defaultAnimations,
+    target
   )
   warnings.push(...project.warnings)
   warnings.push(t('合并 {0} 张图集页', dbTextureNames(subTextures).length))
-  useProjectStore.getState().setWarnings(warnings)
+  // 并入时 finishImportProject 已经写过提示（删名改名、嵌套引用），合并而不是覆盖
+  const appendedWarnings = target === 'currentProject' ? useProjectStore.getState().warnings : []
+  useProjectStore.getState().setWarnings([...appendedWarnings, ...warnings])
   const summary =
     project.assets.length > 1
       ? t('{0} 个骨架（{1}），当前编辑「{2}」', [
@@ -452,12 +500,26 @@ export async function importDragonBonesFlow(sourcePath?: string): Promise<IoResu
       : t('「{0}」', document.armatureName)
   return {
     ok: true,
-    message: t('已导入 DragonBones：{0} / {1} 骨骼 / {2} 插槽 / {3} 动画', [
-      summary,
-      document.bones.length,
-      document.slots.length,
-      document.animations.length
-    ]),
+    message:
+      target === 'currentProject'
+        ? project.assets.length > 1
+          ? t('已把 {0} 个 DragonBones 骨架并入当前工程（{1}），当前编辑「{2}」', [
+              project.assets.length,
+              project.names.join(t('、')),
+              document.armatureName
+            ])
+          : t('已把 DragonBones 骨架「{0}」并入当前工程：{1} 骨骼 / {2} 插槽 / {3} 动画', [
+              document.armatureName,
+              document.bones.length,
+              document.slots.length,
+              document.animations.length
+            ])
+        : t('已导入 DragonBones：{0} / {1} 骨骼 / {2} 插槽 / {3} 动画', [
+            summary,
+            document.bones.length,
+            document.slots.length,
+            document.animations.length
+          ]),
     warnings
   }
 }
@@ -486,9 +548,10 @@ function finishImport(
   asset: ReturnType<typeof importSpine>['asset'],
   pageImages: Record<string, string>,
   pageSizes: PageSizes,
-  sourcePath?: string
+  sourcePath?: string,
+  target: ImportTarget = 'newProject'
 ): EditorDocument {
-  return finishImportProject([asset], pageImages, pageSizes, sourcePath, 0)
+  return finishImportProject([asset], pageImages, pageSizes, sourcePath, 0, [], target)
 }
 
 /**
@@ -505,9 +568,11 @@ function finishImportProject(
   sourcePath?: string,
   activeIndex = 0,
   /** 各骨架的默认动画名（DB 的 armature.defaultActions，空串 = 没有） */
-  defaultAnimations: readonly string[] = []
+  defaultAnimations: readonly string[] = [],
+  target: ImportTarget = 'newProject'
 ): EditorDocument {
-  releaseDocumentAssets()
+  // 注意：`releaseDocumentAssets` 只在「整份替换」那条路上调用 —— 往当前工程里追加骨架时，
+  // 现有文档的图集还得继续用，提前释放会让当前画面变白块
   const documents = assets.map((asset, index) => {
     const document = decompileAsset(asset)
     const defaultAnimation = defaultAnimations[index] ?? ''
@@ -530,6 +595,30 @@ function finishImportProject(
   }
   for (const document of documents) document.images = pool
 
+  /*
+   * 并入当前工程：追加成新骨架并切过去，现有骨架 / 项目名 / 保存路径都不动。
+   * 图集页与现有图片池的合并在 store 的 `appendSkeletons` 里做（含重名不同文件的改名）。
+   */
+  if (target === 'currentProject') {
+    const store = useProjectStore.getState()
+    const at = store.appendSkeletons(documents)
+    const added = useProjectStore.getState().skeletons[at] ?? documents[0]
+    // 切骨架后的收尾与 App 的 resetForSkeletonChange 同一口径：选中项 / 皮肤 / 动画 / 视口
+    const skin = added.editorMeta.activeSkin
+    useSelectionStore.getState().clear()
+    useSelectionStore.getState().select({ skin })
+    useToolStore.getState().setPendingWeightBone(null)
+    useTimelineStore.getState().setAnimation(null)
+    useModeStore.getState().setMode('pose')
+    const addedScene = getActiveScene()
+    if (addedScene) {
+      addedScene.refresh()
+      addedScene.fit()
+    }
+    return added
+  }
+
+  releaseDocumentAssets()
   const index = Math.max(0, Math.min(documents.length - 1, activeIndex))
   if (documents.length > 1) {
     useProjectStore.getState().setProject(documents, index, null, true)
@@ -714,20 +803,35 @@ export async function importDroppedPaths(paths: readonly string[]): Promise<IoRe
           pageImages: resolved.pageImages,
           atlasText
         })
-        const document = finishImport(result.asset, resolved.pageImages, resolved.pageSizes, jsons[0])
+        // 拖入与菜单走同一份「新建工程 / 并入当前工程」确认
+        const target = await askImportTarget('Spine')
+        if (!target) return { ok: false, message: t('已取消导入') }
+        const document = finishImport(result.asset, resolved.pageImages, resolved.pageSizes, jsons[0], target)
         return {
           ok: true,
-          message: t('已导入 Spine（拖入）：{0} 骨骼 / {1} 动画', [
-            document.bones.length,
-            document.animations.length
-          ]),
-          warnings: [...atlas.warnings, ...result.warnings]
+          message:
+            target === 'currentProject'
+              ? t('已把 Spine 骨架「{0}」并入当前工程：{1} 骨骼 / {2} 动画', [
+                  document.armatureName,
+                  document.bones.length,
+                  document.animations.length
+                ])
+              : t('已导入 Spine（拖入）：{0} 骨骼 / {1} 动画', [
+                  document.bones.length,
+                  document.animations.length
+                ]),
+          warnings: [
+            ...(target === 'currentProject' ? useProjectStore.getState().warnings : []),
+            ...atlas.warnings,
+            ...result.warnings
+          ]
         }
       }
       useProjectStore.getState().setWarnings([t('请同时拖入同目录的 .atlas 图集文件（或使用「导入 Spine」菜单）')])
       return importSpineFlow()
     }
-    if (format === 'dragonbones') return importDragonBonesFlow()
+    // 拖入时已知骨骼 JSON 路径：直接按它导入，图集仍在同目录自动收集（不再弹文件框）
+    if (format === 'dragonbones') return importDragonBonesFlow(jsons[0])
   }
 
   const leaves = imageLeaves(list)

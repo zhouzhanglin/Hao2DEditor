@@ -1,6 +1,6 @@
 {
   "name": "hao2d-editor",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "private": true,
   "description": "轻量 2D 骨骼动画编辑器（Electron + TypeScript + pixiJS），支持蒙皮与 FFD 变形",
   "author": "zhouzhanglin",

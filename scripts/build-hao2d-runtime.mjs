@@ -11,6 +11,9 @@ const alias = {
   '@editor': resolve(root, 'src/editor'),
   '@ui': resolve(root, 'src/ui'),
   '@shared': resolve(root, 'src/shared'),
+  // core / render 里的提示文本会 import { t } from '@i18n'：指到替身，
+  // 否则会把 react 与中英两份词典一起打进播放器（见 src/i18n/runtimeStub.ts）
+  '@i18n': resolve(root, 'src/i18n/runtimeStub.ts'),
   // pixi 不打包进运行库：import 重定向到桥文件，运行时从全局 PIXI 取（pixi 由预览页单独加载）
   'pixi.js': resolve(root, 'src/main/preview/pixiShim.ts')
 }

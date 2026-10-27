@@ -1110,6 +1110,7 @@ export const en: Record<string, string> = {
   // ── 顶点选择的快捷键 ──
   '已选中「{0}」的全部 {1} 个顶点': 'Selected all {1} vertices of "{0}"',
   '整体染色': 'Global tint',
+  '说明': 'Help',
   '整体染色（与插槽色、附件色相乘）；双击复位为白色':
     'Global tint (multiplies with slot and attachment colors); double-click to reset to white',
   '染色透明度': 'Tint opacity',

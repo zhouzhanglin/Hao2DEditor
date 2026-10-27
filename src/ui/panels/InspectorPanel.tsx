@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Brush, Crosshair, Grid3x3, RotateCcw, Trash2 } from 'lucide-react'
+import { Crosshair, Grid3x3, RotateCcw, Trash2 } from 'lucide-react'
 import { t } from '@i18n'
 import { BlendMode } from '@core/model/types'
 import { curvePercent } from '@core/anim/interpolation'
@@ -56,6 +56,7 @@ import {
   unitsToPx,
   Vector2Field
 } from '@ui/widgets/fields'
+import { InfoHint } from '@ui/widgets/InfoHint'
 import { PanelEmpty } from '@ui/widgets/PanelShell'
 import { blendOptions, constraintLabel } from '@ui/widgets/constants'
 
@@ -565,8 +566,18 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
   const toolSections = (
     <>
       {tools.tool === 'weight' && mode === 'pose' ? (
-        <FieldGroup title={t('权重刷')}>
-          {/* 参数：Mode / Bone / Normalize / Size / Strength / Feather（Strength 与 Feather 对齐 Spine 的笔刷语义） */}
+        /*
+         * 参数：Mode / Bone / Normalize / Size / Strength / Feather（Strength 与 Feather 对齐 Spine 的笔刷语义）。
+         * 用法说明收进标题旁的 info 图标：一段话常驻会把下面的列表挤下去，而它读一次就够。
+         */
+        <FieldGroup
+          title={t('权重刷')}
+          actions={
+            <InfoHint
+              text={t('Strength = 一笔能刷到的权重上限；Feather = 边缘衰减占笔刷半径的比例（0 = 硬边）；按住修饰键临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长')}
+            />
+          }
+        >
           <SelectField
             label="Mode"
             value={tools.brush.mode}
@@ -620,10 +631,6 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
             suffix="%"
             onChange={(value) => tools.setBrush({ feather: value })}
           />
-          <p className="flex items-center gap-1 text-3xs text-content-lo">
-            <Brush size={10} />
-            {t('Strength = 一笔能刷到的权重上限；Feather = 边缘衰减占笔刷半径的比例（0 = 硬边）；按住修饰键临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长')}
-          </p>
         </FieldGroup>
       ) : null}
     </>
@@ -1325,24 +1332,31 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
               />
             ) : null}
             {attachment.type === 'mesh' ? (
-              <p className="text-3xs leading-relaxed text-content-lo">
-                {t('顶点 {0} · 三角面 {1} · 加权 {2}', [
-                  attachment.vertices.length,
-                  Math.floor(attachment.triangles.length / 3),
-                  attachment.vertices.filter((v) => v.weights.length > 0).length
-                ])}
-                <br />
-                {t('用网格 / FFD 工具在网格内 Alt+点击插入顶点，选中顶点后可在下面删除')}
-              </p>
+              // 数字是**实时状态**（顶点 / 面 / 已加权），留着；怎么加点、怎么删这类说明收进 info 气泡
+              <div className="flex items-start gap-1">
+                <p className="min-w-0 flex-1 text-3xs leading-relaxed text-content-lo">
+                  {t('顶点 {0} · 三角面 {1} · 加权 {2}', [
+                    attachment.vertices.length,
+                    Math.floor(attachment.triangles.length / 3),
+                    attachment.vertices.filter((v) => v.weights.length > 0).length
+                  ])}
+                </p>
+                <InfoHint
+                  text={t('用网格 / FFD 工具在网格内 Alt+点击插入顶点，选中顶点后可在下面删除')}
+                />
+              </div>
             ) : null}
 
             {attachment.type === 'mesh' ? (
               <FieldGroup title={t('权重骨骼列表')}>
-                {/* 两个入口并排一行，都放在列表**上方**：绑定骨骼与按列表重算权重是这块的常用动作 */}
-                <div className="flex gap-1">
+                {/*
+                  「绑定骨骼」独占第一行（`basis-full` 撑满后强制换行）：它是进入这套流程的前提。
+                  下面一行才是「算权重 + 选算法 + 说明」—— 三者本来就是一组动作，拆成三行会让这块高出一截。
+                */}
+                <div className="flex flex-wrap items-center gap-1">
                   <button
                     type="button"
-                    className="hao-btn h-[20px] flex-1 px-2 text-3xs"
+                    className="hao-btn h-[20px] basis-full px-2 text-3xs"
                     title={
                       pickingWeightBone
                         ? t('结束绑定：已点选的骨骼会保留在列表里')
@@ -1362,7 +1376,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                   </button>
                   <button
                     type="button"
-                    className="hao-btn h-[20px] flex-1 px-2 text-3xs"
+                    className="hao-btn h-[20px] shrink-0 px-2 text-3xs"
                     disabled={weightBones.length === 0}
                     title={t('按列表里的骨骼重算所有顶点权重：顶点离哪根骨骼近，它在那根骨骼上的权重就高（列表外的骨骼不参与）')}
                     onClick={() => {
@@ -1400,30 +1414,33 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                   >
                     {t('自动计算权重')}
                   </button>
+                  {/*
+                    算法口径（三选一）与它贴在同一行：热扩散最接近参考编辑器的效果，
+                    表面距离是省时版本，直线距离只作兜底。
+                    下拉不摆「自动权重算法」这行标签 —— 宽度不够，标签会把下拉挤成两行；
+                    它的含义由选项文字（热扩散 / 表面距离 / 直线距离）本身表达，完整名称留在 title 里。
+                    说明文字跟着选中项变，收进 info 气泡。
+                  */}
+                  <select
+                    className="hao-field h-[18px] min-w-0 flex-1 cursor-pointer bg-ink-900 text-3xs disabled:cursor-not-allowed disabled:opacity-40"
+                    value={tools.autoMethod}
+                    title={t('自动权重算法')}
+                    onChange={(event) => tools.setAutoMethod(event.target.value as AutoWeightMethod)}
+                  >
+                    <option value="heat">{t('热扩散（默认）')}</option>
+                    <option value="geodesic">{t('表面距离')}</option>
+                    <option value="distance">{t('直线距离')}</option>
+                  </select>
+                  <InfoHint
+                    text={
+                      tools.autoMethod === 'heat'
+                        ? t('热扩散：沿网格表面平滑扩散，骨骼弯曲处也连续；最慢，网格太大时自动退回「表面距离」')
+                        : tools.autoMethod === 'geodesic'
+                          ? t('表面距离：沿网格表面量距离再按 1/d 衰减分配，比热扩散快，骨骼弯曲处过渡会有突跳')
+                          : t('直线距离：按空间直线距离衰减，最快；手臂贴着身体这类贴身部件会串味，只作兜底')
+                    }
+                  />
                 </div>
-                {/*
-                  自动权重的算法口径（三选一）：
-                  热扩散最接近参考编辑器的效果，表面距离是省时版本，直线距离只作兜底。
-                  说明文字跟着选中项变 —— 三种口径的差别（快慢 / 是否串味）才是用户要判断的东西，
-                  一段话把三条都写上，选中谁看起来都像是没生效。
-                */}
-                <SelectField
-                  label={t('自动权重算法')}
-                  value={tools.autoMethod}
-                  options={[
-                    { value: 'heat', label: t('热扩散（默认）') },
-                    { value: 'geodesic', label: t('表面距离') },
-                    { value: 'distance', label: t('直线距离') }
-                  ]}
-                  onChange={(value) => tools.setAutoMethod(value as AutoWeightMethod)}
-                />
-                <p className="text-3xs leading-relaxed text-content-lo">
-                  {tools.autoMethod === 'heat'
-                    ? t('热扩散：沿网格表面平滑扩散，骨骼弯曲处也连续；最慢，网格太大时自动退回「表面距离」')
-                    : tools.autoMethod === 'geodesic'
-                      ? t('表面距离：沿网格表面量距离再按 1/d 衰减分配，比热扩散快，骨骼弯曲处过渡会有突跳')
-                      : t('直线距离：按空间直线距离衰减，最快；手臂贴着身体这类贴身部件会串味，只作兜底')}
-                </p>
                 {/*
                   Spine 的 Prune：丢掉过小的权重 + 把每顶点影响数压到上限。
                   导出/运行时每顶点只有 4 槽（compile.normalizeWeights → hao2dWriter），
@@ -1446,16 +1463,17 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                       </button>
                     </div>
                   ) : null}
-                  <button
-                    type="button"
-                    className="hao-btn h-[20px] w-full px-2 text-3xs"
-                    disabled={!attachment.vertices.some((vertex) => vertex.weights.length > 0)}
-                    title={t('修剪：丢掉小于阈值的权重，并把每个顶点的影响骨骼数压到上限；有选中顶点时只处理选中的那些。移除的权重按比例分给剩下的骨骼')}
-                    onClick={() => runTrim(tools.trim.maxInfluences, tools.trim.threshold / 100)}
-                  >
-                    {t('修剪权重（{0} 骨）', tools.trim.maxInfluences)}
-                  </button>
-                  <div className="flex items-center gap-1 px-1">
+                  {/* 修剪按钮 + 上限 / 阈值 + 说明图标同一条线：它们说的本来就是同一件事，拆两行只是白占高度 */}
+                  <div className="flex flex-wrap items-center gap-1">
+                    <button
+                      type="button"
+                      className="hao-btn h-[20px] min-w-0 flex-1 px-2 text-3xs"
+                      disabled={!attachment.vertices.some((vertex) => vertex.weights.length > 0)}
+                      title={t('修剪：丢掉小于阈值的权重，并把每个顶点的影响骨骼数压到上限；有选中顶点时只处理选中的那些。移除的权重按比例分给剩下的骨骼')}
+                      onClick={() => runTrim(tools.trim.maxInfluences, tools.trim.threshold / 100)}
+                    >
+                      {t('修剪权重（{0} 骨）', tools.trim.maxInfluences)}
+                    </button>
                     <span className="shrink-0 text-3xs text-content-lo">{t('上限')}</span>
                     <CommitTextField
                       className="hao-field h-[18px] w-[34px] shrink-0 text-right font-mono text-3xs"
@@ -1483,15 +1501,19 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                       onCommit={(next) => tools.setTrim({ threshold: Number(next) })}
                     />
                     <span className="shrink-0 text-3xs text-content-lo">%</span>
+                    <InfoHint
+                      text={t('导出/运行时每顶点只取 4 根骨骼：先在这里修剪，刷出来的百分比才和导出结果一致')}
+                    />
                   </div>
-                  <p className="text-3xs leading-relaxed text-content-lo">
-                    {trimPreview && trimPreview.touched > 0
-                      ? t('将移除 {0} 个骨骼影响，{1} 个顶点会被改写（点上面的按钮才生效）', [
-                          trimPreview.removed,
-                          trimPreview.touched
-                        ])
-                      : t('导出/运行时每顶点只取 4 根骨骼：先在这里修剪，刷出来的百分比才和导出结果一致')}
-                  </p>
+                  {/* 只留实时预览：这是「点下去会改几个顶点」的反馈，不能藏进气泡 */}
+                  {trimPreview && trimPreview.touched > 0 ? (
+                    <p className="text-3xs leading-relaxed text-content-lo">
+                      {t('将移除 {0} 个骨骼影响，{1} 个顶点会被改写（点上面的按钮才生效）', [
+                        trimPreview.removed,
+                        trimPreview.touched
+                      ])}
+                    </p>
+                  ) : null}
                 </div>
                 {/*
                   不加高度上限、也不给滚动条：绑定骨骼可能十几根，列表被截断的话
@@ -1623,7 +1645,14 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
               范围与修剪一致 —— 选中顶点优先，否则整块网格（Spine 也是这个口径）。
             */}
             {attachment.type === 'mesh' ? (
-              <FieldGroup title={t('权重操作')}>
+              <FieldGroup
+                title={t('权重操作')}
+                actions={
+                  <InfoHint
+                    text={t('交换 / 粘贴都只改绑定姿态下的权重；复制的内容不写进工程文件')}
+                  />
+                }
+              >
                 <SelectField
                   label={t('交换 A')}
                   value={swapBones.a || weightBones[0] || ''}
@@ -1664,11 +1693,12 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                     {t('粘贴顶点权重')}
                   </button>
                 </div>
-                <p className="text-3xs leading-relaxed text-content-lo">
-                  {clipboardCount > 0
-                    ? t('剪贴板里有 {0} 个顶点的权重（不写进工程文件）', clipboardCount)
-                    : t('交换 / 粘贴都只改绑定姿态下的权重；复制的内容不写进工程文件')}
-                </p>
+                {/* 剪贴板有内容时才提示（这是状态，不是说明）；静态说明已收进上面的 info 气泡 */}
+                {clipboardCount > 0 ? (
+                  <p className="text-3xs leading-relaxed text-content-lo">
+                    {t('剪贴板里有 {0} 个顶点的权重（不写进工程文件）', clipboardCount)}
+                  </p>
+                ) : null}
               </FieldGroup>
             ) : null}
 

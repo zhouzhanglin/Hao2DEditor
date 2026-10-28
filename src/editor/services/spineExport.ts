@@ -20,8 +20,11 @@ import type { AtlasRegion, PageSizes } from '@importers/uv'
 import type { RuntimeAtlasJson } from '@core/codec/runtimeSkeJson'
 import type { ExportResult } from './exportService'
 
-/** Spine 4.3 数据格式版本号（与示例资源对齐） */
-const SPINE_VERSION = '4.3.74-beta'
+/**
+ * 导出统一按 **Spine 4.3 数据格式**写，版本号与依赖的 `@esotericsoftware/spine-core` 对齐。
+ * 纯数字（不带 `-beta` 之类后缀）：部分运行库会直接拿这个串做版本比较/校验。
+ */
+const SPINE_VERSION = '4.3.13'
 
 /** 文件名清洗：把非法字符换成下划线 */
 export function sanitize(name: string): string {
@@ -398,16 +401,22 @@ function boneNames(asset: RuntimeAsset, indices: number[]): string[] {
   return indices.map((i) => asset.bones[i]?.name ?? '').filter((n) => n.length > 0)
 }
 
+/**
+ * 约束统一按 **Spine 4.3 的 `constraints` 数组**输出（每项带 `type`）。
+ *
+ * 不管工程里的数据是从 3.8、4.0 还是 4.1 导进来的，这里只写 4.3 认识的字段：
+ * - 4.3 不读 `order`，应用顺序由数组顺序决定（`sortConstraints` 已经排好）；
+ * - 3.x 的 `target` / `relative` / `local` / `rotateMix` 等旧名一律不再写，
+ *   对应换成 `source` / `additive` / `localSource`+`localTarget` / `mixRotate`。
+ */
 function buildConstraints(asset: RuntimeAsset): SpineJson['constraints'] {
   const out: Array<Record<string, unknown>> = []
   const sorted = sortConstraints(asset.constraints)
   for (const c of sorted) {
-    const order = c.order
     if (c.type === 'ik') {
       out.push({
         type: 'ik',
         name: c.name,
-        order,
         bones: boneNames(asset, (c as { boneIndices: number[] }).boneIndices),
         target: asset.bones[(c as { targetBoneIndex: number }).targetBoneIndex]?.name ?? '',
         mix: (c as { mix: number }).mix,
@@ -420,57 +429,79 @@ function buildConstraints(asset: RuntimeAsset): SpineJson['constraints'] {
         stretch: (c as { stretch: boolean }).stretch
       })
     } else if (c.type === 'transform') {
-      // 读的是**编辑器内的**约束（字段是 offsetRotate / offsetX …），
-      // 别拿 Spine JSON 的类型来套：Spine 4.0 起那几个字段叫 offsetRotation / offsetX …，
-      // 3.8 叫 rotate / x …，套错类型会读出一堆 undefined（写出 NaN / 丢字段）。
+      /*
+       * 4.3 的 transform 约束有三个硬要求，少一个官方运行库就读不对：
+       *  - `source`：4.3 把 `target` 改名成 source，缺了直接抛
+       *    `Couldn't find source bone undefined …`（导出的文件根本打不开）；
+       *  - `properties`：源通道 → 目标通道的映射表，**不写整个约束静默失效**；
+       *  - 偏移量字段：`rotation / x / y / scaleX / scaleY / shearY`（与 3.8 同名，
+       *    不是 4.0 那套 offsetRotation / offsetX）。
+       */
       const t = c as TransformConstraint
+      const properties: Record<string, { to: Record<string, Record<string, never>> }> = {}
+      for (const channel of ['rotate', 'x', 'y', 'scaleX', 'scaleY', 'shearY']) {
+        properties[channel] = { to: { [channel]: {} } }
+      }
       out.push({
         type: 'transform',
         name: c.name,
-        order,
-        bones: boneNames(asset, (c as { boneIndices: number[] }).boneIndices),
-        target: asset.bones[(c as { targetBoneIndex: number }).targetBoneIndex]?.name ?? '',
+        bones: boneNames(asset, t.boneIndices),
+        source: asset.bones[t.targetBoneIndex]?.name ?? '',
+        properties,
         mixRotate: t.mixRotate,
         mixX: t.mixX,
         mixY: t.mixY,
         mixScaleX: t.mixScaleX,
         mixScaleY: t.mixScaleY,
         mixShearY: t.mixShearY,
-        offsetRotation: t.offsetRotate,
-        offsetX: t.offsetX * RUNTIME_PPU,
-        offsetY: t.offsetY * RUNTIME_PPU,
-        offsetScaleX: t.offsetScaleX,
-        offsetScaleY: t.offsetScaleY,
-        offsetShearY: t.offsetShearY,
-        relative: t.relative,
-        local: t.local
+        rotation: t.offsetRotate,
+        x: t.offsetX * RUNTIME_PPU,
+        y: t.offsetY * RUNTIME_PPU,
+        scaleX: t.offsetScaleX,
+        scaleY: t.offsetScaleY,
+        shearY: t.offsetShearY,
+        localSource: t.local,
+        localTarget: t.local,
+        additive: t.relative
       })
     } else if (c.type === 'path') {
-      const p = c as unknown as SpinePathConstraintJson
+      /*
+       * 4.3 的 path 约束挂在**插槽**上（字段 `slot`）：该插槽必须挂 path 附件。
+       * 编辑器模型只有目标骨骼，这里取该骨骼上的第一个插槽；一个都没有就跳过
+       * （Spine 没有「骨骼当路径」这种表达）。
+       */
+      const slot = asset.slots.find((s) => s.boneIndex === c.targetBoneIndex)
+      if (!slot) continue
       out.push({
         type: 'path',
         name: c.name,
-        order,
-        bones: boneNames(asset, (c as { boneIndices: number[] }).boneIndices),
-        target: asset.bones[(c as { targetBoneIndex: number }).targetBoneIndex]?.name ?? '',
-        position: p.position,
-        spacing: p.spacing,
-        rotateMix: p.rotateMix,
-        translateMix: p.translateMix,
-        positionMode: p.positionMode,
-        spacingMode: p.spacingMode,
-        rotateMode: p.rotateMode === 'chainScale' ? 'chainscale' : p.rotateMode
+        slot: slot.name,
+        bones: boneNames(asset, c.boneIndices),
+        position: c.position,
+        spacing: c.spacing,
+        rotation: 0,
+        mixRotate: c.rotateMix,
+        mixX: c.translateMix,
+        mixY: c.translateMix,
+        positionMode: c.positionMode,
+        spacingMode: c.spacingMode,
+        rotateMode: c.rotateMode === 'chainScale' ? 'chainscale' : c.rotateMode
       })
     } else if (c.type === 'physics') {
-      const raw = (c as { raw: Record<string, unknown> }).raw ?? {}
+      /*
+       * 4.3 的 physics 约束按**单根骨骼**定位（`bone`），且 `scaleY` 是枚举模式。
+       * 老文件里 `bones` 是数组、`scaleY` 是数字，直接展开会被官方运行库读成非法枚举。
+       */
+      const raw = { ...((c as { raw: Record<string, unknown> }).raw ?? {}) }
       const bones = (c as { boneIndices: number[] }).boneIndices
-      out.push({
-        type: 'physics',
-        name: c.name,
-        order,
-        bone: asset.bones[bones[0]]?.name ?? '',
-        ...(raw as Record<string, unknown>)
-      })
+      const bone = (raw.bone as string | undefined) ?? asset.bones[bones[0]]?.name ?? ''
+      delete raw.type
+      delete raw.name
+      delete raw.order
+      delete raw.bones
+      delete raw.bone
+      if (typeof raw.scaleY === 'number') delete raw.scaleY
+      out.push({ type: 'physics', name: c.name, bone, ...raw })
     }
   }
   // 逐项是手工拼的 JSON 片（ik / transform / path / physics 四种形状），与联合类型不同构
@@ -784,6 +815,40 @@ function buildDrawOrder(asset: RuntimeAsset, animation: AnimData): SpineCurveKey
   return frames
 }
 
+/** 多通道曲线：同一组归一化控制点按各通道值域展开（Spine 按通道顺序依次消费 4 个数） */
+function channelCurve(
+  easing: Easing,
+  curve: number[] | null,
+  t1: number,
+  t2: number,
+  v1s: readonly number[],
+  v2s: readonly number[]
+): number[] | string | undefined {
+  if (easing === Easing.Stepped) return 'stepped'
+  if (easing !== Easing.Bezier || !curve || curve.length < 4) return undefined
+  const out: number[] = []
+  for (let i = 0; i < v1s.length; i++) out.push(...absoluteCurve(curve, t1, t2, v1s[i], v2s[i] ?? v1s[i]))
+  return out
+}
+
+/** 单通道约束帧：`{ time, <field>: value }` + 可选曲线 */
+function constraintKey(
+  time: number,
+  field: string,
+  value: number,
+  curve: number[] | string | undefined
+): SpineCurveKeyframe {
+  const key: SpineCurveKeyframe = { time, [field]: value }
+  if (curve !== undefined) key.curve = curve
+  return key
+}
+
+/**
+ * 约束轨道统一按 4.3 的层级写：
+ * - `ik.<名>`：帧数组，`mix / softness / bendPositive / compress / stretch`（官方每个关键帧都写全）；
+ * - `transform.<名>`：帧数组，**只有 6 个 mix**（4.3 的时间轴不能动画偏移）；
+ * - `path.<名>`：拆成 `position` / `spacing` / `mix` 三条子轨道（挤在一帧里的写法 4.3 整段不读）。
+ */
 function buildConstraintTimelines(asset: RuntimeAsset, animation: AnimData): Pick<SpineAnimationJson, 'ik' | 'transform' | 'path'> {
   const ik: SpineAnimationJson['ik'] = {}
   const transform: SpineAnimationJson['transform'] = {}
@@ -793,28 +858,100 @@ function buildConstraintTimelines(asset: RuntimeAsset, animation: AnimData): Pic
     if (!c) continue
     const name = c.name
     if (c.type === 'ik') {
-      ik[name] = track.mix.map((k) => ({ time: k.time, mix: k.value }))
+      const keys = track.mix
+      ik[name] = keys.map((k, i) => {
+        const next = keys[i + 1]
+        const curve = channelCurve(k.easing, k.curve, k.time, next ? next.time : k.time, [k.value], [next ? next.value : k.value])
+        const key = constraintKey(k.time, 'mix', k.value, curve)
+        // 4.3 的 ik 时间轴每帧还带这四个值，缺了会按默认值（softness 0 / bendPositive true …）读
+        key.softness = c.softness
+        key.bendPositive = c.bendSign < 0
+        key.compress = c.compress
+        key.stretch = c.stretch
+        return key
+      })
     } else if (c.type === 'transform') {
-      transform[name] = track.mixRotate.map((k, i) => ({
-        time: k.time,
-        mixRotate: k.value,
-        mixX: track.mixX[i]?.value ?? 1,
-        mixY: track.mixY[i]?.value ?? 1,
-        mixScaleX: track.mixScaleX[i]?.value ?? 1,
-        mixScaleY: track.mixScaleY[i]?.value ?? 1,
-        mixShearY: track.mixShearY[i]?.value ?? 1,
-        rotate: track.offsetRotate[i]?.value ?? 0,
-        x: (track.offsetX[i]?.value ?? 0) * RUNTIME_PPU,
-        y: (track.offsetY[i]?.value ?? 0) * RUNTIME_PPU
-      }))
+      const keys = track.mixRotate
+      transform[name] = keys.map((k, i) => {
+        const next = keys[i + 1]
+        const v1 = [
+          k.value,
+          track.mixX[i]?.value ?? 1,
+          track.mixY[i]?.value ?? 1,
+          track.mixScaleX[i]?.value ?? 1,
+          track.mixScaleY[i]?.value ?? 1,
+          track.mixShearY[i]?.value ?? 1
+        ]
+        const v2 = next
+          ? [
+              next.value,
+              track.mixX[i + 1]?.value ?? 1,
+              track.mixY[i + 1]?.value ?? 1,
+              track.mixScaleX[i + 1]?.value ?? 1,
+              track.mixScaleY[i + 1]?.value ?? 1,
+              track.mixShearY[i + 1]?.value ?? 1
+            ]
+          : v1
+        const curve = channelCurve(k.easing, k.curve, k.time, next ? next.time : k.time, v1, v2)
+        return {
+          time: k.time,
+          mixRotate: v1[0],
+          mixX: v1[1],
+          mixY: v1[2],
+          mixScaleX: v1[3],
+          mixScaleY: v1[4],
+          mixShearY: v1[5],
+          ...(curve === undefined ? {} : { curve })
+        }
+      })
     } else if (c.type === 'path') {
-      path[name] = track.position.map((k, i) => ({
-        time: k.time,
-        position: k.value,
-        spacing: track.spacing[i]?.value ?? 0,
-        rotateMix: track.rotateMix[i]?.value ?? 1,
-        translateMix: track.translateMix[i]?.value ?? 1
-      }))
+      const entry: {
+        position?: SpineCurveKeyframe[]
+        spacing?: SpineCurveKeyframe[]
+        mix?: SpineCurveKeyframe[]
+      } = {}
+      const positionKeys = track.position
+      if (positionKeys.length > 0) {
+        entry.position = positionKeys.map((k, i) => {
+          const next = positionKeys[i + 1]
+          const curve = channelCurve(k.easing, k.curve, k.time, next ? next.time : k.time, [k.value], [next ? next.value : k.value])
+          return constraintKey(k.time, 'position', k.value, curve)
+        })
+      }
+      const spacingKeys = track.spacing
+      if (spacingKeys.length > 0) {
+        entry.spacing = spacingKeys.map((k, i) => {
+          const next = spacingKeys[i + 1]
+          const curve = channelCurve(k.easing, k.curve, k.time, next ? next.time : k.time, [k.value], [next ? next.value : k.value])
+          return constraintKey(k.time, 'spacing', k.value, curve)
+        })
+      }
+      const mixKeys = track.rotateMix
+      if (mixKeys.length > 0) {
+        entry.mix = mixKeys.map((k, i) => {
+          const next = mixKeys[i + 1]
+          const rotateMix = k.value
+          const translateMix = track.translateMix[i]?.value ?? 1
+          const nextRotate = next ? next.value : rotateMix
+          const nextTranslate = next ? (track.translateMix[i + 1]?.value ?? 1) : translateMix
+          const curve = channelCurve(
+            k.easing,
+            k.curve,
+            k.time,
+            next ? next.time : k.time,
+            [rotateMix, translateMix, translateMix],
+            [nextRotate, nextTranslate, nextTranslate]
+          )
+          return {
+            time: k.time,
+            mixRotate: rotateMix,
+            mixX: translateMix,
+            mixY: translateMix,
+            ...(curve === undefined ? {} : { curve })
+          }
+        })
+      }
+      if (entry.position || entry.spacing || entry.mix) path[name] = entry
     }
   }
   return { ik, transform, path }
@@ -910,6 +1047,17 @@ export function buildSpineJson(asset: RuntimeAsset, lookup?: SpineRegionLookup):
     constraints: buildConstraints(asset),
     skins: buildSkins(asset, lookup),
     animations: buildAnimations(asset)
+  }
+  // 事件定义表（对象形式，官方运行库按 for..in 遍历）：动画只写事件名，
+  // 定义缺了直接抛 `Event not found`，整份文件读不进来
+  const eventNames = new Set<string>()
+  for (const animation of asset.animations) {
+    for (const event of animation.events) if (event.name) eventNames.add(event.name)
+  }
+  if (eventNames.size > 0) {
+    const events: Record<string, { int: number; float: number; string: string }> = {}
+    for (const name of eventNames) events[name] = { int: 0, float: 0, string: '' }
+    json.events = events
   }
   // Spine 运行期（spine-csharp SkeletonJson.cs:124）直接按 `skeletonMap["hash"]` 取值，
   // 该 key 缺失会抛 KeyNotFoundException，因此必须写出 hash（任意非空字符串即可）。

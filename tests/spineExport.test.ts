@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { AnimationState, AnimationStateData, AtlasAttachmentLoader, Skeleton, SkeletonJson, TextureAtlas } from '@esotericsoftware/spine-core'
 import { importSpine } from '@importers/spine'
 import { RUNTIME_PPU } from '@core/codec/runtimeSkeJson'
 import type { RuntimeAsset } from '@core/model/asset'
@@ -49,6 +50,261 @@ describe('IK 弯曲方向的读入 / 导出', () => {
     const ik = buildSpineJson(asset).constraints?.find((c) => c.type === 'ik')
     expect(ik).toBeDefined()
     expect(ik?.bendPositive).toBe(bendPositive)
+  })
+})
+
+/**
+ * 导出的文件必须能被官方运行库直接吃下：4.2+ 的 `constraints` 数组里，
+ * transform 约束少了 `source` 会抛 `Couldn't find source bone undefined`，
+ * 少了 `properties` 则静默失效；动画引用的事件名没在顶层 `events` 表里则抛 `Event not found`。
+ * 用户反馈「导出 spine 后官方运行时播不了」就是这几处。
+ */
+describe('导出结果能被官方 spine-core 加载', () => {
+  const json = {
+    skeleton: { spine: '3.8.75', fps: 30 },
+    bones: [
+      { name: 'root' },
+      { name: 'child', parent: 'root', length: 10 },
+      { name: 'target', parent: 'root', x: 10, y: 10, rotation: 45 }
+    ],
+    slots: [],
+    skins: [{ name: 'default', attachments: {} }],
+    ik: [{ name: 'aim', bones: ['child'], target: 'target', mix: 0.5 }],
+    transform: [{ name: 'tc', bones: ['root'], target: 'target', rotation: 30, x: 100, y: -20 }],
+    animations: {
+      wave: {
+        bones: { child: { rotate: [{ time: 0, angle: 0 }, { time: 1, angle: 30 }] } },
+        events: [{ time: 0.5, name: 'hit' }]
+      }
+    }
+  }
+
+  function readWithOfficialRun(value: unknown) {
+    const atlas = new TextureAtlas('p.png\n\tsize: 16, 16\n\tfilter: Linear, Linear\n')
+    return new SkeletonJson(new AtlasAttachmentLoader(atlas)).readSkeletonData(value)
+  }
+
+  it('transform 约束写 source + properties + 4.x 偏移字段名', () => {
+    const out = buildSpineJson(importJson(json))
+    const tc = (out.constraints ?? []).find((c) => c.name === 'tc') as Record<string, unknown>
+    expect(tc.source).toBe('target')
+    // 偏移是 3.8/4.3 共用的 rotation / x / y，不是 4.0 那套 offsetRotation
+    expect(tc.rotation).toBeCloseTo(30, 6)
+    expect(tc.x).toBeCloseTo(100, 6)
+    expect(tc.offsetRotation).toBeUndefined()
+    // properties 缺了官方运行库静默跳过整个约束
+    expect(Object.keys(tc.properties as Record<string, unknown>).sort()).toEqual([
+      'rotate',
+      'scaleX',
+      'scaleY',
+      'shearY',
+      'x',
+      'y'
+    ])
+  })
+
+  it('事件时间轴引用的事件名要写进顶层 events 表', () => {
+    const out = buildSpineJson(importJson(json))
+    expect(Object.keys(out.events ?? {})).toEqual(['hit'])
+  })
+
+  it('官方 4.3 运行库能加载并播放', () => {
+    const data = readWithOfficialRun(buildSpineJson(importJson(json)))
+    expect(data.constraints.length).toBe(2)
+    const skeleton = new Skeleton(data)
+    const state = new AnimationState(new AnimationStateData(data))
+    state.setAnimation(0, 'wave', true)
+    expect(() => {
+      state.update(0.25)
+      state.apply(skeleton)
+      skeleton.updateWorldTransform()
+    }).not.toThrow()
+  })
+})
+
+/**
+ * 4.3 的 transform 时间轴**只有 6 个 mix 通道**，没有偏移通道：
+ * 偏移是约束的静态数据，动画帧里不能再写（写了也不是 4.3 格式）。
+ */
+describe('transform 约束轨道只写 mix', () => {
+  const json = {
+    skeleton: { spine: '3.8.75', fps: 30 },
+    bones: [{ name: 'root' }, { name: 'target' }],
+    slots: [],
+    skins: [{ name: 'default', attachments: {} }],
+    transform: [{ name: 'tc', bones: ['root'], target: 'target', rotation: 30, x: 100, y: -20 }],
+    animations: { wave: { transform: { tc: [{ time: 0, rotateMix: 0.5 }] } } }
+  }
+
+  it('关键帧只有 time + 6 个 mix，偏移留在约束里', () => {
+    const out = buildSpineJson(importJson(json))
+    const key = (out.animations?.wave as { transform: Record<string, Array<Record<string, number>>> }).transform.tc[0]
+    expect(Object.keys(key).sort()).toEqual([
+      'mixRotate',
+      'mixScaleX',
+      'mixScaleY',
+      'mixShearY',
+      'mixX',
+      'mixY',
+      'time'
+    ])
+    const tc = (out.constraints ?? []).find((c) => c.name === 'tc') as Record<string, number>
+    expect(tc.rotation).toBeCloseTo(30, 6)
+    expect(tc.x).toBeCloseTo(100, 6)
+    expect(tc.y).toBeCloseTo(-20, 6)
+  })
+
+  it('导出再导入，约束的静态偏移不变', () => {
+    const roundTrip = importJson(buildSpineJson(importJson(json)))
+    const tc = roundTrip.constraints[0]
+    expect(tc.type).toBe('transform')
+    if (tc.type !== 'transform') return
+    expect(tc.offsetRotate).toBeCloseTo(30, 6)
+    expect(tc.offsetX).toBeCloseTo(1, 6)
+    expect(tc.offsetY).toBeCloseTo(-0.2, 6)
+  })
+})
+
+/**
+ * 需求：**导出永远是 Spine 4.3 格式**，不管工程里的数据是从哪个版本导进来的。
+ * 3.8 / 4.0 / 4.1 的分散数组（`ik` / `transform` / `path`）、`target` / `relative` / `local`、
+ * `rotateMix` 这些 3.x 名字都不该出现在导出结果里 —— 它们的 4.3 对应物分别是
+ * `constraints` 数组、`source`、`additive`、`localSource`+`localTarget`、`mixRotate`。
+ */
+describe('导出一律为 Spine 4.3 格式', () => {
+  const BONES = [
+    { name: 'root' },
+    { name: 'child', parent: 'root', length: 10 },
+    { name: 'target', parent: 'root', x: 10, y: 10, rotation: 45 }
+  ]
+  const rotateWave = {
+    bones: { child: { rotate: [{ time: 0, angle: 0 }, { time: 1, angle: 30 }] } },
+    ik: { aim: [{ time: 0, mix: 0.5 }, { time: 1, mix: 1 }] }
+  }
+
+  /** 3.8 写法：约束分在顶层 ik / transform，target 是骨骼名，偏移叫 rotation / x / y */
+  const SOURCE_38 = {
+    skeleton: { spine: '3.8.75', fps: 30 },
+    bones: BONES,
+    slots: [],
+    skins: [{ name: 'default', attachments: {} }],
+    ik: [{ name: 'aim', bones: ['child'], target: 'target', mix: 0.5 }],
+    transform: [{ name: 'tc', bones: ['root'], target: 'target', rotation: 30, x: 100, y: -20 }],
+    animations: { wave: rotateWave }
+  }
+
+  /** 4.2 写法：统一 constraints 数组、source + properties */
+  const SOURCE_42 = {
+    skeleton: { spine: '4.2.0', fps: 30 },
+    bones: BONES,
+    slots: [],
+    skins: [{ name: 'default', attachments: {} }],
+    constraints: [
+      { type: 'ik', name: 'aim', bones: ['child'], target: 'target', mix: 0.5 },
+      {
+        type: 'transform',
+        name: 'tc',
+        bones: ['root'],
+        source: 'target',
+        mixRotate: 1,
+        mixX: 1,
+        mixY: 1,
+        mixScaleX: 1,
+        mixScaleY: 1,
+        mixShearY: 1,
+        rotation: 30,
+        x: 100,
+        y: -20,
+        properties: { rotate: { to: { rotate: {} } }, x: { to: { x: {} } }, y: { to: { y: {} } } }
+      }
+    ],
+    animations: { wave: rotateWave }
+  }
+
+  it('3.8 与 4.2 的来源导出成同一份 4.3 结构', () => {
+    const from38 = buildSpineJson(importJson(SOURCE_38))
+    const from42 = buildSpineJson(importJson(SOURCE_42))
+    expect(from38.constraints).toEqual(from42.constraints)
+  })
+
+  it('版本头是 4.3.x，且不再有 3.x 的分散约束数组', () => {
+    const out = buildSpineJson(importJson(SOURCE_38))
+    expect(out.skeleton?.spine).toMatch(/^4\.3\./)
+    expect(out.ik).toBeUndefined()
+    expect(out.transform).toBeUndefined()
+    expect(out.path).toBeUndefined()
+    expect(out.physics).toBeUndefined()
+    expect(out.constraints).toHaveLength(2)
+  })
+
+  it('约束里不再出现 3.x 专有字段', () => {
+    const out = buildSpineJson(importJson(SOURCE_38))
+    for (const c of out.constraints ?? []) {
+      const raw = c as Record<string, unknown>
+      expect(raw.order).toBeUndefined()
+      expect(raw.relative).toBeUndefined()
+      expect(raw.local).toBeUndefined()
+      expect(raw.rotateMix).toBeUndefined()
+      expect(raw.translateMix).toBeUndefined()
+      if (raw.type === 'transform') expect(raw.target).toBeUndefined()
+    }
+    const tc = (out.constraints ?? []).find((c) => c.name === 'tc') as Record<string, unknown>
+    expect(tc.source).toBe('target')
+  })
+
+  it('ik 时间轴的每一帧都带 4.3 的 softness / bendPositive / compress / stretch', () => {
+    const out = buildSpineJson(importJson(SOURCE_38))
+    const frames = (out.animations?.wave as { ik: Record<string, Array<Record<string, unknown>>> }).ik.aim
+    expect(frames.length).toBeGreaterThan(0)
+    for (const frame of frames) {
+      expect(frame.softness).toBe(0)
+      expect(frame.bendPositive).toBe(true)
+      expect(frame.compress).toBe(false)
+      expect(frame.stretch).toBe(false)
+    }
+  })
+
+  it('path 时间轴按 4.3 拆成 position / spacing / mix 三条子轨道', () => {
+    const json = {
+      skeleton: { spine: '3.8.75', fps: 30 },
+      bones: [...BONES, { name: 'path' }],
+      slots: [{ name: 'pathSlot', bone: 'path' }],
+      skins: [{ name: 'default', attachments: {} }],
+      path: [
+        {
+          name: 'pc',
+          bones: ['child'],
+          target: 'path',
+          position: 0.5,
+          spacing: 0.2,
+          rotateMix: 0.8,
+          translateMix: 0.6,
+          positionMode: 'percent',
+          spacingMode: 'length',
+          rotateMode: 'chain'
+        }
+      ],
+      animations: {
+        wave: {
+          path: {
+            pc: [
+              { time: 0, position: 0, spacing: 0, rotateMix: 1, translateMix: 1 },
+              { time: 1, position: 1, spacing: 1, rotateMix: 0.5, translateMix: 0.5 }
+            ]
+          }
+        }
+      }
+    }
+    const out = buildSpineJson(importJson(json))
+    const pc = (out.constraints ?? []).find((c) => c.name === 'pc') as Record<string, unknown>
+    expect(pc.slot).toBe('pathSlot')
+    expect(pc.target).toBeUndefined()
+
+    const track = (out.animations?.wave as { path: Record<string, Record<string, unknown[]>> }).path.pc
+    expect(Object.keys(track).sort()).toEqual(['mix', 'position', 'spacing'])
+    expect(track.position.map((k) => (k as { position: number }).position)).toEqual([0, 1])
+    expect(track.spacing.map((k) => (k as { spacing: number }).spacing)).toEqual([0, 1])
+    expect(track.mix.map((k) => (k as { mixRotate: number }).mixRotate)).toEqual([1, 0.5])
   })
 })
 

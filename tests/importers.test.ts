@@ -1339,6 +1339,77 @@ describe('Spine 导入', () => {
     expect(tc.mixY).toBeCloseTo(0.6, 6)
   })
 
+  it('3.8 的 transform 时间轴（rotateMix / translateMix…）能读成 mix', () => {
+    const json = {
+      skeleton: { spine: '3.8.75' },
+      bones: [{ name: 'root' }, { name: 'target' }],
+      slots: [{ name: 'slot', bone: 'root' }],
+      skins: [{ name: 'default', attachments: {} }],
+      transform: [{ name: 'tc', bones: ['root'], target: 'target', rotation: 30, x: 100 }],
+      animations: {
+        wave: {
+          transform: {
+            tc: [
+              { time: 0, rotateMix: 0.5, translateMix: 0.25, scaleMix: 0.75, shearMix: 0.1 },
+              { time: 1, rotateMix: 1 }
+            ]
+          }
+        }
+      }
+    }
+    const { asset } = importSpine({ json: json as never, regions: [], pageSizes: {} })
+    const track = asset.animations[0].constraints[0]
+    // 只认 4.x 的 mixRotate / mixX… 时这些值会全被读成默认 1（动画里约束满强度）
+    expect(track.mixRotate.map((k) => k.value)).toEqual([0.5, 1])
+    // 3.8 的 translateMix 同时管 X 与 Y
+    expect(track.mixX.map((k) => k.value)).toEqual([0.25, 1])
+    expect(track.mixY.map((k) => k.value)).toEqual([0.25, 1])
+    expect(track.mixScaleX.map((k) => k.value)).toEqual([0.75, 1])
+    expect(track.mixScaleY.map((k) => k.value)).toEqual([0.75, 1])
+    expect(track.mixShearY.map((k) => k.value)).toEqual([0.1, 1])
+    // 官方时间轴没有偏移通道：绝不能补 0 关键帧，否则会把约束自带的偏移覆盖成 0
+    expect(track.offsetRotate).toHaveLength(0)
+    expect(track.offsetX).toHaveLength(0)
+    expect(track.offsetY).toHaveLength(0)
+  })
+
+  it('4.x 的 transform 时间轴缺 mixY 时跟随 mixX', () => {
+    const json = {
+      skeleton: { spine: '4.3.0' },
+      bones: [{ name: 'root' }, { name: 'target' }],
+      slots: [{ name: 'slot', bone: 'root' }],
+      skins: [{ name: 'default', attachments: {} }],
+      constraints: [{ type: 'transform', name: 'tc', bones: ['root'], source: 'target' }],
+      animations: { wave: { transform: { tc: [{ time: 0, mixRotate: 0.5, mixX: 0.3 }] } } }
+    }
+    const { asset } = importSpine({ json: json as never, regions: [], pageSizes: {} })
+    const track = asset.animations[0].constraints[0]
+    expect(track.mixRotate[0].value).toBeCloseTo(0.5, 6)
+    expect(track.mixX[0].value).toBeCloseTo(0.3, 6)
+    expect(track.mixY[0].value).toBeCloseTo(0.3, 6)
+  })
+
+  it('编辑器自己导出的偏移关键帧（rotate / x / y）仍能读回', () => {
+    const json = {
+      skeleton: { spine: '3.8.75' },
+      bones: [{ name: 'root' }, { name: 'target' }],
+      slots: [{ name: 'slot', bone: 'root' }],
+      skins: [{ name: 'default', attachments: {} }],
+      transform: [{ name: 'tc', bones: ['root'], target: 'target' }],
+      animations: {
+        wave: {
+          transform: { tc: [{ time: 0, rotate: 12, x: 200, y: -50 }] }
+        }
+      }
+    }
+    const { asset } = importSpine({ json: json as never, regions: [], pageSizes: {} })
+    const track = asset.animations[0].constraints[0]
+    expect(track.offsetRotate[0].value).toBeCloseTo(12, 6)
+    // 偏移的 x/y 在导出侧按像素写，导入要换回世界单位
+    expect(track.offsetX[0].value).toBeCloseTo(2, 6)
+    expect(track.offsetY[0].value).toBeCloseTo(-0.5, 6)
+  })
+
   it('4.2+ 的 curve 是 (时间,值) 绝对坐标 → 归一化；旧版 0..1 直接用', () => {
     const json = {
       skeleton: { spine: '4.3.0' },

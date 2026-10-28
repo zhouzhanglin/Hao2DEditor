@@ -30,6 +30,7 @@ import type {
   SpineBoneJson,
   SpineIkJson,
   SpineJson,
+  SpinePhysicsConstraintJson,
   SpineSlotJson
 } from './spineTypes'
 import { bakeSetupLocals, bakeSpineAnimations } from './spineBake'
@@ -969,6 +970,8 @@ function buildConstraints(
   warnings: string[]
 ): Constraint[] {
   const constraints: Constraint[] = []
+  /** 插槽名 → 骨骼名（4.2+ 的 path / physics 约束按插槽或单骨骼定位） */
+  const slotBone = new Map((json.slots ?? []).map((slot) => [slot.name, slot.bone]))
 
   // 4.2+ 把约束统一放顶层 `constraints`（每项带 type），旧版按类型分在 ik / transform / path。
   // 早先只读旧字段，4.2+ 的资源（如 raptor 4.3）**一个约束都读不到** —— IK 完全不生效，
@@ -976,11 +979,24 @@ function buildConstraints(
   const legacyIk = [...(json.ik ?? [])]
   const legacyTransform = [...(json.transform ?? [])]
   const legacyPath = [...(json.path ?? [])]
+  const legacyPhysics = [...(json.physics ?? [])]
   for (const item of json.constraints ?? []) {
     const type = (item.type ?? '').toLowerCase()
     if (type === 'ik') legacyIk.push(item)
     else if (type === 'transform') legacyTransform.push(item)
     else if (type === 'path') legacyPath.push(item)
+    else if (type === 'physics') legacyPhysics.push(item as SpinePhysicsConstraintJson)
+  }
+
+  /*
+   * 4.2+ 的约束没有 `order` 字段（4.3 运行库按数组顺序 + 依赖排序），此时用出现顺序兜底。
+   * 全都退化成 0 的话，`sortConstraints` 会按类型把顺序重排，与源文件的应用顺序不一致。
+   */
+  let nextOrder = 0
+  const orderOf = (item: { order?: number }): number => {
+    const order = item.order ?? nextOrder
+    nextOrder = Math.max(nextOrder + 1, order + 1)
+    return order
   }
 
   for (const ik of legacyIk) {
@@ -993,7 +1009,7 @@ function buildConstraints(
     constraints.push(
       createIkConstraint({
         name: ik.name,
-        order: ik.order ?? 0,
+        order: orderOf(ik),
         enabled: true,
         boneIndices: bones,
         targetBoneIndex: target,
@@ -1021,7 +1037,7 @@ function buildConstraints(
     constraints.push(
       createTransformConstraint({
         name: transform.name,
-        order: transform.order ?? 0,
+        order: orderOf(transform),
         enabled: true,
         boneIndices: bones,
         targetBoneIndex: target,
@@ -1045,8 +1061,9 @@ function buildConstraints(
         offsetScaleX: transform.offsetScaleX ?? transform.scaleX ?? 0,
         offsetScaleY: transform.offsetScaleY ?? transform.scaleY ?? 0,
         offsetShearY: transform.offsetShearY ?? transform.shearY ?? 0,
-        relative: transform.relative ?? false,
-        local: transform.local ?? false,
+        // 4.2+ 的 additive / localSource+localTarget 就是 3.x 的 relative / local
+        relative: transform.relative ?? transform.additive ?? false,
+        local: transform.local ?? transform.localTarget ?? transform.localSource ?? false,
         inherit: 'normal'
       })
     )
@@ -1054,23 +1071,24 @@ function buildConstraints(
 
   for (const path of legacyPath) {
     const bones = remapBones(path.bones, boneIndex)
-    if (bones.length === 0 || path.target === undefined) {
-      // 4.3 的路径约束挂在插槽的 path 附件上（本项目模型没有对应类型）。
-      // 姿态本身已经由官方运行库烘焙补偿，这里只是提示「约束对象没有导进来」
+    // 4.2+ 的路径约束定位在**插槽**上（`slot`，该插槽挂 path 附件），3.x–4.1 才是骨骼名
+    const targetName = path.target ?? (path.slot ? slotBone.get(path.slot) : undefined)
+    if (bones.length === 0 || targetName === undefined) {
+      // 本项目模型没有 path 附件类型，姿态本身已由官方运行库烘焙补偿
       warnings.push(t('路径约束「{0}」不支持编辑，求解结果已烘进骨骼姿态', path.name))
       continue
     }
     constraints.push(
       createPathConstraint({
         name: path.name,
-        order: path.order ?? 0,
+        order: orderOf(path),
         enabled: true,
         boneIndices: bones,
-        targetBoneIndex: boneIndex.get(path.target) ?? -1,
+        targetBoneIndex: boneIndex.get(targetName) ?? -1,
         position: path.position ?? 0,
         spacing: path.spacing ?? 0,
-        rotateMix: path.rotateMix ?? 1,
-        translateMix: path.translateMix ?? 1,
+        rotateMix: path.rotateMix ?? path.mixRotate ?? 1,
+        translateMix: path.translateMix ?? path.mixX ?? 1,
         positionMode: path.positionMode === 'fixed' ? 'fixed' : 'percent',
         spacingMode:
           path.spacingMode === 'fixed' || path.spacingMode === 'percent' ? path.spacingMode : 'length',
@@ -1080,13 +1098,15 @@ function buildConstraints(
     )
   }
 
-  for (const physics of json.physics ?? []) {
+  for (const physics of legacyPhysics) {
+    // 4.2+ 用单个 `bone`；更早的写法是 `bones` 数组
+    const names = Array.isArray(physics.bones) ? physics.bones : physics.bone ? [physics.bone] : []
     constraints.push(
       createPhysicsConstraint({
         name: physics.name,
-        order: physics.order ?? 0,
+        order: orderOf(physics),
         enabled: true,
-        boneIndices: Array.isArray(physics.bones) ? remapBones(physics.bones as string[], boneIndex) : [],
+        boneIndices: remapBones(names, boneIndex),
         targetBoneIndex: -1,
         raw: { ...physics }
       })

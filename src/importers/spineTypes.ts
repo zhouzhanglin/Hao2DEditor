@@ -71,26 +71,45 @@ export interface SpineTransformConstraintJson {
   scaleX?: number
   scaleY?: number
   shearY?: number
-  /** 4.0+ 的偏移字段名（导出写的就是这套） */
+  /** 4.0+ 的偏移字段名（导入时兼容，导出统一写上面那套 4.3 名字） */
   offsetRotation?: number
   offsetX?: number
   offsetY?: number
   offsetScaleX?: number
   offsetScaleY?: number
   offsetShearY?: number
+  /** 3.x 的名字（3.8 `relative` / `local`），4.3 对应 `additive` / `localSource`+`localTarget` */
   relative?: boolean
   local?: boolean
+  /**
+   * 4.2+ 的通道映射表：`{ "rotate": { "to": { "rotate": {} } }, "x": { "to": { "x": {} } } }`。
+   * **不写官方运行库就当这个约束不存在**（`TransformConstraint.update` 遍历 properties，空表 = 什么也不做）。
+   */
+  properties?: Record<string, { offset?: number; to?: Record<string, { offset?: number; scale?: number; max?: number }> }>
+  /** 4.2+：约束是否用局部坐标 / 叠加式（对应 3.8 的 local / relative） */
+  localSource?: boolean
+  localTarget?: boolean
+  additive?: boolean
+  clamp?: boolean
 }
 
 export interface SpinePathConstraintJson {
   name: string
   order?: number
   bones: string[]
-  target: string
+  /** 3.8–4.1 用骨骼名；4.2+ 改成 `slot`（挂在插槽的 path 附件上） */
+  target?: string
+  slot?: string
   position?: number
   spacing?: number
+  rotation?: number
+  /** 3.8–4.1 的混合系数名 */
   rotateMix?: number
   translateMix?: number
+  /** 4.2+ 的混合系数名 */
+  mixRotate?: number
+  mixX?: number
+  mixY?: number
   positionMode?: string
   spacingMode?: string
   rotateMode?: string
@@ -99,6 +118,8 @@ export interface SpinePathConstraintJson {
 export interface SpinePhysicsConstraintJson {
   name: string
   order?: number
+  /** 4.2+ 用单个 `bone`；更早的写法是 `bones` 数组 */
+  bone?: string
   bones?: string[]
   target?: string
   [key: string]: unknown
@@ -226,7 +247,15 @@ export interface SpineAnimationJson {
   events?: SpineCurveKeyframe[]
   ik?: Record<string, SpineCurveKeyframe[]>
   transform?: Record<string, SpineCurveKeyframe[]>
-  path?: Record<string, SpineCurveKeyframe[]>
+  /**
+   * 3.x–4.1：`path.<约束名>` 直接是帧数组（position / spacing / rotateMix / translateMix 挤在一帧里）；
+   * 4.2+ 拆成三条子轨道：`path.<约束名>.{position, spacing, mix}`。
+   */
+  path?: Record<
+    string,
+    | SpineCurveKeyframe[]
+    | { position?: SpineCurveKeyframe[]; spacing?: SpineCurveKeyframe[]; mix?: SpineCurveKeyframe[] }
+  >
 }
 
 export interface SpineJson {
@@ -243,5 +272,11 @@ export interface SpineJson {
   path?: SpinePathConstraintJson[]
   physics?: SpinePhysicsConstraintJson[]
   skins?: SpineSkinJson[] | Record<string, Record<string, Record<string, SpineAttachmentJson>>>
+  /**
+   * 事件定义表（**对象**：`{ "事件名": { int, float, string, audio } }`，不是数组 ——
+   * 官方运行库用 `for (name in root.events)` 遍历）。动画的事件时间轴只写事件名，
+   * 定义缺了会抛 `Event not found: xxx`，整份文件读不进来。
+   */
+  events?: Record<string, { int?: number; float?: number; string?: string; audio?: string }>
   animations?: Record<string, SpineAnimationJson>
 }

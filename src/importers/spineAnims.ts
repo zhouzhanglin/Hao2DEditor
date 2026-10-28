@@ -8,6 +8,7 @@ import type {
   DeformKeyframe,
   DrawOrderKeyframe,
   EventKeyframe,
+  FloatKeyframe,
   IkAnim,
   SlotAnim
 } from '@core/model/animation'
@@ -291,34 +292,79 @@ export function importSpineAnimations(
   }
 
   for (const [constraintName, keys] of Object.entries(animation.transform ?? {})) {
-    const index = ctx.constraints.findIndex((c) => c.name === constraintName && c.type === 'transform')
-    if (index < 0) continue
+    const constraint = ctx.constraints.find((c) => c.name === constraintName && c.type === 'transform')
+    if (!constraint || constraint.type !== 'transform') continue
+    const index = ctx.constraints.indexOf(constraint)
     const track = emptyConstraintAnim(index)
+    /*
+     * Spine 的 transform 时间轴**只动画 mix，不动画偏移**，而且两代字段名不同：
+     *   3.8    rotateMix / translateMix（同时管 X 与 Y）/ scaleMix / shearMix
+     *   4.0+   mixRotate / mixX / mixY（缺省跟 mixX）/ mixScaleX / mixScaleY / mixShearY
+     * 只认 4.x 那套时，3.8 资源的混合值会全部读回默认 1 —— translateMix 0.4 的约束
+     * 在动画里照样满强度，画面与 Spine 对不上。
+     */
+    const hasOffset = keys.some(
+      (key) =>
+        pickNumber(key, 'rotate') !== undefined ||
+        pickNumber(key, 'x') !== undefined ||
+        pickNumber(key, 'y') !== undefined
+    )
     for (const key of keys) {
-      track.mixRotate.push(floatKey(key, 'mixRotate', 1))
-      track.mixX.push(floatKey(key, 'mixX', 1))
-      track.mixY.push(floatKey(key, 'mixY', 1))
-      track.mixScaleX.push(floatKey(key, 'mixScaleX', 1))
-      track.mixScaleY.push(floatKey(key, 'mixScaleY', 1))
-      track.mixShearY.push(floatKey(key, 'mixShearY', 1))
-      track.offsetRotate.push(floatKey(key, 'rotate', 0))
-      track.offsetX.push(floatKey(key, 'x', 0, true))
-      track.offsetY.push(floatKey(key, 'y', 0, true))
-      duration = Math.max(duration, timeOf(key))
+      const time = timeOf(key)
+      track.mixRotate.push(scalarKey(time, pickNumber(key, 'mixRotate', 'rotateMix') ?? 1))
+      track.mixX.push(scalarKey(time, pickNumber(key, 'mixX', 'translateMix') ?? 1))
+      track.mixY.push(scalarKey(time, pickNumber(key, 'mixY', 'translateMix', 'mixX') ?? 1))
+      track.mixScaleX.push(scalarKey(time, pickNumber(key, 'mixScaleX', 'scaleMix') ?? 1))
+      track.mixScaleY.push(scalarKey(time, pickNumber(key, 'mixScaleY', 'scaleMix') ?? 1))
+      track.mixShearY.push(scalarKey(time, pickNumber(key, 'mixShearY', 'shearMix') ?? 1))
+      /*
+       * 偏移通道是编辑器自己导出的扩展（Spine 官方时间轴没有 rotate/x/y）：官方资源里
+       * 补 0 关键帧会把约束自带的静态偏移整段覆盖成 0，所以只有关键帧确实带偏移时才写，
+       * 缺省值回落到约束自身的静态偏移。
+       */
+      if (hasOffset) {
+        const x = pickNumber(key, 'x')
+        const y = pickNumber(key, 'y')
+        track.offsetRotate.push(scalarKey(time, pickNumber(key, 'rotate') ?? constraint.offsetRotate))
+        track.offsetX.push(scalarKey(time, x === undefined ? constraint.offsetX : pxToUnit(x)))
+        track.offsetY.push(scalarKey(time, y === undefined ? constraint.offsetY : pxToUnit(y)))
+      }
+      duration = Math.max(duration, time)
     }
     constraintTracks.push(track)
   }
 
-  for (const [constraintName, keys] of Object.entries(animation.path ?? {})) {
+  for (const [constraintName, raw] of Object.entries(animation.path ?? {})) {
     const index = ctx.constraints.findIndex((c) => c.name === constraintName && c.type === 'path')
     if (index < 0) continue
     const track = emptyConstraintAnim(index)
-    for (const key of keys) {
-      track.position.push(floatKey(key, 'position', 0))
-      track.spacing.push(floatKey(key, 'spacing', 0))
-      track.rotateMix.push(floatKey(key, 'rotateMix', 1))
-      track.translateMix.push(floatKey(key, 'translateMix', 1))
-      duration = Math.max(duration, timeOf(key))
+    if (Array.isArray(raw)) {
+      // 3.x–4.1：一帧里同时带 position / spacing / rotateMix / translateMix
+      for (const key of raw) {
+        track.position.push(floatKey(key, 'position', 0))
+        track.spacing.push(floatKey(key, 'spacing', 0))
+        track.rotateMix.push(floatKey(key, 'rotateMix', 1))
+        track.translateMix.push(floatKey(key, 'translateMix', 1))
+        duration = Math.max(duration, timeOf(key))
+      }
+    } else {
+      // 4.2+：拆成 position / spacing / mix 三条子轨道，官方资源里只有这三条
+      for (const key of raw.position ?? []) {
+        track.position.push(scalarKey(timeOf(key), pickNumber(key, 'position') ?? 0))
+        duration = Math.max(duration, timeOf(key))
+      }
+      for (const key of raw.spacing ?? []) {
+        track.spacing.push(scalarKey(timeOf(key), pickNumber(key, 'spacing') ?? 0))
+        duration = Math.max(duration, timeOf(key))
+      }
+      for (const key of raw.mix ?? []) {
+        const rotateMix = pickNumber(key, 'mixRotate', 'rotateMix') ?? 1
+        const translateMix = pickNumber(key, 'mixX', 'translateMix') ?? 1
+        const times = timeOf(key)
+        track.rotateMix.push(scalarKey(times, rotateMix))
+        track.translateMix.push(scalarKey(times, translateMix))
+        duration = Math.max(duration, times)
+      }
     }
     constraintTracks.push(track)
   }
@@ -349,6 +395,20 @@ function floatKey(
     easing: Easing.Linear,
     curve: null
   }
+}
+
+/** 取候选字段里第一个是数字的值（3.8 / 4.x 两套字段名并存） */
+function pickNumber(key: Record<string, unknown>, ...fields: string[]): number | undefined {
+  for (const field of fields) {
+    const value = key[field]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+  }
+  return undefined
+}
+
+/** 纯数值帧（时间 + 值），缓动线性 */
+function scalarKey(time: number, value: number): FloatKeyframe {
+  return { time, value, easing: Easing.Linear, curve: null }
 }
 
 /**

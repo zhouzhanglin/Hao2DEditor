@@ -125,7 +125,7 @@ POST /batch
    - 工程文件：`newProject`（空白工程）/ `createProject`（具名并立刻落盘）/ `openProject` / `saveProject` —— **都不弹原生对话框**，保存位置靠参数 `dir` / `path` 显式给出
    - 多骨架：`addSkeleton` / `removeSkeleton` / `renameSkeleton` / `setActiveSkeleton`（图片池跨骨架共享）。`removeSkeleton` 在骨架**被别的骨架嵌套引用**时返回 `ok:false`（错误里带引用位置）：要先删父骨架里指向它的嵌套 display，或 `setNestedArmature` 换成别的骨架
    - 骨架嵌套：`nestArmature`（把工程内另一个骨架挂到插槽上）/ `setNestedArmature`（改引用与默认播放参数）/ `keySlotSubArmatureFrame`（在动画里控制子骨架播哪个动画）；`listDisplays` 的 `nested` 字段、`getAnimationKeys` 的 `subArmature` 通道用于核对
-   - 皮肤：`addSkin` / `renameSkin` / `removeSkin` / `setActiveSkin`（换装动画配合 `keySlotDisplayFrame`）
+   - 皮肤：`addSkin` / `renameSkin` / `removeSkin` / `setActiveSkin`（换装动画配合 `keySlotDisplayFrame`）。`renameSkin` **不能与已有皮肤重名**，`default` 不可改名 / 不可删；改名会连带更新变形（FFD）轨道的皮肤归属、链接网格的源皮肤与当前皮肤
    - 换装链接网格（一套几何 + 多套皮肤换贴图）→ `createLinkedMesh {slot, source, sourceSkin?, skin?, name?, image?}`：几何 / 权重取自同插槽的源网格，自己只决定贴图与 UV；附件名与源同名 = 覆盖该插槽的显示，异名 = 追加 display。`setLinkedMeshSource`（改源）/ `setLinkedMeshImage`（只改这一条的图并重算 UV）/ `unlinkLinkedMesh`（复制几何成独立网格）。`keyDeformFrame` 对链接网格按**源网格点数**校验 offsets，可用 `skin` 指定附件所在皮肤
    - 播放与事件帧：`setTime`（播放头）、`setPlaying`（播放 / 暂停）、`keyEvent` / `setEvent` / `removeEvent`（时间轴最上面的事件轨）
    - 导出：`exportProject`（`mode` = `runtime` / `unity` / `spine`，写盘到 `dir`，**不弹对话框**）；图集缩放持久偏好 → `setExportScale`

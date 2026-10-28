@@ -470,6 +470,22 @@ export const en: Record<string, string> = {
   '皮肤': 'Skins',
   '{0} 个附件': '{0} attachment(s)',
   '新建皮肤': 'New skin',
+  '新建皮肤（每套皮肤一套附件，用于换装 / 换色）':
+    'New skin (each skin has its own attachments; use it for outfit / color swaps)',
+  '皮肤「{0}」': 'Skin "{0}"',
+  '{0}：{1} 个附件（右键重命名 / 删除）':
+    '"{0}": {1} attachment(s) (right-click to rename / delete)',
+  '重命名皮肤': 'Rename skin',
+  '皮肤名不能为空': 'The skin name cannot be empty',
+  '不能重命名默认皮肤 default': 'The default skin cannot be renamed',
+  '默认皮肤不能重命名 / 删除': 'The default skin cannot be renamed or deleted',
+  '改名（变形帧与链接网格里的皮肤归属会一起跟随）':
+    'Rename it (deform keys and linked-mesh skin ownership follow along)',
+  '删除这套皮肤（里面的附件一起消失，可撤销）':
+    'Delete this skin (its attachments go with it; undoable)',
+  '已删除皮肤「{0}」': 'Deleted skin "{0}"',
+  '皮肤「{0}」里有 {1} 个附件，删除后这些附件一起消失（引用它们的显示帧 / 链接网格要另行处理）。确定删除？':
+    'Skin "{0}" has {1} attachment(s); deleting it removes them too (display keys / linked meshes referencing them must be handled separately). Delete?',
   '图片 / 图集页': 'Images / Atlas pages',
   '已选 {0} 张 · 拖入场景可一起创建': '{0} selected · drag into the scene to create them together',
   '⌘/Ctrl 多选': '⌘/Ctrl to multi-select',

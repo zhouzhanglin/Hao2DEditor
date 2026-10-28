@@ -137,7 +137,7 @@
 | `addSkin` | `name`?(string) 皮肤名；不传用 skinN | 新建一套空皮肤（每个现有插槽都建一条空附件表），可用于后续打换装帧 | { name } |
 | `createLinkedMesh` | `slot`*(string) 插槽名<br>`source`*(string) 源网格附件名（同插槽，必须是 mesh）<br>`skin`?(string) 目标皮肤；不传 = 默认皮肤<br>`sourceSkin`?(string) 源皮肤；不传 = 默认皮肤<br>`name`?(string) 附件名；不传沿用源网格名（同名覆盖该插槽显示）<br>`image`?(string) 自己的图片（图片池里的名字）；不传沿用源网格的图 | 在目标皮肤里创建一条链接网格：几何（顶点 / 三角面 / 权重）取自同插槽的源网格，自己只决定贴图与 UV。附件名与源同名 = 覆盖该插槽的显示（换装标准写法），异名 = 追加一个 display | { slot, attachment, warning? } |
 | `removeSkin` | `name`*(string) 皮肤名 | 删除某套皮肤（default 不可删）。若删的是当前皮肤，当前皮肤会退回 default | { name, count } |
-| `renameSkin` | `name`*(string) 原皮肤名<br>`newName`*(string) 新皮肤名 | 改皮肤名（名字被动画的 display 帧按皮肤引用，改名后请检查相关打帧） | { name, newName } |
+| `renameSkin` | `name`*(string) 原皮肤名<br>`newName`*(string) 新皮肤名（不能与已有皮肤重复） | 改皮肤名。**不能和已有皮肤重名**，default 也不可改名。变形（FFD）轨道的皮肤归属、链接网格的源皮肤、当前皮肤会一起跟着改 | { name, newName } |
 | `setActiveSkin` | `name`?(string) 皮肤名；空串 / default = 默认皮肤 | 切换当前皮肤（空串或 default 表示默认皮肤）。只改编辑器状态，不进撤销记录 | { skin } |
 | `setLinkedMeshImage` | `slot`*(string) 插槽名<br>`attachment`*(string) 链接网格附件名<br>`image`*(string) 新图片（图片池里的名字）<br>`skin`?(string) 链接网格自己所在的皮肤；不传 = 默认皮肤 | 只改这一条链接网格的图片（不会动同名源网格），并按新图的区域重算 UV；新图里找不到区域时 UV 清空，运行期退回源网格那块 | { slot, attachment, warning? } |
 | `setLinkedMeshSource` | `slot`*(string) 插槽名<br>`attachment`*(string) 链接网格附件名<br>`source`*(string) 新源网格附件名<br>`skin`?(string) 链接网格自己所在的皮肤；不传 = 默认皮肤<br>`sourceSkin`?(string) 新源皮肤；不传 = 默认皮肤 | 把链接网格换成另一个源皮肤 / 源网格，改完按新源重算 UV。源必须是同插槽的网格（不能是链接网格本身） | { slot, attachment, warning? } |

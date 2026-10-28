@@ -1,12 +1,12 @@
 import { useRef, useState } from 'react'
-import { ImagePlus, Layers, Loader2, Package, Plus, RefreshCw, Scissors, Trash2 } from 'lucide-react'
+import { ImagePlus, Layers, Loader2, Package, Pencil, Plus, RefreshCw, Scissors, Trash2 } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { getPlatform } from '@editor/platform'
 import { splitAtlasImage } from '@editor/services/atlasSplit'
 import { importDroppedPaths } from '@editor/services/projectIo'
 import { PanelEmpty } from '@ui/widgets/PanelShell'
-import { countImageReferences, createRegionFromImage } from '@editor/commands/authoringCommands'
+import { countImageReferences, createRegionFromImage, renameSkin } from '@editor/commands/authoringCommands'
 import { hasExternalFiles, setDraggingImage, setImageDragData } from '@ui/widgets/dragDrop'
 import { ImageHoverPreview, ImageThumb } from './ImageThumb'
 import ContextMenu from '@ui/widgets/ContextMenu'
@@ -46,6 +46,10 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
   const [rowMenu, setRowMenu] = useState<{ x: number; y: number; name: string } | null>(null)
   /** 正在拆的图集名（拆图 + 写盘要点时间，按钮上转个圈） */
   const [splitting, setSplitting] = useState<string | null>(null)
+  /** 皮肤右键菜单：位置 + 目标皮肤名 */
+  const [skinMenu, setSkinMenu] = useState<{ x: number; y: number; name: string } | null>(null)
+  /** 正在改名的皮肤（名字 + 输入框草稿）：就地变成输入框，回车确认 / Esc 取消 */
+  const [renamingSkin, setRenamingSkin] = useState<{ name: string; draft: string } | null>(null)
 
   // 图片可能被删除 / 改名，选中列表里失效的名字直接忽略
   const selected = picked.filter((name) => document.images.some((item) => item.name === name))
@@ -135,6 +139,106 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
     }
   }
 
+  /** 新建皮肤：名字跳过已占用的（`skin2` 被占了就往后顺延），不制造同名皮肤 */
+  const handleAddSkin = (): void => {
+    update(t('新建皮肤'), (draft) => {
+      const taken = new Set(draft.skins.map((skin) => skin.name))
+      let index = draft.skins.length
+      while (taken.has(`skin${index}`)) index++
+      draft.skins.push({
+        name: `skin${index}`,
+        slots: draft.slots.map((slot) => ({ slot: slot.name, attachments: [] }))
+      })
+    })
+  }
+
+  /**
+   * 皮肤改名：**重名 / 空名直接拒绝**。
+   *
+   * 在写文档**之前**就拦下来：皮肤名是「变形（FFD）帧的归属」「链接网格的源皮肤」的键，
+   * 撞名之后两套皮肤就再也分不清谁是谁；顺带也避免留一条什么都没改的撤销记录。
+   */
+  const commitSkinRename = (keepEditing = false): void => {
+    const pending = renamingSkin
+    if (!pending) return
+    const to = pending.draft.trim()
+    if (!to || to === pending.name) {
+      setRenamingSkin(null)
+      return
+    }
+    // 重名时按回车**保持输入框打开**，让用户直接改掉再回车；
+    // 失焦进来的则关掉输入框（否则会留下一个没人聚焦、也退不出去的输入框）
+    if (document.skins.some((skin) => skin.name === to)) {
+      onStatus?.(t('已有同名皮肤：{0}', to))
+      if (!keepEditing) setRenamingSkin(null)
+      return
+    }
+    setRenamingSkin(null)
+    // 名字 + 变形轨道归属 / 链接网格源皮肤 / 当前皮肤一起改（见 renameSkin）
+    update(t('重命名皮肤'), (draft) => {
+      renameSkin(draft, pending.name, to)
+    })
+    // 正被选中的皮肤换到新名字上，否则视口 / 资源面板会立刻退回默认皮肤
+    const selectionStore = useSelectionStore.getState()
+    if (selectionStore.skin === pending.name) selectionStore.select({ skin: to })
+    onStatus?.(t('皮肤已重命名为「{0}」', to))
+  }
+
+  /** 删除皮肤：default 不可删；删掉的若是当前皮肤，当前皮肤退回默认（空串） */
+  const handleDeleteSkin = (name: string): void => {
+    if (name === 'default') {
+      onStatus?.(t('不能删除默认皮肤 default'))
+      return
+    }
+    const skin = document.skins.find((item) => item.name === name)
+    const attachments = skin?.slots.reduce((sum, slot) => sum + slot.attachments.length, 0) ?? 0
+    const confirmed =
+      attachments === 0 ||
+      window.confirm(
+        t('皮肤「{0}」里有 {1} 个附件，删除后这些附件一起消失（引用它们的显示帧 / 链接网格要另行处理）。确定删除？', [
+          name,
+          attachments
+        ])
+      )
+    if (!confirmed) return
+    update(t('删除皮肤'), (draft) => {
+      draft.skins = draft.skins.filter((item) => item.name !== name)
+      if (draft.editorMeta.activeSkin === name) draft.editorMeta.activeSkin = ''
+    })
+    const selectionStore = useSelectionStore.getState()
+    if (selectionStore.skin === name) selectionStore.select({ skin: '' })
+    onStatus?.(t('已删除皮肤「{0}」', name))
+  }
+
+  /** 皮肤右键菜单项：默认皮肤两项都禁掉（它是链接网格源皮肤 / 变形归属的基准） */
+  const skinMenuItems = (name: string): ContextMenuItem[] => {
+    const isDefault = name === 'default'
+    return [
+      {
+        key: 'rename',
+        label: t('重命名'),
+        icon: <Pencil size={12} />,
+        disabled: isDefault,
+        hint: isDefault
+          ? t('默认皮肤不能重命名 / 删除')
+          : t('改名（变形帧与链接网格里的皮肤归属会一起跟随）'),
+        onSelect: () => setRenamingSkin({ name, draft: name })
+      },
+      { key: 'sep', separator: true },
+      {
+        key: 'delete',
+        label: t('删除皮肤'),
+        icon: <Trash2 size={12} />,
+        danger: true,
+        disabled: isDefault,
+        hint: isDefault
+          ? t('默认皮肤不能重命名 / 删除')
+          : t('删除这套皮肤（里面的附件一起消失，可撤销）'),
+        onSelect: () => handleDeleteSkin(name)
+      }
+    ]
+  }
+
   /** 右键菜单项 */
   const imageMenuItems = (name: string): ContextMenuItem[] => [
     {
@@ -205,6 +309,26 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
           {document.skins.map((skin) => {
             const active = (skin.name === 'default' && !activeSkin) || skin.name === activeSkin
             const attachments = skin.slots.reduce((sum, slot) => sum + slot.attachments.length, 0)
+            // 改名中：这颗 chip 就地变成输入框（回车确认 / Esc 取消 / 失焦确认）
+            if (renamingSkin?.name === skin.name) {
+              return (
+                <input
+                  key={skin.name}
+                  autoFocus
+                  value={renamingSkin.draft}
+                  title={t('输入新名字，回车确认 / Esc 取消')}
+                  onFocus={(event) => event.currentTarget.select()}
+                  onChange={(event) => setRenamingSkin({ name: skin.name, draft: event.target.value })}
+                  onBlur={() => commitSkinRename()}
+                  onKeyDown={(event) => {
+                    // 回车确认；此时若重名，输入框保持打开好继续改（见 commitSkinRename）
+                    if (event.key === 'Enter') commitSkinRename(true)
+                    else if (event.key === 'Escape') setRenamingSkin(null)
+                  }}
+                  className="h-[20px] w-[104px] rounded-[4px] border border-accent bg-ink-800 px-1.5 text-3xs text-content-hi outline-none"
+                />
+              )
+            }
             return (
               <button
                 key={skin.name}
@@ -215,13 +339,17 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
                   useProjectStore.getState().setActiveSkin(skin.name)
                   selection.select({ kind: 'slot', skin: skin.name === 'default' ? '' : skin.name })
                 }}
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  setSkinMenu({ x: event.clientX, y: event.clientY, name: skin.name })
+                }}
                 className={[
                   'h-[20px] rounded border px-1.5 text-3xs transition-colors duration-panel cursor-pointer',
                   active
                     ? 'border-transparent bg-accent-deep text-white'
                     : 'border-line bg-ink-900/60 text-content-mid hover:text-content-hi'
                 ].join(' ')}
-                title={t('{0} 个附件', attachments)}
+                title={t('{0}：{1} 个附件（右键重命名 / 删除）', [skin.name, attachments])}
               >
                 {skin.name}
                 <span className={active ? 'ml-1 text-white/70' : 'ml-1 text-content-lo'}>{attachments}</span>
@@ -230,13 +358,9 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
           })}
           <button
             type="button"
+            title={t('新建皮肤（每套皮肤一套附件，用于换装 / 换色）')}
             className="hao-btn h-[20px] px-1.5 text-3xs"
-            onClick={() =>
-              update(t('新建皮肤'), (draft) => {
-                const name = `skin${draft.skins.length}`
-                draft.skins.push({ name, slots: draft.slots.map((slot) => ({ slot: slot.name, attachments: [] })) })
-              })
-            }
+            onClick={handleAddSkin}
           >
             +
           </button>
@@ -402,6 +526,16 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
         <ImageHoverPreview
           image={document.images.find((item) => item.name === hovered.image.name) ?? hovered.image}
           anchor={hovered.row}
+        />
+      ) : null}
+
+      {skinMenu ? (
+        <ContextMenu
+          x={skinMenu.x}
+          y={skinMenu.y}
+          title={t('皮肤「{0}」', skinMenu.name)}
+          items={skinMenuItems(skinMenu.name)}
+          onClose={() => setSkinMenu(null)}
         />
       ) : null}
 

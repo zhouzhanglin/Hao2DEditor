@@ -303,6 +303,55 @@ export function countImageReferences(doc: EditorDocument, name: string): number 
   return count
 }
 
+/**
+ * 皮肤改名：名字 + 所有**按皮肤名记录**的引用一起改。
+ *
+ * 皮肤名不只是一行标签，它被四处按名字记录：皮肤自身的 `name`、变形（FFD）轨道的归属
+ * （`anim.deforms[].skin`）、链接网格的源皮肤（`attachment.linkedMeshSkin`）、
+ * 以及 `editorMeta.activeSkin`。只改 `name` 的话，改名后原有变形帧会整个失效、
+ * 链接网格会退回默认皮肤（画成源皮肤的样子）。
+ *
+ * **空名 / 与已有皮肤重名一律拒绝**：重名会让「选的是哪套皮肤」「这条变形帧属于谁」
+ * 都变得不确定，而且往工程里写进去就再也分不清了。
+ */
+export function renameSkin(
+  doc: EditorDocument,
+  from: string,
+  to: string,
+  options: { allowDefault?: boolean } = {}
+): { ok: boolean; message: string } {
+  const target = from.trim()
+  const next = to.trim()
+  if (!next) return { ok: false, message: t('皮肤名不能为空') }
+  // 名字没变：什么都不做（不算失败，调用方按 ok 判断即可）
+  if (next === target) return { ok: true, message: '' }
+  // 默认皮肤是链接网格「源皮肤」的缺省值（`linkedMeshSkin` 空串），改名会把这条约定打断
+  if (target === 'default' && !options.allowDefault) {
+    return { ok: false, message: t('不能重命名默认皮肤 default') }
+  }
+  const skin = doc.skins.find((item) => item.name === target)
+  if (!skin) return { ok: false, message: t('皮肤不存在：{0}（用 listSkins 查现有皮肤名）', target) }
+  if (doc.skins.some((item) => item.name === next)) {
+    return { ok: false, message: t('已有同名皮肤：{0}', next) }
+  }
+
+  skin.name = next
+  for (const animation of doc.animations) {
+    for (const track of animation.deforms) {
+      if (track.skin === target) track.skin = next
+    }
+  }
+  for (const item of doc.skins) {
+    for (const skinSlot of item.slots) {
+      for (const attachment of skinSlot.attachments) {
+        if (attachment.linkedMeshSkin === target) attachment.linkedMeshSkin = next
+      }
+    }
+  }
+  if (doc.editorMeta.activeSkin === target) doc.editorMeta.activeSkin = next
+  return { ok: true, message: t('皮肤已重命名为「{0}」', next) }
+}
+
 /** 图集拆碎图：一条「图集区域 → 碎图」的对应关系 */
 export interface AtlasSplitEntry {
   /** 原图集里的区域名；「整页」兜底那一条用图集页名 */

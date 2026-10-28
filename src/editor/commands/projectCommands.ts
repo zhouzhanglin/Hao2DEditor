@@ -16,7 +16,7 @@ import {
 } from '../services/projectIo'
 import { prepareRuntimeExport, writeHao2dExport, writeRuntimeExport } from '../services/exportService'
 import { writeSpineExport } from '../services/spineExport'
-import { clearWeightClipboard } from './authoringCommands'
+import { clearWeightClipboard, renameSkin } from './authoringCommands'
 import { keyEventFrame } from './animationCommands'
 import { requireAnimation } from './animOps'
 import { changed, defineAction, defineWrite, unchanged } from './registry'
@@ -398,24 +398,21 @@ export function registerProjectCommands(): void {
     {
       name: 'renameSkin',
       title: '重命名皮肤',
-      description: '改皮肤名（名字被动画的 display 帧按皮肤引用，改名后请检查相关打帧）',
+      description:
+        '改皮肤名。**不能和已有皮肤重名**，default 也不可改名。变形（FFD）轨道的皮肤归属、链接网格的源皮肤、当前皮肤会一起跟着改',
       args: {
         name: { type: 'string', description: '原皮肤名', required: true },
-        newName: { type: 'string', description: '新皮肤名', required: true }
+        newName: { type: 'string', description: '新皮肤名（不能与已有皮肤重复）', required: true }
       },
       returns: '{ name, newName }'
     },
     (draft, args) => {
       const name = need(args, 'name')
       const newName = need(args, 'newName')
-      const skin = draft.skins.find((item) => item.name === name)
-      if (!skin) throw new Error(t('皮肤不存在：{0}（用 listSkins 查现有皮肤名）', name))
-      if (draft.skins.some((item) => item.name === newName)) {
-        throw new Error(t('已有同名皮肤：{0}', newName))
-      }
-      skin.name = newName
-      if (draft.editorMeta.activeSkin === name) draft.editorMeta.activeSkin = newName
-      return changed({ name, newName }, t('皮肤已重命名为「{0}」', newName))
+      // 校验与级联都在 authoringCommands.renameSkin 里：UI 与 AI 必须同一套规则
+      const result = renameSkin(draft, name, newName)
+      if (!result.ok) throw new Error(result.message)
+      return changed({ name, newName: newName.trim() }, result.message)
     }
   )
 

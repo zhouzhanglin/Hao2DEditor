@@ -7,7 +7,7 @@ import {
   removeKeyframeAt,
   upsertKeyframe
 } from '@core/model/animation'
-import type { DeformKeyframe, Float2Keyframe, FloatKeyframe } from '@core/model/animation'
+import type { DeformKeyframe, EventKeyframe, Float2Keyframe, FloatKeyframe } from '@core/model/animation'
 import type {
   AuthoringAnimData,
   AuthoringBoneAnim,
@@ -174,6 +174,56 @@ export function drawOrderFrameAt(
     if (frame.time <= time + 1e-6) found = frame
   }
   return found
+}
+
+// ---------------- 事件帧 ----------------
+
+/** 按时间点找事件帧（4 位小数口径，与打帧一致）：同一时间点只允许一个事件帧 */
+export function eventFrameAt(anim: AuthoringAnimData, time: number): EventKeyframe | null {
+  return anim.events.find((event) => Math.abs(event.time - time) < 1e-4) ?? null
+}
+
+/** 事件名默认取 `event`、`event2`…（避开整个动画里已用过的名字） */
+export function nextEventName(events: readonly EventKeyframe[]): string {
+  const used = new Set(events.map((event) => event.name))
+  if (!used.has('event')) return 'event'
+  for (let i = 2; i < 10000; i++) {
+    const candidate = `event${i}`
+    if (!used.has(candidate)) return candidate
+  }
+  return `event${events.length + 1}`
+}
+
+/**
+ * 写入一个事件帧：**同一时间点只允许一个事件帧**（不同名的事件也不许并存）。
+ *
+ * 该时间点已有事件时就地覆盖**给出的字段**，没给的保持原值 —— 重复打帧不会叠出第二个
+ * 事件（否则播放时同一时刻会全部触发，时间轴上看又只是一个标记），
+ * 也不会把已有事件的名字 / 参数冲回默认值。
+ */
+export function keyEventFrame(
+  anim: AuthoringAnimData,
+  time: number,
+  value: { name?: string; stringParam?: string; intParam?: number; floatParam?: number } = {}
+): { frame: EventKeyframe; replaced: boolean } {
+  const existing = eventFrameAt(anim, time)
+  if (existing) {
+    if (value.name !== undefined) existing.name = value.name
+    if (value.stringParam !== undefined) existing.stringParam = value.stringParam
+    if (value.intParam !== undefined) existing.intParam = value.intParam
+    if (value.floatParam !== undefined) existing.floatParam = value.floatParam
+    return { frame: existing, replaced: true }
+  }
+  const frame: EventKeyframe = {
+    time,
+    name: value.name ?? nextEventName(anim.events),
+    stringParam: value.stringParam ?? '',
+    intParam: value.intParam ?? 0,
+    floatParam: value.floatParam ?? 0
+  }
+  anim.events.push(frame)
+  anim.events.sort((left, right) => left.time - right.time)
+  return { frame, replaced: false }
 }
 
 export function keySlotDisplay(

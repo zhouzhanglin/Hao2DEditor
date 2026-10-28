@@ -5,7 +5,7 @@ import { History } from '../history'
 import type { ProjectSnapshot } from '../history'
 import { applyAtlasSplit, deleteImage, replaceImage } from '../commands/authoringCommands'
 import type { AtlasSplitPlan } from '../commands/authoringCommands'
-import { repairAnimationDurations, repairDisplayNames } from '../timeline/model'
+import { repairAnimationDurations, repairDisplayNames, repairEvents } from '../timeline/model'
 import { validateNestGraph } from '@core/nesting/nest'
 import { t } from '@i18n'
 import { useSelectionStore } from './selectionStore'
@@ -354,9 +354,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // 打开工程 / 导入时的兜底修复：
     // 1. 时长小于最后一个关键帧 → 末尾帧被裁、播放只在极短区间循环（「动画播放不了」）
     // 2. displayIndex 帧与附件名长度不一致 → 运行期解析到空名，显示异常（「有的图丢失」）
+    // 3. 同一时间点叠了多个事件帧 → 时间轴上看不出来，播放却全部触发（「事件帧重复」）
     // 修好后标记为未保存，方便写回。
     const repaired = cloneDocument(document)
-    const repairedCount = repairAnimationDurations(repaired) + repairDisplayNames(repaired)
+    const repairedCount =
+      repairAnimationDurations(repaired) + repairDisplayNames(repaired) + repairEvents(repaired)
     const nested = sanitizeNestRefs([repaired])
     const previous = get()
     /*
@@ -386,7 +388,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     let repairedCount = 0
     const repaired = (skeletons.length > 0 ? skeletons : [createEmptyDocument()]).map((skeleton) => {
       const copy = cloneDocument(skeleton)
-      repairedCount += repairAnimationDurations(copy) + repairDisplayNames(copy)
+      repairedCount +=
+        repairAnimationDurations(copy) + repairDisplayNames(copy) + repairEvents(copy)
       return copy
     })
     const index = clampIndex(activeSkeleton, repaired.length)
@@ -435,6 +438,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const copy = cloneDocument(skeleton)
       repairAnimationDurations(copy)
       repairDisplayNames(copy)
+      repairEvents(copy)
       return copy
     })
     /*

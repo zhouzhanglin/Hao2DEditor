@@ -14,12 +14,13 @@ import {
   moveKeys,
   repairAnimationDurations,
   repairDisplayNames,
+  repairEvents,
   setKeyEasing,
   setKeysTimes,
   slotDisplayNameAt
 } from '@editor/timeline/model'
 import type { KeySelector } from '@editor/timeline/model'
-import { keyBoneChannel, keyDeform, keySlotDisplay } from '@editor/commands/animationCommands'
+import { keyBoneChannel, keyDeform, keyEventFrame, keySlotDisplay } from '@editor/commands/animationCommands'
 import { pickAnimationForAnimate } from '@editor/store/modeStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
@@ -455,6 +456,78 @@ describe('关键帧编辑', () => {
   it('事件轨排在最上面', () => {
     const tracks = buildTimeline(animationWithKeys())
     expect(tracks[0].kind).toBe('event')
+  })
+
+  // —— 同一时间点只允许一个帧：打帧 / 事件帧 / 拖动都不该在一条轨道上叠出第二帧 ——
+  it('同一时间点重复添加事件帧：不叠加，只覆盖给出的字段', () => {
+    const anim = animationWithKeys()
+    // animationWithKeys 里 1s 已有「hit」
+    const replaced = keyEventFrame(anim, 1, { name: 'hit', stringParam: 'left' })
+    expect(replaced.replaced).toBe(true)
+    expect(anim.events).toHaveLength(1)
+
+    // 不传名字不该把它改名（连点「添加事件帧」不会变成 event2）
+    keyEventFrame(anim, 1, { intParam: 3 })
+    expect(anim.events).toHaveLength(1)
+    expect(anim.events[0]).toMatchObject({ time: 1, name: 'hit', stringParam: 'left', intParam: 3 })
+
+    // 不同名的事件也不许并存：同一时刻就地改名
+    keyEventFrame(anim, 1, { name: 'sound' })
+    expect(anim.events).toHaveLength(1)
+    expect(anim.events[0].name).toBe('sound')
+
+    // 只有换时间点才是新增
+    keyEventFrame(anim, 2, { name: 'step' })
+    expect(anim.events.map((event) => event.name)).toEqual(['sound', 'step'])
+  })
+
+  it('把关键帧拖到已被占用的时间点：只留被拖的那一帧（值也以它为准）', () => {
+    const d = doc()
+    // rotate 现有 0s → 10、1s → 40；把 0s 拖到 1s
+    expect(setKeysTimes(d, 'idle', [{ selector: selector({ time: 0 }), time: 1 }])).toBe(1)
+    const rotate = d.animations[0].bones.find((t) => t.bone === 'root')?.rotate ?? []
+    expect(rotate.map((k) => k.time)).toEqual([1])
+    expect(rotate[0].value).toBe(10)
+
+    // moveKeys 平移同样收敛：0s 的帧往后挪 1s，撞上 1s 的帧
+    const shifted = doc()
+    expect(moveKeys(shifted, 'idle', [selector({ time: 0 })], 1)).toBe(1)
+    const shiftedRotate = shifted.animations[0].bones.find((t) => t.bone === 'root')?.rotate ?? []
+    expect(shiftedRotate.map((k) => k.time)).toEqual([1])
+    expect(shiftedRotate[0].value).toBe(10)
+  })
+
+  it('显示帧拖到同一时间点：名字跟着被拖的帧走，不会错位', () => {
+    const d = docWithDisplay()
+    expect(setKeysTimes(d, 'idle', [{ selector: displaySelector(0), time: 1 }])).toBe(1)
+    expect(timesOf(d)).toEqual([1])
+    // 被拖的是 0s 的「head」，原地 1s 的「head_hurt」被覆盖
+    expect(namesOf(d)).toEqual(['head'])
+  })
+
+  it('删除历史遗留的同时间重复事件帧：一次删干净', () => {
+    const d = doc()
+    const events = d.animations[0].events
+    events.push(
+      { time: 1, name: 'dupe', stringParam: '', intParam: 0, floatParam: 0 },
+      { time: 2, name: 'keep', stringParam: '', intParam: 0, floatParam: 0 }
+    )
+    expect(events.filter((event) => event.time === 1)).toHaveLength(2)
+
+    deleteKeys(d, 'idle', [{ kind: 'event', target: 'hit', attachment: '', channel: 'hit', time: 1 }])
+    expect(d.animations[0].events.map((event) => event.name)).toEqual(['keep'])
+  })
+
+  it('repairEvents 打开工程时清掉同一时间点叠出来的事件帧（每个时间点留一个）', () => {
+    const d = doc()
+    d.animations[0].events.push(
+      { time: 1, name: 'dupe', stringParam: '', intParam: 0, floatParam: 0 },
+      { time: 2, name: 'keep', stringParam: '', intParam: 0, floatParam: 0 }
+    )
+    expect(repairEvents(d)).toBe(1)
+    expect(d.animations[0].events.map((event) => event.name)).toEqual(['hit', 'keep'])
+    // 没有重复时是纯读操作
+    expect(repairEvents(d)).toBe(0)
   })
 
   it('修改缓动：Bezier 写入 4 个控制量，其它类型清空 curve', () => {

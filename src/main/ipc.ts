@@ -9,6 +9,7 @@ import {
 } from './previewServer'
 import { commandServerInfo } from './commandServer'
 import { installMcpIntoClients } from './aiClientConfig'
+import { installSkillToClients, openSkillsFolder, skillsInfo } from './aiSkills'
 import { normalizeLocale, setLocale } from './i18n'
 import { buildAppMenu } from './menu'
 import { IPC } from '@shared/ipcTypes'
@@ -108,6 +109,15 @@ export function registerIpcHandlers(): void {
 
   // AI 接入：把 MCP URL 写进已识别的 AI 客户端配置（一键安装）
   ipcMain.handle(IPC.aiInstallMcp, () => fs.safe(() => installMcpIntoClients(commandServerInfo())))
+
+  // AI 接入：随包分发的 Skill（绑骨 / 打帧 / 导出流程的手册）——查位置、开目录、装进客户端
+  ipcMain.handle(IPC.aiSkillsInfo, () => fs.safe(() => skillsInfo()))
+  ipcMain.handle(IPC.aiOpenSkillsDir, () => fs.safe(() => openSkillsFolder()))
+  ipcMain.handle(
+    IPC.aiInstallSkill,
+    (_e, options: { name?: string; dir?: string } | undefined) =>
+      fs.safe(() => installSkillToClients(options ?? {}))
+  )
 
   // 语言：把系统语言标签交给渲染进程（首启判定界面语言用）
   ipcMain.handle(IPC.i18nSystemLocale, () => fs.safe(() => app.getLocale()))

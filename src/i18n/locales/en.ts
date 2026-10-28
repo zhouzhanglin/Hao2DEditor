@@ -380,6 +380,49 @@ export const en: Record<string, string> = {
   '标「需手动配置」的客户端（Codex / WorkBuddy / CodeBuddy / DeepSeek / Trae / ZCode）请把上面的 MCP 地址填进它们各自的 MCP 设置。':
     'For clients marked "Manual setup required" (Codex / WorkBuddy / CodeBuddy / DeepSeek / Trae / ZCode), paste the MCP address above into their own MCP settings.',
 
+  // ── AI 接入弹窗 · 骨骼动画 Skill ─────────────────────────────────────
+  '骨骼动画 Skill': 'Skeletal animation Skill',
+  '随包': 'bundled',
+  '未装到客户端': 'not installed to any client',
+  '工程副本已关': 'project copy off',
+  '工程副本：总是复制': 'project copy: always',
+  '工程副本：同版本时跳过': 'project copy: skipped when same version',
+  '已装 {0}': 'installed: {0}',
+  '复制引导语': 'Copy prompt',
+  '已复制引导语': 'Prompt copied',
+  '复制给 AI 的一句话：让它自己去读 skill': 'Copy a one-liner telling the AI to read the Skill itself',
+  '详情': 'Details',
+  '收起': 'Collapse',
+  '打开 Skill 目录': 'Open Skill folder',
+  '打开目录': 'Open folder',
+  '随编辑器带了一份「Hao2D 骨骼动画」Skill：写明坐标约定、搭骨架 / 打帧 / 蒙皮的步骤和导出方式。装进 AI 客户端的 skills 目录后，它就知道该怎么调用上面的命令。':
+    'The editor ships with a "Hao2D skeletal animation" Skill: coordinate conventions, the steps for rigging / keyframing / skinning, and how to export. Once it is in an AI client\'s skills folder, the AI knows how to drive the commands above.',
+  '未找到随包分发的 Skill 目录': 'Bundled Skill folder not found',
+  '复制路径': 'Copy path',
+  '安装到 CodeBuddy / Claude': 'Install to CodeBuddy / Claude',
+  '选择目录…': 'Choose folder…',
+  '选择 AI 客户端的 skills 目录': "Choose the AI client's skills folder",
+  'Skill 安装结果': 'Skill installation result',
+  '已安装': 'Installed',
+  '需手动复制': 'Copy manually',
+  '未检测到该客户端': 'Client not detected',
+  '复制安装命令': 'Copy install command',
+  '已复制命令': 'Command copied',
+  'Codex / WorkBuddy / Trae 等若未识别到 Skills 目录，把上面的路径或命令交给它，或点「选择目录…」指定它读取技能的位置。':
+    'If Codex / WorkBuddy / Trae did not report a Skills folder, hand it the path or command above, or click "Choose folder…" to point at the folder it reads skills from.',
+  '浏览器模式没有随包 Skill，请在桌面版里使用':
+    'The browser build has no bundled Skill — use the desktop app.',
+  '未检测到': 'Not detected',
+  '未安装': 'Not installed',
+  '已装 v{0}': 'v{0} installed',
+  '可更新：v{0} → v{1}': 'Update available: v{0} → v{1}',
+  '更新到 v{0}': 'Update to v{0}',
+  '重新安装 Skill': 'Reinstall Skill',
+  '保存工程时复制到 <工程>/ai/skills/（给 Codex 这类只读工作区的 AI 用）':
+    'Copy into <project>/ai/skills/ when saving — for workspace-scoped agents like Codex',
+  '客户端已装同版本时也复制（共享工程 / 换机器用）':
+    'Also copy when a client already has the same version (sharing the project / moving machines)',
+
   // ── 舞台参考图弹窗 ──────────────────────────────────────────────────
   '图片': 'Images',
   '请先保存工程：参考图要存到工程目录的 stage/ 下':
@@ -1482,6 +1525,8 @@ export const en: Record<string, string> = {
   '找不到动画「{0}」': 'Animation "{0}" not found',
   '已在 {0}s 添加事件帧「{1}」（在视口下方值栏改名 / 设参数）':
     'Added event key "{1}" at {0}s (rename / set params in the value bar below the viewport)',
+  '{0}s 已有事件帧「{1}」：同一时间点只能有一个事件帧，已选中它（可直接改名 / 改参数）':
+    'An event key "{1}" already exists at {0}s: only one event key is allowed per time point (selected it — rename / set params directly)',
   '请先选中骨骼、插槽、网格附件或约束': 'Select a bone, slot, mesh attachment or constraint first',
   '已在 {0}s 为{1}打关键帧': 'Keyed {1} at {0}s',
   '已在 {0}s 打了 {1} 处关键帧': 'Keyed {1} properties at {0}s',

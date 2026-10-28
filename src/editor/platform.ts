@@ -7,6 +7,8 @@ import type {
   ImageInfo,
   IpcResult,
   McpInstallReport,
+  SkillBundleInfo,
+  SkillInstallReport,
   SpinePreviewInfo,
   SpinePreviewSession
 } from '@shared/ipcTypes'
@@ -79,6 +81,12 @@ export interface Platform {
   aiMcpInfo(): Promise<IpcResult<{ running: boolean; mcpUrl: string; url: string; token: string }>>
   /** AI 接入：把 MCP URL 写进已识别的 AI 客户端配置（一键安装） */
   aiInstallMcp(): Promise<IpcResult<McpInstallReport>>
+  /** AI 接入：随包 AI Skill 的位置与清单 */
+  aiSkillsInfo(): Promise<IpcResult<SkillBundleInfo>>
+  /** AI 接入：在文件管理器里打开随包 Skill 目录 */
+  aiOpenSkillsDir(): Promise<IpcResult<{ path: string }>>
+  /** AI 接入：把 Skill 装进 AI 客户端（不传 dir = 已知支持的客户端；传 dir = 指定目录） */
+  aiInstallSkill(options?: { name?: string; dir?: string }): Promise<IpcResult<SkillInstallReport>>
   /** 语言：系统语言标签（Electron 走主进程 `app.getLocale()`，浏览器读 `navigator.language`） */
   systemLocale(): Promise<string>
   /** 语言：把当前界面语言同步给主进程（重建菜单）；浏览器模式为空实现 */
@@ -247,6 +255,30 @@ class ElectronPlatform implements Platform {
       return { ok: false, error: t('命令服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）') }
     }
     return call.call(this.bridge)
+  }
+
+  async aiSkillsInfo(): Promise<IpcResult<SkillBundleInfo>> {
+    const call = this.bridge.aiSkillsInfo
+    if (typeof call !== 'function') {
+      return { ok: false, error: t('命令服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）') }
+    }
+    return call.call(this.bridge)
+  }
+
+  async aiOpenSkillsDir(): Promise<IpcResult<{ path: string }>> {
+    const call = this.bridge.aiOpenSkillsDir
+    if (typeof call !== 'function') {
+      return { ok: false, error: t('命令服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）') }
+    }
+    return call.call(this.bridge)
+  }
+
+  async aiInstallSkill(options?: { name?: string; dir?: string }): Promise<IpcResult<SkillInstallReport>> {
+    const call = this.bridge.aiInstallSkill
+    if (typeof call !== 'function') {
+      return { ok: false, error: t('命令服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）') }
+    }
+    return call.call(this.bridge, options)
   }
 
   /** 系统语言：优先问主进程 `app.getLocale()`；通道缺失（旧主进程）时退回 navigator */
@@ -453,6 +485,18 @@ class MemoryPlatform implements Platform {
 
   async aiInstallMcp(): Promise<IpcResult<McpInstallReport>> {
     return { ok: false, error: t('浏览器模式没有命令服务，请在桌面版里使用') }
+  }
+
+  async aiSkillsInfo(): Promise<IpcResult<SkillBundleInfo>> {
+    return { ok: false, error: t('浏览器模式没有随包 Skill，请在桌面版里使用') }
+  }
+
+  async aiOpenSkillsDir(): Promise<IpcResult<{ path: string }>> {
+    return { ok: false, error: t('浏览器模式没有随包 Skill，请在桌面版里使用') }
+  }
+
+  async aiInstallSkill(): Promise<IpcResult<SkillInstallReport>> {
+    return { ok: false, error: t('浏览器模式没有随包 Skill，请在桌面版里使用') }
   }
 
   /** 浏览器模式：直接读 navigator.language */

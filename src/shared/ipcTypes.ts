@@ -88,6 +88,9 @@ export const IPC = {
   openExternal: 'shell:openExternal',
   aiMcpInfo: 'ai:mcpInfo',
   aiInstallMcp: 'ai:installMcp',
+  aiSkillsInfo: 'ai:skillsInfo',
+  aiOpenSkillsDir: 'ai:openSkillsDir',
+  aiInstallSkill: 'ai:installSkill',
   i18nSystemLocale: 'i18n:systemLocale',
   i18nSetLocale: 'i18n:setLocale'
 } as const
@@ -198,6 +201,71 @@ export interface McpInstallReport {
   items: McpClientResult[]
 }
 
+/**
+ * 随包分发的 AI Skill（`resources/skills/<name>/SKILL.md`）。
+ * 面板显示它、也能一键复制到 AI 客户端的 skills 目录。
+ */
+export interface SkillInfo {
+  /** frontmatter 里的 name */
+  name: string
+  /** 目录名（安装时落到 `<skills 目录>/<dirName>`） */
+  dirName: string
+  version?: string
+  description: string
+  /** 随包目录的绝对路径 */
+  path: string
+  /** 文件数（面板上给个体量感） */
+  files: number
+}
+
+export interface SkillBundleInfo {
+  /** 随包 Skill 根目录：打包后是 <resources>/skills，开发时是仓库 resources/skills */
+  path: string
+  exists: boolean
+  skills: SkillInfo[]
+  /** 手动安装用的复制命令模板（`<目标 skills 目录>` 为占位） */
+  copyCommand: string
+  /** 每个 AI 客户端里的安装状态（面板据此显示「已装 vX / 可更新」） */
+  targets: SkillTargetState[]
+}
+
+/** 某个 AI 客户端里这个 Skill 的安装状态 */
+export interface SkillTargetState {
+  id: string
+  label: string
+  /** 该客户端的 skills 目录 */
+  path: string
+  /** 是否检测到该客户端（数据目录存在） */
+  detected: boolean
+  /** 是否支持自动安装 */
+  auto: boolean
+  /** 是否已装（skillsDir/<name>/SKILL.md 存在） */
+  installed: boolean
+  /** 已装版本（读 SKILL.md 的 frontmatter；老版本没写 version 就是 undefined） */
+  installedVersion?: string
+  /** 已装版本与随包不一致 */
+  outdated: boolean
+}
+
+export type SkillInstallStatus = 'written' | 'manual' | 'error'
+
+export interface SkillTargetResult {
+  id: string
+  label: string
+  status: SkillInstallStatus
+  /** written：写入的目录；manual：该客户端的 skills 目录 */
+  path?: string
+  error?: string
+  /** manual：是否检测到该客户端的数据目录 */
+  detected?: boolean
+  /** manual：可直接复制执行的安装命令 */
+  copyCommand?: string
+}
+
+export interface SkillInstallReport {
+  items: SkillTargetResult[]
+}
+
 /** preload 暴露到 window.hao 的 API。 */
 export interface HaoBridge {
   readonly isElectron: true
@@ -242,6 +310,18 @@ export interface HaoBridge {
   aiMcpInfo(): Promise<IpcResult<{ running: boolean; mcpUrl: string; url: string; token: string }>>
   /** AI 接入：把 MCP URL 写进已识别的 AI 客户端配置（一键安装） */
   aiInstallMcp(): Promise<IpcResult<McpInstallReport>>
+  /** AI 接入：随包 AI Skill 的位置与清单 */
+  aiSkillsInfo(): Promise<IpcResult<SkillBundleInfo>>
+  /** AI 接入：在文件管理器里打开随包 Skill 目录 */
+  aiOpenSkillsDir(): Promise<IpcResult<{ path: string }>>
+  /**
+   * AI 接入：把 Skill 复制进 AI 客户端。
+   * 不传参数 = 装到已知支持 Skills 且已安装的客户端；传 `dir` = 装到用户选的目录。
+   */
+  aiInstallSkill(options?: {
+    name?: string
+    dir?: string
+  }): Promise<IpcResult<SkillInstallReport>>
   /** 语言：主进程侧的系统语言标签（`app.getLocale()`，首次启动用它判定界面语言） */
   systemLocale(): Promise<IpcResult<string>>
   /** 语言：把当前界面语言同步给主进程，让它按该语言重建菜单 */

@@ -6,7 +6,9 @@ import type { Selection } from '../store/selectionStore'
 import type { RuntimeBundle } from '../runtime'
 import { buildTimeline, deleteKeys, keyframeTargets, syncDuration } from './model'
 import {
+  eventFrameAt,
   keyBoneChannel,
+  keyEventFrame,
   keySlotDisplay,
   keySlotSubArmature,
   pruneEmptyTracks
@@ -16,7 +18,6 @@ import { AttachmentType } from '@core/model/types'
 import type { BoneChannel } from '../commands/animationCommands'
 import type { KeyframeTarget, KeyKind, KeySelector, PoseSnapshot } from './model'
 import type { AuthoringAnimData } from '@core/model/authoring'
-import type { EventKeyframe } from '@core/model/animation'
 import type { Vec2 } from '@core/math/matrix'
 import { t } from '@i18n'
 
@@ -250,23 +251,16 @@ export function keySlotSubArmatureNow(
   }
 }
 
-/** 事件名默认取 `event`、`event2`…（避开已用过的名字） */
-function nextEventName(events: readonly EventKeyframe[]): string {
-  const used = new Set(events.map((event) => event.name))
-  if (!used.has('event')) return 'event'
-  for (let i = 2; i < 10000; i++) {
-    const candidate = `event${i}`
-    if (!used.has(candidate)) return candidate
-  }
-  return `event${events.length + 1}`
-}
-
 /**
  * 在当前播放头位置插入一个**事件帧**（时间轴最上面那条事件轨）。
  *
  * 事件帧只有「时间 + 事件名 + 字符串 / 整数 / 浮点参数」（见 `EventKeyframe`）：
  * 运行期由 `AnimationPlayer.fireEvents` 在越过该时刻时触发（含循环回绕），
  * 导出到 spine / DragonBones 也带着它 —— 之前缺的就是这里的创建入口。
+ *
+ * **同一时间点只允许一个事件帧**：该时刻已经有事件时不再新建，只把已有的那个选中，
+ * 让用户直接在值栏改名 / 改参数。事件轨的标记是按时间合并显示的，叠出来的第二个
+ * 事件在时间轴上看不见，却会在播放时一起触发。
  *
  * 名字按 `event` / `event2`… 递增，插入后**立刻选中它**：视口下方的值栏会直接给出
  * 改名与三个参数的输入框，不用再去轨道里把它找出来。
@@ -276,13 +270,30 @@ export function keyEventNow(): ActionResult {
   if (!animScope) return { ok: false, message: noAnimationMessage() }
   // 与 dope sheet 新建关键帧同一取整口径（4 位小数），保证键 id / 选中判定稳定
   const at = Math.round(useTimelineStore.getState().time * 1e4) / 1e4
+  const animation = useProjectStore.getState().document.animations.find((item) => item.name === animScope)
+  if (!animation) return { ok: false, message: t('找不到动画「{0}」', animScope) }
+
+  const existing = eventFrameAt(animation, at)
+  if (existing) {
+    const timeline = useTimelineStore.getState()
+    timeline.notifyKeyed('event', at)
+    timeline.setSelectedKeys([
+      { kind: 'event', target: existing.name, attachment: '', channel: existing.name, time: at }
+    ])
+    return {
+      ok: true,
+      message: t('{0}s 已有事件帧「{1}」：同一时间点只能有一个事件帧，已选中它（可直接改名 / 改参数）', [
+        at.toFixed(2),
+        existing.name
+      ])
+    }
+  }
+
   let name = ''
   useProjectStore.getState().update(t('添加事件帧'), (draft) => {
     const animation = draft.animations.find((item) => item.name === animScope)
     if (!animation) return
-    name = nextEventName(animation.events)
-    animation.events.push({ time: at, name, stringParam: '', intParam: 0, floatParam: 0 })
-    animation.events.sort((a, b) => a.time - b.time)
+    name = keyEventFrame(animation, at).frame.name
     // 时长是「可编辑范围」：事件落在末尾之外时同步延长（只增不减）
     syncDuration(animation)
   })

@@ -20,8 +20,10 @@ import { useModeStore } from '../store/modeStore'
 import { useSelectionStore } from '../store/selectionStore'
 import { useTimelineStore } from '../store/timelineStore'
 import { useToolStore } from '../store/toolStore'
+import { useSettingsStore } from '../store/settingsStore'
 import { getActiveScene } from '../activeScene'
 import { releaseDocumentAssets } from './assetCache'
+import type { BatchFile, SkillInfo, SkillTargetState } from '@shared/ipcTypes'
 
 export interface IoResult {
   ok: boolean
@@ -204,6 +206,11 @@ const AI_DIR_NAME = 'ai'
 const AI_API_DOC_NAME = 'hao2d-ai-command-api.md'
 const AI_PLAYBOOK_NAME = 'hao2d-ai-playbook.md'
 const AI_SERVER_INFO_NAME = 'hao2d-ai-server.json'
+const AI_SKILLS_DIR_NAME = 'skills'
+/** 记录已复制到工程里的 Skill 版本，避免每次保存都重写 ~30KB */
+const AI_SKILL_MARKER_NAME = '.hao2d-skill.json'
+/** 客户端已装同版本时，工程里只留这个指路文件（不放副本） */
+const AI_SKILL_POINTER_NAME = 'README.md'
 
 async function exportAiCompanionFiles(projectDir: string): Promise<void> {
   if (!projectDir) return
@@ -225,6 +232,115 @@ async function exportAiCompanionFiles(projectDir: string): Promise<void> {
       note: '由 Hao2DEditor 在保存/打开工程时自动生成（工程 ai/ 目录）。编辑器关闭后命令服务停止、token 失效；重新打开编辑器并保存/打开工程即可刷新本文件。'
     }
     await platform.writeText(joinPath(aiDir, AI_SERVER_INFO_NAME), `${JSON.stringify(payload, null, 2)}\n`)
+  }
+  await exportAiSkillCopy(projectDir)
+}
+
+/** 客户端已装同版本时，工程里只留这个指路文件，不放副本 */
+function skillPointerMarkdown(skill: SkillInfo, installed: SkillTargetState[]): string {
+  const where = installed
+    .map((target) => `- ${target.label}：\`${joinPath(target.path, skill.dirName)}\``)
+    .join('\n')
+  return [
+    '# AI Skill 不在工程内（本机客户端已有）',
+    '',
+    `本机已经在 AI 客户端安装了 \`${skill.name}\`${skill.version ? ` v${skill.version}` : ''}，客户端会自动加载它。`,
+    '因此本工程**不再保留副本**：同一份手册读两遍只会多占上下文，版本不一致时还会互相冲突。',
+    '',
+    '已安装位置（本机路径，仅供排查）：',
+    where,
+    '',
+    '换机器、或把工程共享给没装这个 Skill 的同事时：打开「文件 → AI 接入…」面板，',
+    '勾选「客户端已装同版本时也复制」，再保存一次工程即可把副本写回来。',
+    ''
+  ].join('\n')
+}
+
+/** 删掉工程里的旧副本（逐文件删；没有删目录的 IPC，空目录留着无害） */
+async function removeSkillCopy(platform: Platform, targetDir: string, markerPath: string): Promise<void> {
+  const entries = await platform.listDir(targetDir, true)
+  for (const entry of entries) {
+    if (!entry.isDirectory) await platform.deleteFile(entry.path)
+  }
+  await platform.deleteFile(markerPath)
+}
+
+/**
+ * 把随包 AI Skill 复制到 `<工程>/ai/skills/<name>/`（**客户端已有同版本时不留副本**）。
+ *
+ * 为什么要往工程里放一份：Codex 这类「在工作区里干活」的 AI 只读当前文件夹，
+ * 看不到 `~/.codebuddy/skills`；工程里带一份，打开文件夹就能上手。
+ *
+ * 但客户端已经加载了同版本 Skill 时，副本纯属重复：同一份手册读两遍白占上下文，
+ * 版本不一致时还会互相冲突。所以这时只写一个 `ai/skills/README.md` 指路，
+ * 并把可能存在的旧副本清掉。真想留副本（共享给同事 / 换机器）就打开
+ * 设置项 `aiSkillAlwaysCopyProject`。
+ *
+ * 成本控制：
+ * - 面板开关 `aiSkillInProject` 关掉就完全不写；
+ * - 版本 + 文件数没变就跳过（复用 `.hao2d-skill.json`），保存工程是高频动作；
+ * - 复制失败（工程目录只读等）只记日志，不阻断保存。
+ */
+async function exportAiSkillCopy(projectDir: string): Promise<void> {
+  if (!projectDir) return
+  const settings = useSettingsStore.getState()
+  if (!settings.aiSkillInProject) return
+  try {
+    const platform = getPlatform()
+    const info = await platform.aiSkillsInfo()
+    if (!info.ok || !info.data.exists || !info.data.skills.length) return
+    const skill = info.data.skills[0]
+    const skillsDir = joinPath(joinPath(projectDir, AI_DIR_NAME), AI_SKILLS_DIR_NAME)
+    const targetDir = joinPath(skillsDir, skill.dirName)
+    const markerPath = joinPath(skillsDir, AI_SKILL_MARKER_NAME)
+    const readmePath = joinPath(skillsDir, AI_SKILL_POINTER_NAME)
+
+    // 客户端已装「同版本」→ 工程里不留副本。版本不同（客户端是旧的）时照常复制：
+    // 随包那份更新，清掉反而更差。
+    const sameVersion = info.data.targets.filter((target) =>
+      Boolean(skill.version && target.installed && target.installedVersion === skill.version)
+    )
+    if (sameVersion.length > 0 && !settings.aiSkillAlwaysCopyProject) {
+      await removeSkillCopy(platform, targetDir, markerPath)
+      await platform.writeText(readmePath, skillPointerMarkdown(skill, sameVersion))
+      return
+    }
+
+    // 要留副本：先删掉指路 README，否则「不在工程内」和「这就是副本」互相矛盾
+    await platform.deleteFile(readmePath)
+
+    // 先 exists 再读：readText 读不到会走主进程的 error 分支，白白在日志里刷一条
+    const markerText = (await platform.exists(markerPath)) ? await platform.readText(markerPath) : ''
+    if (markerText) {
+      try {
+        const marker = JSON.parse(markerText) as { version?: string; files?: number }
+        if (marker.version === (skill.version ?? '') && marker.files === skill.files) return
+      } catch {
+        // 标记文件损坏：当作没写过，下面整份重写
+      }
+    }
+
+    const entries = await platform.listDir(skill.path, true)
+    const files: BatchFile[] = []
+    for (const entry of entries) {
+      if (entry.isDirectory) continue
+      const bytes = await platform.readBinary(entry.path)
+      if (!bytes || bytes.length === 0) continue
+      files.push({ path: joinPath(targetDir, entry.relativePath), bytes })
+    }
+    if (files.length === 0) return
+    // writeBatch 会按目标路径自动建目录
+    await platform.writeBatch(files)
+    const marker = {
+      name: skill.name,
+      version: skill.version ?? '',
+      files: skill.files,
+      updatedAt: new Date().toISOString(),
+      note: '由 Hao2DEditor 自动生成：随包 AI Skill 的副本。源码在 App 的 resources/skills，改这里不会同步回去。'
+    }
+    await platform.writeText(markerPath, `${JSON.stringify(marker, null, 2)}\n`)
+  } catch (error) {
+    console.warn('[hao2d] 复制 AI Skill 到工程失败：', error)
   }
 }
 

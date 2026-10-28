@@ -16,11 +16,28 @@ export interface GlobalSettings {
   spineAtlasTxt: boolean
   /** 骨骼叠加层样式（视口里骨骼的长相，默认值见 `DEFAULT_BONE_STYLE`） */
   boneStyle: BoneOverlayStyle
+  /**
+   * 保存 / 打开工程时，把随包 AI Skill 复制到 `<工程>/ai/skills/`。
+   *
+   * 给「工作区型」AI（Codex 这类在工程目录里干活的）用：打开文件夹就能看到手册，
+   * 不必配 MCP、也不必自己去用户目录找。默认开；嫌工程目录里多文件可在 AI 接入面板关掉。
+   */
+  aiSkillInProject: boolean
+  /**
+   * 客户端已经装了**同版本**的 Skill 时，工程里还要不要留副本。
+   *
+   * 默认 `false`——客户端会自动加载它，工程里再放一份就是同一份手册读两遍：
+   * 白占上下文，版本不一致时还会互相冲突。此时工程里只写一个 `ai/skills/README.md` 指路。
+   * 需要把工程共享给没装 Skill 的同事、或要换机器时，再在这里打开。
+   */
+  aiSkillAlwaysCopyProject: boolean
 }
 
 const DEFAULT_SETTINGS: GlobalSettings = {
   spineAtlasTxt: false,
-  boneStyle: { ...DEFAULT_BONE_STYLE }
+  boneStyle: { ...DEFAULT_BONE_STYLE },
+  aiSkillInProject: true,
+  aiSkillAlwaysCopyProject: false
 }
 
 function loadSettings(): GlobalSettings {
@@ -77,6 +94,10 @@ export interface SettingsStore extends GlobalSettings {
   setBoneStyle: (patch: Partial<BoneOverlayStyle>) => void
   /** 骨骼样式恢复默认 */
   resetBoneStyle: () => void
+  /** 是否把随包 AI Skill 复制进工程 ai/skills/ */
+  setAiSkillInProject: (value: boolean) => void
+  /** 客户端已装同版本时，是否仍然复制到工程 */
+  setAiSkillAlwaysCopyProject: (value: boolean) => void
 }
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
@@ -94,5 +115,13 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
     const boneStyle = { ...DEFAULT_BONE_STYLE }
     set({ boneStyle })
     saveSettings({ ...get(), boneStyle })
+  },
+  setAiSkillInProject: (value) => {
+    set({ aiSkillInProject: value })
+    saveSettings({ ...get(), aiSkillInProject: value })
+  },
+  setAiSkillAlwaysCopyProject: (value) => {
+    set({ aiSkillAlwaysCopyProject: value })
+    saveSettings({ ...get(), aiSkillAlwaysCopyProject: value })
   }
 }))

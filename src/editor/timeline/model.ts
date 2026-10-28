@@ -338,12 +338,18 @@ export function editKeys(
   return count
 }
 
-/** 删除选中的关键帧（含事件帧） */
+/**
+ * 删除选中的关键帧（含事件帧）。
+ *
+ * 按**时间**删而不是按帧对象删：同一时刻只允许一帧，历史数据里遗留的重复帧
+ * （早期事件帧叠帧）也一并清掉 —— 时间轴把它们合并成一颗标记，删一次却还剩一个，
+ * 看起来就是「删不掉」。
+ */
 export function deleteKeys(doc: EditorDocument, animationName: string | null, selectors: readonly KeySelector[]): number {
   return editFrameTimes(doc, animationName, selectors, (subset, frames) => {
-    for (const frame of subset) {
-      const index = frames.indexOf(frame)
-      if (index >= 0) frames.splice(index, 1)
+    const times = subset.map((frame) => frame.time)
+    for (let index = frames.length - 1; index >= 0; index--) {
+      if (times.some((time) => Math.abs(frames[index].time - time) < 1e-4)) frames.splice(index, 1)
     }
   })
 }
@@ -473,6 +479,25 @@ export function repairDisplayNames(doc: EditorDocument): number {
 }
 
 /**
+ * 打开工程 / 导入后的兜底：**同一时间点只保留一个事件帧**（保留排在最前的那个），
+ * 返回清掉的重复帧数量。
+ *
+ * 早期「添加事件帧」不做去重，同一播放头连点几次就会在同一时刻叠出 event / event2 …：
+ * 时间轴按时间合并标记看不出来，播放时却会全部触发；而删除按「时间」定位，
+ * 一次只能删掉其中一个（剩下的像幽灵一样删不干净）。
+ */
+export function repairEvents(doc: EditorDocument): number {
+  let removed = 0
+  for (const animation of doc.animations) {
+    const before = animation.events.length
+    sortFrames(animation.events)
+    dedupeFrames(animation.events)
+    removed += before - animation.events.length
+  }
+  return removed
+}
+
+/**
  * 按「选择器（保存原始时间）+ 目标时间」重设关键帧时间。
  * 拖拽时每次都基于**原始时间**重算，避免增量累积误差；selector 始终能定位到原始帧。
  */
@@ -484,16 +509,21 @@ export function setKeysTimes(
   const animation = doc.animations.find((item) => item.name === animationName)
   if (!animation) return 0
   let count = 0
+  /** 被拖动 / 缩放的帧：它们落到已有帧的时间上时，保留它们、丢掉原地那一帧 */
+  const touched = new Set<unknown>()
   for (const entry of entries) {
     const frames = resolveTimeFrames(animation, entry.selector)
     if (!frames) continue
     const frame = frames.find((item) => Math.abs(item.time - entry.selector.time) < 1e-4)
     if (!frame) continue
     frame.time = Math.max(0, entry.time)
+    touched.add(frame)
     count++
   }
   // 全部处理完再排序，保证 selector → frame 的匹配不被中途排序破坏
   sortAllTracks(animation)
+  // 拖到已有帧的时间点上时两帧会并存：同一条通道只保留被拖的那一帧
+  dedupeAllTracks(animation, touched)
   syncDuration(animation)
   return count
 }
@@ -534,6 +564,72 @@ function sortAllTracks(animation: AuthoringAnimData): void {
   }
   sortFrames(animation.events)
   sortFrames(animation.drawOrder)
+}
+
+/**
+ * 同一条轨道上**不允许两帧落在同一时刻**（容差 1e-4，与选择器判定一致）。
+ *
+ * 拖动 / 缩放 / 拖到已有帧上是出现「同一帧叠多帧」的唯一入口：时间轴按时间合并标记，
+ * 界面上只能看到一颗菱形（或一面旗），播放采样却只认其中一帧 —— 看着像丢帧。
+ * 这里收敛成一帧：`preferred` 里的帧（本次被操作的）优先存活，否则保留排在前面的那帧。
+ */
+function dedupeFrames<T extends { time: number }>(frames: T[], preferred?: ReadonlySet<unknown>): void {
+  const kept: T[] = []
+  let dropped = false
+  for (const frame of frames) {
+    const clash = kept.find((item) => Math.abs(item.time - frame.time) < 1e-4)
+    if (!clash) {
+      kept.push(frame)
+      continue
+    }
+    dropped = true
+    if (preferred?.has(frame) && !preferred.has(clash)) kept[kept.indexOf(clash)] = frame
+  }
+  if (!dropped) return
+  frames.length = 0
+  frames.push(...kept)
+}
+
+/** display 通道的去重版：帧与附件名是并行数组，必须成对丢弃（否则名字错位、显示成别的图） */
+function dedupeDisplayFrames(track: AuthoringSlotAnim, preferred?: ReadonlySet<unknown>): void {
+  const pairs = track.displayIndex.map((frame, index) => ({ frame, name: track.displayAttachment[index] ?? '' }))
+  const kept: typeof pairs = []
+  let dropped = false
+  for (const pair of pairs) {
+    const clash = kept.find((item) => Math.abs(item.frame.time - pair.frame.time) < 1e-4)
+    if (!clash) {
+      kept.push(pair)
+      continue
+    }
+    dropped = true
+    if (preferred?.has(pair.frame) && !preferred.has(clash.frame)) kept[kept.indexOf(clash)] = pair
+  }
+  if (!dropped) return
+  track.displayIndex = kept.map((pair) => pair.frame)
+  track.displayAttachment = kept.map((pair) => pair.name)
+}
+
+/** 所有轨道按时间收敛重复帧（事件 / 绘制顺序这类离散帧同样适用） */
+function dedupeAllTracks(animation: AuthoringAnimData, preferred?: ReadonlySet<unknown>): void {
+  for (const track of animation.bones) {
+    dedupeFrames(track.rotate, preferred)
+    dedupeFrames(track.translate, preferred)
+    dedupeFrames(track.scale, preferred)
+    dedupeFrames(track.shear, preferred)
+  }
+  for (const track of animation.slots) {
+    dedupeFrames(track.color, preferred)
+    dedupeDisplayFrames(track, preferred)
+    dedupeFrames(track.visible, preferred)
+    if (track.subArmature) dedupeFrames(track.subArmature, preferred)
+  }
+  for (const track of animation.deforms) dedupeFrames(track.frames, preferred)
+  for (const track of animation.constraints) {
+    for (const list of Object.values(constraintFrames(track))) dedupeFrames(list, preferred)
+  }
+  // 同一时间点只允许一个事件帧（不同名事件也不并存）：多出来的会在播放时同时触发
+  dedupeFrames(animation.events, preferred)
+  dedupeFrames(animation.drawOrder, preferred)
 }
 
 export function setKeyEasing(
@@ -935,6 +1031,8 @@ function editFrameTimes(
   const animation = doc.animations.find((item) => item.name === animationName)
   if (!animation) return 0
   let count = 0
+  /** 本次操作命中的帧对象：同时间点去重时优先保留它们（拖过去的那一帧覆盖原地帧） */
+  const touched = new Set<unknown>()
   const grouped = new Map<string, KeySelector[]>()
   for (const selector of selectors) {
     const key = `${selector.kind}|${selector.target}|${selector.attachment}|${selector.channel}`
@@ -946,9 +1044,15 @@ function editFrameTimes(
   for (const list of grouped.values()) {
     const frames = resolveTimeFrames(animation, list[0])
     if (!frames) continue
-    const subset = list
-      .map((selector) => frames.find((frame) => Math.abs(frame.time - selector.time) < 1e-4))
-      .filter((frame): frame is { time: number } => Boolean(frame))
+    // 同一时间点的两个选择器会命中**同一个帧对象**（例如事件帧按时间合并标记后一次选中了两个）：
+    // 重复处理会让计数虚报，删除时第二次 indexOf 还返回 -1，表现成「删了还剩一个」
+    const subset = [
+      ...new Set(
+        list
+          .map((selector) => frames.find((frame) => Math.abs(frame.time - selector.time) < 1e-4))
+          .filter((frame): frame is { time: number } => Boolean(frame))
+      )
+    ]
     if (subset.length === 0) continue
     // display 通道：帧和附件名是并行数组，删/移动帧后要按**帧对象身份**恢复配对
     // （否则名字会错位，播放时显示出错误的 attachment 或直接不画）
@@ -960,6 +1064,7 @@ function editFrameTimes(
       ? new Map(displayTrack.displayIndex.map((frame, index) => [frame, displayTrack.displayAttachment[index] ?? '']))
       : null
     mutate(subset, frames)
+    for (const frame of subset) touched.add(frame)
     count += subset.length
     if (displayTrack && namesByFrame) {
       displayTrack.displayAttachment = displayTrack.displayIndex.map(
@@ -968,6 +1073,8 @@ function editFrameTimes(
     }
   }
   sortAllTracks(animation)
+  // 拖动 / 缩放把两帧送到同一时刻时只留一帧：时间轴按时间合并标记，多了也看不出来
+  dedupeAllTracks(animation, touched)
   syncDuration(animation)
   return count
 }

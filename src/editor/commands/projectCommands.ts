@@ -17,6 +17,7 @@ import {
 import { prepareRuntimeExport, writeHao2dExport, writeRuntimeExport } from '../services/exportService'
 import { writeSpineExport } from '../services/spineExport'
 import { clearWeightClipboard } from './authoringCommands'
+import { keyEventFrame } from './animationCommands'
 import { requireAnimation } from './animOps'
 import { changed, defineAction, defineWrite, unchanged } from './registry'
 import { need, needNum, optBool, optNum, optNumList, optText, optTextList, rawText } from './args'
@@ -49,17 +50,6 @@ function resetForSkeletonChange(): void {
   clearWeightClipboard()
   useTimelineStore.getState().setAnimation(null)
   getActiveScene()?.fit()
-}
-
-/** 事件名默认取 `event`、`event2`…（避开已用过的名字，与时间轴的取法一致） */
-function nextEventName(events: readonly EventKeyframe[]): string {
-  const used = new Set(events.map((event) => event.name))
-  if (!used.has('event')) return 'event'
-  for (let i = 2; i < 10000; i++) {
-    const candidate = `event${i}`
-    if (!used.has(candidate)) return candidate
-  }
-  return `event${events.length + 1}`
 }
 
 /** 按时间点找事件帧（时间用 4 位小数舍入，与打帧口径一致） */
@@ -531,7 +521,7 @@ export function registerProjectCommands(): void {
       name: 'keyEvent',
       title: '添加事件帧',
       description:
-        '在指定时间点插入一个事件帧（时间轴最上面那条事件轨）。不传 time 用当前播放头，不传 name 自动取 event / event2…',
+        '在指定时间点插入一个事件帧（时间轴最上面那条事件轨）。不传 time 用当前播放头，不传 name 自动取 event / event2…。**同一时间点只有一个事件帧**：该时刻已有事件时只覆盖传入的字段（不会叠出第二个）',
       args: {
         animation: { type: 'string', description: '动画名；不传则用当前编辑动画' },
         time: { type: 'number', description: '时间点（秒）；不传用当前播放头' },
@@ -546,16 +536,21 @@ export function registerProjectCommands(): void {
     (draft, args) => {
       const animation = requireAnimation(draft, optText(args, 'animation'))
       const at = Math.round((optNum(args, 'time') ?? useTimelineStore.getState().time) * 1e4) / 1e4
-      const name = optText(args, 'name') ?? nextEventName(animation.events)
-      const stringParam = rawText(args, 'stringParam') ?? ''
-      const intParam = optNum(args, 'intParam') ?? 0
-      const floatParam = optNum(args, 'floatParam') ?? 0
-      animation.events.push({ time: at, name, stringParam, intParam, floatParam })
-      animation.events.sort((a, b) => a.time - b.time)
+      const explicitName = optText(args, 'name')
+      // 同一时间点只允许一个事件帧：已有事件就地覆盖给出字段，不追加第二个。
+      // name 只在**显式给出**时才覆盖，否则保留该时刻已有事件的名字（不传名字不该把它改名）
+      const { frame, replaced } = keyEventFrame(animation, at, {
+        ...(explicitName === undefined ? {} : { name: explicitName }),
+        stringParam: rawText(args, 'stringParam'),
+        intParam: optNum(args, 'intParam'),
+        floatParam: optNum(args, 'floatParam')
+      })
       syncDuration(animation)
       return changed(
-        { animation: animation.name, time: at, name },
-        `已在 ${at.toFixed(2)}s 添加事件帧「${name}」`
+        { animation: animation.name, time: at, name: frame.name },
+        replaced
+          ? `已在 ${at.toFixed(2)}s 覆盖事件帧「${frame.name}」（同一时间点只能有一个事件帧）`
+          : `已在 ${at.toFixed(2)}s 添加事件帧「${frame.name}」`
       )
     }
   )

@@ -52,6 +52,9 @@ const bridge: HaoBridge = {
 
   aiMcpInfo: () => invoke(IPC.aiMcpInfo),
   aiInstallMcp: () => invoke(IPC.aiInstallMcp),
+  aiSkillsInfo: () => invoke(IPC.aiSkillsInfo),
+  aiOpenSkillsDir: () => invoke(IPC.aiOpenSkillsDir),
+  aiInstallSkill: (options) => invoke(IPC.aiInstallSkill, options),
 
   systemLocale: () => invoke<string>(IPC.i18nSystemLocale),
   setAppLocale: (locale: string) => invoke<void>(IPC.i18nSetLocale, locale),

@@ -15,6 +15,8 @@
     "build": "npm run build:hao2d-runtime && electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "gen:skill-docs": "vite-node --config vitest.config.ts scripts/gen-skill-commands.mjs",
+    "check:skill-docs": "vite-node --config vitest.config.ts scripts/gen-skill-commands.mjs --check",
     "test": "vitest run",
     "test:watch": "vitest",
     "package": "npm run build && electron-builder --dir",
@@ -63,6 +65,12 @@
     "files": [
       "out/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/skills",
+        "to": "skills"
+      }
     ],
     "artifactName": "Hao2D.Editor-${version}-${os}-${arch}.${ext}",
     "afterPack": "./scripts/afterPack.cjs",

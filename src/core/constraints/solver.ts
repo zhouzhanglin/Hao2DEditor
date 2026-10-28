@@ -280,6 +280,8 @@ function tipPosition(skeleton: Skeleton, boneIndex: number): { x: number; y: num
  * - relative = true 时叠加目标相对 setup 的增量，而不是直接对齐
  * - inherit 决定从目标变换中剔除哪些分量（normal 全取 / onlyTranslation 只取平移 /
  *   noRotationOrReflection 去掉旋转 / noScale 与 noScaleOrReflection 去掉缩放）
+ * - 偏移量（x/y/rotation/shearY）始终是**目标骨骼空间**里的量：世界模式要跟着目标的
+ *   旋转/缩放/镜像换算（Spine `target.localToWorld`），局部模式直接用，见下方注释
  */
 function solveTransform(skeleton: Skeleton, c: TransformConstraint, state: ConstraintState): void {
   const target = c.targetBoneIndex
@@ -295,8 +297,8 @@ function solveTransform(skeleton: Skeleton, c: TransformConstraint, state: Const
 
   const targetRot = useLocal ? skeleton.localRot[target] : skeleton.worldRot[target]
   const setupTargetRot = useLocal ? setup.rot[target] : setup.worldRot[target]
-  const targetPosX = useLocal ? setup.pos[target * 2] : skeleton.boneWorldX(target)
-  const targetPosY = useLocal ? setup.pos[target * 2 + 1] : skeleton.boneWorldY(target)
+  const targetPosX = useLocal ? skeleton.localPos[target * 2] : skeleton.boneWorldX(target)
+  const targetPosY = useLocal ? skeleton.localPos[target * 2 + 1] : skeleton.boneWorldY(target)
   const setupTargetPosX = useLocal ? setup.pos[target * 2] : setup.world[target * 16 + 12]
   const setupTargetPosY = useLocal ? setup.pos[target * 2 + 1] : setup.world[target * 16 + 13]
   const targetScaleX = useLocal ? skeleton.localScale[target * 2] : worldScaleX(skeleton, target)
@@ -307,13 +309,33 @@ function solveTransform(skeleton: Skeleton, c: TransformConstraint, state: Const
     ? skeleton.localShear[target * 2 + 1]
     : worldAxisY(skeleton, target) - skeleton.worldRot[target] - 90
 
+  /*
+   * 世界模式下 x/y/rotation/shearY 这几个偏移量都是**目标骨骼局部空间**的坐标
+   * （Spine 的 `target.localToWorld(offset)`）：要跟着目标的旋转、缩放和镜像一起转，
+   * 不能当成世界单位直接加。早先直接加世界单位，本站 head 约束（translateMix 0.4，
+   * 偏移 -97.08 / 20.21）就把头甩到了身体外面 —— 而它正确的位置几乎就是偏移换算后
+   * 落在的位置（约束本意只是微调）。
+   */
+  const to = target * 16
+  const ta = skeleton.world[to]
+  const tb = skeleton.world[to + 4]
+  const tc = skeleton.world[to + 1]
+  const td = skeleton.world[to + 5]
+  // 目标被镜像（行列式为负）时，角度类偏移要反向（Spine 的 degRadReflect）
+  const reflect = ta * td - tb * tc > 0 ? 1 : -1
+  const offsetRotate = useLocal ? state.offsetRotate : state.offsetRotate * reflect
+  const offsetShearY = useLocal ? state.offsetShearY : state.offsetShearY * reflect
+  // 平移偏移换到世界空间：只走目标矩阵的线性部分（旋转 + 缩放 + 镜像），平移另行加入
+  const offsetX = useLocal ? state.offsetX : ta * state.offsetX + tb * state.offsetY
+  const offsetY = useLocal ? state.offsetY : tc * state.offsetX + td * state.offsetY
+
   for (const bone of c.boneIndices) {
     if (bone < 0 || bone >= skeleton.boneCount) continue
 
     if (!skipRotation && state.mixRotate > 0) {
       const want = c.relative
-        ? skeleton.worldRot[bone] + (targetRot - setupTargetRot) + state.offsetRotate
-        : targetRot + state.offsetRotate
+        ? skeleton.worldRot[bone] + (targetRot - setupTargetRot) + offsetRotate
+        : targetRot + offsetRotate
       setWorldRotation(skeleton, bone, want, state.mixRotate)
       skeleton.updateFkFrom(bone)
     }
@@ -331,8 +353,8 @@ function solveTransform(skeleton: Skeleton, c: TransformConstraint, state: Const
 
       if (state.mixShearY > 0) {
         const wantShear = c.relative
-          ? skeleton.localShear[bone * 2 + 1] + (targetShearY - setup.shear[target * 2 + 1]) + state.offsetShearY
-          : targetShearY + state.offsetShearY
+          ? skeleton.localShear[bone * 2 + 1] + (targetShearY - setup.shear[target * 2 + 1]) + offsetShearY
+          : targetShearY + offsetShearY
         skeleton.localShear[bone * 2 + 1] = lerpAngle(
           skeleton.localShear[bone * 2 + 1],
           wantShear,
@@ -343,22 +365,32 @@ function solveTransform(skeleton: Skeleton, c: TransformConstraint, state: Const
     }
 
     if (c.inherit !== 'onlyTranslation' && (state.mixX > 0 || state.mixY > 0)) {
-      const curX = skeleton.boneWorldX(bone)
-      const curY = skeleton.boneWorldY(bone)
-      const wantX = c.relative ? curX + (targetPosX - setupTargetPosX) : targetPosX
-      const wantY = c.relative ? curY + (targetPosY - setupTargetPosY) : targetPosY
-      /*
-       * 混合在**世界空间**做：世界模式的偏移量是世界单位，父骨骼带旋转/镜像时
-       * 「先转局部再混」和「先混再转局部」并不等价（本站的 body/head 约束就挂在
-       * 旋转 90°+ 的父骨下，混错会让头飞出身体）。
-       */
-      const destX = curX + (wantX + state.offsetX - curX) * state.mixX
-      const destY = curY + (wantY + state.offsetY - curY) * state.mixY
-      const local = worldToLocal(skeleton, bone, destX, destY)
-      if (local) {
-        skeleton.localPos[bone * 2] = local.x
-        skeleton.localPos[bone * 2 + 1] = local.y
+      if (useLocal) {
+        // 局部模式：目标和自身都用「相对父骨」的局部坐标，直接改 localPos
+        const curX = skeleton.localPos[bone * 2]
+        const curY = skeleton.localPos[bone * 2 + 1]
+        const wantX = c.relative ? targetPosX - setupTargetPosX : targetPosX
+        const wantY = c.relative ? targetPosY - setupTargetPosY : targetPosY
+        skeleton.localPos[bone * 2] = curX + (wantX + offsetX - curX) * state.mixX
+        skeleton.localPos[bone * 2 + 1] = curY + (wantY + offsetY - curY) * state.mixY
         skeleton.updateFkFrom(bone)
+      } else {
+        const curX = skeleton.boneWorldX(bone)
+        const curY = skeleton.boneWorldY(bone)
+        const wantX = c.relative ? curX + (targetPosX - setupTargetPosX) : targetPosX
+        const wantY = c.relative ? curY + (targetPosY - setupTargetPosY) : targetPosY
+        /*
+         * 混合在**世界空间**做：世界模式的偏移量已经换到世界空间（见上），父骨骼带
+         * 旋转/镜像时「先转局部再混」和「先混再转局部」并不等价。
+         */
+        const destX = curX + (wantX + offsetX - curX) * state.mixX
+        const destY = curY + (wantY + offsetY - curY) * state.mixY
+        const local = worldToLocal(skeleton, bone, destX, destY)
+        if (local) {
+          skeleton.localPos[bone * 2] = local.x
+          skeleton.localPos[bone * 2 + 1] = local.y
+          skeleton.updateFkFrom(bone)
+        }
       }
     }
   }

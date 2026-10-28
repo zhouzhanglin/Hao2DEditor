@@ -60,7 +60,11 @@ export interface SpineTransformConstraintJson {
   translateMix?: number
   scaleMix?: number
   shearMix?: number
-  /** 3.8–4.1 的偏移字段名 */
+  /**
+   * 3.8 的偏移字段名。注意旋转叫 **`rotation`**（3.8 运行库读的就是这个名字），
+   * 4.x 才改叫 `offsetRotation` —— 只认 `rotate` 会把老资源的旋转偏移整段丢成 0。
+   */
+  rotation?: number
   rotate?: number
   x?: number
   y?: number

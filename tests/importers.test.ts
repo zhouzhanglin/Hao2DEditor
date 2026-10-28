@@ -1307,7 +1307,7 @@ describe('Spine 导入', () => {
     expect(tc.mixY).toBeCloseTo(1, 6)
   })
 
-  it('transform 约束的 3.8 字段名（rotate / x / translateMix…）仍然认', () => {
+  it('transform 约束的 3.8 字段名（rotation / x / translateMix…）仍然认', () => {
     const json = {
       skeleton: { spine: '3.8.75' },
       bones: [{ name: 'root' }, { name: 'target' }],
@@ -1320,7 +1320,8 @@ describe('Spine 导入', () => {
           target: 'target',
           rotateMix: 0.4,
           translateMix: 0.6,
-          rotate: -15,
+          // 3.8 运行库读的是 `rotation`（不是 `rotate`，也不是 4.x 的 `offsetRotation`）
+          rotation: -15,
           x: 200
         }
       ]
@@ -1329,6 +1330,7 @@ describe('Spine 导入', () => {
     const tc = asset.constraints[0]
     expect(tc.type).toBe('transform')
     if (tc.type !== 'transform') return
+    // 只读 rotate / offsetRotation 时这里会是 0：body/head 的旋转偏移整段丢失
     expect(tc.offsetRotate).toBeCloseTo(-15, 6)
     expect(tc.offsetX).toBeCloseTo(2, 6)
     // translateMix 同时管 X 与 Y

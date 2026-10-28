@@ -262,12 +262,16 @@ describe('变换约束', () => {
     expect(Math.atan2(skeleton.world[16 + 1], skeleton.world[16]) * (180 / Math.PI)).toBeCloseTo(30, 3)
   })
 
-  it('偏移量按世界空间加（父骨镜像时不跟着翻向）', () => {
+  /*
+   * 平移偏移量是**目标骨骼局部空间**的坐标（Spine 的 `target.localToWorld(offset)`）。
+   * 早先当成世界单位直接加：目标一旋转/镜像，受约束骨就被甩到别处 —— 「一起打僵尸」
+   * 里 head 约束（translateMix 0.4，偏移 -97.08 / 20.21）表现就是头离开身体。
+   */
+  it('平移偏移量跟着目标旋转走（目标转 90° 时 offsetX 变成世界 +Y）', () => {
     const runtime = asset(
       [
-        createBoneData({ name: 'root', localScale: { x: -1, y: 1 } }),
-        createBoneData({ name: 'child', parentIndex: 0 }),
-        createBoneData({ name: 'target' })
+        createBoneData({ name: 'child' }),
+        createBoneData({ name: 'target', localPosition: { x: 10, y: 10 }, rotation: 90 })
       ],
       [slot('s', 0)],
       [skin('default', [{ slotName: 's', attachments: [region('r', 'tex', 2, 2)] }])],
@@ -276,19 +280,111 @@ describe('变换约束', () => {
     runtime.constraints = [
       createTransformConstraint({
         name: 'follow',
-        boneIndices: [1],
-        targetBoneIndex: 2,
+        boneIndices: [0],
+        targetBoneIndex: 1,
         mixRotate: 0,
         mixScaleX: 0,
         mixScaleY: 0,
-        offsetX: -1,
-        offsetY: 0.5
+        offsetX: 1
       })
     ]
     const skeleton = new Skeleton(runtime)
     solveConstraints(skeleton, runtime.constraints, createConstraintStates(runtime.constraints))
-    expect(skeleton.boneWorldX(1)).toBeCloseTo(-1, 4)
-    expect(skeleton.boneWorldY(1)).toBeCloseTo(0.5, 4)
+    expect(skeleton.boneWorldX(0)).toBeCloseTo(10, 4)
+    expect(skeleton.boneWorldY(0)).toBeCloseTo(11, 4)
+  })
+
+  it('平移偏移量跟着目标镜像翻向（目标 scaleX = -1 时 offsetX 取反）', () => {
+    const runtime = asset(
+      [
+        createBoneData({ name: 'child' }),
+        createBoneData({ name: 'target', localPosition: { x: 10, y: 0 }, localScale: { x: -1, y: 1 } })
+      ],
+      [slot('s', 0)],
+      [skin('default', [{ slotName: 's', attachments: [region('r', 'tex', 2, 2)] }])],
+      { textures: ['tex'] }
+    )
+    runtime.constraints = [
+      createTransformConstraint({
+        name: 'follow',
+        boneIndices: [0],
+        targetBoneIndex: 1,
+        mixRotate: 0,
+        mixScaleX: 0,
+        mixScaleY: 0,
+        offsetX: 1
+      })
+    ]
+    const skeleton = new Skeleton(runtime)
+    solveConstraints(skeleton, runtime.constraints, createConstraintStates(runtime.constraints))
+    expect(skeleton.boneWorldX(0)).toBeCloseTo(9, 4)
+    expect(skeleton.boneWorldY(0)).toBeCloseTo(0, 4)
+  })
+
+  it('局部模式下平移跟随目标**当前**局部位置，而不是 setup', () => {
+    // 目标被动画挪动后仍按 setup 对齐的话，受约束骨会停在旧位置
+    const runtime = asset(
+      [createBoneData({ name: 'child' }), createBoneData({ name: 'target', localPosition: { x: 5, y: 0 } })],
+      [slot('s', 0)],
+      [skin('default', [{ slotName: 's', attachments: [region('r', 'tex', 2, 2)] }])],
+      { textures: ['tex'] }
+    )
+    runtime.constraints = [
+      createTransformConstraint({
+        name: 'follow',
+        boneIndices: [0],
+        targetBoneIndex: 1,
+        local: true,
+        mixRotate: 0,
+        mixScaleX: 0,
+        mixScaleY: 0,
+        offsetX: 2
+      })
+    ]
+    const skeleton = new Skeleton(runtime)
+    skeleton.localPos[2] = 3
+    skeleton.updateFk(0)
+    solveConstraints(skeleton, runtime.constraints, createConstraintStates(runtime.constraints))
+    // 目标局部 x = 3，加偏移 2 → 5（若错误地取 setup 的 5，则会是 7）
+    expect(skeleton.localPos[0]).toBeCloseTo(5, 4)
+  })
+
+  it('目标被镜像时旋转偏移反向（Spine 的 degRadReflect）', () => {
+    const runtime = asset(
+      [
+        createBoneData({ name: 'root', localScale: { x: -1, y: 1 } }),
+        createBoneData({ name: 'child', parentIndex: 0 }),
+        createBoneData({ name: 'target', parentIndex: 0, rotation: 40 })
+      ],
+      [slot('s', 0)],
+      [skin('default', [{ slotName: 's', attachments: [region('r', 'tex', 2, 2)] }])],
+      { textures: ['tex'] }
+    )
+    runtime.constraints = [
+      createTransformConstraint({
+        name: 'aim',
+        boneIndices: [1],
+        targetBoneIndex: 2,
+        mixX: 0,
+        mixY: 0,
+        mixRotate: 1,
+        mixScaleX: 0,
+        mixScaleY: 0,
+        offsetRotate: 30
+      })
+    ]
+    const skeleton = new Skeleton(runtime)
+    const o = 2 * 16
+    const det = skeleton.world[o] * skeleton.world[o + 5] - skeleton.world[o + 1] * skeleton.world[o + 4]
+    expect(det).toBeLessThan(0)
+    solveConstraints(skeleton, runtime.constraints, createConstraintStates(runtime.constraints))
+    const diff = (a: number, b: number) => {
+      let d = (a - b) % 360
+      if (d > 180) d -= 360
+      if (d < -180) d += 360
+      return d
+    }
+    expect(diff(skeleton.worldRot[1], skeleton.worldRot[2] - 30)).toBeCloseTo(0, 3)
   })
 })
 

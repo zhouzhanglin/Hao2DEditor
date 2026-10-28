@@ -1028,8 +1028,9 @@ function buildConstraints(
         /*
          * 字段名两套都要认：Spine 4.0 把 transform 约束的混合与偏移改名了 ——
          *   mix:  rotateMix / translateMix / scaleMix / shearMix  →  mixRotate / mixX+Y / mixScaleX+Y / mixShearY
-         *   offset: rotate / x / y / scaleX / scaleY / shearY    →  offsetRotation / offsetX / offsetY / …
-         * 只读旧名会让 4.x 资源里的偏移整段丢成 0（导出侧写的是新名，所以两边也曾不对称）。
+         *   offset: rotation / x / y / scaleX / scaleY / shearY  →  offsetRotation / offsetX / offsetY / …
+         * 只读旧名会让 4.x 资源里的偏移整段丢成 0（导出侧写的是新名，所以两边也曾不对称）；
+         * 而 3.8 的旋转偏移叫 `rotation`，只认 `rotate` 时老资源的旋转偏移同样是 0。
          */
         mixRotate: transform.mixRotate ?? transform.rotateMix ?? 1,
         mixX: transform.mixX ?? transform.translateMix ?? 1,
@@ -1037,7 +1038,8 @@ function buildConstraints(
         mixScaleX: transform.mixScaleX ?? transform.scaleMix ?? 1,
         mixScaleY: transform.mixScaleY ?? transform.scaleMix ?? 1,
         mixShearY: transform.mixShearY ?? transform.shearMix ?? 1,
-        offsetRotate: transform.offsetRotation ?? transform.rotate ?? 0,
+        // 3.8 的旋转偏移叫 `rotation`（3.8 SkeletonJson 读的就是这个名字）
+        offsetRotate: transform.offsetRotation ?? transform.rotate ?? transform.rotation ?? 0,
         offsetX: pxToUnit(transform.offsetX ?? transform.x ?? 0),
         offsetY: pxToUnit(transform.offsetY ?? transform.y ?? 0),
         offsetScaleX: transform.offsetScaleX ?? transform.scaleX ?? 0,

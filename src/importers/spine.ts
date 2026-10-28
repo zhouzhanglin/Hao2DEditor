@@ -210,8 +210,17 @@ function remapLinkedMeshUvs(
         if (!parent || parent.uvs.length === 0) continue
         const own = attachment.regionName ? ctx.regions.get(attachment.regionName) : undefined
         const source = parent.regionName ? ctx.regions.get(parent.regionName) : undefined
-        // 拿不到区域矩形（没有 .atlas）就保持原样，运行期会退回源网格的 UV
-        if (!own || !source) continue
+        if (!own || !source) {
+          /*
+           * 拿不到区域矩形（碎图 / 没有 .atlas）：整页就是区域，直接沿用**父网格的 UV**。
+           *
+           * 必须是等长的：导出重打包后只有「自己的 UV 与父等长」时运行期才用自己的 UV，
+           * 否则退回父 UV —— 而父 UV 指向源皮肤那块图，换装皮肤就画成源皮肤的样子
+           * （Goblins 的脚 / 袖子）。早先这里直接 continue 留 8 个占位，正是那个 bug。
+           */
+          attachment.uvs = Float32Array.from(parent.uvs)
+          continue
+        }
         attachment.uvs = mapRegionRelativeUvs(
           pageUvsToRegionRelative(parent.uvs, source, ctx.pageSizes),
           own,

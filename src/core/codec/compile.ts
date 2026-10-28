@@ -5,6 +5,7 @@ import { createRuntimeAsset } from '../model/asset'
 import type { RuntimeAsset } from '../model/asset'
 import { t } from '@i18n'
 import { computeBindposes, createSetupPose } from '../model/setup'
+import { fillLinkedMeshUvs } from '../skin/linkedMesh'
 import type { AnimData, BoneAnim, ConstraintAnim, DeformAnim, DrawOrderKeyframe, IkAnim, SlotAnim } from '../model/animation'
 import { emptyConstraintAnim } from '../model/animation'
 import type { Constraint, IkConstraint } from '../model/constraints'
@@ -562,6 +563,12 @@ export function compileDocument(doc: EditorDocument): CompileResult {
   const bindposes = computeBindposes(skeletonOnly)
 
   const skins = buildSkins(doc, index, slotBoneOfName, bindposes, setup.world, warnings)
+  /*
+   * 旧工程 / 碎图导入的 linkedmesh 往往只带 8 个占位 UV：这里按父网格补齐（等长）。
+   * 导出重打包时「UV 长度对不对」决定用自己还是用父的 UV —— 不补齐就会被判成「不可用」，
+   * 页与区域退回源皮肤，切换换装皮肤后画出来仍是源皮肤那块贴图（Goblins 的脚 / 袖子）。
+   */
+  fillLinkedMeshUvs(skins)
   validateClipping(skins, slotIndex, warnings)
   const textureNames = collectTextures(doc, skins)
   const images: ImageRef[] = doc.images.map((image) => ({

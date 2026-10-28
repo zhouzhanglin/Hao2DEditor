@@ -15,7 +15,8 @@ import {
   unlinkLinkedMesh
 } from '@editor/commands/authoringCommands'
 import { keyDeformFrame } from '@editor/commands/animOps'
-import { attachmentSkinOf, linkedMeshUvs, resolveAuthoringLinkedMesh } from '@core/skin/linkedMesh'
+import { attachmentSkinOf, fillLinkedMeshUvs, linkedMeshUvs, resolveAuthoringLinkedMesh } from '@core/skin/linkedMesh'
+import { AttachmentType, createAttachmentData } from '@core/model/types'
 import { compileDocument } from '@core/codec/compile'
 import { buildRuntimeMaps } from '@core/model/asset'
 
@@ -288,6 +289,85 @@ describe('FFD', () => {
         skin: 'goblin'
       })
     ).toThrow()
+  })
+})
+
+describe('旧工程自愈（编译期补齐）', () => {
+  it('占位 UV 被补成父网格等长 UV，空 source 补成父附件名', () => {
+    const parent = createAttachmentData({
+      name: 'arm',
+      type: AttachmentType.Mesh,
+      textureName: 'hero.png',
+      uvs: new Float32Array(12),
+      vertices: new Float32Array(12),
+      triangles: [0, 1, 2, 0, 2, 3],
+      size: { x: 1, y: 1 }
+    })
+    const linked = createAttachmentData({
+      name: 'arm',
+      type: AttachmentType.LinkedMesh,
+      textureName: 'goblin.png',
+      linkedMeshAttachment: '',
+      uvs: new Float32Array(8)
+    })
+    const skins = [
+      { name: 'default', slots: [{ slotName: 'arm', attachments: [parent] }] },
+      { name: 'goblin', slots: [{ slotName: 'arm', attachments: [linked] }] }
+    ]
+
+    expect(fillLinkedMeshUvs(skins)).toBe(1)
+    expect(linked.linkedMeshAttachment).toBe('arm')
+    expect(linked.uvs.length).toBe(12)
+  })
+
+  it('compileDocument 会把旧数据补齐（否则导出重打包后贴图退回源皮肤）', () => {
+    const doc = createEmptyDocument()
+    doc.bones.push(createAuthoringBone({ name: 'root' }))
+    doc.slots.push(createAuthoringSlot({ name: 'arm', bone: 'root', attachment: 'arm' }))
+    doc.skins[0].slots.push({
+      slot: 'arm',
+      attachments: [
+        createAuthoringAttachment({
+          name: 'arm',
+          type: 'mesh',
+          image: 'hero.png',
+          vertices: [
+            { x: -0.5, y: -0.5, weights: [] },
+            { x: 0.5, y: -0.5, weights: [] },
+            { x: 0.5, y: 0.5, weights: [] },
+            { x: -0.5, y: 0.5, weights: [] },
+            { x: 0, y: 0, weights: [] },
+            { x: 0.2, y: 0.2, weights: [] }
+          ],
+          uvs: new Array(12).fill(0),
+          triangles: [0, 1, 2, 0, 2, 3],
+          size: { x: 1, y: 1 }
+        })
+      ]
+    })
+    doc.skins.push({
+      name: 'goblin',
+      slots: [
+        {
+          slot: 'arm',
+          attachments: [
+            createAuthoringAttachment({
+              name: 'arm',
+              type: 'linkedmesh',
+              image: 'goblin.png',
+              linkedMeshAttachment: '',
+              // 老数据只有 4 个角的占位 UV
+              uvs: [0, 0, 1, 0, 1, 1, 0, 1]
+            })
+          ]
+        }
+      ]
+    })
+
+    const { asset } = compileDocument(doc)
+    const compiled = asset.skins.find((skin) => skin.name === 'goblin')!.slots[0].attachments[0]
+    expect(compiled.uvs.length).toBe(12)
+    expect(compiled.linkedMeshAttachment).toBe('arm')
   })
 })
 

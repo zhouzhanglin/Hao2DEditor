@@ -8,6 +8,8 @@ import type {
   EditorDocument
 } from '../model/authoring'
 import type { Vec2 } from '../math/matrix'
+import { AttachmentType } from '../model/types'
+import type { SkinData } from '../model/types'
 
 /**
  * 创作期的 linkedmesh 解析（**只读**）。
@@ -206,4 +208,59 @@ export function linkedMeshUvs(
   const pageSizes = pageSizesOf(doc)
   const relative = pageUvsToRegionRelative(parent.uvs, source, pageSizes)
   return Array.from(mapRegionRelativeUvs(relative, own, pageSizes))
+}
+
+/**
+ * 补齐编译产物里 linkedmesh 缺失的 UV（长度必须等于父网格 UV 长度）。
+ *
+ * 为什么必须在编译期做：导出（`exportService.remapAsset`）会把所有 UV 重新映射到打包后的图集页，
+ * 而**运行期只有「自己的 UV 与父网格等长」时才会用自己的**。旧工程 / 碎图导入的 linkedmesh
+ * 往往只剩 8 个占位 UV —— 导出时会被判成「UV 不可用」，页与区域退回源皮肤，
+ * 于是切换到换装皮肤后画出来还是**源皮肤那块贴图**（Goblins 的脚 / 袖子就是这样出错的）。
+ *
+ * 没有图集矩形信息时只能「沿用父 UV」：碎图（整页 = 区域）下这一步是精确的；
+ * 图集页场景下它与运行期原本的回退行为一致（画成源皮肤那块），不会更差。
+ *
+ * 顺带把空的 `linkedMeshAttachment` 补成父附件名 —— Unity 端 `MeshBuilder.ResolveLinkedMesh`
+ * 只认这个字段，空串会直接判定「没有父网格」而不绘制（编辑器 / Spine 侧另有同名兜底）。
+ *
+ * @returns 修好的附件数量
+ */
+export function fillLinkedMeshUvs(
+  skins: readonly SkinData[],
+  defaultSkinName = 'default'
+): number {
+  if (skins.length === 0) return 0
+  const defaultSkin = skins.find((skin) => skin.name === defaultSkinName) ?? skins[0]
+  let fixed = 0
+
+  for (const skin of skins) {
+    for (const skinSlot of skin.slots) {
+      for (const attachment of skinSlot.attachments) {
+        if (attachment.type !== AttachmentType.LinkedMesh) continue
+        const sourceSkin = attachment.linkedMeshSkin
+          ? skins.find((item) => item.name === attachment.linkedMeshSkin) ?? defaultSkin
+          : defaultSkin
+        const sourceSlot = sourceSkin.slots.find((item) => item.slotName === skinSlot.slotName)
+        if (!sourceSlot) continue
+        const sourceName = attachment.linkedMeshAttachment || attachment.name
+        const parent = sourceSlot.attachments.find(
+          (item) => item.name === sourceName && item.type !== AttachmentType.LinkedMesh
+        )
+        if (!parent) continue
+
+        let touched = false
+        if (!attachment.linkedMeshAttachment) {
+          attachment.linkedMeshAttachment = parent.name
+          touched = true
+        }
+        if (parent.uvs.length > 0 && attachment.uvs.length !== parent.uvs.length) {
+          attachment.uvs = Float32Array.from(parent.uvs)
+          touched = true
+        }
+        if (touched) fixed++
+      }
+    }
+  }
+  return fixed
 }

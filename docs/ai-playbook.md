@@ -30,7 +30,15 @@
 9) 复核 getAnimationKeys → saveProject → exportProject {mode:'runtime'|'unity'|'spine', dir}（导出也不弹对话框）
 
 ## 皮肤
-addSkin {name} 建皮肤 → addDisplay {slot, image, skin} 往该皮肤放件 → keySlotDisplayFrame {slot, time, attachment, skin} 打显示帧完成切换；setActiveSkin 只影响编辑器当前预览
+addSkin {name} 建皮肤 → addDisplay {slot, image, skin} 往该皮肤放件 → keySlotDisplayFrame {slot, time, attachment, skin} 打显示帧完成切换；setActiveSkin 只影响当前预览
+
+## 换装链接网格（一套几何 + 多套皮肤换贴图）
+默认皮肤里有一条网格（如 `front-foot`）→ 新建一套皮肤 `addSkin {name:'goblin'}` → `createLinkedMesh {slot:'front-foot', source:'front-foot', skin:'goblin', image:'goblin.png'}`：
+- 几何 / 三角面 / 权重永远来自源网格，源网格改形状时链接网格自动跟随，**不要**为每套皮肤复制一份网格
+- 附件名与源同名 = 覆盖该插槽的显示（换装的标准写法）；想额外再加一件就把 `name` 换成别的名字
+- 换图用 `setLinkedMeshImage`（只改这一条，并按其图集区域重算 UV）；源换到别的网格用 `setLinkedMeshSource`
+- 不想再共享几何时 `unlinkLinkedMesh` 复制成普通网格（顶点数不变，已有 FFD 帧仍然有效）
+- 打 FFD：`keyDeformFrame` 的 offsets 长度按**源网格点数 × 2**，并传 `skin` 标出这条链接网格所在的皮肤，否则切皮肤后变形帧会串到同名的源网格上
 
 ## 骨架嵌套（把一个骨架挂到另一个骨架的插槽上）
 - 多骨架工程：`getProjectState` 的 `skeletons[]` 里有每个骨架的名字与 `animationNames`（子骨架动画名直接在这里看，不必先切换）；切当前编辑骨架用 `setActiveSkeleton`

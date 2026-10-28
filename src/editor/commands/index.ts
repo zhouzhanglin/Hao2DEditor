@@ -1,5 +1,6 @@
 import { registerAnimCommands } from './animCommands'
 import { registerBindAllCommands } from './bindAll'
+import { registerLinkedMeshCommands } from './linkedMeshCommands'
 import { registerMaskCommands } from './maskCommands'
 import { registerMeshCommands } from './meshCommands'
 import { registerProjectCommands } from './projectCommands'
@@ -22,6 +23,7 @@ export function installCommands(): void {
   registerSkeletonCommands()
   registerAnimCommands()
   registerMeshCommands()
+  registerLinkedMeshCommands()
   registerMaskCommands()
   registerBindAllCommands()
   registerProjectCommands()

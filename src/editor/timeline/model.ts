@@ -4,6 +4,7 @@ import { lastKeyTime } from '@core/model/authoring'
 import type { AuthoringAnimData, AuthoringConstraintAnim, AuthoringSlotAnim, EditorDocument } from '@core/model/authoring'
 import type { ConstraintState } from '@core/constraints/solver'
 import {
+  deformSkinTag,
   ensureConstraintAnim,
   keyBoneChannel,
   keyDeform,
@@ -13,6 +14,7 @@ import {
   keySlotVisible,
   pruneEmptyTracks
 } from '../commands/animationCommands'
+import { attachmentSkinOf } from '@core/skin/linkedMesh'
 import type { AuthoringAttachment } from '@core/model/authoring'
 import { t } from '@i18n'
 
@@ -622,7 +624,9 @@ export function keyframeTargets(
   animationName: string | null,
   pose: PoseSnapshot,
   targets: readonly KeyframeTarget[],
-  time: number
+  time: number,
+  /** 当前激活皮肤：只用来判断变形帧的**皮肤归属**（同名链接网格与源网格靠它区分轨道） */
+  skinName = ''
 ): number {
   const animation = doc.animations.find((item) => item.name === animationName)
   if (!animation) return 0
@@ -694,7 +698,9 @@ export function keyframeTargets(
       const index = pose.slotIndex[target.target]
       const offsets = index === undefined ? null : pose.deformOffsets[index]
       if (!offsets) continue
-      keyDeform(animation, target.target, target.attachment, time, offsets)
+      // 皮肤归属：换装皮肤里的链接网格与默认皮肤的源网格同名同槽位，只能靠 skin 区分轨道
+      const ownerSkin = attachmentSkinOf(doc, target.target, target.attachment, skinName)
+      keyDeform(animation, target.target, target.attachment, time, offsets, 0, deformSkinTag(doc, ownerSkin))
       count++
       continue
     }

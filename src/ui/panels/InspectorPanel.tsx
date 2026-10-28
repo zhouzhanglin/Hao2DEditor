@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Crosshair, Grid3x3, RotateCcw, Trash2 } from 'lucide-react'
+import { Crosshair, Grid3x3, Link2, RotateCcw, Trash2 } from 'lucide-react'
 import { t } from '@i18n'
 import { BlendMode } from '@core/model/types'
 import { curvePercent } from '@core/anim/interpolation'
@@ -25,20 +25,25 @@ import {
   deleteMeshVertex,
   pasteVertexWeights,
   patchAttachment,
+  patchAttachmentInSkin,
   PPU,
   previewTrimWeights,
   removeWeightBone,
   resolveAttachment,
+  setLinkedMeshImage,
+  setLinkedMeshSource,
   setVertexWeight,
   swapWeightBones,
   trimVertexWeights,
+  unlinkLinkedMesh,
   weightBonesOf
 } from '@editor/commands/authoringCommands'
 import type { AutoWeightMethod } from '@editor/commands/authoringCommands'
+import { resolveAuthoringLinkedMesh } from '@core/skin/linkedMesh'
 import { runAutoWeightsForBones } from '@editor/tools/authoringTools'
 import { buildGridMesh, buildOutlineMesh } from '@editor/commands/meshActions'
 import type { RenameKind } from '@editor/commands/authoringCommands'
-import type { AuthoringConstraint, EditorDocument } from '@core/model/authoring'
+import type { AuthoringAttachment, AuthoringConstraint, EditorDocument } from '@core/model/authoring'
 import { rootBoneName } from '@core/model/authoring'
 import { isDescendantOf } from '@editor/commands/hierarchyCommands'
 import { weightPaletteColor } from '@core/weightPalette'
@@ -870,6 +875,46 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
       tools.pendingWeightBone?.attachment === selection.attachment
 
     const meshAttachment = attachment && attachment.type === 'mesh' ? attachment : null
+
+    /*
+     * 链接网格（linkedmesh）：几何来自源网格，面板只决定贴图 / UV。
+     * 这里解析一次给「只读说明」用 —— 找不到源网格时也要能看出来（而不是显示成一块普通网格）。
+     */
+    const linkedMesh = attachment && attachment.type === 'linkedmesh' ? attachment : null
+    const linkedMeshView = linkedMesh ? resolveAuthoringLinkedMesh(document, linkedMesh, slot.name) : null
+    /** 默认皮肤名（与运行期 pickSkinByName 同一口径）：`linkedMeshSkin` 空串表示它 */
+    const linkedDefaultSkin =
+      document.skins.find((item) => item.name === 'default')?.name ?? document.skins[0]?.name ?? ''
+    /** 可选的源网格：当前源皮肤里、同一插槽下的 Mesh 附件 */
+    const linkedParentOptions = linkedMesh
+      ? (
+          document.skins
+            .find((item) => item.name === (linkedMesh.linkedMeshSkin || linkedDefaultSkin))
+            ?.slots.find((item) => item.slot === slot.name)?.attachments ?? []
+        )
+          .filter((item) => item.type === 'mesh')
+          .map((item) => ({ value: item.name, label: item.name }))
+      : []
+
+    /**
+     * 附件字段的就地修改：链接网格必须**只改当前皮肤这一条**。
+     *
+     * 换装场景里链接网格与源网格同名，`patchAttachment` 会把所有皮肤的同名附件一起改 ——
+     * 挪一下位置就把源网格也挪走了。其余类型保持「跨皮肤同步」的原语义不变。
+     */
+    const patchSelected = (draft: EditorDocument, mutate: (item: AuthoringAttachment) => void): void => {
+      if (attachment?.type === 'linkedmesh') {
+        patchAttachmentInSkin(
+          draft,
+          selection.skin || document.editorMeta.activeSkin,
+          slot.name,
+          attachment.name,
+          mutate
+        )
+        return
+      }
+      patchAttachment(draft, slot.name, attachment.name, mutate)
+    }
     /**
      * 修剪的范围：有选中顶点时只处理它们（与画笔「选了顶点就只刷这些」同一套规则）。
      *
@@ -1141,6 +1186,64 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
               }
             />
             {/*
+              链接网格：几何（顶点 / 三角面 / 权重）全部来自源网格，这一条只决定贴图与 UV。
+              改源在层级树右键菜单里（那里能按同插槽列出候选网格），这里给只读说明 + 解链出口。
+            */}
+            {linkedMesh ? (
+              <FieldGroup title={t('链接网格')}>
+                <p className="flex items-start gap-1 text-3xs leading-[16px] text-content-lo">
+                  <Link2 size={11} className="mt-0.5 shrink-0" />
+                  {linkedMeshView
+                    ? t('几何来自「{0}」（{1}）：改形状请编辑源网格，这里只决定贴图与 UV', [
+                        linkedMeshView.parent.name,
+                        linkedMesh.linkedMeshSkin || t('默认皮肤')
+                      ])
+                    : t('找不到源网格：先修好源皮肤 / 源网格（层级树右键这条 display 可改源），或解链为独立网格')}
+                </p>
+                <SelectField
+                  label={t('源网格')}
+                  value={linkedMesh.linkedMeshAttachment || linkedMesh.name}
+                  options={linkedParentOptions}
+                  disabled={linkedParentOptions.length === 0}
+                  onChange={(value) => {
+                    let message = ''
+                    update(t('修改链接源'), (draft) => {
+                      const result = setLinkedMeshSource(draft, {
+                        slot: slot.name,
+                        attachment: linkedMesh.name,
+                        skin: selection.skin,
+                        sourceSkin: linkedMesh.linkedMeshSkin || '',
+                        source: value
+                      })
+                      message = result.ok ? result.warning ?? t('已把源网格改成「{0}」', value) : result.reason
+                    })
+                    if (message) onStatus(message)
+                  }}
+                />
+                <button
+                  type="button"
+                  className="hao-btn h-[20px] self-start px-2 text-3xs"
+                  title={t('把源网格的几何 / 权重复制到这一条，之后与源网格无关（可 Ctrl+Z 撤销）')}
+                  onClick={() => {
+                    let message = ''
+                    update(t('解链为独立网格'), (draft) => {
+                      const result = unlinkLinkedMesh(draft, {
+                        slot: slot.name,
+                        attachment: linkedMesh.name,
+                        skin: selection.skin
+                      })
+                      message = result.ok
+                        ? t('已解链为独立网格（{0} 顶点）', result.vertices)
+                        : result.reason
+                    })
+                    if (message) onStatus(message)
+                  }}
+                >
+                  {t('解链为独立网格')}
+                </button>
+              </FieldGroup>
+            ) : null}
+            {/*
               嵌套骨架：引用的是**同工程里的另一个骨架**（按名字），不复制数据。
               默认动画 / 循环 / 偏移 / 倍速是 setup 值；时间轴上的「子骨架」通道会按帧覆盖它们。
             */}
@@ -1235,13 +1338,32 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                     { value: '', label: t('（纯色）') },
                     ...document.images.map((image) => ({ value: image.name, label: image.name }))
                   ]}
-                  onChange={(value) =>
+                  onChange={(value) => {
+                    /*
+                     * 链接网格换图必须**只改这一条**并按新区域重算 UV：
+                     * `patchAttachment` 会把所有皮肤的同名附件一起改（链接网格与源网格恰好同名），
+                     * 直接把源网格的贴图也换掉。
+                     */
+                    if (attachment.type === 'linkedmesh') {
+                      let message = ''
+                      update(t('修改附件图片'), (draft) => {
+                        const result = setLinkedMeshImage(draft, {
+                          slot: slot.name,
+                          attachment: attachment.name,
+                          skin: selection.skin,
+                          image: value
+                        })
+                        message = result.ok ? result.warning ?? '' : result.reason
+                      })
+                      if (message) onStatus(message)
+                      return
+                    }
                     update(t('修改附件图片'), (draft) => {
                       patchAttachment(draft, slot.name, attachment.name, (a) => {
                         a.image = value
                       })
                     })
-                  }
+                  }}
                 />
                 ) : null}
                 {/* 同骨骼位置：按像素显示 / 输入（中键拖动 / 上下键按 10px 走），写回仍是世界单位 */}
@@ -1250,19 +1372,19 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                   value={attachment.position}
                   unitScale={PX_PER_UNIT}
                   step={10}
-                  onChange={(value) => update(t('修改附件位置'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.position = value }))}
+                  onChange={(value) => update(t('修改附件位置'), (draft) => patchSelected(draft, (a) => { a.position = value }))}
                 />
                 <NumberField
                   label={t('旋转')}
                   value={attachment.rotation}
                   suffix="°"
-                  onChange={(value) => update(t('修改附件旋转'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.rotation = value }))}
+                  onChange={(value) => update(t('修改附件旋转'), (draft) => patchSelected(draft, (a) => { a.rotation = value }))}
                 />
                 <Vector2Field
                   label={t('缩放')}
                   value={attachment.scale}
                   step={0.1}
-                  onChange={(value) => update(t('修改附件缩放'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.scale = value }))}
+                  onChange={(value) => update(t('修改附件缩放'), (draft) => patchSelected(draft, (a) => { a.scale = value }))}
                 />
               </>
             ) : null}
@@ -1274,7 +1396,13 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
               改这个数在视口里看不出任何变化，只会在「自动生成网格」按它映射尺寸时
               产生看不出来的偏差。原值仍留在数据里（「还原为 Region」与重新生成都要用）。
             */}
-            {attachment.type !== 'mesh' && attachment.type !== 'clipping' && attachment.type !== 'armature' ? (
+            {/*
+              链接网格不显示尺寸：渲染尺寸取源网格的（改这里不会生效，只会让人以为改了没反应）。
+            */}
+            {attachment.type !== 'mesh' &&
+            attachment.type !== 'linkedmesh' &&
+            attachment.type !== 'clipping' &&
+            attachment.type !== 'armature' ? (
               <Vector2Field
                 label={t('尺寸')}
                 value={attachment.size}
@@ -1314,7 +1442,7 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                 value={attachment.color}
                 onDragStart={() => useProjectStore.getState().beginTransaction(t('修改附件颜色'))}
                 onDragEnd={() => useProjectStore.getState().endTransaction()}
-                onChange={(value) => update(t('修改附件颜色'), (draft) => patchAttachment(draft, slot.name, attachment.name, (a) => { a.color = value }))}
+                onChange={(value) => update(t('修改附件颜色'), (draft) => patchSelected(draft, (a) => { a.color = value }))}
               />
             ) : null}
             {/*
@@ -1344,6 +1472,21 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
                 <InfoHint
                   text={t('用网格 / FFD 工具在网格内 Alt+点击插入顶点，选中顶点后可在下面删除')}
                 />
+              </div>
+            ) : null}
+
+            {/* 链接网格的顶点只读（几何在源网格上），但仍可单独打 FFD 帧 */}
+            {linkedMesh ? (
+              <div className="flex items-start gap-1">
+                <p className="min-w-0 flex-1 text-3xs leading-relaxed text-content-lo">
+                  {linkedMeshView
+                    ? t('顶点 {0} · 三角面 {1}（来自源网格，只读）', [
+                        linkedMeshView.vertices.length,
+                        Math.floor(linkedMeshView.triangles.length / 3)
+                      ])
+                    : t('顶点数未知：源网格缺失')}
+                </p>
+                <InfoHint text={t('链接网格的几何 / 权重在源网格上编辑；Animate 态仍可给这一条单独打 FFD 帧')} />
               </div>
             ) : null}
 
@@ -1901,7 +2044,11 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
           遮罩不能用「转为网格 / 自动生成网格」：它的点是多边形控制点，不是可蒙皮的渲染网格。
           遮罩的 FFD 直接走顶点工具（D）写 deform 轨道，不需要这一栏。
         */}
-        {attachment && attachment.type !== 'mesh' && attachment.type !== 'clipping' ? (
+        {/*
+          链接网格也不给这一栏：几何来自源网格，转网格 / 按轮廓生成都只能对图片（Region）做，
+          摆出来只会点出一个「只有图片能转网格」的报错。
+        */}
+        {attachment && attachment.type !== 'mesh' && attachment.type !== 'linkedmesh' && attachment.type !== 'clipping' ? (
           <FieldGroup title={t('网格 / FFD')}>
             <NumberField
               label={t('密度')}

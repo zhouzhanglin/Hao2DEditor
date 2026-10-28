@@ -300,13 +300,14 @@ export function registerAnimCommands(): void {
       name: 'keyDeformFrame',
       title: '打 FFD 帧',
       description:
-        '打一帧网格 / 遮罩形变（FFD）。offsets 是每个顶点的偏移 [x0,y0,x1,y1,...]，长度必须是顶点数的 2 倍；遮罩顶点用 getMask 读',
+        '打一帧网格 / 遮罩形变（FFD）。offsets 是每个顶点的偏移 [x0,y0,x1,y1,...]，长度必须是顶点数的 2 倍（链接网格按源网格的点数算）；遮罩顶点用 getMask 读',
       args: {
         animation: { type: 'string', description: '动画名；不传则用当前编辑动画' },
         slot: { type: 'string', description: '插槽名', required: true },
-        attachment: { type: 'string', description: '网格或遮罩附件名', required: true },
+        attachment: { type: 'string', description: '网格 / 遮罩 / 链接网格附件名', required: true },
         time: { type: 'number', description: '时间点（秒）', required: true },
-        offsets: { type: 'array', description: '顶点偏移数组，长度 = 顶点数 × 2（全 0 表示复位）', required: true }
+        offsets: { type: 'array', description: '顶点偏移数组，长度 = 顶点数 × 2（全 0 表示复位）', required: true },
+        skin: { type: 'string', description: '附件所在皮肤；不传则按默认皮肤 + 当前皮肤解析' }
       },
       returns: '{ animation, slot, attachment, time, vertexCount }'
     },
@@ -318,7 +319,8 @@ export function registerAnimCommands(): void {
         slot: need(args, 'slot'),
         attachment: need(args, 'attachment'),
         time: needNum(args, 'time'),
-        offsets
+        offsets,
+        ...(optText(args, 'skin') ? { skin: optText(args, 'skin') } : {})
       })
       return changed(
         result,

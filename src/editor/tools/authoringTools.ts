@@ -16,7 +16,8 @@ import { useModeStore } from '../store/modeStore'
 import type { GizmoMode } from '../store/toolStore'
 import { useProjectStore } from '../store/projectStore'
 import { useSelectionStore } from '../store/selectionStore'
-import { keyBoneChannel, keyDeform } from '../commands/animationCommands'
+import { deformSkinTag, keyBoneChannel, keyDeform } from '../commands/animationCommands'
+import { attachmentSkinOf, resolveAuthoringLinkedMesh } from '@core/skin/linkedMesh'
 import { t } from '@i18n'
 // 「画骨骼时把鼠标下的插槽带过来」复用层级树拖放插槽的同一套命令（会换算附件位置，画面不跳）
 import { moveSlot, validateSlotMove } from '../commands/hierarchyCommands'
@@ -33,6 +34,7 @@ import {
   meshVertexSamples,
   paintWeights,
   patchAttachment,
+  resolveAttachment,
   setClippingPoint,
   setClippingVertices,
   uniqueName,
@@ -896,6 +898,27 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       if (!resolved || resolved.vertex < 0) {
         host.status(t('该顶点不支持编辑（Region 请先转为网格）'))
         return true
+      }
+      /*
+       * 链接网格的几何来自源网格：Pose 态拖顶点走的是「改 attachment.vertices」，
+       * 而链接网格的顶点数组是空的 —— 照常放行会静默无反应（比报错更糟），
+       * 这里明确拦住并指路。Animate 态写的是 FFD 帧（offsets 与几何无关），照常放行。
+       */
+      if (host.mode !== 'animate') {
+        const document = useProjectStore.getState().document
+        const picked = resolveAttachment(document, resolved.slot, resolved.attachment, host.selection.skin)
+        if (picked?.type === 'linkedmesh') {
+          const source = resolveAuthoringLinkedMesh(document, picked, resolved.slot)?.parent
+          host.status(
+            source
+              ? t('「{0}」是链接网格：几何来自源网格「{1}」，请切到源网格编辑，或在属性面板里「解链为独立网格」', [
+                  picked.name,
+                  source.name
+                ])
+              : t('「{0}」是链接网格，但找不到源网格：先修好源皮肤 / 源网格，或解链为独立网格', picked.name)
+          )
+          return true
+        }
       }
       const current = useSelectionStore.getState()
       const sameTarget =
@@ -2536,11 +2559,15 @@ function dragVertex(host: ToolHost, world: Vec2): void {
   // 这一帧相对上一帧的位移（多选时同一份增量加到每个点上）
   const step = { x: delta.x - drag.totalDelta.x, y: delta.y - drag.totalDelta.y }
   const targets = drag.vertices.length > 0 ? drag.vertices : [drag.vertex]
+  // 皮肤上下文：同名附件（默认皮肤的源网格 / 换装皮肤的链接网格）只能靠它区分
+  const skin = host.selection.skin
   if (editBind) {
     const fields = new Map(drag.uvFields.map((item) => [item.index, item.field]))
     store.updateSilent((draft) => {
-      const attachment = findAttachment(draft, drag.slot, drag.attachment)
-      if (!attachment) return
+      // 皮肤优先：`findAttachment` 跨皮肤取首个匹配，会把换装皮肤的编辑写到源网格上
+      const attachment = resolveAttachment(draft, drag.slot, drag.attachment, skin)
+      // 链接网格没有自己的顶点（按下时已拦住；这里防御一下，避免把父网格当自己改）
+      if (!attachment || attachment.type === 'linkedmesh') return
       for (const index of targets) {
         const vertex = attachment.vertices[index]
         if (!vertex) continue
@@ -2558,7 +2585,15 @@ function dragVertex(host: ToolHost, world: Vec2): void {
       }
     })
   } else {
-    const base = currentOffsets(store.document, scene.currentAnimation, drag.slot, drag.attachment, host.time, vertexCount)
+    const base = currentOffsets(
+      store.document,
+      scene.currentAnimation,
+      drag.slot,
+      drag.attachment,
+      host.time,
+      vertexCount,
+      skin
+    )
     store.updateSilent((draft) => {
       const offsets = [...base]
       for (const index of targets) {
@@ -2568,7 +2603,11 @@ function dragVertex(host: ToolHost, world: Vec2): void {
         offsets[at + 1] += step.y
       }
       const animation = draft.animations.find((item) => item.name === scene.currentAnimation)
-      if (animation) keyDeform(animation, drag.slot, drag.attachment, host.time, offsets)
+      // 皮肤归属：链接网格与源网格同名同槽位，不写 skin 会把变形帧加到源网格上
+      if (animation) {
+        const ownerSkin = attachmentSkinOf(draft, drag.slot, drag.attachment, skin)
+        keyDeform(animation, drag.slot, drag.attachment, host.time, offsets, 0, deformSkinTag(draft, ownerSkin))
+      }
     })
   }
 
@@ -2584,10 +2623,16 @@ function currentOffsets(
   slot: string,
   attachmentName: string,
   time: number,
-  vertexCount: number
+  vertexCount: number,
+  skin = ''
 ): number[] {
   const animation = doc.animations.find((item) => item.name === animationName)
-  const track = animation?.deforms.find((item) => item.slot === slot && item.attachment === attachmentName)
+  // 轨道按皮肤区分：同名链接网格与源网格的 FFD 不能互相复用
+  const wanted = deformSkinTag(doc, attachmentSkinOf(doc, slot, attachmentName, skin))
+  const track = animation?.deforms.find(
+    (item) =>
+      item.slot === slot && item.attachment === attachmentName && (item.skin ?? '') === wanted
+  )
   const frame = track?.frames.find((item) => Math.abs(item.time - time) < 1e-3)
   if (frame && frame.offsets.length >= vertexCount * 2) return [...frame.offsets]
   return new Array<number>(vertexCount * 2).fill(0)

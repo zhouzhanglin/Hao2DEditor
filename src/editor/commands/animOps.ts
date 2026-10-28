@@ -3,6 +3,7 @@ import type { KeyframeBase } from '@core/model/animation'
 import type { AuthoringAnimData, AuthoringSkin, EditorDocument } from '@core/model/authoring'
 import { hexToRgba } from '@core/util/color'
 import {
+  deformSkinTag,
   keyBoneChannel,
   keyDeform,
   keyDrawOrder,
@@ -14,7 +15,8 @@ import {
   removeDeformKeyframe
 } from './animationCommands'
 import type { BoneChannel } from './animationCommands'
-import { findSkinSlot } from './authoringCommands'
+import { findSkinSlot, resolveAttachment } from './authoringCommands'
+import { attachmentSkinOf, resolveAuthoringLinkedMesh } from '@core/skin/linkedMesh'
 import type { Vec2 } from './skeletonOps'
 import { t } from '@i18n'
 
@@ -294,6 +296,8 @@ export interface KeyDeformFrameOptions {
   time: number
   /** 满顶点长度的 [x0,y0,x1,y1,...]；全 0 = 该帧复位 */
   offsets: number[]
+  /** 附件所在皮肤（换装皮肤里的链接网格要按它解析源网格）；不传 = 默认皮肤 */
+  skin?: string
 }
 
 /** 打一帧 FFD（网格顶点偏移） */
@@ -304,7 +308,10 @@ export function keyDeformFrame(
   const anim = requireAnimation(doc, options.animation)
   const slot = requireSlot(doc, options.slot)
   const time = requireTime(options.time)
-  const attachment = findAttachmentOrThrow(doc, slot.name, options.attachment)
+  const attachment = resolveAttachment(doc, slot.name, options.attachment, options.skin ?? '')
+  if (!attachment) {
+    throw new Error(t('找不到附件：{0} / {1}（用 listDisplays 查插槽下的附件名）', [slot.name, options.attachment]))
+  }
   if (
     attachment.type !== 'mesh' &&
     attachment.type !== 'linkedmesh' &&
@@ -317,7 +324,20 @@ export function keyDeformFrame(
       )
     )
   }
-  const vertexCount = attachment.vertices.length
+  /*
+   * 链接网格自己不存顶点（几何在源网格里），点数必须按解析结果算；
+   * 直接读 `attachment.vertices` 会得到 0，offsets 只能传空数组 —— FFD 形同不可用。
+   */
+  let vertexCount = attachment.vertices.length
+  if (attachment.type === 'linkedmesh') {
+    const view = resolveAuthoringLinkedMesh(doc, attachment, slot.name)
+    if (!view) {
+      throw new Error(
+        t('链接网格「{0}」找不到源网格：先修好源皮肤 / 源网格，或在属性面板里「解链为独立网格」', options.attachment)
+      )
+    }
+    vertexCount = view.vertices.length
+  }
   if (options.offsets.length !== vertexCount * 2) {
     // 长度对不上会写出一帧错位的 FFD，播放时网格直接变形错乱 —— 这里必须挡住
     throw new Error(
@@ -328,7 +348,12 @@ export function keyDeformFrame(
       ])
     )
   }
-  keyDeform(anim, slot.name, options.attachment, time, options.offsets)
+  /*
+   * 皮肤归属：换装皮肤里的同名链接网格与源网格共用 `slot + attachment`，只能靠 skin 区分轨道。
+   * 归属按附件**实际所在的皮肤**算（当前皮肤里没有这条附件时它就是默认皮肤的）。
+   */
+  const ownerSkin = attachmentSkinOf(doc, slot.name, options.attachment, options.skin ?? '')
+  keyDeform(anim, slot.name, options.attachment, time, options.offsets, 0, deformSkinTag(doc, ownerSkin))
   return { animation: anim.name, slot: slot.name, attachment: options.attachment, time, vertexCount }
 }
 
@@ -520,13 +545,4 @@ export function clearAnimation(doc: EditorDocument, name?: string): { animation:
   anim.deforms = []
   anim.drawOrder = []
   return { animation: anim.name }
-}
-
-function findAttachmentOrThrow(doc: EditorDocument, slotName: string, attachmentName: string) {
-  for (const skin of doc.skins) {
-    const skinSlot = findSkinSlot(skin, slotName)
-    const found = skinSlot?.attachments.find((item) => item.name === attachmentName)
-    if (found) return found
-  }
-  throw new Error(t('找不到附件：{0} / {1}（用 listDisplays 查插槽下的附件名）', [slotName, attachmentName]))
 }

@@ -45,10 +45,33 @@ export function ensureSlotAnim(anim: AuthoringAnimData, slot: string): Authoring
   return track
 }
 
-export function ensureDeformAnim(anim: AuthoringAnimData, slot: string, attachment: string): AuthoringDeformAnim {
-  let track = anim.deforms.find((item) => item.slot === slot && item.attachment === attachment)
+/**
+ * FFD 轨道的皮肤归属：**默认皮肤 → 空串**（与老工程 / 无皮肤归属的轨道兼容），
+ * 其它皮肤 → 写皮肤名。
+ *
+ * 为什么必须带：换装皮肤里的链接网格与默认皮肤的源网格**同名、同槽位、同显示下标**，
+ * 运行期只靠 `track.skin` 判定归属（见 player.applyDeform）；不写就会把变形加到源网格上。
+ */
+export function deformSkinTag(doc: { skins: readonly { name: string }[] }, skinName: string): string {
+  const name = (skinName ?? '').trim()
+  if (!name) return ''
+  const defaultSkin = doc.skins.find((item) => item.name === 'default') ?? doc.skins[0]
+  return defaultSkin && defaultSkin.name === name ? '' : name
+}
+
+export function ensureDeformAnim(
+  anim: AuthoringAnimData,
+  slot: string,
+  attachment: string,
+  skin = ''
+): AuthoringDeformAnim {
+  const wanted = skin.trim()
+  let track = anim.deforms.find(
+    (item) => item.slot === slot && item.attachment === attachment && (item.skin ?? '') === wanted
+  )
   if (!track) {
     track = { slot, attachment, frames: [] }
+    if (wanted) track.skin = wanted
     anim.deforms.push(track)
   }
   return track
@@ -208,16 +231,17 @@ export function keySlotVisible(anim: AuthoringAnimData, slot: string, time: numb
   upsertKeyframe(track.visible, { time, value: visible ? 1 : 0, easing: 1, curve: null })
 }
 
-/** 写入 FFD：offsets 为满顶点长度的 [x0,y0,x1,y1,...] */
+/** 写入 FFD：offsets 为满顶点长度的 [x0,y0,x1,y1,...]；`skin` 见 deformSkinTag */
 export function keyDeform(
   anim: AuthoringAnimData,
   slot: string,
   attachment: string,
   time: number,
   offsets: number[],
-  vertexOffset = 0
+  vertexOffset = 0,
+  skin = ''
 ): void {
-  const track = ensureDeformAnim(anim, slot, attachment)
+  const track = ensureDeformAnim(anim, slot, attachment, skin)
   upsertKeyframe(track.frames, emptyDeformKeyframe(time, [...offsets]))
   const frame = track.frames.find((item) => Math.abs(item.time - time) < 1e-4)
   if (frame) frame.vertexOffset = vertexOffset

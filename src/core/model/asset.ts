@@ -140,15 +140,41 @@ export function mergeSkinIntoSlotMap(target: Map<string, SkinSlotData>, skin: Sk
   }
 }
 
-function findSkinAttachments(asset: RuntimeAsset, skinName: string, slotName: string): AttachmentData[] | null {
-  let skin: SkinData | null = null
-  if (skinName) {
-    skin = asset.skins.find((s) => s.name === skinName) ?? null
+/**
+ * 按名字选皮肤。口径与编译期一致（见 `compile.ts` 的 `defaultSkinIndex`）：
+ * 指定名字 → 名为 `default` 的皮肤 → 第一个皮肤。
+ *
+ * 编辑器创作侧（`core/skin/linkedMesh.ts`）用同一个口径找源皮肤，
+ * 否则「default 不是第一套皮肤」的工程里，链接网格在编辑器能画、导出后找不到源网格。
+ */
+export function pickSkinByName<T extends { name: string }>(skins: readonly T[], name: string): T | null {
+  if (skins.length === 0) return null
+  if (name) {
+    const found = skins.find((item) => item.name === name)
+    if (found) return found
   }
-  if (!skin) skin = asset.skins[0] ?? null
-  if (!skin) return null
-  const slot = skin.slots.find((s) => s.slotName === slotName)
-  return slot ? slot.attachments : null
+  return skins.find((item) => item.name === 'default') ?? skins[0]
+}
+
+/**
+ * 找 linkedmesh 的源网格（运行期）。规则与官方一致，并在编辑器创作侧复用同一套：
+ * - 源网格名空串 → **自身同名**（换装皮肤绝大多数就是「同名附件、换一张图」）
+ * - 源皮肤名空串 / 找不到 → 名为 `default` 的皮肤（再退第一个皮肤）
+ * - 只在**同一个槽位**里找，且父附件本身不能再是 linkedmesh（不做链式解析）
+ */
+export function findLinkedMeshParent(
+  skins: readonly SkinData[],
+  lm: { name: string; linkedMeshAttachment: string },
+  slotName: string,
+  fallbackSkinName = ''
+): AttachmentData | null {
+  const sourceName = lm.linkedMeshAttachment || lm.name
+  if (!sourceName) return null
+  const skin = pickSkinByName(skins, fallbackSkinName)
+  const slot = skin?.slots.find((item) => item.slotName === slotName)
+  const parent = slot?.attachments.find((item) => item.name === sourceName)
+  if (!parent || parent.type === AttachmentType.LinkedMesh) return null
+  return parent
 }
 
 /**
@@ -160,41 +186,33 @@ function findSkinAttachments(asset: RuntimeAsset, skinName: string, slotName: st
  * 这样老工程（导入时把 4.x 的 `source` 读丢、存成空串）也能直接恢复正常显示。
  */
 export function resolveLinkedMesh(asset: RuntimeAsset, lm: AttachmentData, slotName: string): AttachmentData | null {
-  const sourceName = lm.linkedMeshAttachment || lm.name
-  if (asset.skins.length === 0 || !sourceName) return null
-  const parents = findSkinAttachments(asset, lm.linkedMeshSkin, slotName)
-  if (!parents) return null
+  const parent = findLinkedMeshParent(asset.skins, lm, slotName, lm.linkedMeshSkin)
+  if (!parent) return null
 
-  for (const parent of parents) {
-    if (parent.name !== sourceName) continue
-    if (parent.type === AttachmentType.LinkedMesh) return null
-
-    const merged: AttachmentData = {
-      ...lm,
-      type: parent.type === AttachmentType.Mesh ? AttachmentType.Mesh : AttachmentType.Region,
-      vertices: parent.vertices,
-      weights: parent.weights,
-      triangles: parent.triangles,
-      edges: parent.edges,
-      hull: parent.hull,
-      size: { ...parent.size },
-      /*
-       * UV 必须与父网格的顶点一一对应。linkedmesh 在 Spine 数据里**没有 uvs**
-       *（几何全取自源网格），但 `createAttachmentData` 默认给 8 个占位 UV，
-       * 老工程 / 拆分过图集的工程里这 8 个数还会被换算成乱七八糟的值。
-       * 直接采用就会「32 个顶点只配 8 个 UV」：越界读到 NaN，整块网格消失
-       *（Goblins 切到 goblingirl 后脚没了）。长度对不上就一律用父网格的。
-       */
-      uvs: lm.uvs.length > 0 && lm.uvs.length === parent.uvs.length ? lm.uvs : parent.uvs,
-      ffdInBoneSpace: parent.ffdInBoneSpace,
-      position: { ...lm.position },
-      scale: { ...lm.scale },
-      color: { ...lm.color }
-    }
-    if (!merged.textureName) merged.textureName = parent.textureName
-    return merged
+  const merged: AttachmentData = {
+    ...lm,
+    type: parent.type === AttachmentType.Mesh ? AttachmentType.Mesh : AttachmentType.Region,
+    vertices: parent.vertices,
+    weights: parent.weights,
+    triangles: parent.triangles,
+    edges: parent.edges,
+    hull: parent.hull,
+    size: { ...parent.size },
+    /*
+     * UV 必须与父网格的顶点一一对应。linkedmesh 在 Spine 数据里**没有 uvs**
+     *（几何全取自源网格），但 `createAttachmentData` 默认给 8 个占位 UV，
+     * 老工程 / 拆分过图集的工程里这 8 个数还会被换算成乱七八糟的值。
+     * 直接采用就会「32 个顶点只配 8 个 UV」：越界读到 NaN，整块网格消失
+     *（Goblins 切到 goblingirl 后脚没了）。长度对不上就一律用父网格的。
+     */
+    uvs: lm.uvs.length > 0 && lm.uvs.length === parent.uvs.length ? lm.uvs : parent.uvs,
+    ffdInBoneSpace: parent.ffdInBoneSpace,
+    position: { ...lm.position },
+    scale: { ...lm.scale },
+    color: { ...lm.color }
   }
-  return null
+  if (!merged.textureName) merged.textureName = parent.textureName
+  return merged
 }
 
 /**

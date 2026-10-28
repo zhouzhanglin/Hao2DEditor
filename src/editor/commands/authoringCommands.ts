@@ -11,8 +11,10 @@ import type {
 } from '@core/model/authoring'
 import { mulPoint, trs } from '@core/math/matrix'
 import type { Vec2 } from '@core/math/matrix'
+import { linkedMeshUvs, regionNameForImage, resolveAuthoringLinkedMesh } from '@core/skin/linkedMesh'
 import { pageUvsToRegionRelative } from '@importers/uv'
 import type { AtlasRegion, PageSizes } from '@importers/uv'
+import { t } from '@i18n'
 import { convexHull, createGridMesh, refineAroundVertex, triangulatePolygon } from '@core/mesh/triangulate'
 import type { MeshGeometry } from '@core/mesh/triangulate'
 import { buildAutoMesh } from '@core/mesh/autoMesh'
@@ -522,8 +524,13 @@ export function autoGenerateRegionMesh(
  * 没有快照（例如 Spine 导入的网格）就按顶点包围盒估一个矩形、UV 用整图。
  * 顶点/三角面会被清空，对应的 FFD 关键帧也一并移除，避免顶点数对不上越界。
  */
-export function convertMeshToRegion(doc: EditorDocument, slotName: string, attachmentName: string): boolean {
-  const attachment = findAttachment(doc, slotName, attachmentName)
+export function convertMeshToRegion(
+  doc: EditorDocument,
+  slotName: string,
+  attachmentName: string,
+  skinName = ''
+): boolean {
+  const attachment = resolveAttachment(doc, slotName, attachmentName, skinName)
   if (!attachment || (attachment.type !== 'mesh' && attachment.type !== 'linkedmesh')) return false
 
   const snapshot = attachment.regionSnapshot
@@ -532,7 +539,15 @@ export function convertMeshToRegion(doc: EditorDocument, slotName: string, attac
     attachment.size = { ...snapshot.size }
     attachment.uvs = [...snapshot.uvs]
   } else {
-    const box = vertexBounds(attachment.vertices)
+    /*
+     * 链接网格自己不带顶点（几何全在源网格里），包围盒要按解析后的几何估；
+     * 直接用 `attachment.vertices` 会得到空数组 —— 尺寸停在原值上，容易「还原出来大小不对」。
+     */
+    const source =
+      attachment.vertices.length > 0
+        ? attachment.vertices
+        : resolveAuthoringLinkedMesh(doc, attachment, slotName)?.vertices ?? []
+    const box = vertexBounds(source)
     if (box) attachment.size = box
     attachment.uvs = [0, 0, 1, 0, 1, 1, 0, 1]
   }
@@ -548,6 +563,296 @@ export function convertMeshToRegion(doc: EditorDocument, slotName: string, attac
     )
   }
   return true
+}
+
+// ---------------- LinkedMesh（不同皮肤复用同一份网格几何） ----------------
+
+/** 皮肤口径（与 `core/model/asset.ts` 的 pickSkinByName 一致）：指定名字 → default → 第一个 */
+function pickSkinFor(doc: EditorDocument, name?: string): AuthoringSkin | null {
+  if (doc.skins.length === 0) return null
+  const wanted = (name ?? '').trim()
+  if (wanted) {
+    const found = doc.skins.find((item) => item.name === wanted)
+    if (found) return found
+  }
+  return doc.skins.find((item) => item.name === 'default') ?? doc.skins[0]
+}
+
+/**
+ * 严格按名字取皮肤：**指定了名字就必须存在**。
+ * 创建 / 改源这类写操作不能用宽松兜底 —— 名字写错会静默落到默认皮肤上，链接关系就悄悄错了。
+ */
+function requireSkin(doc: EditorDocument, name: string | undefined): AuthoringSkin | null {
+  const wanted = (name ?? '').trim()
+  if (!wanted) return pickSkinFor(doc, '')
+  return doc.skins.find((item) => item.name === wanted) ?? null
+}
+
+/** 写进 `linkedMeshSkin` 的值：源皮肤是默认皮肤时空串（与 Spine 的缺省语义一致） */
+function linkedSkinField(skin: AuthoringSkin, doc: EditorDocument): string {
+  const defaultSkin = pickSkinFor(doc, '')
+  return defaultSkin && skin.name === defaultSkin.name ? '' : skin.name
+}
+
+export interface CreateLinkedMeshOptions {
+  slot: string
+  /** 目标皮肤；空 = 默认皮肤 */
+  skin?: string
+  /** 源皮肤；空 = 默认皮肤（写进 linkedMeshSkin） */
+  sourceSkin?: string
+  /** 源网格附件名（同插槽，必须是 mesh） */
+  source: string
+  /** 附件名；缺省与源同名（同名 = 覆盖该插槽的显示，换装的标准写法） */
+  name?: string
+  /** 自己的图片；缺省沿用源网格的图 */
+  image?: string
+}
+
+export type CreateLinkedMeshResult =
+  | { ok: true; slot: string; attachment: string; warning?: string }
+  | { ok: false; reason: string }
+
+/**
+ * 在目标皮肤里创建一条 linkedmesh：几何（顶点 / 三角面 / 权重）永远取自源网格，
+ * 自己只决定贴图与 UV。附件名与源同名时**覆盖该插槽的显示**，异名时追加一个 display。
+ *
+ * 不复制几何是刻意的：源网格改形状后所有链接网格要自动跟随（Spine 语义），
+ * 复制一份就得多维护一套同步逻辑，导出的 `.hao2d` 里几何本来也只存父附件一份。
+ */
+export function createLinkedMesh(doc: EditorDocument, options: CreateLinkedMeshOptions): CreateLinkedMeshResult {
+  const slot = doc.slots.find((item) => item.name === options.slot)
+  if (!slot) return { ok: false, reason: t('插槽不存在：{0}', options.slot) }
+
+  const skin = requireSkin(doc, options.skin)
+  if (!skin) return { ok: false, reason: t('目标皮肤不存在：{0}', options.skin ?? '') }
+  const sourceSkin = requireSkin(doc, options.sourceSkin)
+  if (!sourceSkin) return { ok: false, reason: t('源皮肤不存在：{0}', options.sourceSkin ?? '') }
+
+  const sourceSlot = findSkinSlot(sourceSkin, slot.name)
+  const parent = sourceSlot?.attachments.find((item) => item.name === options.source)
+  if (!parent) {
+    return {
+      ok: false,
+      reason: t('源皮肤「{0}」的插槽「{1}」里没有附件「{2}」', [sourceSkin.name, slot.name, options.source])
+    }
+  }
+  if (parent.type !== 'mesh') {
+    return {
+      ok: false,
+      reason: t('源附件「{0}」是 {1}，链接网格的几何只能来自网格（先用 convertToMesh）', [parent.name, parent.type])
+    }
+  }
+  if (parent.vertices.length === 0) {
+    return { ok: false, reason: t('源网格「{0}」没有顶点，链接不出可见几何', parent.name) }
+  }
+
+  const image = (options.image ?? '').trim() || parent.image
+  if (image && !doc.images.some((item) => item.name === image)) {
+    return { ok: false, reason: t('图片不存在：{0}（用 listImages 查图片池）', image) }
+  }
+
+  /*
+   * 同名 = 覆盖该插槽的显示（换装标准写法）。只有「源皮肤就是目标皮肤」时必须换名，
+   * 否则会把源网格本身覆盖掉 —— 这时按 `name_2` 自动加序号。
+   */
+  const sameSkin = skin.name === sourceSkin.name
+  let name = (options.name ?? '').trim() || parent.name
+  if (sameSkin && name === parent.name) {
+    name = uniqueName(
+      skin.slots.flatMap((item) => item.attachments.map((attachment) => attachment.name)),
+      parent.name
+    )
+  }
+
+  const linked = createAuthoringAttachment({
+    name,
+    type: 'linkedmesh',
+    image,
+    // 换图后区域名要按**新图**重新对（`default/arm` → `goblin/arm`），照抄旧名字会退化成整页
+    regionName: regionNameForImage(doc, image, parent.regionName),
+    // 位置 / 旋转 / 缩放 / 尺寸沿用源网格：换图后不跑位、不改大小
+    position: { ...parent.position },
+    rotation: parent.rotation,
+    scale: { ...parent.scale },
+    size: { ...parent.size },
+    color: parent.color,
+    linkedMeshSkin: linkedSkinField(sourceSkin, doc),
+    linkedMeshAttachment: parent.name
+  })
+
+  const uvs = linkedMeshUvs(doc, linked, parent)
+  if (uvs) linked.uvs = uvs
+
+  const skinSlot = ensureSkinSlot(skin, slot.name)
+  const index = skinSlot.attachments.findIndex((item) => item.name === name)
+  if (index >= 0) skinSlot.attachments[index] = linked
+  else skinSlot.attachments.push(linked)
+  slot.attachment = name
+
+  return {
+    ok: true,
+    slot: slot.name,
+    attachment: name,
+    ...(uvs
+      ? {}
+      : {
+          warning: t(
+            '没能按「{0}」的图集区域重算 UV：贴图会沿用源网格那块（画出来是源皮肤的样子），换一张有区域信息的图或手动调 UV',
+            image
+          )
+        })
+  }
+}
+
+export interface SetLinkedMeshSourceOptions {
+  slot: string
+  attachment: string
+  /** 链接网格自己所在的皮肤；空 = 默认皮肤 */
+  skin?: string
+  /** 新源皮肤；空 = 默认皮肤 */
+  sourceSkin?: string
+  /** 新源网格附件名 */
+  source: string
+}
+
+export type LinkedMeshEditResult = { ok: true; warning?: string } | { ok: false; reason: string }
+
+/** 改链接网格的源（源皮肤 / 源网格），改完按新源重算 UV */
+export function setLinkedMeshSource(
+  doc: EditorDocument,
+  options: SetLinkedMeshSourceOptions
+): LinkedMeshEditResult {
+  const skin = requireSkin(doc, options.skin)
+  if (!skin) return { ok: false, reason: t('皮肤不存在：{0}', options.skin ?? '') }
+  const linked = findSkinSlot(skin, options.slot)?.attachments.find((item) => item.name === options.attachment)
+  if (!linked) return { ok: false, reason: t('找不到附件：{0} / {1}', [options.slot, options.attachment]) }
+  if (linked.type !== 'linkedmesh') {
+    return { ok: false, reason: t('附件「{0}」不是链接网格（{1}）', [linked.name, linked.type]) }
+  }
+
+  const sourceSkin = requireSkin(doc, options.sourceSkin)
+  if (!sourceSkin) return { ok: false, reason: t('源皮肤不存在：{0}', options.sourceSkin ?? '') }
+  const parent = findSkinSlot(sourceSkin, options.slot)?.attachments.find((item) => item.name === options.source)
+  if (!parent) {
+    return {
+      ok: false,
+      reason: t('源皮肤「{0}」的插槽「{1}」里没有附件「{2}」', [sourceSkin.name, options.slot, options.source])
+    }
+  }
+  if (parent.type !== 'mesh' || parent.vertices.length === 0) {
+    return { ok: false, reason: t('源附件「{0}」不是可用网格（{1}）', [parent.name, parent.type]) }
+  }
+  if (parent === linked) return { ok: false, reason: t('链接网格不能把自己当源网格') }
+
+  linked.linkedMeshSkin = linkedSkinField(sourceSkin, doc)
+  linked.linkedMeshAttachment = parent.name
+  const uvs = linkedMeshUvs(doc, linked, parent)
+  if (uvs) linked.uvs = uvs
+  return {
+    ok: true,
+    ...(uvs
+      ? {}
+      : {
+          warning: t(
+            '没能按「{0}」的图集区域重算 UV：贴图会沿用源网格那块（画出来是源皮肤的样子）',
+            linked.image
+          )
+        })
+  }
+}
+
+export interface SetLinkedMeshImageOptions {
+  slot: string
+  attachment: string
+  /** 链接网格自己所在的皮肤；空 = 默认皮肤 */
+  skin?: string
+  /** 新图片（图片池里的名字） */
+  image: string
+}
+
+/**
+ * 给链接网格换图。**只改这一条附件**（不能走 `patchAttachment`：它会连带改掉同名的源网格），
+ * 换完按新图的区域重算 UV；找不到区域就把 UV 清空，运行期会退回源网格的 UV。
+ */
+export function setLinkedMeshImage(
+  doc: EditorDocument,
+  options: SetLinkedMeshImageOptions
+): LinkedMeshEditResult {
+  const skin = requireSkin(doc, options.skin)
+  if (!skin) return { ok: false, reason: t('皮肤不存在：{0}', options.skin ?? '') }
+  const linked = findSkinSlot(skin, options.slot)?.attachments.find((item) => item.name === options.attachment)
+  if (!linked) return { ok: false, reason: t('找不到附件：{0} / {1}', [options.slot, options.attachment]) }
+  if (linked.type !== 'linkedmesh') {
+    return { ok: false, reason: t('附件「{0}」不是链接网格（{1}）', [linked.name, linked.type]) }
+  }
+  const image = options.image.trim()
+  if (!doc.images.some((item) => item.name === image)) {
+    return { ok: false, reason: t('图片不存在：{0}（用 listImages 查图片池）', image) }
+  }
+
+  linked.image = image
+  // 区域名跟着新图走（裸名匹配优先），否则 UV 会退化成整页
+  linked.regionName = regionNameForImage(doc, image, linked.regionName)
+  const parent = linked.linkedMeshAttachment ? resolveAuthoringLinkedMesh(doc, linked, options.slot)?.parent ?? null : null
+  const uvs = parent ? linkedMeshUvs(doc, linked, parent) : null
+  linked.uvs = uvs ?? []
+  return {
+    ok: true,
+    ...(uvs ? {} : { warning: t('新图「{0}」里找不到对应区域：UV 已清空，运行期会沿用源网格那块', image) })
+  }
+}
+
+export interface UnlinkLinkedMeshOptions {
+  slot: string
+  attachment: string
+  /** 链接网格自己所在的皮肤；空 = 默认皮肤 */
+  skin?: string
+}
+
+export type UnlinkLinkedMeshResult =
+  | { ok: true; slot: string; attachment: string; vertices: number; triangles: number }
+  | { ok: false; reason: string }
+
+/**
+ * 解链：把源网格的几何 / 权重 / UV 深拷贝到自己名下，变成普通网格。
+ *
+ * 顶点数与源网格一致，所以原有的 FFD 关键帧仍然对得上，不需要清理轨道。
+ * 解链是「已经不想再共享几何」的出口（源网格后续改动不再影响它）。
+ */
+export function unlinkLinkedMesh(doc: EditorDocument, options: UnlinkLinkedMeshOptions): UnlinkLinkedMeshResult {
+  const skin = requireSkin(doc, options.skin)
+  if (!skin) return { ok: false, reason: t('皮肤不存在：{0}', options.skin ?? '') }
+  const linked = findSkinSlot(skin, options.slot)?.attachments.find((item) => item.name === options.attachment)
+  if (!linked) return { ok: false, reason: t('找不到附件：{0} / {1}', [options.slot, options.attachment]) }
+  if (linked.type !== 'linkedmesh') {
+    return { ok: false, reason: t('附件「{0}」不是链接网格（{1}）', [linked.name, linked.type]) }
+  }
+
+  const view = resolveAuthoringLinkedMesh(doc, linked, options.slot)
+  if (!view) return { ok: false, reason: t('找不到源网格：链接的几何复制不了，先修好源皮肤 / 源网格再解链') }
+
+  linked.type = 'mesh'
+  linked.vertices = view.vertices.map((vertex) => ({
+    x: vertex.x,
+    y: vertex.y,
+    weights: vertex.weights.map((weight) => ({ ...weight }))
+  }))
+  linked.triangles = [...view.triangles]
+  linked.edges = [...view.parent.edges]
+  linked.hull = view.parent.hull
+  linked.size = { ...view.parent.size }
+  linked.uvs = [...view.uvs]
+  linked.ffdInBoneSpace = view.parent.ffdInBoneSpace
+  linked.linkedMeshSkin = ''
+  linked.linkedMeshAttachment = ''
+
+  return {
+    ok: true,
+    slot: options.slot,
+    attachment: linked.name,
+    vertices: linked.vertices.length,
+    triangles: Math.floor(linked.triangles.length / 3)
+  }
 }
 
 /** 附件局部坐标 → 插槽骨骼局部坐标（遮罩顶点统一存后者，与 Spine 一致） */
@@ -1101,6 +1406,27 @@ export function patchAttachment(
     const attachment = skinSlot.attachments.find((item) => item.name === attachmentName)
     if (attachment) patch(attachment)
   }
+}
+
+/**
+ * **皮肤作用域**的就地修改：只改指定皮肤里的那一条附件。
+ *
+ * 链接网格必须走这里：`patchAttachment` 会改所有皮肤的同名附件，而换装场景里
+ * 源网格与链接网格恰好同名（「同名覆盖」就是标准写法），改一次图片会把源网格的图一起改掉。
+ */
+export function patchAttachmentInSkin(
+  doc: EditorDocument,
+  skinName: string,
+  slotName: string,
+  attachmentName: string,
+  patch: (attachment: AuthoringAttachment) => void
+): boolean {
+  const skin = doc.skins.find((item) => item.name === skinName) ?? doc.skins[0]
+  const skinSlot = skin ? findSkinSlot(skin, slotName) : null
+  const attachment = skinSlot?.attachments.find((item) => item.name === attachmentName)
+  if (!attachment) return false
+  patch(attachment)
+  return true
 }
 
 export function deleteAttachment(doc: EditorDocument, slotName: string, attachmentName: string): void {

@@ -16,6 +16,7 @@ import type { Placement } from '@core/atlas/remap'
 import { AttachmentType } from '@core/model/types'
 import type { ImageAtlasRegion } from '@core/model/types'
 import type { RuntimeAsset } from '@core/model/asset'
+import { findLinkedMeshParent } from '@core/model/asset'
 import { t } from '@i18n'
 import { encodeAtlasPages, loadImageBitmap } from './pngEncoder'
 import type { PageEncodePlan } from './pngEncoder'
@@ -255,17 +256,25 @@ function remapAsset(asset: RuntimeAsset, packed: PackedAtlas): void {
     }
   }
 
-  // linkedmesh 的 UV 取自父附件，这里同步父附件所在的新页
+  /*
+   * linkedmesh 的「页」跟着谁走？
+   *
+   * 运行期会把链接网格自己的 UV 与父网格等长时**优先用自己的**（换装皮肤就是靠这一点只换贴图），
+   * 所以只有当自己的 UV 不可用（长度对不上父网格，运行期会退回父 UV）时，页才必须同步成父的。
+   * 早先这里无条件按父覆盖，多页图集 + 异名链接时会出现「UV 是自己的、页却是父的」→ 取错图。
+   *
+   * 找父也要按 `linkedMeshSkin`（可能在别的皮肤里），不能只看当前皮肤。
+   */
   for (const skin of asset.skins) {
     for (const skinSlot of skin.slots) {
       for (const attachment of skinSlot.attachments) {
         if (attachment.type !== AttachmentType.LinkedMesh) continue
-        const parentSlot = skin.slots.find((slot) => slot.slotName === skinSlot.slotName)
-        const parent = parentSlot?.attachments.find((a) => a.name === attachment.linkedMeshAttachment)
-        if (parent) {
-          attachment.textureName = parent.textureName
-          attachment.regionName = parent.regionName
-        }
+        const parent = findLinkedMeshParent(asset.skins, attachment, skinSlot.slotName, attachment.linkedMeshSkin)
+        if (!parent) continue
+        const ownUvsValid = attachment.uvs.length > 0 && attachment.uvs.length === parent.uvs.length
+        if (ownUvsValid) continue
+        attachment.textureName = parent.textureName
+        attachment.regionName = parent.regionName
       }
     }
   }

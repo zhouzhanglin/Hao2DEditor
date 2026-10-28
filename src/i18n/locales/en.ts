@@ -2277,4 +2277,87 @@ export const en: Record<string, string> = {
     'The skeleton name "{0}" is already taken, so it was renamed to "{1}"',
   '图片「{0}」与现有图片重名，已重命名为「{1}」':
     'The image name "{0}" is already taken, so it was renamed to "{1}"',
+
+  // ── LinkedMesh（链接网格：一套几何 + 多套皮肤换贴图） ────────────────────
+  '链接网格': 'Linked mesh',
+  '链接网格「{0}」找不到源网格：先修好源皮肤 / 源网格，或在属性面板里「解链为独立网格」':
+    'Linked mesh "{0}" has no source mesh: fix the source skin / mesh first, or use "Unlink to independent mesh" in the inspector',
+  '目标皮肤不存在：{0}': 'Target skin does not exist: {0}',
+  '源皮肤不存在：{0}': 'Source skin does not exist: {0}',
+  '源皮肤「{0}」的插槽「{1}」里没有附件「{2}」': 'Skin "{0}" has no attachment "{2}" in slot "{1}"',
+  '源附件「{0}」是 {1}，链接网格的几何只能来自网格（先用 convertToMesh）':
+    'Source attachment "{0}" is {1}; a linked mesh can only take geometry from a mesh (convert it with convertToMesh first)',
+  '源网格「{0}」没有顶点，链接不出可见几何':
+    'Source mesh "{0}" has no vertices, so the linked mesh would have no visible geometry',
+  '没能按「{0}」的图集区域重算 UV：贴图会沿用源网格那块（画出来是源皮肤的样子），换一张有区域信息的图或手动调 UV':
+    'Could not recompute UVs from the atlas region of "{0}": the source mesh UVs are reused (it will look like the source skin). Pick an image with region info or adjust the UVs manually',
+  '皮肤不存在：{0}': 'Skin does not exist: {0}',
+  '找不到附件：{0} / {1}': 'Attachment not found: {0} / {1}',
+  '附件「{0}」不是链接网格（{1}）': 'Attachment "{0}" is not a linked mesh ({1})',
+  '源附件「{0}」不是可用网格（{1}）': 'Source attachment "{0}" is not a usable mesh ({1})',
+  '链接网格不能把自己当源网格': 'A linked mesh cannot use itself as its source mesh',
+  '没能按「{0}」的图集区域重算 UV：贴图会沿用源网格那块（画出来是源皮肤的样子）':
+    'Could not recompute UVs from the atlas region of "{0}": the source mesh UVs are reused (it will look like the source skin)',
+  '新图「{0}」里找不到对应区域：UV 已清空，运行期会沿用源网格那块':
+    'The new image "{0}" has no matching region: UVs were cleared and the runtime falls back to the source mesh UVs',
+  '找不到源网格：链接的几何复制不了，先修好源皮肤 / 源网格再解链':
+    'Source mesh not found: there is no geometry to copy; fix the source skin / mesh before unlinking',
+  '{0}改的是绑定数据：先 setMode 切到 pose（Animate 态只动关键帧）':
+    '{0} changes rig data: switch to pose with setMode first (the Animate mode only edits keyframes)',
+  '新建链接网格': 'New linked mesh',
+  '新建链接网格…': 'New linked mesh…',
+  '已创建链接网格：{0} / {1}': 'Created linked mesh: {0} / {1}',
+  '修改链接源': 'Change linked mesh source',
+  '已把「{0}」的源网格改成「{1}」': 'Changed the source mesh of "{0}" to "{1}"',
+  '给链接网格换图': 'Change linked mesh image',
+  '已把「{0}」换成图片「{1}」': 'Changed "{0}" to image "{1}"',
+  '解链为独立网格': 'Unlink to independent mesh',
+  '解链': 'Unlink',
+  '已解链为独立网格：{0} / {1}（{2} 顶点）': 'Unlinked to an independent mesh: {0} / {1} ({2} vertices)',
+  '已解链为独立网格（{0} 顶点）': 'Unlinked to an independent mesh ({0} vertices)',
+  '「{0}」是链接网格：几何来自源网格「{1}」，请切到源网格编辑，或在属性面板里「解链为独立网格」':
+    '"{0}" is a linked mesh: its geometry comes from the source mesh "{1}". Edit the source mesh, or use "Unlink to independent mesh" in the inspector',
+  '「{0}」是链接网格，但找不到源网格：先修好源皮肤 / 源网格，或解链为独立网格':
+    '"{0}" is a linked mesh but its source mesh is missing: fix the source skin / mesh, or unlink it',
+  '几何来自「{0}」（{1}）：改形状请编辑源网格，这里只决定贴图与 UV':
+    'Geometry comes from "{0}" ({1}): edit the source mesh to change the shape; this attachment only controls texture and UVs',
+  '找不到源网格：先修好源皮肤 / 源网格（层级树右键这条 display 可改源），或解链为独立网格':
+    'Source mesh not found: fix the source skin / mesh (right-click this display in the hierarchy to change the source), or unlink it',
+  '默认皮肤': 'Default skin',
+  '默认皮肤（{0}）': 'Default skin ({0})',
+  '源皮肤': 'Source skin',
+  '源网格': 'Source mesh',
+  '附件名': 'Attachment name',
+  '与源网格同名': 'Same name as the source mesh',
+  '（沿用源网格的图）': '(use the source mesh image)',
+  '改链接网格的源': 'Change linked mesh source',
+  '改源网格…': 'Change source mesh…',
+  '当前源：{0}': 'Current source: {0}',
+  '当前源：与自身同名': 'Current source: same name as itself',
+  '已把源网格改成「{0}」': 'Changed the source mesh to "{0}"',
+  '把源网格的几何 / 权重复制到这一条，之后与源网格无关（可 Ctrl+Z 撤销）':
+    'Copy the source mesh geometry / weights into this attachment so it no longer depends on the source (Ctrl+Z to undo)',
+  '顶点 {0} · 三角面 {1}（来自源网格，只读）': 'Vertices {0} · Triangles {1} (from the source mesh, read-only)',
+  '顶点数未知：源网格缺失': 'Vertex count unknown: source mesh missing',
+  '链接网格的几何 / 权重在源网格上编辑；Animate 态仍可给这一条单独打 FFD 帧':
+    'Linked mesh geometry / weights are edited on the source mesh; in Animate mode you can still key FFD frames on this attachment',
+  '添加链接网格…': 'Add linked mesh…',
+  '复用其它皮肤同插槽的网格几何，只换这一条自己的贴图':
+    'Reuse the mesh geometry of another skin in the same slot, with its own texture',
+  '以「{0}」的几何为源，只换这一条自己的贴图':
+    'Use the geometry of "{0}" as the source and give this attachment its own texture',
+  '复制源网格的几何与权重，之后与源网格无关':
+    'Copy the source mesh geometry and weights; it will no longer depend on the source',
+  '会把源网格的顶点 / 三角面 / 权重复制到「{0}」名下，之后它就是普通网格：源网格再改形状也不会影响它。':
+    'Copies the source mesh vertices / triangles / weights into "{0}", which becomes a regular mesh and no longer follows the source shape.',
+  '顶点数不变，已有的 FFD 关键帧仍然有效。':
+    'The vertex count stays the same, so existing FFD keyframes remain valid.',
+  '可 Ctrl+Z 撤销': 'Ctrl+Z to undo',
+  '创建后可 Ctrl+Z 撤销': 'Ctrl+Z to undo the creation',
+  '源皮肤的这个插槽里没有网格：先在源皮肤里把图片转成网格，或换一个皮肤':
+    'No mesh in this slot of the source skin: convert an image to a mesh in that skin first, or pick another skin',
+  '改源只换几何来源，贴图与 UV 会按新源重算':
+    'Changing the source only swaps the geometry source; texture and UVs are recomputed',
+  '几何（顶点 / 三角面 / 权重）来自源网格，这里只决定贴图与 UV。附件名与源同名 = 覆盖该插槽的显示':
+    'Geometry (vertices / triangles / weights) comes from the source mesh; this dialog only decides texture and UVs. Using the same name as the source replaces what this slot displays',
 }

@@ -121,7 +121,7 @@ export function keyframeTargetsNow(targets: readonly KeyframeTarget[], label = '
 
   let count = 0
   useProjectStore.getState().update(t('打关键帧'), (draft) => {
-    count = keyframeTargets(draft, animationName, snapshotPose(bundle), targets, timeline.time)
+    count = keyframeTargets(draft, animationName, snapshotPose(bundle), targets, timeline.time, draft.editorMeta.activeSkin)
   })
   if (count > 0) {
     // 让时间轴滚动到该轨道并高亮：不然打的帧在轨道列表下方看不见，像「没反应」
@@ -331,7 +331,7 @@ export function keyframeNow(): ActionResult {
 
   let count = 0
   useProjectStore.getState().update(t('打关键帧'), (draft) => {
-    count = keyframeTargets(draft, animationName, snapshotPose(bundle), targets, timeline.time)
+    count = keyframeTargets(draft, animationName, snapshotPose(bundle), targets, timeline.time, draft.editorMeta.activeSkin)
   })
   if (count > 0) {
     // 与右键菜单一致：滚到该轨道并高亮（K 键打帧同样不该「悄无声息」）

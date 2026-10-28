@@ -55,8 +55,12 @@ import {
   deleteAttachment,
   deleteBone,
   deleteSlot,
-  toggleSlotDisplay
+  resolveAttachment,
+  toggleSlotDisplay,
+  unlinkLinkedMesh
 } from '@editor/commands/authoringCommands'
+import LinkedMeshDialog from '@ui/widgets/LinkedMeshDialog'
+import ConfirmDialog from '@ui/widgets/ConfirmDialog'
 import { checkNestDrop } from '@core/nesting/nest'
 import {
   boneSlotAnchor,
@@ -1406,13 +1410,21 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
 
   /** 右键菜单：记录点击位置与目标对象 */
   const [menu, setMenu] = useState<{ x: number; y: number; target: MenuTarget } | null>(null)
-  /** display 行自己的右键菜单（Animate 态：从当前时间开始显示它） */
+  /** display 行自己的右键菜单（Animate 态：从当前时间开始显示它；Pose 态：链接网格操作） */
   const [displayMenu, setDisplayMenu] = useState<{
     x: number
     y: number
     slot: string
     attachment: string
   } | null>(null)
+  /** 新建 / 改源弹窗（链接网格） */
+  const [linkedMeshDialog, setLinkedMeshDialog] = useState<{
+    slot: string
+    defaultSource?: string
+    editing?: { attachment: string; sourceSkin: string; source: string }
+  } | null>(null)
+  /** 解链确认（复制几何后与源网格断开） */
+  const [unlinkTarget, setUnlinkTarget] = useState<{ slot: string; attachment: string } | null>(null)
 
   const openMenu = (event: React.MouseEvent, target: MenuTarget): void => {
     event.preventDefault()
@@ -1636,6 +1648,18 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         icon: <Plus size={12} />,
         onSelect: () => addSlot(host)
       },
+      // 插槽行额外给「从别的皮肤借网格」的入口：源网格必须来自**同一个插槽**
+      ...(target.kind === 'slot'
+        ? [
+            {
+              key: 'linked-mesh',
+              label: t('添加链接网格…'),
+              hint: t('复用其它皮肤同插槽的网格几何，只换这一条自己的贴图'),
+              icon: <Link2 size={12} />,
+              onSelect: () => setLinkedMeshDialog({ slot: target.name })
+            }
+          ]
+        : []),
       // 约束驱动的是骨骼，挂在插槽下没有意义，只在骨骼行 / 根层提供
       ...(target.kind === 'bone' || target.kind === 'root'
         ? [
@@ -1667,6 +1691,61 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     ]
     if (target.kind !== 'root') {
       items.push({ key: 'sep2', label: '', separator: true }, deleteItem(target))
+    }
+    return items
+  }
+
+  /** 默认皮肤名：链接源的缺省值（与运行期 pickSkinByName 同一口径） */
+  const defaultSkinName =
+    document.skins.find((item) => item.name === 'default')?.name ?? document.skins[0]?.name ?? ''
+
+  /**
+   * display 行的 **Pose 态**菜单：链接网格的「建 / 改源 / 解链」。
+   *
+   * 放在 display 行而不是插槽行：「从这一条派生」是最常见的用法（换装时给某个部件换图），
+   * 直接把当前附件预填成源网格，少一次选择。
+   */
+  const displayMenuItems = (slot: string, attachmentName: string): ContextMenuItem[] => {
+    const skinName = selection.skin || document.editorMeta.activeSkin
+    const attachment = resolveAttachment(document, slot, attachmentName, skinName)
+    const items: ContextMenuItem[] = []
+    // 「以这一条为源」只对网格成立：链接网格的几何本身也是借来的（链式）不允许
+    if (attachment?.type === 'mesh') {
+      items.push({
+        key: 'linked-mesh-new',
+        label: t('新建链接网格…'),
+        hint: t('以「{0}」的几何为源，只换这一条自己的贴图', attachmentName),
+        icon: <Link2 size={12} />,
+        onSelect: () => setLinkedMeshDialog({ slot, defaultSource: attachmentName })
+      })
+    }
+    if (attachment?.type === 'linkedmesh') {
+      items.push(
+        {
+          key: 'linked-mesh-source',
+          label: t('改源网格…'),
+          hint: attachment.linkedMeshAttachment
+            ? t('当前源：{0}', attachment.linkedMeshAttachment)
+            : t('当前源：与自身同名'),
+          icon: <Link2 size={12} />,
+          onSelect: () =>
+            setLinkedMeshDialog({
+              slot,
+              editing: {
+                attachment: attachment.name,
+                sourceSkin: attachment.linkedMeshSkin || defaultSkinName,
+                source: attachment.linkedMeshAttachment || attachment.name
+              }
+            })
+        },
+        {
+          key: 'linked-mesh-unlink',
+          label: t('解链为独立网格'),
+          hint: t('复制源网格的几何与权重，之后与源网格无关'),
+          danger: true,
+          onSelect: () => setUnlinkTarget({ slot, attachment: attachment.name })
+        }
+      )
     }
     return items
   }
@@ -1898,6 +1977,9 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             />
           ) : attachment.type === 'clipping' ? (
             <Pentagon size={11} className={showing ? 'text-accent' : 'text-content-lo/60'} />
+          ) : attachment.type === 'linkedmesh' ? (
+            // 链接网格与普通网格共用几何来源不同：用链条图标区分，一眼看出「这条是借来的」
+            <Link2 size={11} className={showing ? 'text-accent' : 'text-content-lo/60'} />
           ) : isMeshType(attachment.type) ? (
             <Grid3x3 size={11} className={showing ? 'text-accent' : 'text-content-lo/60'} />
           ) : (
@@ -1933,9 +2015,11 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         onIconClick={() => selectDisplay(slot.name, attachment.name)}
         iconTitle={showing ? t('点击隐藏（该插槽不显示任何 display）') : t('点击显示它')}
         onSelect={() => selection.selectAttachment(slot.name, attachment.name)}
-        // Animate 态：右键 display = 从当前时间点开始显示它（打显示关键帧）
+        // Animate 态：从当前时间点开始显示它（打显示关键帧）；Pose 态：链接网格的建 / 改源 / 解链
         onContextMenu={(event) => {
-          if (useModeStore.getState().mode !== 'animate') return
+          // Pose 态只有网格类附件有菜单（贴图 / 包围盒 / 遮罩这一层没有可做的事，不弹空框）
+          const animating = useModeStore.getState().mode === 'animate'
+          if (!animating && attachment.type !== 'mesh' && attachment.type !== 'linkedmesh') return
           event.preventDefault()
           event.stopPropagation()
           setDisplayMenu({
@@ -2313,29 +2397,75 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           x={displayMenu.x}
           y={displayMenu.y}
           title={t('「{0}」· display「{1}」', [displayMenu.slot, displayMenu.attachment])}
-          items={[
-            {
-              key: 'display-key',
-              label: t('显示关键帧（从这里开始显示）'),
-              hint: t('在当前时间切到「{0}」', displayMenu.attachment),
-              icon: <KeyRound size={12} />,
-              onSelect: () => {
-                const result = keySlotDisplayNow(displayMenu.slot, displayMenu.attachment)
-                onStatus?.(result.message)
-              }
-            },
-            {
-              key: 'display-hide-key',
-              label: t('隐藏关键帧（从这里开始不显示）'),
-              hint: t('在当前时间把该插槽切成「不显示」'),
-              icon: <EyeOff size={12} />,
-              onSelect: () => {
-                const result = keySlotDisplayNow(displayMenu.slot, '')
-                onStatus?.(result.message)
-              }
-            }
-          ]}
+          items={
+            useModeStore.getState().mode === 'animate'
+              ? [
+                  {
+                    key: 'display-key',
+                    label: t('显示关键帧（从这里开始显示）'),
+                    hint: t('在当前时间切到「{0}」', displayMenu.attachment),
+                    icon: <KeyRound size={12} />,
+                    onSelect: () => {
+                      const result = keySlotDisplayNow(displayMenu.slot, displayMenu.attachment)
+                      onStatus?.(result.message)
+                    }
+                  },
+                  {
+                    key: 'display-hide-key',
+                    label: t('隐藏关键帧（从这里开始不显示）'),
+                    hint: t('在当前时间把该插槽切成「不显示」'),
+                    icon: <EyeOff size={12} />,
+                    onSelect: () => {
+                      const result = keySlotDisplayNow(displayMenu.slot, '')
+                      onStatus?.(result.message)
+                    }
+                  }
+                ]
+              : displayMenuItems(displayMenu.slot, displayMenu.attachment)
+          }
           onClose={() => setDisplayMenu(null)}
+        />
+      ) : null}
+
+      {linkedMeshDialog ? (
+        <LinkedMeshDialog
+          slot={linkedMeshDialog.slot}
+          skin={selection.skin || document.editorMeta.activeSkin}
+          defaultSource={linkedMeshDialog.defaultSource}
+          editing={linkedMeshDialog.editing}
+          onStatus={(text) => onStatus?.(text)}
+          onClose={() => setLinkedMeshDialog(null)}
+        />
+      ) : null}
+
+      {unlinkTarget ? (
+        <ConfirmDialog
+          title={t('解链为独立网格')}
+          icon={Link2}
+          message={t(
+            '会把源网格的顶点 / 三角面 / 权重复制到「{0}」名下，之后它就是普通网格：源网格再改形状也不会影响它。',
+            unlinkTarget.attachment
+          )}
+          details={t('顶点数不变，已有的 FFD 关键帧仍然有效。')}
+          confirmLabel={t('解链')}
+          hint={t('可 Ctrl+Z 撤销')}
+          onConfirm={() => {
+            const target = unlinkTarget
+            let message = ''
+            update(t('解链为独立网格'), (draft) => {
+              const result = unlinkLinkedMesh(draft, {
+                slot: target.slot,
+                attachment: target.attachment,
+                skin: selection.skin || document.editorMeta.activeSkin
+              })
+              message = result.ok
+                ? t('已解链为独立网格：{0} / {1}（{2} 顶点）', [result.slot, result.attachment, result.vertices])
+                : result.reason
+            })
+            setUnlinkTarget(null)
+            onStatus?.(message)
+          }}
+          onClose={() => setUnlinkTarget(null)}
         />
       ) : null}
     </div>

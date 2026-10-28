@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Activity,
@@ -1867,9 +1867,10 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     const showing = shownDisplayName(slot) === attachment.name
     const hovered = displayHover?.slot === slot.name && displayHover.attachment === attachment.name
     return (
-      <>
+      // key 必须挂在 Fragment 上：这个返回值会被 push 进 `rows` 数组（一行 + 可能出现的悬浮卡片），
+      // 挂在里面的 TreeRow 上不算数，React 会报「Each child in a list should have a unique key prop」
+      <Fragment key={`display:${slot.name}:${attachment.name}`}>
       <TreeRow
-        key={`display:${slot.name}:${attachment.name}`}
         dragPayload={{ kind: 'display', slot: slot.name, name: attachment.name }}
         onDropNode={(payload, position) =>
           handleNodeDrop(payload, { kind: 'display', name: attachment.name, slot: slot.name }, position)
@@ -1956,7 +1957,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           attachment={attachment}
         />
       ) : null}
-      </>
+      </Fragment>
     )
   }
 

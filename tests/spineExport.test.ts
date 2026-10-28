@@ -8,6 +8,7 @@ import type { AtlasRegion } from '@importers/uv'
 import {
   buildSpineJson,
   collectRegionTrim,
+  defaultSkinForPreview,
   serializeSpineAtlas,
   spineAtlasRegionNames
 } from '@editor/services/spineExport'
@@ -711,5 +712,35 @@ describe('DB 附件上的裁剪回填进 .atlas', () => {
     )
     const plainSkins = plain.skins as SpineSkinJson[]
     expect(plainSkins[0].attachments?.beak_lower?.beak_lower?.width).toBe(39)
+  })
+})
+
+/**
+ * 「皮肤列表正常、中间没图像」的来源：Hao2D 皮肤是「基底永远生效 + 选中皮肤叠加」，
+ * 基底（通常叫 default）里往往只有几个附件。
+ */
+describe('预览默认皮肤', () => {
+  const skins = [
+    { name: 'default', slots: [{ slotName: 's0', attachments: [] }] },
+    { name: 'goblin', slots: [{ slotName: 's1', attachments: [] }] }
+  ]
+
+  it('取编辑器当前皮肤（叠加层），不是基底那套', () => {
+    const asset = createRuntimeAsset({ skins, defaultSkinIndex: 0, defaultSkin: 'goblin' })
+    expect(defaultSkinForPreview(asset)).toBe('goblin')
+  })
+
+  it('没有当前皮肤时退回基底', () => {
+    const asset = createRuntimeAsset({ skins, defaultSkinIndex: 0, defaultSkin: '' })
+    expect(defaultSkinForPreview(asset)).toBe('default')
+  })
+
+  it('当前皮肤在导出产物里不存在时也退回基底（老工程 / 皮肤被删）', () => {
+    const asset = createRuntimeAsset({ skins, defaultSkinIndex: 0, defaultSkin: 'goblingirl' })
+    expect(defaultSkinForPreview(asset)).toBe('default')
+  })
+
+  it('空皮肤表给空串（预览页按「没有皮肤可选」处理）', () => {
+    expect(defaultSkinForPreview(createRuntimeAsset({ skins: [] }))).toBe('')
   })
 })

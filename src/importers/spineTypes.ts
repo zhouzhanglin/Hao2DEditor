@@ -201,6 +201,14 @@ export interface SpineCurveKeyframe {
   x?: number
   y?: number
   curve?: number | number[] | string
+  /**
+   * 老格式（2.x / 早期 3.x）把贝塞尔的四个控制点拆成兄弟字段：
+   * `curve` = cx1、`c2` = cy1、`c3` = cx2、`c4` = cy2（缺省 0 / 1 / 1）。
+   * 这种写法交给 4.x 运行库会算出 NaN，见 `spineLegacyCurves`。
+   */
+  c2?: number
+  c3?: number
+  c4?: number
   [key: string]: unknown
 }
 

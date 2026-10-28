@@ -4,6 +4,7 @@ import type { Vec2 } from '@core/math/matrix'
 import { Viewport } from '@render/viewport'
 import { SkeletonView } from '@render/skeletonView'
 import type { TextureStore } from '@render/material'
+import { destroyTexture } from '@render/material'
 import {
   GIZMO_AXIS_LENGTH,
   GIZMO_CENTER_RADIUS,
@@ -349,7 +350,8 @@ export class EditorScene {
     const prev = this.stageSprite.texture
     this.stageSprite.texture = texture ?? Texture.EMPTY
     // 旧贴图是我们自己 new 出来的，换掉就没人引用了，销毁掉避免 GPU 资源泄漏
-    if (prev && prev !== Texture.EMPTY && prev !== texture) prev.destroy(true)
+    //（走 `destroyTexture`：舞台图常被渲染过，直接 destroy 会触发 pixi 的 bindGroup 误报）
+    if (prev && prev !== Texture.EMPTY && prev !== texture) destroyTexture(prev)
     this.dirty = true
   }
 

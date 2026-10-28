@@ -583,23 +583,136 @@ export function wrapRotateKeys(json: unknown): unknown {
   return changed ? { ...(json as object), animations: animationsOut } : json
 }
 
+/**
+ * 3.x 的 `linkedmesh` 用 `parent` 指向源网格，4.2+ 改名成 `source`。
+ *
+ * 官方 4.3 的 `SkeletonJson.readAttachment` 里 `mesh` 与 `linkedmesh` 走**同一个分支**，
+ * 只认 `source`：缺了就当普通 mesh 继续读 `uvs` / `vertices`，而 linkedmesh 本来没有 `vertices`，
+ * `readVertices` 里 `vertices.length` 直接抛 TypeError —— 整份文件烘焙失败、回退内置解析
+ * （老资源里带 linkedmesh 的每次导入都会刷这条错误）。
+ */
+function normalizeLegacyAttachments(json: unknown): { json: unknown; fixed: number } {
+  let fixed = 0
+  const root = json as { skins?: unknown } | null
+  const skins = root?.skins
+  if (!skins || typeof skins !== 'object') return { json, fixed }
+
+  const fixAttachment = (att: unknown): unknown => {
+    if (!att || typeof att !== 'object') return att
+    const map = att as Record<string, unknown>
+    if (map.type !== 'linkedmesh' || map.source !== undefined) return att
+    const parent = map.parent
+    if (typeof parent !== 'string' || parent.length === 0) return att
+    const next: Record<string, unknown> = { ...map, source: parent }
+    delete next.parent
+    fixed++
+    return next
+  }
+
+  const fixSlotMap = (slotMap: unknown): unknown => {
+    if (!slotMap || typeof slotMap !== 'object') return slotMap
+    let changed: Record<string, unknown> | null = null
+    for (const [name, att] of Object.entries(slotMap as Record<string, unknown>)) {
+      const next = fixAttachment(att)
+      if (next === att) continue
+      changed ??= { ...(slotMap as Record<string, unknown>) }
+      changed[name] = next
+    }
+    return changed ?? slotMap
+  }
+
+  const fixAttachments = (attachments: unknown): unknown => {
+    if (!attachments || typeof attachments !== 'object') return attachments
+    let changed: Record<string, unknown> | null = null
+    for (const [slotName, slotMap] of Object.entries(attachments as Record<string, unknown>)) {
+      const next = fixSlotMap(slotMap)
+      if (next === slotMap) continue
+      changed ??= { ...(attachments as Record<string, unknown>) }
+      changed[slotName] = next
+    }
+    return changed ?? attachments
+  }
+
+  let skinsOut: unknown = skins
+  if (Array.isArray(skins)) {
+    let changed: unknown[] | null = null
+    skins.forEach((skin, index) => {
+      const attachments = (skin as { attachments?: unknown } | null)?.attachments
+      const next = fixAttachments(attachments)
+      if (next === attachments) return
+      changed ??= skins.slice()
+      changed[index] = { ...(skin as object), attachments: next }
+    })
+    if (changed) skinsOut = changed
+  } else {
+    // 3.x 早期的对象式 skins：`{ 皮肤名: { 插槽名: { 附件名: {...} } } }`
+    let changed: Record<string, unknown> | null = null
+    for (const [skinName, attachments] of Object.entries(skins as Record<string, unknown>)) {
+      const next = fixAttachments(attachments)
+      if (next === attachments) continue
+      changed ??= { ...(skins as Record<string, unknown>) }
+      changed[skinName] = next
+    }
+    if (changed) skinsOut = changed
+  }
+  return skinsOut === skins ? { json, fixed } : { json: { ...(root as object), skins: skinsOut }, fixed }
+}
+
+/**
+ * 3.x 的插槽颜色时间轴叫 `color`，4.0+ 拆成 `rgba` / `rgb` / `alpha`（3.8 的 `color` 是四通道）。
+ *
+ * 官方 4.3 的 `readAnimation` 对 `map.slots.<槽>` 下不认识的键**直接抛**
+ * `Invalid timeline type for a slot`，所以只要有一条颜色轨道，整份文件就烘不出来。
+ */
+function normalizeLegacySlotTimelines(json: unknown): { json: unknown; fixed: number } {
+  const animations = (json as { animations?: Record<string, unknown> } | null)?.animations
+  if (!animations || typeof animations !== 'object') return { json, fixed: 0 }
+  let fixed = 0
+  let animationsOut: Record<string, unknown> | null = null
+  for (const [name, animation] of Object.entries(animations)) {
+    const slots = (animation as { slots?: Record<string, Record<string, unknown>> } | null)?.slots
+    if (!slots || typeof slots !== 'object') continue
+    let slotsOut: Record<string, Record<string, unknown>> | null = null
+    for (const [slotName, timelines] of Object.entries(slots)) {
+      if (!timelines || typeof timelines !== 'object' || timelines.color === undefined) continue
+      const { color, ...rest } = timelines
+      slotsOut ??= { ...slots }
+      slotsOut[slotName] = { ...rest, rgba: color }
+      fixed++
+    }
+    if (!slotsOut) continue
+    animationsOut ??= { ...animations }
+    animationsOut[name] = { ...(animation as object), slots: slotsOut }
+  }
+  return animationsOut ? { json: { ...(json as object), animations: animationsOut }, fixed } : { json, fixed }
+}
+
 export function bakeSpineAnimations(input: SpineBakeInput): BakedAnimation[] | null {
   const fps = input.fps && input.fps > 0 ? input.fps : 30
+  /*
+   * 附件与插槽时间轴先规整：这两处是**硬错误**，不修的话官方库每次都在
+   * `readAttachment` / `readAnimation` 抛异常，烘焙永远走不到动画那一步。
+   * - 3.x 的 linkedmesh 用 `parent`（4.2+ 叫 `source`）
+   * - 3.x 的插槽颜色时间轴叫 `color`（4.0+ 叫 `rgba`）
+   */
+  const attachments = normalizeLegacyAttachments(input.json)
+  const slots = normalizeLegacySlotTimelines(attachments.json)
   /*
    * rotate 取值先连续化再交给官方库：官方按取值线性插值，直接读 337.8 会在中途把角色翻过来。
    * 必须在**拆缓动之前**做 —— 拆出来的子键是按原始端点算的（337.8 → 0 的长弧），
    * 事后再连续化就会顺着这些子键一路减 360°，末尾多转一整圈。
    */
-  const wrapped = wrapRotateKeys(input.json)
+  const wrapped = wrapRotateKeys(slots.json)
   const first = bakeOnce(input, wrapped, fps, true)
   if (first) return first
 
   const fixed = normalizeLegacyAnimations(wrapped as SpineJson, fps)
-  if (fixed.segments === 0 && fixed.renamed === 0) return null
+  if (fixed.segments === 0 && fixed.renamed === 0 && fixed.merged === 0) return null
   const retry = bakeOnce(input, fixed.json, fps, false)
   if (retry) {
     console.info(
-      `[spine] 老格式动画已规整（拆缓动 ${fixed.segments} 段 / 改名 ${fixed.renamed} 帧），改用官方运行库烘焙`
+      `[spine] 老格式动画已规整（拆缓动 ${fixed.segments} 段 / 改名 ${fixed.renamed} 帧 / ` +
+        `拼回曲线 ${fixed.merged} 帧），改用官方运行库烘焙`
     )
     return retry
   }
@@ -810,7 +923,8 @@ function bakeOnce(
      *（版本差异：3.3 的键名、图集缺 region、附件类型不认识…）。把原因打出来，
      * 排查「导入后动画和官方库不一致」时第一眼就能看到。
      */
-    if (!quiet) console.warn('[spine] 官方运行库烘焙抛错，已回退内置解析：', error)
+    // 这是**预期内的回退**（3.x 老格式与 4.x 运行库不兼容），不是导入失败：动画会走内置解析
+    if (!quiet) console.warn('[spine] 官方运行库烘焙未成功，动画已回退内置解析（不影响导入/显示）：', error)
     return null
   }
 }

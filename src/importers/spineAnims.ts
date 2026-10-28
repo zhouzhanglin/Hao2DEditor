@@ -16,7 +16,8 @@ import type { BoneData, VertexWeight } from '@core/model/types'
 import type { Constraint } from '@core/model/constraints'
 import type { AtlasRegion, PageSizes } from './uv'
 import { parseHexColor, pxToUnit } from './uv'
-import type { SpineAnimationJson } from './spineTypes'
+import type { SpineAnimationJson, SpineCurveKeyframe } from './spineTypes'
+import { splitCurveControlPoints } from './spineLegacyCurves'
 
 /** 网格附件的绑定顶点（deform 换算与长度对齐用） */
 export interface SpineDeformBase {
@@ -105,7 +106,7 @@ export interface SpineAnimContext {
  * - 骨骼轨道的 rotate/translate/scale 是**相对 setup 的增量**，这里叠加成绝对值后写入
  * - `attachment` 轨道固定 Stepped，同时产出附件名（换皮肤后按名解析才正确）
  * - `deform` 的层级既可能是 3.x 的「插槽层」，也可能是 4.x 的「皮肤层」
- * - easing：curve 数组 ≥4 → Bezier；数字 → Bezier[c,0,1,1]；"stepped" → Stepped；其余 Linear
+ * - easing：curve 数组 ≥4 → Bezier；数字 → Bezier[c, c2, c3, c4]（缺省 0/1/1）；"stepped" → Stepped；其余 Linear
  */
 export function importSpineAnimations(
   name: string,
@@ -142,7 +143,7 @@ export function importSpineAnimations(
       const nraw = next ? numberOr(next.angle ?? next.value, 0) : raw
       // 缓动的归一化必须用**曲线所在的原始值空间**（角度 / 像素 / 倍数），
       // 不能换成叠加过 setup、除过 PPU 的最终值 —— 控制点是同一空间的绝对坐标
-      const e = curveOfChannel(key.curve, 0, timeOf(key), next ? timeOf(next) : timeOf(key), raw, nraw, ctx.absoluteCurve)
+      const e = curveOfChannel(key, 0, timeOf(key), next ? timeOf(next) : timeOf(key), raw, nraw, ctx.absoluteCurve)
       track.rotate.push({ time: timeOf(key), value: bone.rotation + raw, ...e })
       duration = Math.max(duration, timeOf(key))
     }
@@ -154,7 +155,7 @@ export function importSpineAnimations(
       const rawX = numberOr(key.x, 0)
       const nrawX = next ? numberOr(next.x, 0) : rawX
       // 多通道 curve 里 x / y 各占一组，而模型每帧只存一个 easing —— 用 x 通道（编辑器默认两通道一致）
-      const e = curveOfChannel(key.curve, 0, timeOf(key), next ? timeOf(next) : timeOf(key), rawX, nrawX, ctx.absoluteCurve)
+      const e = curveOfChannel(key, 0, timeOf(key), next ? timeOf(next) : timeOf(key), rawX, nrawX, ctx.absoluteCurve)
       track.translate.push({
         time: timeOf(key),
         value: {
@@ -172,7 +173,7 @@ export function importSpineAnimations(
       const next = scKeys[i + 1]
       const rawX = numberOr(key.x, 1)
       const nrawX = next ? numberOr(next.x, 1) : rawX
-      const e = curveOfChannel(key.curve, 0, timeOf(key), next ? timeOf(next) : timeOf(key), rawX, nrawX, ctx.absoluteCurve)
+      const e = curveOfChannel(key, 0, timeOf(key), next ? timeOf(next) : timeOf(key), rawX, nrawX, ctx.absoluteCurve)
       track.scale.push({
         time: timeOf(key),
         value: { x: bone.localScale.x * rawX, y: bone.localScale.y * numberOr(key.y, 1) },
@@ -186,7 +187,7 @@ export function importSpineAnimations(
       const next = shKeys[i + 1]
       const rawX = numberOr(key.x, 0)
       const nrawX = next ? numberOr(next.x, 0) : rawX
-      const e = curveOfChannel(key.curve, 0, timeOf(key), next ? timeOf(next) : timeOf(key), rawX, nrawX, ctx.absoluteCurve)
+      const e = curveOfChannel(key, 0, timeOf(key), next ? timeOf(next) : timeOf(key), rawX, nrawX, ctx.absoluteCurve)
       // 与 Unity 端 Hao2D 运行时一致：shear 帧**原样保留**（不叠加 setup）
       // —— 那边的注释明确写着「setup 里没有 shear，且运行期不采样它，原样保留」
       track.shear.push({
@@ -657,10 +658,11 @@ function expandDrawOrder(
  * 所以只在版本缺失（`null`）时才回退到它。
  *
  * `channel` 选第几组（0 = x / rotate，1 = y）。`curve` 为 `"stepped"` 时阶跃，
- * 缺省 / 非数组为线性。
+ * 缺省为线性。**数字**是 2.x / 早期 3.x 的拆分写法：`curve` = cx1，`c2/c3/c4` = cy1/cx2/cy2
+ *（缺省 0 / 1 / 1），四个分量都是归一化控制点，两个通道共用一组。
  */
 function curveOfChannel(
-  curve: unknown,
+  key: SpineCurveKeyframe,
   channel: number,
   time1: number,
   time2: number,
@@ -668,12 +670,15 @@ function curveOfChannel(
   value2: number,
   absolute: boolean | null
 ): { easing: Easing; curve: number[] | null } {
+  const curve = key.curve
   if (curve === 'stepped') return { easing: Easing.Stepped, curve: null }
+  const split = splitCurveControlPoints(key)
+  if (split) return { easing: Easing.Bezier, curve: split }
   if (!Array.isArray(curve)) return { easing: Easing.Linear, curve: null }
   const base = channel * 4
   if (curve.length < base + 4) {
     // 单通道轨道只给 4 个数：第二通道复用第一组
-    if (channel > 0 && curve.length >= 4) return curveOfChannel(curve, 0, time1, time2, value1, value2, absolute)
+    if (channel > 0 && curve.length >= 4) return curveOfChannel(key, 0, time1, time2, value1, value2, absolute)
     return { easing: Easing.Linear, curve: null }
   }
   const c1t = numberOr(curve[base], 0)

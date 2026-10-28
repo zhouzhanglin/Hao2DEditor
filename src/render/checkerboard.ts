@@ -1,4 +1,5 @@
 import { Texture, TilingSprite } from 'pixi.js'
+import { destroyTexture } from './material'
 
 /**
  * 棋盘格两档底色。
@@ -60,7 +61,10 @@ export class Checkerboard {
    */
   destroy(): void {
     this.sprite.removeFromParent()
-    this.sprite.destroy({ texture: true, textureSource: true })
+    // 纹理走 `destroyTexture`（连图源一起释放，并避开 pixi 的 bindGroup 误报，见那里的注释）
+    const texture = this.sprite.texture
+    this.sprite.destroy({ texture: false, textureSource: false })
+    destroyTexture(texture)
   }
 }
 

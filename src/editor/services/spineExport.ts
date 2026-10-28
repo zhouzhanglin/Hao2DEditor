@@ -1281,6 +1281,22 @@ export interface SpineBundleResult {
 }
 
 /**
+ * 预览 / 运行期默认该显示哪套皮肤 = **编辑器当前皮肤**（`asset.defaultSkin`，叠加在基底之上）。
+ *
+ * 不能给基底那套（`defaultSkinIndex`，通常叫 `default`）：Hao2D 的皮肤是「基底永远生效 +
+ * 选中皮肤同名覆盖」，基底里往往只有几个附件 —— 实测 Gobling 工程 default 只有 4 个附件、
+ * goblin 有 22 个。预览页拿基底名开局就会「皮肤 / 动画列表都在、中间却没有图像」。
+ *
+ * 名字在导出产物里不存在时（老工程 / 皮肤被删）退回基底，保证预览至少能开。
+ */
+export function defaultSkinForPreview(asset: RuntimeAsset): string {
+  const skins = asset.skins
+  if (skins.length === 0) return ''
+  if (asset.defaultSkin && skins.some((skin) => skin.name === asset.defaultSkin)) return asset.defaultSkin
+  return skins[Math.min(Math.max(asset.defaultSkinIndex, 0), skins.length - 1)].name
+}
+
+/**
  * 把导出计划编译成「可直接落盘、也可直接喂在线预览」的产物：每个骨架一份 json + atlas + 图集页字节。
  *
  * 图集页只编码一次（计划里的图集本身就是所有骨架共用的），每个骨架各自做区域改名与裁剪换算 ——
@@ -1360,8 +1376,7 @@ export async function buildSpineBundles(
     // 查表用**未改名的**区域（UV 换算要的是那块矩形本身），页名用改名后的，附件 path 由 names 改写
     const lookup: SpineRegionLookup = { ...buildRegionLookup({ ...plan.atlas, pages }), names }
     const skeletonJson = buildSpineJson(skeleton.asset, lookup)
-    const skinCount = skeleton.asset.skins.length
-    const defaultSkinIndex = skinCount > 0 ? Math.min(Math.max(skeleton.asset.defaultSkinIndex, 0), skinCount - 1) : -1
+    const defaultSkinName = defaultSkinForPreview(skeleton.asset)
     bundles.push({
       name: skeleton.name || skeleton.asset.armatureName || base,
       base,
@@ -1371,7 +1386,7 @@ export async function buildSpineBundles(
       animations: skeleton.asset.animations.map((anim) => anim.name),
       skins: skeleton.asset.skins.map((skin) => skin.name),
       defaultAnimation: skeleton.asset.animations[0]?.name ?? '',
-      defaultSkin: defaultSkinIndex >= 0 ? skeleton.asset.skins[defaultSkinIndex].name : ''
+      defaultSkin: defaultSkinName
     })
   }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { bezierEase, normalizeLegacyAnimations } from '@importers/spineLegacyCurves'
-import type { SpineJson } from '@importers/spineTypes'
+import type { SpineCurveKeyframe, SpineJson } from '@importers/spineTypes'
 
 /** 3.3 风格的最小文件：两根骨骼 + 一条带缓动的 translate / rotate 轨道 */
 function legacyJson(): SpineJson {
@@ -131,6 +131,38 @@ describe('老格式动画规整', () => {
     const scale = result.json.animations?.stepped.bones?.COG.scale ?? []
     expect(scale).toHaveLength(2)
     expect(scale[0].curve).toBe('stepped')
+  })
+
+  it('curve + c2/c3/c4 的拆分写法拼回数组（4.x 运行库直接读数字会算出 NaN）', () => {
+    const json: SpineJson = {
+      skeleton: { spine: '3.8.99' },
+      animations: {
+        fire: {
+          bones: {
+            hip: {
+              // 实测 010 的 `Pistol/attack-1`：首帧省略 time / x，缓动拆成 curve + c2/c3/c4
+              translate: [
+                { y: -1.21, curve: 0.501, c2: 0.03, c3: 0.314 },
+                { time: 0.1, x: -3.73, y: -9.63, curve: 0.602, c2: 0.04, c3: 0.42, c4: 1.68 },
+                { time: 0.4333, y: -1.21 }
+              ] as unknown as SpineCurveKeyframe[]
+            }
+          }
+        }
+      }
+    }
+    const result = normalizeLegacyAnimations(json, 30)
+    expect(result.merged).toBe(2)
+    const keys = result.json.animations?.fire.bones?.hip.translate ?? []
+    // 拆开的兄弟字段必须清掉：官方 readCurve 只认数组，读到数字就取到 undefined → NaN
+    expect(keys.every((key) => typeof key.curve !== 'number')).toBe(true)
+    expect(keys.every((key) => key.c2 === undefined && key.c3 === undefined && key.c4 === undefined)).toBe(true)
+    // 首帧缺 time 也要能拆（否则 span 是 NaN，子键数算成 1，缓动被静默丢成直线）
+    // 首段 0 → 0.1s 在 30fps 下是 3 个子键，第 1 个子键落在 1/30 处
+    expect(keys[1].time).toBeCloseTo(1 / 30, 6)
+    // 曲线 `[0.501, 0.03, 0.314, 1]`（缺省的 c2/c4 取 0 / 1）：前段慢、后段快
+    expect(keys[1].y).toBeCloseTo(-1.21 + (-9.63 - -1.21) * bezierEase(0.501, 0.03, 0.314, 1, 1 / 3), 6)
+    expect(keys.find((key) => key.time === 0.1)?.y).toBeCloseTo(-9.63, 6)
   })
 
   it('不改动传入的 JSON（返回深拷贝）', () => {

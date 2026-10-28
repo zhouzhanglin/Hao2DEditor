@@ -3,7 +3,7 @@ import { Bone } from 'lucide-react'
 import ContextMenu from '@ui/widgets/ContextMenu'
 import { slotLayerMenuItems } from '@ui/widgets/slotLayerMenuItems'
 import { EditorScene } from '@editor/scene'
-import { TextureStore } from '@render/material'
+import { TextureStore, destroyTexture } from '@render/material'
 import { ImageAlphaCache } from '@render/imageAlpha'
 import { imageSources } from '@render/imageSourceRegistry'
 import { getPlatform, dirName } from '@editor/platform'
@@ -456,7 +456,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
           source: new ImageSource({ resource: image, alphaMode: 'premultiply-alpha-on-upload' })
         })
         if (cancelled) {
-          texture.destroy(true)
+          destroyTexture(texture)
           return
         }
         scene.setStageTexture(texture)

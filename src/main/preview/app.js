@@ -378,6 +378,40 @@
     })
   }
 
+  /**
+   * 应用皮肤（Hao2D 的皮肤是**叠加**语义，不是替换）。
+   *
+   * 编辑器里「基底皮肤永远生效 + 当前皮肤同名覆盖」（见 compile.ts 的 defaultSkinIndex /
+   * defaultSkin、以及运行期 buildRuntimeMaps），导出的 spine json 把两者写成**各自独立的皮肤**：
+   * 基底一般叫 `default`（往往只有几个附件），真正的角色部件在 `goblin` / `goblingirl` 这类皮肤里。
+   *
+   * 所以这里必须合成一个皮肤再交给官方运行库：直接 `setSkin('goblin')` 会丢掉只存在于
+   * default 的附件（武器之类），而直接 `setSkin('default')` 就是「皮肤列表正常、中间没图像」——
+   * 上一版预览页就是这样，默认只挂了基底那套。
+   */
+  var BASE_SKIN = 'default'
+  function applySkin(name) {
+    if (!app.skeleton || !app.data) return
+    var base = null
+    var skins = app.data.skins
+    for (var i = 0; i < skins.length; i++) if (skins[i].name === BASE_SKIN) base = skins[i]
+    // 找不到名为 default 的基底时按编译侧的老规则退化成第一套（见 compile.ts）
+    if (!base) base = skins.length > 0 ? skins[0] : null
+    var extra = null
+    if (name && (!base || name !== base.name)) {
+      for (var j = 0; j < skins.length; j++) if (skins[j].name === name) extra = skins[j]
+    }
+    if (!base && !extra) return
+    if (!extra) {
+      app.skeleton.setSkin(base.name)
+      return
+    }
+    var merged = new spine.Skin(base ? BASE_SKIN + '+' + extra.name : extra.name)
+    if (base) merged.addSkin(base)
+    merged.addSkin(extra)
+    app.skeleton.setSkin(merged)
+  }
+
   function fillSelect(select, items, selected) {
     select.innerHTML = ''
     items.forEach(function (item) {
@@ -417,9 +451,12 @@
       fillSelect($('animSelect'), animNames.map(function (name) { return { value: name, label: name } }), wantAnim)
       $('animSelect').disabled = animNames.length <= 1
 
-      if (skinNames.length > 0) app.skeleton.setSkin(wantSkin)
-      // 4.3 起是 setupPose()（旧名字 setToSetupPose 已不存在）
+      // 4.3 起是 setupPose()（旧名字 setToSetupPose 已不存在）。
+      // 顺序：先回 setup pose、再挂皮肤 —— 反过来的话 setupPose 会把皮肤挂上的附件清掉
+      //（Slot.setupPose 在 `attachmentName` 为空时直接 setAttachment(null)）
       app.skeleton.setupPose()
+      // 基底 + 选中皮肤（叠加语义，见 applySkin）
+      if (skinNames.length > 0) applySkin(wantSkin)
       app.skeleton.updateWorldTransform(spine.Physics.update)
       // 默认适配大小：加载完成后立刻按真实视口取一次景（用户手动拖过 / 缩过才解除）
       app.touched = false
@@ -576,8 +613,8 @@
   })
   $('skinSelect').addEventListener('change', function (event) {
     if (!app.skeleton) return
-    app.skeleton.setSkin(event.target.value)
     app.skeleton.setupPoseSlots()
+    applySkin(event.target.value)
     app.skeleton.updateWorldTransform(spine.Physics.update)
     app.dirty = true
   })

@@ -63,3 +63,33 @@ describe('TextureStore：换资源时的清理', () => {
     expect(store.has('page.png')).toBe(true)
   })
 })
+
+/**
+ * 独立 describe：上面两组用例共用同一份 `urls` / `resolvers` 记账，断言里写死了下标与顺序，
+ * 所以这条要放在它们**之后**、并且自己取句柄。
+ */
+describe('纹理销毁', () => {
+  it('destroy 前先摘掉图源上的 change 监听（避开 pixi 的「destroyed while still bound」误报）', async () => {
+    const store = new TextureStore()
+    const loading = store.load('page.png', 'c-url')
+    await flush()
+    // 取本次加载的解码句柄（前面的用例已经消耗掉若干个，不能写死下标）
+    resolvers[resolvers.length - 1]()
+    await loading
+
+    const texture = store.get('page.png')
+    const source = texture.source
+    // 模拟 pixi 批处理的 BindGroup：它就是这么监听图源的（见 BindGroup.setResource）
+    let notified = 0
+    source.on('change', () => {
+      notified++
+    })
+    store.delete('page.png')
+
+    // 监听在销毁前就被摘掉了 → 没人被通知，`onResourceChange` 也就不会打警告
+    expect(notified).toBe(0)
+    expect(texture.destroyed).toBe(true)
+    expect(source.destroyed).toBe(true)
+  })
+
+})

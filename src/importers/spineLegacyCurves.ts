@@ -68,6 +68,43 @@ function needsFlatten(curve: SpineCurveKeyframe['curve']): boolean {
   return curve === 'linear'
 }
 
+/**
+ * 把老格式**拆开写**的贝塞尔控制点拼回一组 `[cx1, cy1, cx2, cy2]`。
+ *
+ * 2.x / 早期 3.x 的导出把四个归一化控制点拆到兄弟字段上：
+ * `curve` = cx1、`c2` = cy1、`c3` = cx2、`c4` = cy2，缺省值分别是 0 / 1 / 1
+ * （实测 010 里最常见的组合是 `curve: 0.25, c3: 0.75` → `[0.25, 0, 0.75, 1]`，
+ * 正是标准的缓入缓出；cy 分量的取值上限到 1.68 也符合「取值轴可以过冲」，
+ * 而 cx 分量都落在 0..1 —— 说明轴序无误）。
+ *
+ * 为什么必须拼：官方 4.x 的 `readCurve` 只认「数组」和 `"stepped"`，遇到**数字**照样走数组分支
+ * 去读 `curve[0]`，得到 `undefined`，`setBezier` 拿到 NaN 控制点后整条轨道立刻变 NaN ——
+ * 实测 010 的 `Pistol/attack-1` 第 0 帧 `hip` 的 pose 就是 NaN,NaN,0，整份文件烘焙失败。
+ *
+ * 不是数字（数组 / `"stepped"` / `"linear"` / 缺省）时返回 null，交给后面的原有逻辑。
+ * 内置解析器（`spineAnims` 的 `curveOfChannel`）用同一函数，两条路径必须给出同样的缓动。
+ */
+export function splitCurveControlPoints(key: SpineCurveKeyframe): CurvePoints | null {
+  const curve = key.curve
+  if (typeof curve !== 'number' || !Number.isFinite(curve)) return null
+  return [
+    curve,
+    typeof key.c2 === 'number' && Number.isFinite(key.c2) ? key.c2 : 0,
+    typeof key.c3 === 'number' && Number.isFinite(key.c3) ? key.c3 : 1,
+    typeof key.c4 === 'number' && Number.isFinite(key.c4) ? key.c4 : 1
+  ]
+}
+
+/**
+ * 关键帧时间（秒）。**首帧常常省略 `time`**（官方 `getValue(keyMap, "time", 0)` 当 0）。
+ *
+ * 直接读 `undefined` 会让 `to.time - from.time` 变成 NaN：子键数被算成 1，
+ * 这段缓动就被静默丢成直线（实测 010 的 `Pistol/attack-1` 首段正是这么丢的）。
+ */
+function timeOfKey(key: SpineCurveKeyframe): number {
+  return typeof key.time === 'number' && Number.isFinite(key.time) ? key.time : 0
+}
+
 /** 取关键帧的数值（rotate 是单值 `value`/`angle`，其余是 `x` / `y` 两个分量） */
 function valuesOf(key: SpineCurveKeyframe, track: BoneTrackName): number[] {
   if (track === 'rotate') {
@@ -77,7 +114,7 @@ function valuesOf(key: SpineCurveKeyframe, track: BoneTrackName): number[] {
   return [typeof key.x === 'number' ? key.x : 0, typeof key.y === 'number' ? key.y : 0]
 }
 
-type CurvePoints = [number, number, number, number]
+export type CurvePoints = [number, number, number, number]
 
 /**
  * 一段曲线在某个通道上的**归一化**控制点。
@@ -113,7 +150,8 @@ function curvePointsFor(
   const inRange = (value: number): boolean => value >= -1 && value <= 2
   if (inRange(c1t) && inRange(c1v) && inRange(c2t) && inRange(c2v)) return [c1t, c1v, c2t, c2v]
 
-  const dt = to.time - from.time
+  const t0 = timeOfKey(from)
+  const dt = timeOfKey(to) - t0
   if (Math.abs(dt) < 1e-9) return null
   const a = valuesOf(from, track)
   const b = valuesOf(to, track)
@@ -121,7 +159,7 @@ function curvePointsFor(
   const v0 = a[index] ?? 0
   const dv = (b[index] ?? 0) - v0
   const flat = Math.abs(dv) < 1e-9
-  return [(c1t - from.time) / dt, flat ? 0 : (c1v - v0) / dv, (c2t - from.time) / dt, flat ? 1 : (c2v - v0) / dv]
+  return [(c1t - t0) / dt, flat ? 0 : (c1v - v0) / dv, (c2t - t0) / dt, flat ? 1 : (c2v - v0) / dv]
 }
 
 /** 取数组里的数字（非数字给 0） */
@@ -141,7 +179,7 @@ function flattenSegment(
   delete lifted.curve
   const out: SpineCurveKeyframe[] = [lifted]
 
-  const span = to.time - from.time
+  const span = timeOfKey(to) - timeOfKey(from)
   const count = span > 0 ? Math.max(1, Math.round(span * fps)) : 1
   if (count <= 1) return out
 
@@ -152,7 +190,7 @@ function flattenSegment(
 
   for (let k = 1; k < count; k++) {
     const t = k / count
-    const time = from.time + span * t
+    const time = timeOfKey(from) + span * t
     const ex = easeX ? bezierEase(easeX[0], easeX[1], easeX[2], easeX[3], t) : t
     if (track === 'rotate') {
       out.push({ time, value: a[0] + (b[0] - a[0]) * ex })
@@ -174,25 +212,29 @@ export interface LegacyAnimFixResult {
   segments: number
   /** `angle` 改名成 `value` 的关键帧数 */
   renamed: number
+  /** 拼回数组的「`curve` + `c2/c3/c4`」老格式关键帧数 */
+  merged: number
 }
 
 /**
  * 规整老格式（主版本 < 4）的骨骼动画轨道：拆缓动曲线 + `angle` → `value`。
  *
  * - 只动 `rotate` / `translate` / `scale` / `shear`，插槽轨道与其它字段原样保留；
+ * - `curve: 数字` + `c2/c3/c4` 的拆分写法先拼回一组数组，再走同一套拆缓动（见 `splitCurvePoints`）；
  * - 子键密度 = 烘焙帧率（`fps`）：一帧一个键，采样点上与官方缓动完全一致；
  * - 输入不被改动（返回深拷贝）；
- * - 4.x 及以上的文件直接原样返回（两个计数都是 0）。
+ * - 4.x 及以上的文件直接原样返回（三个计数都是 0）。
  */
 export function normalizeLegacyAnimations(json: SpineJson, fps: number): LegacyAnimFixResult {
   const step = fps > 0 ? fps : 30
-  if (majorOf(json.skeleton?.spine) >= 4) return { json, segments: 0, renamed: 0 }
+  if (majorOf(json.skeleton?.spine) >= 4) return { json, segments: 0, renamed: 0, merged: 0 }
   const animations = json.animations
-  if (!animations || typeof animations !== 'object') return { json, segments: 0, renamed: 0 }
+  if (!animations || typeof animations !== 'object') return { json, segments: 0, renamed: 0, merged: 0 }
 
   const out = JSON.parse(JSON.stringify(json)) as SpineJson
   let segments = 0
   let renamed = 0
+  let merged = 0
 
   for (const animation of Object.values(out.animations ?? {}) as SpineAnimationJson[]) {
     const bones = animation?.bones
@@ -209,6 +251,15 @@ export function normalizeLegacyAnimations(json: SpineJson, fps: number): LegacyA
             key.value = key.angle
             delete key.angle
             renamed++
+          }
+          // 拆开写的贝塞尔 → 4.x 认的数组写法（不拼会直接烘出 NaN，见 splitCurvePoints）
+          const points = splitCurveControlPoints(key)
+          if (points) {
+            key.curve = points
+            delete key.c2
+            delete key.c3
+            delete key.c4
+            merged++
           }
         }
 
@@ -228,5 +279,5 @@ export function normalizeLegacyAnimations(json: SpineJson, fps: number): LegacyA
     }
   }
 
-  return { json: out, segments, renamed }
+  return { json: out, segments, renamed, merged }
 }

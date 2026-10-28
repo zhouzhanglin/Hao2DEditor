@@ -54,6 +54,31 @@ export function rgbaToHexNumber(color: RGBA): number {
   return (r << 16) | (g << 8) | b
 }
 
+/**
+ * 销毁纹理（连图源一起），并**先摘掉图源上的 `change` 监听**。
+ *
+ * 为什么要绕这一下：pixi 8 的批处理会给「参与批处理的那组纹理」造一个 `BindGroup`，
+ * 存在模块级的 `cachedGroups` 里（key 是这组纹理 uid 的哈希，**永不释放**），而它监听着
+ * 每个图源的 `change`。`TextureSource.destroy()` 内部会先 `unload()` 再 emit `change`，
+ * 于是 `BindGroup.onResourceChange` 看到 `resource.destroyed` 就打出
+ * `[BindGroup] a 'textureSource' was destroyed while still bound to a shader`。
+ *
+ * 实际情形是「误报」：那个 bindGroup 只是一份死缓存，贴图并没有真绑在谁身上；
+ * 而且 uid 不会复用，它也不可能再被取到。但警告每次换工程都会刷，看着像我们漏了解绑。
+ *
+ * 我们又要**立刻**释放（换工程时旧图集页必须马上让位给同名新图，见 `TextureStore.delete`），
+ * 所以做法是销毁前把图源上的监听摘干净，让缓存里的 BindGroup 静默失效：
+ * 它拿不到通知，也就不会读已经销毁的 GPU 资源。
+ */
+export function destroyTexture(texture: Texture): void {
+  // 全局共享的兜底纹理（白图 / 空图）谁都不能销毁；重复销毁也直接放过
+  if (!texture || texture.destroyed || texture === Texture.WHITE || texture === Texture.EMPTY) return
+  const source = texture.source
+  // 只摘 `change`：`unload` 之类的事件不参与这条误报链路，摘多了反而是另一层隐患
+  if (source && !source.destroyed) source.removeAllListeners('change')
+  texture.destroy(true)
+}
+
 /** 用 <img> 加载图片并转成纹理（为什么要绕开 Assets.load，见 imageLoader 的说明） */
 async function loadTextureFromUrl(url: string): Promise<Texture> {
   const image = await loadImageElement(url)
@@ -131,14 +156,14 @@ export class TextureStore {
     const texture = this.textures.get(name)
     if (!texture) return
     this.textures.delete(name)
-    texture.destroy(true)
+    destroyTexture(texture)
     this.notify()
   }
 
   clear(): void {
     // 正在加载的也要作废：它们的 URL 都属于「上一份资源」
     for (const name of [...this.textures.keys(), ...this.loading]) this.invalidate(name)
-    for (const texture of this.textures.values()) texture.destroy(true)
+    for (const texture of this.textures.values()) destroyTexture(texture)
     this.textures.clear()
     this.notify()
   }

@@ -149,7 +149,7 @@
 | --- | --- | --- | --- |
 | `addSkeleton` | `name`?(string) 骨架名；不传用「骨架 N」 | 新建一个空骨架（含根骨骼 root）并切过去。图片池与其它骨架共享 | { name, activeSkeleton, count } |
 | `nestArmature` | `slot`*(string) 目标插槽名<br>`armature`*(string) 被引用的骨架名（必须是工程里的另一个骨架）<br>`name`?(string) 新 display 的名字；缺省用骨架名（重名自动加序号）<br>`skin`?(string) 皮肤名；不传用当前皮肤 | 把工程里的另一个骨架作为 display 挂到指定插槽上（同工程按名字引用，不复制数据），并切换为当前显示项。会拒绝自引用 / 循环引用 / 超深 | { slot, attachment } |
-| `removeSkeleton` | `index`?(number) 骨架下标；不传 = 当前骨架 | 删除指定下标的骨架（至少保留一个）。不传 index 则删当前骨架 | { count, activeSkeleton } |
+| `removeSkeleton` | `index`?(number) 骨架下标；不传 = 当前骨架 | 删除指定下标的骨架（至少保留一个）。不传 index 则删当前骨架。**被别的骨架嵌套引用时删不掉**：先删掉父骨架里指向它的嵌套 display（或 setNestedArmature 换成别的骨架） | { count, activeSkeleton } |
 | `renameSkeleton` | `index`?(number) 骨架下标；不传 = 当前骨架<br>`name`*(string) 新名字 | 改某个骨架的 armatureName（不影响项目名 / 导出目录名）。不传 index 则改当前骨架 | { index, name } |
 | `setActiveSkeleton` | `index`*(number) 骨架下标 | 切换当前编辑的骨架（只换引用，不动数据），并清空针对旧骨架的选中 / 时间轴状态 | { name, activeSkeleton } |
 | `setNestedArmature` | `slot`*(string) 插槽名<br>`attachment`*(string) 嵌套骨架 display 名<br>`armature`?(string) 引用哪个骨架（同工程里的骨架名；空串 = 断开引用）<br>`animation`?(string) setup 默认播放的子动画名；空串 = setup 姿态<br>`playTimes`?(number) 播放次数：0 或负数 = 无限循环（每轮从 offset 起播）；正数 = 播几次后定格<br>`offset`?(number) 起始偏移（秒）<br>`speed`?(number) 倍速，1 = 原速 | 改嵌套骨架 display 的引用与默认播放参数：引用骨架名 / 默认子动画 / 播放次数（0=循环）/ 起始偏移 / 倍速。只对 type=armature 的 display 有效 | { slot, attachment, changedFields } |

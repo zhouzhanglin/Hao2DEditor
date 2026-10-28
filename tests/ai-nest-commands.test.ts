@@ -171,4 +171,30 @@ describe('AI 命令：骨架嵌套', () => {
     expect(result.ok).toBe(false)
     expect(String(result.error)).toContain('没有嵌套骨架')
   })
+
+  // —— 被嵌套引用的骨架不能删：父骨架里会留下指空的 armature display ——
+  it('store 拒绝删除被引用的骨架，并报出引用位置', () => {
+    const result = useProjectStore.getState().removeSkeleton(1)
+    expect(result.ok).toBe(false)
+    expect(result.message).toContain('正在被引用')
+    // 位置格式：父骨架名 / 插槽名 / display 名
+    expect(result.message).toContain('Hero / weapon / Sword')
+    expect(useProjectStore.getState().skeletons).toHaveLength(2)
+    // 没删就不该留撤销记录
+    expect(useProjectStore.getState().canUndo).toBe(false)
+  })
+
+  it('removeSkeleton 命令：被引用时折成 ok:false，不静默删掉', async () => {
+    const result = await executeCommand('removeSkeleton', { index: 1 })
+    expect(result.ok).toBe(false)
+    expect(String(result.error)).toContain('正在被引用')
+    expect(useProjectStore.getState().skeletons).toHaveLength(2)
+  })
+
+  it('父骨架不再引用时可以删（先删掉嵌套 display）', () => {
+    useProjectStore.getState().setProject([parentDoc(false), childDoc()], 0, null, false)
+    const result = useProjectStore.getState().removeSkeleton(1)
+    expect(result.ok).toBe(true)
+    expect(useProjectStore.getState().skeletons.map((skeleton) => skeleton.armatureName)).toEqual(['Hero'])
+  })
 })

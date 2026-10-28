@@ -61,8 +61,14 @@ export interface ProjectState {
    * 当前工程已有的骨架、项目名、保存路径都不动。
    */
   appendSkeletons: (skeletons: EditorDocument[]) => number
-  /** 删除某个骨架（至少保留一个） */
-  removeSkeleton: (index: number) => void
+  /**
+   * 删除某个骨架（至少保留一个）。
+   *
+   * 被别的骨架嵌套引用（有 armature display 的 `subArmature` 指向它）时**拒绝删除**，
+   * 返回 `ok: false` + 引用位置 —— 否则父骨架里就留下一个指空的嵌套 display。
+   * 调用方必须看返回值：UI 要提示原因而不是报「已删除」，AI 命令要折成 ok:false。
+   */
+  removeSkeleton: (index: number) => { ok: boolean; message: string }
   /** 重命名某个骨架（改它的 `armatureName`） */
   renameSkeleton: (index: number, name: string) => void
   /** 删除图片（跨所有骨架清理引用，引用它的附件退化为纯色） */
@@ -519,18 +525,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   removeSkeleton: (index) => {
     const state = get()
     // 至少留一个：项目里没有骨架时编辑器的面板 / 视口都没有可编辑对象
-    if (state.skeletons.length <= 1) return
+    if (state.skeletons.length <= 1) return { ok: false, message: t('项目里至少保留一个骨架') }
     const at = clampIndex(index, state.skeletons.length)
-    // 被别的骨架嵌套引用时不允许删除（否则父骨架里就留下一个空引用）
     const target = state.skeletons[at]?.armatureName ?? ''
+    // 被别的骨架嵌套引用时不允许删除（否则父骨架里就留下一个指空的嵌套 display）
     const referencedBy = nestReferencesTo(state.skeletons, target)
     if (referencedBy.length > 0) {
-      set({
-        warnings: [
-          t('骨架「{0}」正在被引用，先删除这些嵌套 display：{1}', [target, referencedBy.join(t('、'))])
-        ]
-      })
-      return
+      return {
+        ok: false,
+        message: t('骨架「{0}」正在被引用，先删除这些嵌套 display：{1}', [
+          target,
+          referencedBy.join(t('、'))
+        ])
+      }
     }
     history.push('删除骨架', snapshotOf(state))
     const list = state.skeletons.filter((_, i) => i !== at)
@@ -542,6 +549,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           : state.activeSkeleton
     const next = clampIndex(active, list.length)
     set({ document: list[next], skeletons: list, activeSkeleton: next, dirty: true, ...syncFlags(state) })
+    return { ok: true, message: t('已删除骨架「{0}」（图片池未动）', target) }
   },
 
   renameSkeleton: (index, name) => {

@@ -291,7 +291,8 @@ export function registerProjectCommands(): void {
     {
       name: 'removeSkeleton',
       title: '删除骨架',
-      description: '删除指定下标的骨架（至少保留一个）。不传 index 则删当前骨架',
+      description:
+        '删除指定下标的骨架（至少保留一个）。不传 index 则删当前骨架。**被别的骨架嵌套引用时删不掉**：先删掉父骨架里指向它的嵌套 display（或 setNestedArmature 换成别的骨架）',
       args: { index: { type: 'number', description: '骨架下标；不传 = 当前骨架' } },
       returns: '{ count, activeSkeleton }'
     },
@@ -308,7 +309,10 @@ export function registerProjectCommands(): void {
         )
       }
       const name = store.skeletons[index]?.armatureName ?? String(index)
-      store.removeSkeleton(index)
+      // 被别的骨架嵌套引用时 store 会拒绝删除：折成 ok:false 把原因回给 AI，
+      // 不做「切换骨架」的收尾（否则明明没删，选中 / 播放头 / 视口却全被重置了）
+      const removed = store.removeSkeleton(index)
+      if (!removed.ok) throw new Error(removed.message)
       resetForSkeletonChange()
       const after = useProjectStore.getState()
       return changed(

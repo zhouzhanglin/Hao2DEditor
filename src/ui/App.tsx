@@ -339,10 +339,15 @@ export default function App() {
         flash(t('项目里至少保留一个骨架'))
         return
       }
-      const name = store.skeletons[index]?.armatureName ?? ''
-      store.removeSkeleton(index)
+      // 被别的骨架嵌套引用时 store 会拒绝删除：照实提示原因，且不做「切换骨架」那套收尾
+      // （停播 / 清选中 / 重置视口）。以前不看返回值，明明没删也报「已删除」，还会把编辑状态清掉
+      const result = store.removeSkeleton(index)
+      if (!result.ok) {
+        flash(result.message)
+        return
+      }
       resetForSkeletonChange()
-      flash(t('已删除骨架「{0}」（图片池未动）', name))
+      flash(result.message)
     },
     [flash, resetForSkeletonChange]
   )

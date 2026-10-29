@@ -110,12 +110,6 @@ const SLOT_ORDER_MIN = 90
 const SLOT_ORDER_MAX = 420
 const SLOT_ORDER_KEY = 'hao2d:slot-order-height'
 
-/** Animate 态左栏「曲线」面板高度（占原「资源与皮肤」的位置，独立记忆） */
-const CURVE_PANEL_HEIGHT = 250
-const CURVE_PANEL_MIN = 150
-const CURVE_PANEL_MAX = 560
-const CURVE_PANEL_KEY = 'hao2d:curve-panel-height'
-
 function loadPanelHeight(key: string, fallback: number, min: number, max: number): number {
   if (typeof localStorage === 'undefined') return fallback
   const stored = Number(localStorage.getItem(key))
@@ -192,7 +186,6 @@ export default function App() {
   })
   const [assetHeight, setAssetHeight] = useState(() => loadPanelHeight(ASSET_PANEL_KEY, ASSET_PANEL_HEIGHT, ASSET_PANEL_MIN, ASSET_PANEL_MAX))
   const [slotOrderHeight, setSlotOrderHeight] = useState(() => loadPanelHeight(SLOT_ORDER_KEY, SLOT_ORDER_HEIGHT, SLOT_ORDER_MIN, SLOT_ORDER_MAX))
-  const [curveHeight, setCurveHeight] = useState(() => loadPanelHeight(CURVE_PANEL_KEY, CURVE_PANEL_HEIGHT, CURVE_PANEL_MIN, CURVE_PANEL_MAX))
   /** 导出弹窗（选目录 / 调图集缩放 / 预览）：null = 未打开 */
   const [exportMode, setExportMode] = useState<ExportMode | null>(null)
   /** 全局设置弹窗（与工程无关、跨工程保留）：false = 未打开 */
@@ -273,21 +266,11 @@ export default function App() {
     })
   }, [])
 
-  /** Animate 态左栏分隔条：拖的是「曲线」面板高度（与「资源与皮肤」各自记忆） */
-  const resizeCurvePanel = useCallback((delta: number) => {
-    setCurveHeight((previous) => {
-      const next = Math.min(CURVE_PANEL_MAX, Math.max(CURVE_PANEL_MIN, previous - delta))
-      if (typeof localStorage !== 'undefined') localStorage.setItem(CURVE_PANEL_KEY, String(Math.round(next)))
-      return next
-    })
-  }, [])
-
   // 「重置布局」把面板高度一并复位，和其它分栏保持一致
   useEffect(() => {
     const reset = (): void => {
       setAssetHeight(ASSET_PANEL_HEIGHT)
       setSlotOrderHeight(SLOT_ORDER_HEIGHT)
-      setCurveHeight(CURVE_PANEL_HEIGHT)
     }
     window.addEventListener('hao2d:reset-layout', reset)
     return () => window.removeEventListener('hao2d:reset-layout', reset)
@@ -907,21 +890,12 @@ export default function App() {
             >
               <SlotOrderPanel onStatus={flash} />
             </PanelShell>
-            {/* 分隔条：向上拖把底部面板拉长（高度会记住）。
-                Animate 态这块位置让给「曲线」，资源与皮肤只在 Pose 态显示 */}
-            <Splitter direction="vertical" onResize={mode === 'animate' ? resizeCurvePanel : resizeAssetPanel} />
-            {mode === 'animate' ? (
-              <PanelShell title={t('曲线')} grow={false} style={{ height: curveHeight }}>
-                <CurvePanel />
-              </PanelShell>
-            ) : (
-              <PanelShell title={t('资源与皮肤')} grow={false} style={{ height: assetHeight }}>
-                <AssetPanel
-                  onImport={() => handleCommand('project:importImages')}
-                  onStatus={flash}
-                />
-              </PanelShell>
-            )}
+            {/* 分隔条：向上拖把「资源与皮肤」拉高（高度会记住）。
+                曲线编辑器已挪到视口右下角浮动显示（见下面的 CurvePanel） */}
+            <Splitter direction="vertical" onResize={resizeAssetPanel} />
+            <PanelShell title={t('资源与皮肤')} grow={false} style={{ height: assetHeight }}>
+              <AssetPanel onImport={() => handleCommand('project:importImages')} onStatus={flash} />
+            </PanelShell>
           </>
         }
         center={
@@ -949,6 +923,8 @@ export default function App() {
               <PropertyKeyBar onStatus={flash} />
               {/* 关键帧的值：贴在视口正下方中间，改值时光看画面即可（仅 Animate 态出现） */}
               {mode === 'animate' ? <KeyframeValueBar /> : null}
+              {/* 缓动曲线：视口右下角浮动显示，选中关键帧才出现（判断在 CurvePanel 内部） */}
+              {mode === 'animate' ? <CurvePanel /> : null}
               {/* 空白工程提示：不再自带示例角色，首次启动给个上手指引 */}
               {doc.bones.length === 0 && doc.images.length === 0 ? (
                 <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-1 text-center">

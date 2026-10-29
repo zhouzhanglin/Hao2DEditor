@@ -46,9 +46,9 @@ const PRESETS: Array<{ label: string; easing: Easing; curve: number[] | null }> 
  * 为什么固定成 12 格而不是让值域自适应：自适应时「往上能拖多远」取决于当前曲线，
  * 一拖手柄画面就跟着缩放，反而不好控制。固定 12 格后，纵向可拖范围恒为 -1..2。
  */
-const WIDTH = 132
-const HEIGHT = 176
-const PAD = 12
+const WIDTH = 72
+const HEIGHT = 128
+const PAD = 8
 /** 纵轴每格 0.25：中间 4 格 = 0..1，上下各 4 格 → 值域 -1 .. 2 */
 const STEP = 0.25
 const VALUE_MIN = -1
@@ -75,8 +75,8 @@ function thumbDomain(curve: number[]): Domain {
  * 预设按钮的图标：在 `THUMB` 见方的小图里画一遍这条缓动曲线（形状所见即所得，
  * 与主图同一套控制点 → 不写文字也不会认错）。
  */
-const THUMB = 26
-const THUMB_PAD = 3
+const THUMB = 18
+const THUMB_PAD = 2
 
 function presetPath(easing: Easing, curve: number[] | null): string {
   const span = THUMB - THUMB_PAD * 2
@@ -159,7 +159,7 @@ export default function CurveEditor({ selectedKeys, easing, curve, onChange, sho
   const path = `M ${p0.cx} ${p0.cy} C ${p1.cx} ${p1.cy}, ${p2.cx} ${p2.cy}, ${p3.cx} ${p3.cy}`
 
   return (
-    <div className="flex h-full min-h-0 items-center gap-2.5">
+    <div className="flex h-full min-h-0 items-center gap-2">
       <svg
         ref={svgRef}
         width={WIDTH}
@@ -197,9 +197,9 @@ export default function CurveEditor({ selectedKeys, easing, curve, onChange, sho
         })}
         {easing === Easing.Bezier ? (
           <>
-            <path d={path} fill="none" stroke="#0A84FF" strokeWidth={1.6} />
-            <line x1={p0.cx} y1={p0.cy} x2={p1.cx} y2={p1.cy} stroke="#BF5AF2" strokeDasharray="3 3" />
-            <line x1={p3.cx} y1={p3.cy} x2={p2.cx} y2={p2.cy} stroke="#BF5AF2" strokeDasharray="3 3" />
+            <path d={path} fill="none" stroke="#0A84FF" strokeWidth={1.3} />
+            <line x1={p0.cx} y1={p0.cy} x2={p1.cx} y2={p1.cy} stroke="#BF5AF2" strokeDasharray="2 2" />
+            <line x1={p3.cx} y1={p3.cy} x2={p2.cx} y2={p2.cy} stroke="#BF5AF2" strokeDasharray="2 2" />
           </>
         ) : (
           <path
@@ -210,11 +210,11 @@ export default function CurveEditor({ selectedKeys, easing, curve, onChange, sho
             }
             fill="none"
             stroke="#0A84FF"
-            strokeWidth={1.6}
+            strokeWidth={1.3}
           />
         )}
-        <circle cx={p0.cx} cy={p0.cy} r={3} fill="#8E8E93" />
-        <circle cx={p3.cx} cy={p3.cy} r={3} fill="#8E8E93" />
+        <circle cx={p0.cx} cy={p0.cy} r={2.2} fill="#8E8E93" />
+        <circle cx={p3.cx} cy={p3.cy} r={2.2} fill="#8E8E93" />
         {enabled && easing === Easing.Bezier ? (
           <>
             {[1, 2].map((index) => {
@@ -224,19 +224,19 @@ export default function CurveEditor({ selectedKeys, easing, curve, onChange, sho
               return (
                 <g key={index}>
                   {/*
-                    真身是外面这个透明的大圆（r=10）：5px 的小圆点在密集面板里几乎点不中，
+                    真身是外面这个透明的大圆（r=7）：小圆点在密集面板里几乎点不中，
                     拖动全靠它兜住鼠标。可视的小圆点不接事件（pointer-events-none），
                     免得挡住命中区。
                   */}
                   <circle
                     cx={point.cx}
                     cy={point.cy}
-                    r={10}
+                    r={7}
                     fill="transparent"
                     className={enabled ? 'cursor-grab' : undefined}
                     onPointerDown={onPointerDown}
                   />
-                  <circle cx={point.cx} cy={point.cy} r={5} fill="#BF5AF2" pointerEvents="none" />
+                  <circle cx={point.cx} cy={point.cy} r={3.5} fill="#BF5AF2" pointerEvents="none" />
                 </g>
               )
             })}
@@ -244,10 +244,10 @@ export default function CurveEditor({ selectedKeys, easing, curve, onChange, sho
         ) : null}
       </svg>
 
-      <div className="flex min-w-0 flex-1 flex-col justify-center gap-1.5">
+      <div className="flex min-w-0 flex-1 flex-col justify-center gap-1">
         {showTitle ? <span className="hao-panel-title">{t('曲线')}</span> : null}
         {/* 预设铺成一排小图：每格画的就是这条缓动的形状（名称放 title 里），比文字按钮好挑 */}
-        <div className="flex flex-wrap gap-1">
+        <div className="grid grid-cols-3 gap-0.5">
           {PRESETS.map((preset) => {
             const isActive =
               preset.easing === easing &&
@@ -265,7 +265,7 @@ export default function CurveEditor({ selectedKeys, easing, curve, onChange, sho
                 title={t(preset.label)}
                 aria-label={t(preset.label)}
                 className={[
-                  'flex h-[26px] w-[30px] items-center justify-center rounded-[5px] border transition-colors duration-panel',
+                  'flex h-[20px] w-full items-center justify-center rounded-[4px] border transition-colors duration-panel',
                   !enabled
                     ? 'cursor-not-allowed border-line text-content-lo/40'
                     : isActive
@@ -292,7 +292,7 @@ export default function CurveEditor({ selectedKeys, easing, curve, onChange, sho
                     d={presetPath(preset.easing, preset.curve)}
                     fill="none"
                     stroke="currentColor"
-                    strokeWidth={1.6}
+                    strokeWidth={1.2}
                     strokeLinecap="round"
                   />
                 </svg>

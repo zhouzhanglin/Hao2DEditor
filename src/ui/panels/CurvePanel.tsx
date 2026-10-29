@@ -23,7 +23,7 @@ export default function CurvePanel() {
   const frame = single && animation ? findKeyframe(animation, single) : null
 
   return (
-    <div className="flex h-full w-full flex-col gap-1.5 overflow-y-auto overflow-x-hidden p-2">
+    <div className="flex h-full w-full flex-col overflow-y-auto overflow-x-hidden p-2">
       <CurveEditor
         selectedKeys={selectedKeys}
         easing={frame?.easing ?? Easing.Linear}
@@ -35,9 +35,6 @@ export default function CurvePanel() {
           })
         }}
       />
-      <p className="text-3xs text-content-lo">
-        {t('选中关键帧后拖控制点，或点预设按钮；多选时预设作用于全部选中帧。')}
-      </p>
     </div>
   )
 }

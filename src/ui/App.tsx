@@ -911,12 +911,7 @@ export default function App() {
                 Animate 态这块位置让给「曲线」，资源与皮肤只在 Pose 态显示 */}
             <Splitter direction="vertical" onResize={mode === 'animate' ? resizeCurvePanel : resizeAssetPanel} />
             {mode === 'animate' ? (
-              <PanelShell
-                title={t('曲线')}
-                grow={false}
-                style={{ height: curveHeight }}
-                actions={<span className="text-3xs text-content-lo">{t('选中关键帧后拖控制点')}</span>}
-              >
+              <PanelShell title={t('曲线')} grow={false} style={{ height: curveHeight }}>
                 <CurvePanel />
               </PanelShell>
             ) : (

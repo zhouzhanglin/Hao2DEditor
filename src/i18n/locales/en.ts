@@ -24,7 +24,6 @@ export const en: Record<string, string> = {
   '调整会写入绘制顺序帧': 'Edits are written as draw-order keyframes',
   '绘制顺序（setup）': 'Draw order (setup)',
   '曲线': 'Curves',
-  '选中关键帧后拖控制点': 'Select a keyframe, then drag a control point',
   '资源与皮肤': 'Assets & Skins',
 
   // ── 视口 ──────────────────────────────────────────────────────────────
@@ -284,10 +283,6 @@ export const en: Record<string, string> = {
   '舞台（参考图）\n设置视口背景参考图：位置 / 大小 / 透明度，仅编辑器显示，不导出':
     'Stage (reference image)\nSet a viewport background reference image: position / size / opacity. Editor-only, never exported',
   '舞台：打开参考图设置': 'Stage: opened reference image settings',
-
-  // ── 曲线面板 ────────────────────────────────────────────────────────
-  '选中关键帧后拖控制点，或点预设按钮；多选时预设作用于全部选中帧。':
-    'After selecting keyframes, drag the control points or click a preset; with multiple keyframes selected the preset applies to all of them.',
 
   // ── 图片缩略图（ImageThumb） ────────────────────────────────────────
   '无法读取图片文件': 'Could not read the image file',
@@ -730,8 +725,11 @@ export const en: Record<string, string> = {
   '缓入': 'Ease in',
   '缓出': 'Ease out',
   '回弹': 'Back',
-  '阶跃：保持前一帧直到下一关键帧': 'Stepped: hold the previous frame until the next keyframe',
-  '线性：匀速插值': 'Linear: constant-rate interpolation',
+  '强缓入': 'Strong ease in',
+  '强缓出': 'Strong ease out',
+  '急停': 'Snap stop',
+  '缓入回弹': 'Back in',
+  '缓出回弹': 'Back out',
   '先在 dope sheet 里选中关键帧': 'Select keyframes in the dope sheet first',
   '修改缓动': 'Edit easing',
 

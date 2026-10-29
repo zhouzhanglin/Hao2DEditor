@@ -890,11 +890,7 @@ export default function App() {
         }
         left={
           <>
-            <PanelShell
-              title={t('层级结构')}
-              grow
-              actions={<span className="text-3xs text-content-lo" title={t('单棵树：插槽挂在宿主骨骼下，约束挂在驱动骨骼下')}>{t('图标区分类型')}</span>}
-            >
+            <PanelShell title={t('层级结构')} grow>
               <HierarchyTree onStatus={flash} />
             </PanelShell>
             {/* 分隔条：向上拖把「slot 层级」拉高（高度会记住） */}
@@ -935,11 +931,9 @@ export default function App() {
         }
         center={
           <div className="hao-panel m-[3px] flex flex-1 flex-col overflow-hidden">
-            <div className="flex h-[26px] shrink-0 items-center justify-between border-b border-line bg-ink-700 px-2">
+            {/* 标题栏只写「视口」：当前是 Pose 还是 Animate 由视口左上角的切换按钮表示，这里再写一遍是重复 */}
+            <div className="flex h-[26px] shrink-0 items-center border-b border-line bg-ink-700 px-2">
               <span className="hao-panel-title">{t('视口')}</span>
-              <span className="text-3xs text-content-lo">
-                {mode === 'pose' ? t('Pose · 绑定状态（编辑 setup）') : t('Animate · 动画编辑状态')}
-              </span>
             </div>
             <div className="relative flex min-h-0 flex-1">
               <ViewportCanvas onSceneReady={onSceneReady} onStatus={flash} />

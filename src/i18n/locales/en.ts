@@ -20,8 +20,6 @@ export const en: Record<string, string> = {
 
   // ── 左侧面板标题 / 提示 ────────────────────────────────────────────────
   '层级结构': 'Hierarchy',
-  '单棵树：插槽挂在宿主骨骼下，约束挂在驱动骨骼下': 'Single tree: slots sit under their host bone, constraints under their driving bone',
-  '图标区分类型': 'Icons distinguish types',
   'slot 层级': 'Slot Order',
   '调整会写入绘制顺序帧': 'Edits are written as draw-order keyframes',
   '绘制顺序（setup）': 'Draw order (setup)',
@@ -31,8 +29,6 @@ export const en: Record<string, string> = {
 
   // ── 视口 ──────────────────────────────────────────────────────────────
   '视口': 'Viewport',
-  'Pose · 绑定状态（编辑 setup）': 'Pose · Bind mode (edit setup)',
-  'Animate · 动画编辑状态': 'Animate · Animation editing mode',
   '空白工程': 'Empty project',
   '顶部菜单「导入图片 / 导入 Spine / 导入 DragonBones」开始，或「打开」已有工程': 'Start from the top menu "Import Images / Import Spine / Import DragonBones", or open an existing project',
   '属性': 'Inspector',

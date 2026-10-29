@@ -87,6 +87,7 @@ export const en: Record<string, string> = {
   '有未保存修改': 'Unsaved changes',
   '当前编辑状态（切换按钮在视口左上角）': 'Current edit mode (switch is at the top-left of the viewport)',
   '重置面板布局': 'Reset panel layout',
+  '打开项目文件夹': 'Open project folder',
 
   // ── 骨架条 ────────────────────────────────────────────────────────────
   '骨架': 'Skeleton',
@@ -907,7 +908,7 @@ export const en: Record<string, string> = {
   '（未选择动画）': '(no animation selected)',
   '新建动画（建好自动切过去）': 'New animation (switches to it automatically)',
   '新建动画': 'New animation',
-  '+ 动画': '+ Animation',
+  '+ 动画': '+Anim',
   '输入新名字，回车确认 / Esc 取消': 'Type a new name, Enter to confirm / Esc to cancel',
   '重命名当前动画': 'Rename the current animation',
   '复制当前动画（连同全部关键帧）': 'Duplicate the current animation (with all keyframes)',
@@ -922,10 +923,11 @@ export const en: Record<string, string> = {
     'The duration cannot be shorter than the last keyframe ({0} frames / {1}s); set to {0} frames',
   '帧': 'fr',
   '把当前姿态写成关键帧（K）': 'Key the current pose (K)',
-  '在当前时间插入事件帧（事件名 / 字符串 / 整数 / 浮点在视口下方的值栏里改）':
-    'Insert an event frame at the current time (edit the name / string / int / float in the value bar below the viewport)',
+  // 「添加事件帧」已在文件末尾的命令文案区定义（同一句被按钮 title 与命令结果共用）
   '事件帧': 'Event frame',
   '删除选中的关键帧（Delete）': 'Delete the selected keyframes (Delete)',
+  '展开时间轴': 'Expand timeline',
+  '折叠时间轴': 'Collapse timeline',
   '上一帧 (←)': 'Previous frame (←)',
   '播放 / 暂停 (空格)': 'Play / pause (Space)',
   '下一帧 (→)': 'Next frame (→)',

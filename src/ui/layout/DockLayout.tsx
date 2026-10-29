@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTimelineStore } from '@editor/store/timelineStore'
 import Splitter from './Splitter'
 
 export interface DockLayoutProps {
@@ -33,6 +34,8 @@ const MIN_SIDE = 180
 const MAX_SIDE = 520
 const MIN_TIMELINE = 160
 const MAX_TIMELINE = 560
+/** 时间轴收起时的高度：正好放下顶部播放条（30px），下方轨道一根都不渲染 */
+const TIMELINE_COLLAPSED_HEIGHT = 30
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value))
@@ -50,6 +53,12 @@ function loadSizes(): LayoutSizes {
 export default function DockLayout(props: DockLayoutProps) {
   const [sizes, setSizes] = useState<LayoutSizes>(loadSizes)
   const persistTimer = useRef<number | null>(null)
+  /**
+   * 时间轴收起（只剩播放条）：高度由播放条决定，不再用 `sizes.timeline`。
+   * 状态放在 timelineStore 里而不是本地：时间轴面板自己的按钮要能改它，
+   * 这一层要跟着改高度 —— 跨组件就只能走 store。
+   */
+  const timelineCollapsed = useTimelineStore((s) => s.collapsed)
 
   useEffect(() => {
     if (typeof localStorage === 'undefined') return
@@ -100,10 +109,11 @@ export default function DockLayout(props: DockLayoutProps) {
           {/* 时间轴只占中列宽度：在视口下面，不侵占左右两侧的面板 */}
           {props.timeline !== null ? (
             <>
-              <Splitter direction="vertical" onResize={resizeTimeline} />
+              {/* 收起时连分隔条一起不渲染：此时高度固定为播放条，拖它没有意义 */}
+              {timelineCollapsed ? null : <Splitter direction="vertical" onResize={resizeTimeline} />}
               <div
                 className="animate-slide-up mx-[3px] mb-[3px] shrink-0 overflow-hidden"
-                style={{ height: sizes.timeline }}
+                style={{ height: timelineCollapsed ? TIMELINE_COLLAPSED_HEIGHT : sizes.timeline }}
               >
                 {props.timeline}
               </div>

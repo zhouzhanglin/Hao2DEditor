@@ -1,5 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Flag, KeyRound, Pause, Play, Repeat, SkipBack, SkipForward, Square, Timer, Trash2 } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronUp,
+  Flag,
+  KeyRound,
+  Pause,
+  Play,
+  Repeat,
+  SkipBack,
+  SkipForward,
+  Square,
+  Timer,
+  Trash2
+} from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { playheadTime, usePlayheadStore } from '@editor/store/playheadStore'
@@ -44,6 +57,8 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
       currentAnimation: s.currentAnimation,
       selectedKeys: s.selectedKeys,
       playing: s.playing,
+      collapsed: s.collapsed,
+      setCollapsed: s.setCollapsed,
       loop: s.loop,
       speed: s.speed,
       snapToFrame: s.snapToFrame,
@@ -352,25 +367,26 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
           {t('帧')}
         </label>
 
-        {/* 这两个按钮 shrink-0：窗口窄时该由右侧的进度滑块（flex-1）让位，
-            按钮标签被挤成竖排（关/键/帧）看着像坏了 */}
+        {/*
+          打帧 / 事件帧只放图标：工具栏横向本来就紧，带文字时中文挤成竖排、英文也占掉一大截，
+          而这两个图标（钥匙 / 旗子）已经足够表意，含义写在 title 里。
+          shrink-0 保留：窗口窄时该由右侧的进度滑块（flex-1）让位。
+        */}
         <button
           type="button"
-          className="hao-btn h-[20px] shrink-0 px-1.5 text-3xs"
+          className="hao-btn h-[20px] w-[22px] shrink-0 justify-center px-0"
           title={t('把当前姿态写成关键帧（K）')}
           onClick={keyCurrent}
         >
-          <KeyRound size={11} className="mr-1 inline" />
-          {t('关键帧')}
+          <KeyRound size={12} />
         </button>
         <button
           type="button"
-          className="hao-btn h-[20px] shrink-0 px-1.5 text-3xs"
-          title={t('在当前时间插入事件帧（事件名 / 字符串 / 整数 / 浮点在视口下方的值栏里改）')}
+          className="hao-btn h-[20px] w-[22px] shrink-0 justify-center px-0"
+          title={t('添加事件帧')}
           onClick={keyEvent}
         >
-          <Flag size={11} className="mr-1 inline" />
-          {t('事件帧')}
+          <Flag size={12} />
         </button>
         <button
           type="button"
@@ -447,68 +463,91 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         <span ref={timeReadoutRef} className="shrink-0 font-mono text-3xs text-content-lo">
           {frame} / {t('{0} 帧', totalFrames)} · {time.toFixed(3)}s
         </span>
+
+        {/*
+          一键收起 / 展开下方**全部轨道**（轨道列表 + dope sheet）。
+          智能过滤只留少量轨道就能明显提帧，说明成本几乎都在轨道行上 —— 收起时整块不渲染
+          （见 DockLayout：面板高度一起收到播放条那 30px），播放与拖拽交互就回到视口本身的成本。
+          实心蓝底是为了在这一排灰按钮里一眼能看见（收起后它会变成灰底，提示「点一下能打开」）。
+        */}
+        <button
+          type="button"
+          className={[
+            'flex h-[20px] w-[22px] shrink-0 items-center justify-center rounded-[5px] text-3xs transition-colors duration-panel',
+            timeline.collapsed
+              ? 'bg-ink-600 text-content-hi hover:bg-ink-500'
+              : 'bg-accent text-white hover:bg-accent/85'
+          ].join(' ')}
+          title={timeline.collapsed ? t('展开时间轴') : t('折叠时间轴')}
+          onClick={() => timeline.setCollapsed(!timeline.collapsed)}
+        >
+          {timeline.collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
       </div>
 
-      <DopeSheet
-        tracks={tracks}
-        axis={axis}
-        length={duration}
-        zoom={timeline.zoom}
-        onZoom={timeline.setZoom}
-        time={time}
-        frameRate={document.frameRate}
-        snapToFrame={timeline.snapToFrame}
-        selectedKeys={selectedKeys}
-        onSelectKeys={timeline.setSelectedKeys}
-        onKeySubArmature={(slot) => onStatus(keySlotSubArmatureNow(slot).message)}
-        onDeleteTrack={(track) =>
-          onStatus(
-            deleteTrack({
-              kind: track.kind,
-              target: track.target,
-              attachment: track.attachment,
-              channel: track.channel ?? '',
-              time: 0
-            }).message
-          )
-        }
-        onCleanupFrames={() => onStatus(cleanupEmptyTracks().message)}
-        onScrub={(value) => {
-          timeline.setPlaying(false)
-          timeline.setTime(value)
-        }}
-        onSelectTarget={(track) => {
-          // null = 轨道列表里右键，取消通道选择。当前选择直接读 store：
-          // 面板刻意不订阅这些「按点击变化」的字段（见上面的高频通道说明），已经没选就不写。
-          if (!track) {
-            if (useTimelineStore.getState().selectedTrack) timeline.setSelectedTrack(null)
-            return
+      {/* 收起态整块不挂载：轨道行才是时间轴的大头（关键帧节点数量 × 行数），留着只藏起来照样要花布局/合成 */}
+      {timeline.collapsed ? null : (
+        <DopeSheet
+          tracks={tracks}
+          axis={axis}
+          length={duration}
+          zoom={timeline.zoom}
+          onZoom={timeline.setZoom}
+          time={time}
+          frameRate={document.frameRate}
+          snapToFrame={timeline.snapToFrame}
+          selectedKeys={selectedKeys}
+          onSelectKeys={timeline.setSelectedKeys}
+          onKeySubArmature={(slot) => onStatus(keySlotSubArmatureNow(slot).message)}
+          onDeleteTrack={(track) =>
+            onStatus(
+              deleteTrack({
+                kind: track.kind,
+                target: track.target,
+                attachment: track.attachment,
+                channel: track.channel ?? '',
+                time: 0
+              }).message
+            )
           }
-          selectTrack(track, selection, onStatus, timeline.setSelectedTrack)
-        }}
-        onSetTimes={(entries) => {
-          // 绝对时间由 dope sheet 基于拖拽起点算出，这里只做写入（拖拽会话内 selector 时间保持同步）
-          const name = animation?.name ?? null
-          useProjectStore.getState().updateSilent((draft) => {
-            setKeysTimes(draft, name, entries)
-          })
-          // 播放头跟着被拖的帧走：视口实时显示这个时机下的姿态，便于对帧
-          const anchor = entries[0]?.time
-          if (anchor !== undefined) {
-            timeline.setTime(Math.max(0, Math.min(duration, anchor)))
-          }
-        }}
-        onBeginDrag={() => {
-          // 拖动关键帧时先停播：否则播放头一边被推进一边被拖拽跟随，画面会来回跳
-          timeline.setPlaying(false)
-          useProjectStore.getState().beginTransaction(t('移动关键帧'))
-        }}
-        onEndDrag={() => {
-          useProjectStore.getState().endTransaction()
-          onStatus(t('关键帧时间已更新'))
-        }}
-        onStatus={onStatus}
-      />
+          onCleanupFrames={() => onStatus(cleanupEmptyTracks().message)}
+          onScrub={(value) => {
+            timeline.setPlaying(false)
+            timeline.setTime(value)
+          }}
+          onSelectTarget={(track) => {
+            // null = 轨道列表里右键，取消通道选择。当前选择直接读 store：
+            // 面板刻意不订阅这些「按点击变化」的字段（见上面的高频通道说明），已经没选就不写。
+            if (!track) {
+              if (useTimelineStore.getState().selectedTrack) timeline.setSelectedTrack(null)
+              return
+            }
+            selectTrack(track, selection, onStatus, timeline.setSelectedTrack)
+          }}
+          onSetTimes={(entries) => {
+            // 绝对时间由 dope sheet 基于拖拽起点算出，这里只做写入（拖拽会话内 selector 时间保持同步）
+            const name = animation?.name ?? null
+            useProjectStore.getState().updateSilent((draft) => {
+              setKeysTimes(draft, name, entries)
+            })
+            // 播放头跟着被拖的帧走：视口实时显示这个时机下的姿态，便于对帧
+            const anchor = entries[0]?.time
+            if (anchor !== undefined) {
+              timeline.setTime(Math.max(0, Math.min(duration, anchor)))
+            }
+          }}
+          onBeginDrag={() => {
+            // 拖动关键帧时先停播：否则播放头一边被推进一边被拖拽跟随，画面会来回跳
+            timeline.setPlaying(false)
+            useProjectStore.getState().beginTransaction(t('移动关键帧'))
+          }}
+          onEndDrag={() => {
+            useProjectStore.getState().endTransaction()
+            onStatus(t('关键帧时间已更新'))
+          }}
+          onStatus={onStatus}
+        />
+      )}
 
     </div>
   )

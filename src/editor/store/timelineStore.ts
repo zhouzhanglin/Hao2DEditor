@@ -16,6 +16,14 @@ export interface TimelineState {
    * 放在 store 而不是 DopeSheet 局部状态：AI 命令（setSmartFilter）也要能改它。
    */
   smartFilter: boolean
+  /**
+   * 时间轴正文（轨道列表 + dope sheet）是否收起 —— 收起后只剩顶部播放条。
+   *
+   * 轨道行是时间轴最贵的一块（每行若干关键帧节点，播放时每帧都要布局 / 合成）。
+   * 智能过滤只留少量轨道就能明显提帧（实测），说明成本几乎全在这些行上；
+   * 所以给一个「一键全部不渲染」的开关，比逐组折叠更直接。
+   */
+  collapsed: boolean
   snapToFrame: boolean
   /**
    * 时间轴时间缩放（1 = 完整适配动画长度；越大时间轴越长、关键帧越松散）。
@@ -52,6 +60,7 @@ export interface TimelineState {
   setSpeed: (speed: number) => void
   toggleOnionSkin: () => void
   setSmartFilter: (value: boolean) => void
+  setCollapsed: (collapsed: boolean) => void
   setSnapToFrame: (snap: boolean) => void
   setZoom: (zoom: number) => void
   setSelectedKeys: (keys: KeySelector[]) => void
@@ -77,6 +86,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   speed: 1,
   onionSkin: false,
   smartFilter: false,
+  collapsed: false,
   snapToFrame: true,
   zoom: TIMELINE_ZOOM_DEFAULT,
   selectedKeys: [],
@@ -107,6 +117,7 @@ export const useTimelineStore = create<TimelineState>((set, get) => ({
   setSpeed: (speed) => set({ speed: Math.max(0.1, Math.min(4, speed)) }),
   toggleOnionSkin: () => set({ onionSkin: !get().onionSkin }),
   setSmartFilter: (smartFilter) => set({ smartFilter }),
+  setCollapsed: (collapsed) => set({ collapsed }),
   setSnapToFrame: (snapToFrame) => set({ snapToFrame }),
   setZoom: (zoom) => set({ zoom: Math.max(TIMELINE_ZOOM_MIN, Math.min(TIMELINE_ZOOM_MAX, zoom)) }),
   // 任何「非拖框」方式改选中（命令 / 逐点点击 / 粘贴等）都默认关掉缩放框，

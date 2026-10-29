@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
+  ArrowUpRight,
   ChevronDown,
   FilePlus2,
   FolderOpen,
@@ -11,7 +12,6 @@ import {
   Undo2,
   Redo2
 } from 'lucide-react'
-import type { EditorMode } from '@editor/store/modeStore'
 import { getPlatform } from '@editor/platform'
 import { recentProjects } from '@editor/services/projectIo'
 import { t } from '@i18n'
@@ -25,8 +25,6 @@ const APP_ICON = new URL('app-icon.png', document.baseURI).href
 export interface MenuBarProps {
   documentName: string
   dirty: boolean
-  /** 当前编辑状态，仅用于菜单栏上的状态徽标（切换入口在视口左上角） */
-  mode: EditorMode
   projectPath: string | null
   onCommand: (command: string) => void
   onOpenRecent: (path: string) => void
@@ -195,7 +193,6 @@ function ExportMenu({ onCommand }: { onCommand: (command: string) => void }) {
 export default function MenuBar({
   documentName,
   dirty,
-  mode,
   projectPath,
   onCommand,
   onOpenRecent
@@ -255,30 +252,35 @@ export default function MenuBar({
       <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
         <span className="truncate text-panel text-content-mid">{documentName}</span>
         {dirty ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" title={t('有未保存修改')} /> : null}
+        {/*
+          工程路径 → 右侧小箭头 = 在系统文件管理器里打开工程所在目录
+          （`revealInFolder` 走 shell.showItemInFolder，Finder / 资源管理器会打开目录并选中 .proj）。
+          工程还没存盘（`projectPath` 为空）时**整个箭头不显示**：那时根本没有目录可开。
+        */}
         {projectPath ? (
-          <span className="max-w-[420px] truncate text-3xs text-content-lo">{projectPath}</span>
+          <span className="flex min-w-0 items-center gap-0.5">
+            <span className="max-w-[420px] truncate text-3xs text-content-lo">{projectPath}</span>
+            <button
+              type="button"
+              className="hao-tool-button h-[18px] w-[18px] shrink-0"
+              title={t('打开项目文件夹')}
+              onClick={() => {
+                void getPlatform()
+                  .revealInFolder(projectPath)
+                  .catch((error: unknown) => console.error('[hao2d] 打开项目文件夹失败', error))
+              }}
+            >
+              <ArrowUpRight size={11} />
+            </button>
+          </span>
         ) : null}
       </div>
 
-      <div className="flex items-center gap-1.5">
-        <span
-          className={[
-            'flex h-[20px] items-center gap-1 rounded-[5px] px-2 text-2xs font-medium',
-            mode === 'animate' ? 'bg-accent-deep text-white' : 'bg-white/[0.07] text-content-mid'
-          ].join(' ')}
-          title={t('当前编辑状态（切换按钮在视口左上角）')}
-        >
-          {mode === 'pose' ? t('准备') : t('动画')}
-        </span>
-        <button
-          type="button"
-          title={t('重置面板布局')}
-          onClick={() => window.dispatchEvent(new Event('hao2d:reset-layout'))}
-          className="hao-tool-button"
-        >
-          <ChevronDown size={13} />
-        </button>
-      </div>
+      {/*
+        右上角原来有一个「重置面板布局」按钮（一个箭头图标，看着像下拉菜单）。
+        功能与「视图 → 重置面板布局」（`view:resetLayout`）完全重复，且图标表意很误导，
+        所以整块删掉 —— 要重置布局走菜单即可，分隔条随时可以手拖。
+      */}
     </header>
   )
 }

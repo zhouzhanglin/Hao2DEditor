@@ -850,9 +850,9 @@ export default function App() {
           ? t('附件「{0}」', selection.attachment)
           : selection.kind === 'constraint'
             ? t('约束「{0}」', selection.constraint)
-            : mode === 'pose'
-              ? t('Pose 状态')
-              : t('Animate 状态')
+            : // 没选中对象时状态栏留空：当前是 Pose 还是 Animate 由视口左上角的切换按钮表示，
+              // 这里再写一遍只是重复
+              ''
 
   return (
     <div
@@ -874,7 +874,6 @@ export default function App() {
           <MenuBar
             documentName={projectName}
             dirty={dirty}
-            mode={mode}
             projectPath={projectPath}
             onCommand={handleCommand}
             onOpenRecent={(path) => run(openProjectAt(path))}
@@ -1000,8 +999,6 @@ export default function App() {
           <StatusBar
             stats={stats}
             selection={selectionText}
-            animationName={mode === 'animate' ? timeline.currentAnimation : null}
-            frameRate={doc.frameRate}
             hint={hint}
             busy={busy}
           />

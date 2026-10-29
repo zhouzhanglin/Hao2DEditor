@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { playheadTime, usePlayheadStore } from '@editor/store/playheadStore'
 import { formatPerf, perfStats, subscribePerf } from '@editor/store/perfStore'
 import type { PerfStats } from '@editor/store/perfStore'
 import { t } from '@i18n'
@@ -16,16 +15,9 @@ export interface StatusBarProps {
     texturesTotal: number
   }
   selection: string
-  animationName: string | null
-  frameRate: number
   hint?: string
   /** 正在执行的耗时操作（导入 / 导出 / 打包），非空时显示进度提示 */
   busy?: string | null
-}
-
-/** 播放头读数：`帧号 / fps · 秒数`（写进纯文本节点，不走 React） */
-function formatReadout(time: number, frameRate: number): string {
-  return `${Math.round(time * frameRate)} / ${frameRate}fps · ${time.toFixed(3)}s`
 }
 
 /** 帧率读数的开关（软件级偏好：与工程无关，跨工程保留） */
@@ -36,34 +28,8 @@ function readShowPerf(): boolean {
   return localStorage.getItem(PERF_KEY) === '1'
 }
 
-/** 最底状态栏：高密度统计信息，右侧动画名与帧号。 */
-export default function StatusBar({
-  stats,
-  selection,
-  animationName,
-  frameRate,
-  hint,
-  busy
-}: StatusBarProps) {
-  /**
-   * 时间从**播放头时钟**读（高频通道），但**不进 React state** —— 直接写 DOM。
-   *
-   * 播放时这个读数每帧都在变。之前是 `usePlayheadStore((s) => s.time)`：值一变就重渲染
-   * 整个状态栏（十几个节点 + commit），而且经过 React 调度器的 MessagePort 派发，
-   * 落在哪一帧不确定 —— 60fps 只有 16.6ms 的预算，每帧多一次调度就可能把某帧挤出去。
-   * 这里与时间轴面板 / DopeSheet 的播放头同一套路：只有这一个文本节点动。
-   */
-  const readoutRef = useRef<HTMLSpanElement | null>(null)
-  useEffect(() => {
-    const apply = (time: number): void => {
-      const el = readoutRef.current
-      if (!el) return
-      el.textContent = formatReadout(time, frameRate)
-    }
-    apply(playheadTime())
-    return usePlayheadStore.subscribe((state) => apply(state.time))
-  }, [frameRate])
-
+/** 最底状态栏：高密度统计信息 + 右下的操作提示 / 帧率读数开关。 */
+export default function StatusBar({ stats, selection, hint, busy }: StatusBarProps) {
   /**
    * 帧率读数：默认关（不占地方），点右侧 `FPS` 打开。
    *
@@ -118,8 +84,13 @@ export default function StatusBar({
         ) : null}
       </span>
 
-      <span className="h-[12px] w-px bg-line" />
-      <span className="truncate text-content-mid">{selection}</span>
+      {/* 没选中对象时 selection 为空串：连分隔线一起不渲染，免得留一条悬空竖线 */}
+      {selection ? (
+        <>
+          <span className="h-[12px] w-px bg-line" />
+          <span className="truncate text-content-mid">{selection}</span>
+        </>
+      ) : null}
 
       <span className="ml-auto flex items-center gap-3">
         {busy ? (
@@ -129,26 +100,6 @@ export default function StatusBar({
           </span>
         ) : null}
         {hint ? <span className="animate-fade-in text-accent/80">{hint}</span> : null}
-        {animationName ? (
-          <>
-            <span className="text-content-mid">{animationName}</span>
-            {/*
-              内容由 effect 直接写，React 不管这个文本节点（播放时也照常每帧更新）。
-              ref 回调里**再补一次**：切动画 / 切到「未选择动画」再切回来时这个 span 会
-              先卸载再挂载，而 effect 的依赖（frameRate）没变、不会重跑 ——
-              不补的话读数会空着，直到下一次播放头变化（暂停时永远等不到）。
-            */}
-            <span
-              ref={(el) => {
-                readoutRef.current = el
-                if (el) el.textContent = formatReadout(playheadTime(), frameRate)
-              }}
-              className="font-mono text-content-lo"
-            />
-          </>
-        ) : (
-          <span className="text-content-lo">{t('未选择动画')}</span>
-        )}
         {/* 帧率读数开关：关闭时只是一个 `FPS` 按钮，打开后原地显示读数（内容由上面的 effect 写） */}
         <button
           type="button"

@@ -508,8 +508,19 @@ export class EditorScene {
       this.bundle.player.time = patch.time
       this.invalidateSkin()
     }
-    // 从暂停切到播放：把当前时间写回播放器并重建，避免首帧使用过期的采样结果
+    /*
+     * 从暂停切到播放：把当前时间写回播放器并重建，避免首帧使用过期的采样结果。
+     *
+     * **非循环且已经停在末尾 → 从头重播**：播放头在最后一帧时按下播放，若照旧把末尾时间
+     * 写回播放器，`update` 的第一帧就判 completed 并立刻停播 —— 表现就是「点了播放没反应」。
+     * 判定用播放器自己的时长（按最后一个关键帧算），所以「可编辑范围比实际动画长」
+     * 时（例如时长 67 帧、最后关键帧在第 40 帧）也能正确识别为「已到末尾」。
+     */
     if (this.viewState.playing && !wasPlaying && this.bundle) {
+      const duration = this.bundle.player.duration
+      if (!this.viewState.loop && duration > 0 && this.viewState.time >= duration - 1e-6) {
+        this.viewState.time = 0
+      }
       this.bundle.player.time = this.viewState.time
       this.invalidateSkin()
     }

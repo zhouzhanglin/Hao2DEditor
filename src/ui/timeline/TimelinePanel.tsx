@@ -9,7 +9,6 @@ import {
   Repeat,
   SkipBack,
   SkipForward,
-  Square,
   Timer,
   Trash2
 } from 'lucide-react'
@@ -415,13 +414,17 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         <button type="button" className="hao-tool-button" title={t('下一帧 (→)')} onClick={() => stepFrame(1)}>
           <SkipForward size={13} />
         </button>
+        {/*
+          循环开关：图标**固定**是 Repeat，开 / 关只看底色（accent 实底 = 开）。
+          原来关掉时换成方块，读起来像「停止」，与「循环未启用」不是一回事。
+        */}
         <button
           type="button"
           className={['hao-tool-button', timeline.loop ? 'hao-tool-button-active' : ''].join(' ')}
           title={t('循环播放')}
           onClick={timeline.toggleLoop}
         >
-          {timeline.loop ? <Repeat size={13} /> : <Square size={12} />}
+          <Repeat size={13} />
         </button>
 
         <select

@@ -40,6 +40,17 @@ export class Skeleton {
   deformOffsets: Array<number[] | null>
   deformOffsetBase: Int32Array
 
+  /**
+   * 每帧约束求解**之前**的目标世界坐标快照（`[x, y]` 成对，与 `asset.constraints` 同序）。
+   * NaN = 本轮没有求解过（叠加层回退到实时读取）。
+   *
+   * 为什么需要它：IK 求解会重算链上骨骼**及其全部后代**的世界矩阵（见 `updateFkFrom`）。
+   * 如果某条约束的目标骨正好挂在链的下方（target 在链内），它的世界位置在求解后就被
+   * 「推走」了 —— 叠加层若直接读 `world`，准星每帧会在「动画采样位置」与「被 IK 推走的位置」
+   * 之间来回，看起来就是跟不上动画、在抖。绘制统一读这份快照 = 画在 IK 真正瞄准的那个点上。
+   */
+  readonly constraintTarget: Float32Array
+
   readonly boneCount: number
   readonly slotCount: number
 
@@ -71,6 +82,7 @@ export class Skeleton {
     this.setupDisplayBase = new Int32Array(this.slotCount)
     this.deformOffsets = new Array<number[] | null>(this.slotCount).fill(null)
     this.deformOffsetBase = new Int32Array(this.slotCount).fill(-1)
+    this.constraintTarget = new Float32Array((asset.constraints?.length ?? 0) * 2).fill(Number.NaN)
 
     this.attOverrideName = new Array<string | null>(this.slotCount).fill(null)
     this.visOverride = new Uint8Array(this.slotCount)
@@ -137,6 +149,8 @@ export class Skeleton {
       this.deformOffsetBase[i] = -1
       this.drawOrder[i] = i
     }
+    // 回到 setup 姿态后，上一轮求解留下的目标快照已失效：清掉，叠加层回退到实时读取
+    this.constraintTarget.fill(Number.NaN)
     this.updateFk(0)
   }
 

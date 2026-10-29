@@ -278,8 +278,9 @@ export function bakeSetupLocals(input: SpineBakeInput): Map<number, SetupBoneLoc
  * ① **markStepped**：官方用「阶跃关键帧」表达瞬间切换（最典型是 head-turn 的
  *    head.scale 从 1 直接切到 -1 做水平镜像）。逐帧采样会把它摊成密集线性帧 ——
  *    运行期在两帧之间平滑过渡（scaleX 1 → 0 → -1，头先被压扁再反向展开），
- *    看着不自然，且与采样率无关。相邻采样点差值超过阈值即把前一点标成阶跃。
- *    正常线性动画每帧变化远小于阈值（位移 < 1 像素、旋转 < 10 度、缩放 < 0.1），不会误判。
+ *    看着不自然，且与采样率无关。判据是「差值超阈值 **且** 跳变前那一帧几乎没动」：
+ *    只比差值会把快速匀速运动（IK 目标骨跟手、甩鞭）误标成阶跃，那一段播放时变成
+ *    逐帧 hold → 一格一格跳（表现为 IK 准星抖动、跟不上动画），见 `markSteppedVec2`。
  *
  * ② **simplify**：删掉能用直线近似替代的中间帧。采样烘焙是「每帧写一个关键帧」，
  *    但绝大多数轨道每帧变化很小甚至完全不动（静止的部件、匀速运动的部件），
@@ -288,19 +289,46 @@ export function bakeSetupLocals(input: SpineBakeInput): Map<number, SetupBoneLoc
  *    **阶跃段不简化**，否则会破坏瞬间切换语义。
  */
 
-/** 阶跃检测（双分量）：超阈值即认为该点之后是瞬间切换 */
+/**
+ * 阶跃检测（双分量）。
+ *
+ * 阶跃的真正特征是「**先保持、再瞬间切换**」：官方用阶跃关键帧表达镜面翻转
+ * （head.scale 1 → -1）这类突变，逐帧采样后表现为「一段常量 → 一帧大跳 → 一段常量」。
+ *
+ * 所以只看相邻两帧的差值是不够的。IK 的目标骨跟着手挥、或者任何快速匀速运动的骨骼，
+ * 每帧位移同样会超过阈值 —— 按旧判据（差值超阈值就标）整段会被标成阶跃，播放时每帧
+ * 「保持到下一帧再跳」，在 60fps 屏幕上就是一格一格走、慢半拍（视口里 IK 准星抖动、
+ * 跟不上动画就是这么来的）。这里额外要求**进入跳变前的那一帧几乎没动**才算阶跃。
+ */
 export function markSteppedVec2(keys: BakedVec2Key[], threshold: number): void {
   for (let i = 0; i < keys.length - 1; i++) {
     const a = keys[i]
     const b = keys[i + 1]
-    if (Math.abs(b.x - a.x) > threshold || Math.abs(b.y - a.y) > threshold) a.stepped = true
+    const jump = Math.abs(b.x - a.x) > threshold || Math.abs(b.y - a.y) > threshold
+    if (!jump) continue
+    if (i === 0) {
+      // 序列开头没有「之前」可比：保持原判据（动画一开始就切换的情况）
+      a.stepped = true
+      continue
+    }
+    const prev = keys[i - 1]
+    // 跳变前那一帧的位移在阈值一半以内，才算「保持后跳变」；连续运动不标
+    const incoming = Math.max(Math.abs(a.x - prev.x), Math.abs(a.y - prev.y))
+    if (incoming <= threshold * 0.5) a.stepped = true
   }
 }
 
-/** 阶跃检测（单值） */
+/** 阶跃检测（单值），判据与 `markSteppedVec2` 一致：跳变前那一帧几乎没动才算阶跃 */
 export function markSteppedScalar(keys: BakedScalarKey[], threshold: number): void {
   for (let i = 0; i < keys.length - 1; i++) {
-    if (Math.abs(keys[i + 1].value - keys[i].value) > threshold) keys[i].stepped = true
+    const a = keys[i]
+    const b = keys[i + 1]
+    if (Math.abs(b.value - a.value) <= threshold) continue
+    if (i === 0) {
+      a.stepped = true
+      continue
+    }
+    if (Math.abs(a.value - keys[i - 1].value) <= threshold * 0.5) a.stepped = true
   }
 }
 

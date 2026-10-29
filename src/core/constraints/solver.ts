@@ -92,6 +92,22 @@ export function solveConstraints(
 ): void {
   if (constraints.length === 0) return
 
+  /*
+   * 求解前先把每条约束的目标世界坐标快照下来（供视口叠加层画准星 / 连线）。
+   *
+   * 求解会重算链上骨骼**及其后代**的世界矩阵；目标骨若挂在链下方，它的位置在求解后
+   * 就变了。叠加层读这份快照 = 画在 IK 真正瞄准的那个点上（见 Skeleton.constraintTarget），
+   * 否则准星每帧在「动画位置 / 被推走的位置」之间来回，看起来就是跟不上动画、在抖。
+   */
+  const targets = skeleton.constraintTarget
+  for (let i = 0; i < constraints.length; i++) {
+    const constraint = constraints[i]
+    const target = constraint.targetBoneIndex
+    const valid = constraint.type !== 'physics' && target >= 0 && target < skeleton.boneCount
+    targets[i * 2] = valid ? skeleton.boneWorldX(target) : Number.NaN
+    targets[i * 2 + 1] = valid ? skeleton.boneWorldY(target) : Number.NaN
+  }
+
   for (const constraint of sortConstraints(constraints)) {
     if (!constraint.enabled || constraint.type === 'physics') continue
     let state: ConstraintState | undefined

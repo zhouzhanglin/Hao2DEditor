@@ -506,11 +506,24 @@ function drawConstraintLinks(
   w: number,
   selectedBones: ReadonlySet<number>
 ): void {
+  const targets = skeleton.constraintTarget
   for (const constraint of constraints) {
     if (!constraint.enabled || constraint.type === 'physics') continue
     if (constraint.targetBoneIndex < 0 || constraint.targetBoneIndex >= skeleton.boneCount) continue
-    const targetX = skeleton.boneWorldX(constraint.targetBoneIndex)
-    const targetY = skeleton.boneWorldY(constraint.targetBoneIndex)
+    /*
+     * 目标点取**约束求解前**的快照（见 Skeleton.constraintTarget）。
+     *
+     * IK 求解会重算链上骨骼**及其后代**的世界矩阵（updateFkFrom）。目标骨若挂在链下方，
+     * 求解后它的世界位置已经不等于 IK 实际瞄准的那个点 —— 直接读 `world` 的话，准星会画在
+     * 「被推开的位置」，与链尾的差距每帧变一次，播放时就是跟不上动画、在抖。
+     * NaN = 本轮没有求解过（未启用运行时 IK / 刚 stop）→ 回退实时读取。
+     */
+    const ci = constraints.indexOf(constraint)
+    const known = ci >= 0 && ci * 2 + 1 < targets.length
+    const cachedX = known ? targets[ci * 2] : Number.NaN
+    const cachedY = known ? targets[ci * 2 + 1] : Number.NaN
+    const targetX = Number.isNaN(cachedX) ? skeleton.boneWorldX(constraint.targetBoneIndex) : cachedX
+    const targetY = Number.isNaN(cachedY) ? skeleton.boneWorldY(constraint.targetBoneIndex) : cachedY
 
     if (constraint.type === 'ik') {
       /*

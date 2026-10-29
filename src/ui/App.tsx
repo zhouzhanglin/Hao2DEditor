@@ -40,6 +40,29 @@ function gizmoLabel(mode: GizmoMode): string {
   return t({ move: '移动', rotate: '旋转', scale: '缩放', shear: '斜切' }[mode])
 }
 
+/** 状态栏里的视口统计（见下面轮询：值不变时必须返回同一个对象） */
+interface ViewportStats {
+  bones: number
+  slots: number
+  constraints: number
+  vertices: number
+  triangles: number
+  texturesLoaded: number
+  texturesTotal: number
+}
+
+/**
+ * 按键逐个比较（而不是手写字段列表）：以后往 `ViewportStats` 里加字段，
+ * 比较会自动覆盖 —— 漏字段的后果就是「数字变了状态栏不更新」，那是很难发现的坑。
+ */
+function sameViewportStats(a: ViewportStats, b: ViewportStats): boolean {
+  const keys = Object.keys(a) as Array<keyof ViewportStats>
+  for (const key of keys) {
+    if (a[key] !== b[key]) return false
+  }
+  return true
+}
+
 /** 当前焦点是否在可编辑文本元素内（输入框 / 文本域 / contentEditable） */
 function activeEditableElement(): HTMLElement | null {
   const el = typeof document !== 'undefined' ? document.activeElement : null
@@ -158,7 +181,7 @@ export default function App() {
   const [hint, setHint] = useState<string | undefined>(undefined)
   const [busy, setBusy] = useState<string | null>(null)
   const [zoom, setZoom] = useState(100)
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<ViewportStats>({
     bones: 0,
     slots: 0,
     constraints: 0,
@@ -424,7 +447,7 @@ export default function App() {
       if (!scene) return
       const mesh = scene.meshResult
       const images = useProjectStore.getState().document.images
-      setStats({
+      const next: ViewportStats = {
         bones: scene.runtime?.asset.bones.length ?? 0,
         slots: scene.runtime?.asset.slots.length ?? 0,
         constraints: scene.runtime?.asset.constraints.length ?? 0,
@@ -434,7 +457,16 @@ export default function App() {
         // （只统计工程里的图片，仓库里可能还留着已删图或探针加载的纹理）
         texturesLoaded: images.filter((image) => scene.textures.has(image.name)).length,
         texturesTotal: images.length
-      })
+      }
+      /*
+       * **值没变就返回同一个对象**，让 React 直接 bailout。
+       *
+       * `setStats` 传新对象时 React 无从跳过 —— 而 App 是根组件，一次 set 会把整棵 UI
+       * 连同 `InspectorPanel` / `HierarchyTree` / `DopeSheet`（几十行轨道、上千个关键帧节点）
+       * 全部重渲染一遍。播放时这些统计根本不变化（骨架数、顶点数、三角形数都是静态的），
+       * 于是每 250ms 白掉一次帧 —— 表现就是「动画在走，但每隔几百毫秒顿一下」。
+       */
+      setStats((prev) => (sameViewportStats(prev, next) ? prev : next))
       /*
        * 缩放读数 = **屏幕像素 ÷ 图像像素**，所以要先除 PPU。
        *
@@ -442,6 +474,7 @@ export default function App() {
        * 图像像素（见 importers/uv 与 Viewport 的空场景默认值）—— 100% 表示 1 图像像素
        * 正好画 1 屏幕像素。直接 `zoom * 100` 会把「像素/单位」当成百分比，读数大 100 倍。
        */
+      // 同一个数值时 React 会自动 bailout（Object.is），不需要额外比较
       setZoom(Math.round((scene.viewport.zoom / PPU) * 100))
     }, 250)
     return () => window.clearInterval(timer)

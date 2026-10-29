@@ -279,6 +279,11 @@ export class EditorScene {
   private tint = { r: 1, g: 1, b: 1, a: 1 }
   private animationName: string | null = null
   private dirty = true
+  /**
+   * 上一帧画坐标轴时的可见世界范围（见 `drawAxes`）。
+   * 播放时相机不动，这份几何却每帧被 clear + 重新 stroke 一遍 —— 缓存后只有相机变化才重建。
+   */
+  private readonly axesRange = { minX: NaN, minY: NaN, maxX: NaN, maxY: NaN, width: NaN }
   private viewState: SceneViewState = {
     // 网格 / FFD / 权重显示都不看开关：按选中项、工具与权重刷自动决定
     overlay: { bones: true, constraints: true },
@@ -1645,12 +1650,33 @@ export class EditorScene {
    * 看起来就像"xy 不见了"。
    */
   private drawAxes(): void {
-    const g = this.axes
-    g.clear()
     const viewport = this.viewport
     const topLeft = viewport.screenToWorld(0, 0)
     const bottomRight = viewport.screenToWorld(viewport.width, viewport.height)
     const width = viewport.pixelsToWorld(1)
+    /*
+     * 相机没动就**不重画**：坐标轴只由「可见世界范围 + 线宽」决定，与动画时间无关。
+     * 播放时它每帧都在变，若每帧 `clear()` + 重新 `stroke()`，pixi 会重新三角化这条路径
+     * 并把顶点重新上传 —— 纯属白白占掉帧预算（60fps 下单帧只有 16.6ms）。
+     */
+    const range = this.axesRange
+    if (
+      range.minX === topLeft.x &&
+      range.minY === topLeft.y &&
+      range.maxX === bottomRight.x &&
+      range.maxY === bottomRight.y &&
+      range.width === width
+    ) {
+      return
+    }
+    range.minX = topLeft.x
+    range.minY = topLeft.y
+    range.maxX = bottomRight.x
+    range.maxY = bottomRight.y
+    range.width = width
+
+    const g = this.axes
+    g.clear()
     // y 轴（世界 x = 0）
     g.moveTo(0, topLeft.y).lineTo(0, bottomRight.y)
     // x 轴（世界 y = 0）
@@ -2103,23 +2129,13 @@ export class EditorScene {
        * 基准取**整个角色**的包围盒（不是选中的那个网格）：按网格算的话，切到一个零件网格
        * （比如长矛前端的小块）点时大小会忽然变成针尖。这圈点只是"标出顶点在哪"，
        * 同一屏里大小一致更重要。
+       *
+       * 直接用 `meshResult.bounds`（每帧构建时已经算好），**不要**再遍历一遍顶点：
+       * 播放时这段每帧都会跑，高模角色上等于白烧一次全顶点扫描。
        */
-      const positions = this.meshResult?.positions
-      if (positions) {
-        let minX = Number.POSITIVE_INFINITY
-        let minY = Number.POSITIVE_INFINITY
-        let maxX = Number.NEGATIVE_INFINITY
-        let maxY = Number.NEGATIVE_INFINITY
-        const count = this.meshResult?.vertexCount ?? 0
-        for (let i = 0; i < count; i++) {
-          const x = positions[i * 2]
-          const y = positions[i * 2 + 1]
-          if (x < minX) minX = x
-          if (x > maxX) maxX = x
-          if (y < minY) minY = y
-          if (y > maxY) maxY = y
-        }
-        const extent = Math.max(maxX - minX, maxY - minY)
+      const bounds = this.meshResult?.bounds
+      if (bounds) {
+        const extent = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY)
         if (extent > 1e-6) {
           /*
            * 世界半径跟着网格走，但**屏幕尺寸夹在 6~14px 之间**：

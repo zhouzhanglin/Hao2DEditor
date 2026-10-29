@@ -12,7 +12,7 @@ import { useSelectionStore } from '@editor/store/selectionStore'
 import { useToolStore } from '@editor/store/toolStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
-import { usePlayheadStore } from '@editor/store/playheadStore'
+import { playheadTime, usePlayheadStore } from '@editor/store/playheadStore'
 import { usePreviewStore } from '@editor/store/previewStore'
 import { useSettingsStore } from '@editor/store/settingsStore'
 import {
@@ -154,6 +154,20 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         const timeline = useTimelineStore.getState()
         const isPlaying = Boolean(scene.currentAnimation) && timeline.playing
         const time = scene.runtime?.player.time ?? 0
+        /*
+         * 非循环播完：播放器把自己停了（scene 内的 playing 被置 false），但主 store 仍是
+         * "播放中" —— 播放按钮停在暂停图标、状态栏读数也一直不恢复。这里同步回主 store。
+         * 只在这一帧写一次（写完后条件不再成立），不进每帧热路径。
+         *
+         * **先把时间落回主 store，再复位播放标志**：复位会立刻触发视口的 push
+         * （`setViewState({ time, playing: false })`），若此时 `timeline.time` 还是播放前的
+         * 旧值（多半是 0），`setViewState` 会把播放器 seek 回去 —— 播完停在最后一帧，
+         * 画面却跳回开头。
+         */
+        if (timeline.playing && scene.currentAnimation && !scene.state.playing) {
+          useTimelineStore.getState().setTime(time)
+          useTimelineStore.getState().setPlaying(false)
+        }
         if (isPlaying) {
           // 播放推进：只写**播放头时钟**（高频通道），不写 timelineStore。
           // 写主 store 会通知整棵 UI 树重渲染（实测单帧净成本 ~100ms，帧率 44 → 8fps），
@@ -379,7 +393,13 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         playing: mode === 'animate' && timeline.playing,
         speed: timeline.speed,
         loop: timeline.loop,
-        time: timeline.time,
+        /*
+         * 播放中必须推**高频通道**的当前时间：`timeline.time` 在播放期间是冻结的旧值，
+         * 推它会让 `setViewState` 把播放器 seek 回那一刻 —— 表现就是「播放中点一下层级树 /
+         * 改个开关，画面跳回起点」。判据用**场景自己的**播状态：点暂停的那一次 push 里
+         * store 的 playing 已经先变成 false 了，这时更要拿真实位置，否则同样会跳。
+         */
+        time: scene.state.playing ? playheadTime() : timeline.time,
         onionSkin: mode === 'animate' && timeline.onionSkin,
         /*
          * 网格显示分两套：

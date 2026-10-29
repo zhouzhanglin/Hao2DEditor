@@ -7,10 +7,12 @@
 连接信息解析顺序：
   1. --url / --token（或环境变量 HAO2D_URL / HAO2D_TOKEN）
   2. 从 --project（默认 cwd）逐级向上找 ai/hao2d-ai-server.json
-  3. 用户目录 command-server.json
-     macOS   ~/Library/Application Support/hao2d-editor/
-     Windows %APPDATA%/hao2d-editor/
-     Linux   ~/.config/hao2d-editor/
+  3. 用户目录 command-server.json（编辑器 userData 目录）
+     macOS   ~/Library/Application Support/<名字>/
+     Windows %APPDATA%/<名字>/
+     Linux   ~/.config/<名字>/
+     <名字> 跟 app 名走：安装版 Hao2D Editor.app 内部 setName('Hao2D')，实际目录是 Hao2D；
+     dev / 老版本可能是 Hao2D Editor 或 hao2d-editor。三个都试，别只认一个。
 
 用法：
   python3 hao2d.py health
@@ -48,14 +50,23 @@ def _read_json(path: str) -> dict | None:
 
 
 def _user_data_candidates() -> list[str]:
+    """userData 目录名 = app.getName()。
+
+    安装包 CFBundleName 是 `Hao2D Editor`，但主进程有 app.setName('Hao2D')，
+    实际写出的目录是 Hao2D；dev / 老版本可能是 Hao2D Editor 或 hao2d-editor。
+    三个都列出来依次试，避免因目录名不同而断连。
+    """
     home = os.path.expanduser("~")
     if sys.platform == "darwin":
-        base = os.path.join(home, "Library", "Application Support", "hao2d-editor")
+        root = os.path.join(home, "Library", "Application Support")
     elif os.name == "nt":
-        base = os.path.join(os.environ.get("APPDATA", home), "hao2d-editor")
+        root = os.environ.get("APPDATA", home)
     else:
-        base = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.join(home, ".config")), "hao2d-editor")
-    return [os.path.join(base, "command-server.json")]
+        root = os.environ.get("XDG_CONFIG_HOME", os.path.join(home, ".config"))
+    return [
+        os.path.join(root, name, "command-server.json")
+        for name in ("Hao2D", "Hao2D Editor", "hao2d-editor")
+    ]
 
 
 def discover(project: str | None, url: str | None, token: str | None) -> tuple[str, str, str]:
@@ -86,7 +97,7 @@ def discover(project: str | None, url: str | None, token: str | None) -> tuple[s
     sys.exit(
         "找不到 Hao2DEditor 命令服务。\n"
         "  - 编辑器开着吗？关闭时发现文件会被删除\n"
-        "  - 试 --url http://127.0.0.1:37241 --token <token>\n"
+        "  - 试 --url <url> --token <token>（url 以上面两个 json 里的为准；固定端口被占用会顺延）\n"
         "  - 或读工程 <工程目录>/ai/hao2d-ai-server.json\n"
         "  - 或读用户目录 command-server.json（路径见本脚本头部注释）"
     )

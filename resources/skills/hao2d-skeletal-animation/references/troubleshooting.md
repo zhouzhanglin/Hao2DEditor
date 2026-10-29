@@ -75,8 +75,8 @@
 ```text
 1. getProjectState        → dirty:false、projectPath 正确、skeletons 数量对
 2. getAnimationKeys       → 每条动画的轨道 / 时间点符合预期
-3. captureViewport        → 关键时刻的姿态截图给用户看
-4. exportProject          → warnings 为空，把产出路径告诉用户
+3. captureViewport        → 自己看一眼关键时刻的姿态（不发给用户等确认）
+4. exportProject          → 仅用户明确要求时才导；导了再看 warnings 是否为空
 ```
 
 ## 8. 常见返工原因（提前避开）

@@ -1,14 +1,15 @@
 ---
 name: hao2d-skeletal-animation
-version: 1.0.0
+version: 1.0.1
 description: "Hao2DEditor 骨骼动画制作助手（通过编辑器本机命令服务 / MCP 驱动）。当用户要用 Hao2D 制作或修改 2D 骨骼动画时使用：新建工程与导入切图/图集、搭骨骼层级与插槽、装配附件、按轮廓生成网格与自动蒙皮、打关键帧（位移/旋转/缩放/斜切、附件切换、颜色、可见性、绘制顺序、FFD 变形、子骨架、事件帧）、皮肤换装与链接网格、骨架嵌套（换武器）、IK/变换/路径约束、遮罩裁剪、复核并导出 runtime / unity / Spine。支持分阶段确认与跳步（素材已导入 / 骨架已绑好、只差动画时直接进打帧）。触发词：Hao2D、hao2d-editor、骨骼动画、绑骨、蒙皮、打关键帧、K 帧、Spine 动画、角色动画、idle/walk/attack 动画、换装、图集导入、只补动画、增量修改已有骨架。"
-agent_created: true
 ---
 
 # Hao2D 骨骼动画制作
 
 > **可能有两份**：这份 Skill 同时可能以「工程内副本」的形式存在于 `<工程>/ai/skills/hao2d-skeletal-animation/`。
 > 只读你手上这一份就够，不要再去读另一份；两份版本不同时以客户端加载的（或随包安装的）为准。
+> 随包位置：macOS `/Applications/Hao2D Editor.app/Contents/Resources/skills/hao2d-skeletal-animation/`，
+> Windows `<安装目录>\resources\skills\hao2d-skeletal-animation\`；下文的 `references/`、`scripts/` 都相对这里。
 
 ## 这个 skill 解决什么
 
@@ -26,7 +27,7 @@ agent_created: true
 | --- | --- | --- |
 | 1 | **MCP** | 客户端已加载 Hao2DEditor 时，工具名就是命令名（`addBone` / `keyBoneFrame` …），直接 tools/call |
 | 2 | 工程 `ai/hao2d-ai-server.json` | 含 `url` + `token`；编辑器保存 / 打开工程时写出，是当前最可靠的一份 |
-| 3 | 用户目录 `command-server.json` | macOS `~/Library/Application Support/hao2d-editor/`、Windows `%APPDATA%\hao2d-editor\`、Linux `~/.config/hao2d-editor/` |
+| 3 | 用户目录 `command-server.json` | 编辑器 userData 目录：macOS `~/Library/Application Support/Hao2D/`、Windows `%APPDATA%\Hao2D\`、Linux `~/.config/Hao2D/`。安装包叫 `Hao2D Editor.app`，但主进程 `setName('Hao2D')`，所以目录名是 `Hao2D`；dev / 老版本可能叫 `Hao2D Editor` / `hao2d-editor`。**别猜，读 json 里的 `file` 字段** |
 
 拿到 `url` + `token` 后用**自己的 HTTP 请求能力**（fetch / requests）访问：
 
@@ -42,9 +43,9 @@ agent_created: true
 
 ## 铁律（先记住这几条，能省一半返工）
 
-1. **动画一步做完，不要中途停下来等确认**：不要生成缩略图问「这样可以吗」，也不要问
-   「要不要继续」。打帧 → 补缓动 → 自查 → 汇报，一次做完。只有**真的做不下去**时（素材缺件、
-   视角歧义、骨骼/插槽名字对不上）才停下来问。
+1. **门禁归门禁，打帧不停**：S1~S4 按下面的分阶段流水线停下等确认；一旦进入 S5 动画段，
+   打帧 → 补缓动 → 自查 → 汇报**一次做完**，不要生成缩略图问「这样可以吗」，也不要问
+   「要不要继续」。动画段里只有**真的做不下去**时（素材缺件、骨骼/插槽名字对不上）才停下来问。
 2. **坐标与单位**：世界坐标 y 轴**向上**；1 世界单位 = 100 像素（PPU=100），512px 的图约 5.12 单位；
    角度是**度**；时间是**秒**，打帧给**绝对时间点**；颜色 `#RRGGBB`，透明度 0–1。
 3. **一律用名字引用**骨骼 / 插槽 / 附件 / 动画 / 皮肤，不用下标。`addBone` / `addSlot` / `addDisplay`
@@ -83,28 +84,17 @@ agent_created: true
 
 ## 分阶段确认流水线（可跳步）
 
-一句话需求 ≠ 一次做完。按 6 段推进，**每段先体检、再动手**；只有 S1~S4 需要停下确认，
-**动画这一段一次做完**：
+一句话需求 ≠ 一次做完：S1 方案 → S2 素材 → S3 骨架 → S4 装配（**这四段各停一次等确认**）
+→ S5 动画（**不停**，一次做完）→ S6 导出（只在用户明确要求时做）。
 
-| 阶段 | 交付物 | 门禁 |
-| --- | --- | --- |
-| S1 方案 | 复述需求 + 动作表（动作 / 时长 / 帧数 / 是否循环） | 停下等用户确认 |
-| S2 素材 | 工程落盘、图片入库、图集拆分 | 停下等用户确认 |
-| S3 骨架 | `addBone` 先根后叶 | 停下等用户确认 |
-| S4 装配 | `addSlot` + `addDisplay` + 摆位（+ 需要形变时蒙皮） | 停下等用户确认 |
-| S5 动画 | 直接打帧 + 缓动 + 事件帧 | **不停**：打完自查后汇报 |
-| S6 导出 | `exportProject` | 只在用户明确要求时做 |
+**开工先体检**：`getProjectState` + `listBones / listSlots / listDisplays / listImages / listAnimations`，
+按结果决定从哪进；已经做完的阶段直接跳过，并在汇报里写明跳过了哪几段及依据。
+用户口头说「图放好了 / 骨骼绑好了」也要查一次确认，确认无误就直接开始，不要重做他的工作。
 
-**开工先体检，按结果决定从哪进**：`getProjectState` + `listBones / listSlots / listDisplays / listImages / listAnimations`。
-已经做完的阶段直接跳过，并在汇报里写明跳过了哪几段及依据，例如
-「检测到 13 根骨骼、11 个插槽均已装配 → 跳过 S3/S4，直接 S5」。
-**用户口头说「图放好了 / 骨骼绑好了」也要用查询确认一次**，确认无误就直接开始，不要重做他的工作。
-
-最常见跳步：用户已摆好图、绑好骨、只差动画 → 只跑体检 + **只做动画模式**：
-不新建 / 重命名 / 删除骨骼与插槽，不动 setup pose，不动图片池；
+**只做动画时**（最常见）：不新建 / 重命名 / 删除骨骼与插槽，不动 setup pose，不动图片池；
 `addAnimation` 前先 `listAnimations` 查重名；回退用 `clearTrack` 而不是 `undo`。
 
-每个门禁问什么、跳步判定表、只做动画的硬约束、序列帧方案、汇报模板：`references/pipeline.md`。
+门禁问什么、跳步判定表、只做动画的完整硬约束、序列帧方案、汇报模板：`references/pipeline.md`。
 
 ## 按需加载的参考文件
 

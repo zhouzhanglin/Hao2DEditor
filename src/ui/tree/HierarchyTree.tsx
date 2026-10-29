@@ -648,7 +648,7 @@ function boneRowTitle(
     t('骨骼「{0}」', bone.name),
     t('父级：{0}', bone.parent || t('（根骨骼）')),
     t('挂载：{0}', attached.length > 0 ? attached.join(' · ') : t('（空）')),
-    // 与行尾 meta 同一口径（length 存世界单位，树里按 px 显示，换算走 unitsToPx）；
+    // 长度 / 旋转只在悬浮说明里给（行尾不写了）：length 存世界单位，按 px 显示要换算（unitsToPx）；
     // rotation 存的是**局部**值，有父级时写明基准，免得跟视口里看到的世界角度对不上
     t('长度 {0}px · {1}', [
       unitsToPx(bone.length).toFixed(0),
@@ -1870,7 +1870,6 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         }
         active={selection.kind === 'bone' && selection.bones.includes(bone.name)}
         secondary={selection.kind === 'bone' && selection.bone !== bone.name}
-        meta={bone.length > 0 ? `${unitsToPx(bone.length).toFixed(0)}px` : undefined}
         expandable={hasChildren}
         expanded={expanded}
         onToggle={() => toggle(bone.name)}
@@ -1986,23 +1985,12 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             <ImageIcon size={11} className={showing ? 'text-accent' : 'text-content-lo/60'} />
           )
         }
-        meta={
-          attachment.type === 'armature'
-            ? showing
-              ? t('显示中 · 骨架 {0}', attachment.subArmature || '?')
-              : t('骨架 {0}', attachment.subArmature || '?')
-            : attachment.type === 'clipping'
-              ? showing
-                ? t('显示中 · 遮罩')
-                : t('遮罩')
-              : showing
-                ? isMeshType(attachment.type)
-                  ? t('显示中 · 网格')
-                  : t('显示中')
-                : isMeshType(attachment.type)
-                  ? t('网格')
-                  : undefined
-        }
+        /*
+         * 行尾只留「这一行本身就看不出来」的信息：嵌套骨架 display 引用的是哪个骨架。
+         * 类型（网格 / 遮罩 / 图片…）由前面的图标表达、是否正在显示由图标颜色表达，
+         * 再写一遍「显示中 · 网格」纯属噪音 —— 而且那串字还会把本来就长的名字挤得更短。
+         */
+        meta={attachment.type === 'armature' ? t('骨架 {0}', attachment.subArmature || '?') : undefined}
         // display 行也算宿主插槽的地盘：拖到插槽下面（含子行）都是「给这个插槽加 display」
         dataSlot={slot.name}
         // 选中附件（视口 / 检查器）时按「插槽 + 附件」定位到这一行（同名附件可能出现在多个插槽）
@@ -2067,10 +2055,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         flashKey={flash?.kind === 'slot' && flash.name === slot.name ? flash.nonce : 0}
         active={selection.kind === 'slot' && selection.slot === slot.name}
         icon={<SlotIcon color={toCss(slot.color)} />}
-        // 行尾显示当前显示的 display 名，不用展开也知道显示的是哪一个。
-        // Animate 态按关键帧采样（与 display 行的「显示中」标记同一数据源），不能直接看 setup
-        meta={showing || (displays.length > 0 ? t('{0} 个 display', displays.length) : undefined)}
-        // 关掉 display 行时没有子行可展开，箭头一并收掉（行尾的「N 个 display」仍留着看数量）
+        // 行尾不再写「当前显示的是谁 / 有几个 display」：展开插槽就能看到，
+        // 悬浮说明（slotRowTitle）里也写着，行尾那串字只是把名字挤短
         expandable={showDisplays && displays.length > 0}
         expanded={expanded}
         dataSlot={slot.name}
@@ -2123,11 +2109,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       // 约束没有拖动负载，双击聚焦的目标只能显式给（骨骼 / 插槽 / display 都由负载推导）
       focusTarget={{ kind: 'constraint', name: constraint.name }}
       icon={CONSTRAINT_ICON[constraint.type] ?? <Link2 size={11} />}
-      meta={
-        constraint.type === 'ik'
-          ? t('IK {0} 骨', constraint.bones.length)
-          : constraintKind(constraint.type)
-      }
+      // 行尾描述（IK N 骨 / 类型名）不写：类型由图标表达，骨骼链在悬浮说明里，删掉后名字不再被截断
       onSelect={() => selection.selectConstraint(constraint.name)}
       onContextMenu={(event) =>
         openMenu(event, { kind: 'constraint', name: constraint.name, bone: constraint.bones[0] ?? '' })

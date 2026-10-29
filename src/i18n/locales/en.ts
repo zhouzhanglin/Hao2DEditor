@@ -28,7 +28,6 @@ export const en: Record<string, string> = {
   '曲线': 'Curves',
   '选中关键帧后拖控制点': 'Select a keyframe, then drag a control point',
   '资源与皮肤': 'Assets & Skins',
-  '拖动上方分隔条调高': 'Drag the divider above to resize',
 
   // ── 视口 ──────────────────────────────────────────────────────────────
   '视口': 'Viewport',

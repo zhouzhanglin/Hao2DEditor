@@ -924,12 +924,7 @@ export default function App() {
                 <CurvePanel />
               </PanelShell>
             ) : (
-              <PanelShell
-                title={t('资源与皮肤')}
-                grow={false}
-                style={{ height: assetHeight }}
-                actions={<span className="text-3xs text-content-lo">{t('拖动上方分隔条调高')}</span>}
-              >
+              <PanelShell title={t('资源与皮肤')} grow={false} style={{ height: assetHeight }}>
                 <AssetPanel
                   onImport={() => handleCommand('project:importImages')}
                   onStatus={flash}

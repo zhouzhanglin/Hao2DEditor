@@ -1,5 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { playheadTime, usePlayheadStore } from '@editor/store/playheadStore'
+import { formatPerf, perfStats, subscribePerf } from '@editor/store/perfStore'
+import type { PerfStats } from '@editor/store/perfStore'
 import { t } from '@i18n'
 
 export interface StatusBarProps {
@@ -24,6 +26,14 @@ export interface StatusBarProps {
 /** 播放头读数：`帧号 / fps · 秒数`（写进纯文本节点，不走 React） */
 function formatReadout(time: number, frameRate: number): string {
   return `${Math.round(time * frameRate)} / ${frameRate}fps · ${time.toFixed(3)}s`
+}
+
+/** 帧率读数的开关（软件级偏好：与工程无关，跨工程保留） */
+const PERF_KEY = 'hao2d:show-perf'
+
+function readShowPerf(): boolean {
+  if (typeof localStorage === 'undefined') return false
+  return localStorage.getItem(PERF_KEY) === '1'
 }
 
 /** 最底状态栏：高密度统计信息，右侧动画名与帧号。 */
@@ -53,6 +63,34 @@ export default function StatusBar({
     apply(playheadTime())
     return usePlayheadStore.subscribe((state) => apply(state.time))
   }, [frameRate])
+
+  /**
+   * 帧率读数：默认关（不占地方），点右侧 `FPS` 打开。
+   *
+   * 数值从 `perfStore`（2Hz 发布）来，同样**只写文本节点**，不触发重渲染；
+   * 只有「开关」本身走 React state（一次点击一次重渲染，可以忽略）。
+   */
+  const [showPerf, setShowPerf] = useState(readShowPerf)
+  const perfRef = useRef<HTMLSpanElement | null>(null)
+  useEffect(() => {
+    if (!showPerf) return
+    const apply = (stats: PerfStats): void => {
+      const el = perfRef.current
+      if (!el) return
+      el.textContent = formatPerf(stats)
+      el.title = t('最差一帧 {0}ms', stats.worstMs.toFixed(1))
+    }
+    apply(perfStats())
+    return subscribePerf(apply)
+  }, [showPerf])
+
+  const togglePerf = (): void => {
+    setShowPerf((prev) => {
+      const next = !prev
+      if (typeof localStorage !== 'undefined') localStorage.setItem(PERF_KEY, next ? '1' : '0')
+      return next
+    })
+  }
 
   return (
     <footer className="flex h-[22px] items-center gap-3 border-t border-line bg-ink-800 px-2 text-2xs text-content-lo">
@@ -111,6 +149,26 @@ export default function StatusBar({
         ) : (
           <span className="text-content-lo">{t('未选择动画')}</span>
         )}
+        {/* 帧率读数开关：关闭时只是一个 `FPS` 按钮，打开后原地显示读数（内容由上面的 effect 写） */}
+        <button
+          type="button"
+          onClick={togglePerf}
+          className={`shrink-0 rounded px-1 font-mono ${
+            showPerf ? 'text-accent' : 'text-content-lo hover:text-content-mid'
+          }`}
+          title={showPerf ? t('点击隐藏帧率读数') : t('点击显示视口帧率')}
+        >
+          {showPerf ? (
+            <span
+              ref={(el) => {
+                perfRef.current = el
+                if (el) el.textContent = formatPerf(perfStats())
+              }}
+            />
+          ) : (
+            'FPS'
+          )}
+        </button>
       </span>
     </footer>
   )

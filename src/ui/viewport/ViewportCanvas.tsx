@@ -13,6 +13,7 @@ import { useToolStore } from '@editor/store/toolStore'
 import { useModeStore } from '@editor/store/modeStore'
 import { useTimelineStore } from '@editor/store/timelineStore'
 import { playheadTime, usePlayheadStore } from '@editor/store/playheadStore'
+import { publishPerf } from '@editor/store/perfStore'
 import { usePreviewStore } from '@editor/store/previewStore'
 import { useSettingsStore } from '@editor/store/settingsStore'
 import {
@@ -130,6 +131,12 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     let last = performance.now()
     /** 上一帧是否在播放：用于在「播放 → 停止」的那一帧把最终时间落回主 store */
     let playing = false
+    /* 帧统计窗口（见 perfStore）：每 500ms 汇总发布一次 */
+    let perfWindowStart = last
+    let perfFrames = 0
+    let perfFrameSum = 0
+    let perfJsSum = 0
+    let perfWorst = 0
     /**
      * 渲染循环。
      *
@@ -139,8 +146,10 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
      * 这里把单帧错误隔离开：跳过这一帧、打出堆栈，循环继续跑。
      */
     const loop = (now: number): void => {
-      const dt = Math.min(0.1, (now - last) / 1000)
+      const frameMs = now - last
+      const dt = Math.min(0.1, frameMs / 1000)
       last = now
+      const startedAt = performance.now()
       try {
         scene.update(dt)
         // 首次拿到有效几何后自动适配视野（拖图会提前置 autoFitDone，见 onImageDrop）
@@ -182,6 +191,33 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       } catch (error) {
         console.error('[hao2d] 视口渲染循环出错（已跳过该帧，视口不会卡死）', error)
       }
+
+      /*
+       * 帧统计：窗口内的平均帧间隔 / 平均主线程耗时 / 最差一帧。
+       * 首帧（frameMs 为 0）与「窗口失焦后回来」（rAF 被暂停，frameMs 上千毫秒）不计入，
+       * 否则最差帧会被一次切窗口顶到天上，读数就没意义了。
+       */
+      if (frameMs > 0 && frameMs < 1000) {
+        perfFrames++
+        perfFrameSum += frameMs
+        perfJsSum += performance.now() - startedAt
+        if (frameMs > perfWorst) perfWorst = frameMs
+      }
+      if (now - perfWindowStart >= 500) {
+        const elapsed = now - perfWindowStart
+        publishPerf({
+          fps: perfFrames > 0 ? (perfFrames * 1000) / elapsed : 0,
+          frameMs: perfFrames > 0 ? perfFrameSum / perfFrames : 0,
+          jsMs: perfFrames > 0 ? perfJsSum / perfFrames : 0,
+          worstMs: perfWorst
+        })
+        perfWindowStart = now
+        perfFrames = 0
+        perfFrameSum = 0
+        perfJsSum = 0
+        perfWorst = 0
+      }
+
       raf = requestAnimationFrame(loop)
     }
     raf = requestAnimationFrame(loop)

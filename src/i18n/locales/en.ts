@@ -104,6 +104,9 @@ export const en: Record<string, string> = {
   '图片纹理全部就绪': 'All image textures ready',
   '纹理': 'Textures',
   '未选择动画': 'No animation selected',
+  '点击显示视口帧率': 'Show viewport frame rate',
+  '点击隐藏帧率读数': 'Hide frame rate readout',
+  '最差一帧 {0}ms': 'Worst frame {0}ms',
 
   // ── App 提示 / 反馈 ────────────────────────────────────────────────────
   '处理中…': 'Processing…',

@@ -153,12 +153,12 @@ export interface SceneViewState {
    */
   weightTargetBone: string
   /**
-   * 网格工具（`ffd`）的隔离目标：**只渲染这个插槽的附件**，其余全部隐藏。
-   * 空串 = 不隔离（未选中网格 / 其它工具时显示全部）。
+   * 网格工具（`ffd`）**正在编辑**的插槽名（空串 = 没选中可编辑的网格）。
+   *
+   * 只决定两件事：叠加层画哪个插槽的线框 / 顶点、顶点拾取抓谁（见 `editingSlotIndex`）。
+   * **不隐藏其它 display** —— 网格工具下角色照常完整显示，只是线框与顶点只落在当前网格上。
    */
-  isolateMeshSlot: string
-  /** 隔离插槽上要显示的附件名（空串 = 沿用当前显示项） */
-  isolateMeshAttachment: string
+  editMeshSlot: string
   /**
    * 网格子工具正在画的折线预览（绘制边界 / 自定义布线），null = 没在画。
    *
@@ -289,8 +289,7 @@ export class EditorScene {
     overlay: { bones: true, constraints: true },
     stage: null,
     focusMeshSlot: '',
-    isolateMeshSlot: '',
-    isolateMeshAttachment: '',
+    editMeshSlot: '',
     selectedBone: '',
     selectedBones: [],
     hoveredBone: '',
@@ -470,40 +469,6 @@ export class EditorScene {
       this.viewport.contentLayer.addChild(this.view.container)
       this.markDirty()
     }
-  }
-
-  /**
-   * 网格工具的「隔离显示」：**只渲染当前选中的那个网格**，其余附件全部跳过。
-   *
-   * 复杂角色上十几个网格彼此遮挡，顶点 / 线框 / 贴图叠成一片，看不出在编哪一个；
-   * 隔离后画面里只剩目标网格，拖顶点、看权重都干净。未选中、选中的不是网格、
-   * 或换到别的工具时自动恢复显示全部。
-   *
-   * `isolateMeshSlot` 存的是插槽**名**（附件名会随皮肤切换变化，插槽名稳定），
-   * 每帧解析一次的开销可以忽略；`setIsolation` 内部做去重，值不变时不会触发重建。
-   */
-  private applyMeshIsolation(): void {
-    const view = this.view
-    if (!view) return
-    const name = this.viewState.isolateMeshSlot
-    let index = -1
-    let display = -1
-    if (name && this.bundle) {
-      const found = this.bundle.asset.slots.findIndex((slot) => slot.name === name)
-      if (found >= 0) {
-        // 优先用**选中的那个附件**（按名查显示下标）—— 选中不等于它在显示，
-        // 不指定的话隔离出来可能还是旧的显示项
-        const wanted = this.viewState.isolateMeshAttachment
-        const byName = wanted ? view.meshBuilder.attachmentIndexOf(found, wanted) : -1
-        const current = byName >= 0 ? byName : this.bundle.skeleton.slotDisplayIndex[found]
-        const attachment = this.attachmentAt(found, current)
-        if (attachment && attachment.type === AttachmentType.Mesh) {
-          index = found
-          display = byName
-        }
-      }
-    }
-    view.setIsolation(index, display)
   }
 
   setViewState(patch: Partial<SceneViewState>): void {
@@ -794,9 +759,6 @@ export class EditorScene {
       this.view.markDirty()
       this.dirty = true
     }
-
-    // 网格工具的隔离显示：只渲染当前选中的那个网格（值不变时内部直接返回）
-    this.applyMeshIsolation()
 
     if (this.view.isDirty) {
       this.view.update(this.bundle.skeleton)
@@ -1143,11 +1105,11 @@ export class EditorScene {
    * **在编辑谁**的插槽下标（**-1 = 谁都不可编辑**，不是「不限」）。覆盖层「画谁」与顶点拾取「抓谁」
    * 共用它，两处必须一致 —— 否则会拖到根本没画出来的顶点：
    * - 选择 / Pose 工具：选中项（`focusMeshSlot`）；选中骨骼时为空 → 不画也不抓；
-   * - 顶点工具：选中的附件（`isolateMeshSlot`）—— 即便它是 Region、不会真隔离
-   *  （见 applyMeshIsolation），也只画它自己的顶点；否则整个角色的顶点会一起铺出来。
+   * - 顶点工具：选中的附件（`editMeshSlot`）—— 即便它是 Region，也只画它自己的顶点；
+   *   否则整个角色的顶点会一起铺出来（注意：这**不影响**其它 display 的渲染）。
    */
   private editingSlotIndex(): number {
-    return this.slotIndexByName(this.viewState.isolateMeshSlot || this.viewState.focusMeshSlot)
+    return this.slotIndexByName(this.viewState.editMeshSlot || this.viewState.focusMeshSlot)
   }
 
   private slotIndexByName(name: string): number {
@@ -2091,19 +2053,21 @@ export class EditorScene {
     /*
      * 网格层什么时候画、画谁：
      *
-     * - **顶点工具（隔离中）**：强制显示 —— 工具本身就在编这个网格，「看不见网格线」说不过去；
+     * - **顶点工具**：画**正在编辑的那个插槽**（`editMeshSlot`，视口按选中的附件填）
+     *   —— 工具本身就在编这个网格，「看不见网格线」说不过去；
      * - **选择 / Pose 工具**：只画**选中的那个插槽**（`focusMeshSlot`，视口按选中项填）。
      *   原来有个全局「网格」开关，一开就是把所有 displayObject 都铺上线框，已移除；
      * - **权重 / FFD 显示层**：照旧全局（那两层的语义是看权重、看 FFD 偏移，不是选谁画谁）。
+     *
+     * 两个工具都**只决定线框 / 顶点画在哪**，都不隐藏其它 display：
+     * 编辑器已不再启用 MeshBuilder 的插槽隔离（`isolating` 恒为 false），
+     * 保留这个判断只是为了隔离若被重新启用时叠加层仍然正确。
      */
     const isolating = (this.view?.meshBuilder.isolateSlot ?? -1) >= 0
     const focusSlot = this.focusSlotIndex()
-    /*
-     * **在编辑谁**：选择 / Pose 工具取选中项，顶点工具取选中的附件（见 editingSlotIndex）。
-     *
-     * 为什么不能只靠 `isolating`：隔离只对 **Mesh** 成立（见 applyMeshIsolation），Region 走不到
-     * 那里 —— 而顶点工具也要能编 Region（转网格前后都要看得到顶点）。原来这份「看得到」是靠顶部
-     * 「FFD」开关撑着的，那个开关已移除（与「网格」开关同一处理）：显示跟着工具走，不需要手动开。
+    /**
+     * **在编辑谁**：选择 / Pose 工具取选中项，顶点工具取选中的附件（见 `editingSlotIndex`）。
+     * 这个下标只用于「画谁的线框 / 顶点」与「拾取抓谁」，与渲染哪些 display 无关。
      */
     const editingSlot = this.editingSlotIndex()
     // 重画边界时网格线框与顶点整个让开（否则旧网格的形状压在 region 框上，看不出该往哪画）
@@ -2117,7 +2081,7 @@ export class EditorScene {
     }
     /*
      * 顶点圆点的半径（世界单位）：
-     * - **顶点工具（隔离中）**：固定 5 屏幕像素 —— 那是可拖的手柄，缩多远都要抓得住；
+     * - **顶点工具**：固定 5 屏幕像素 —— 那是可拖的手柄，缩多远都要抓得住；
      * - **选择 / Pose 工具**：按**网格自身尺寸**取固定值（顶点包围盒最长边的 2%），
      *   不为视口缩放做补偿 —— 放大时点跟着网格一起变大，缩小时一起变小。
      *   这两类工具下顶点只是"标出位置"，跟着内容走比固定屏幕尺寸更直观。
@@ -2158,7 +2122,10 @@ export class EditorScene {
         unitsPerPixel: unitPerPixel,
         showWireframe: isolating || editingSlot >= 0,
         showVertices: isolating || editingSlot >= 0,
-        // 隔离本身就只构建了那一个插槽，不需要再过滤；顶点工具下的 Region 靠它只画选中那一个
+        /*
+         * 只画**正在编辑的那个插槽**的线框 / 顶点（其余 display 照常渲染，只是不铺线框）。
+         * 隔离若被重新启用（`isolating`），整份顶点缓冲本来就只剩那一个插槽，不必再过滤。
+         */
         onlySlot: isolating ? -1 : editingSlot,
         vertexRadius,
         // 权重着色（饼图）跟着权重刷工具走：顶部「权重」开关已移除

@@ -402,18 +402,11 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         time: scene.state.playing ? playheadTime() : timeline.time,
         onionSkin: mode === 'animate' && timeline.onionSkin,
         /*
-         * 网格显示分两套：
-         * - **顶点工具（FFD）**：隔离 —— 只渲染正在编辑的那一个网格（其它附件一起隐藏，
-         *   否则十几层网格互相遮挡，线框与纹理叠在一起根本看不清）；
-         * - **选择 / Pose 工具**：不隔离，只把线框与顶点限制在选中的那个插槽上（focusMeshSlot）。
-         *   这两件事必须分开：隔离会让角色"掉图层"，而这两个工具只是不想让所有
-         *   displayObject 都铺线框 —— 其余部分照常显示。
-         *
-         * 选中项不是网格时由场景侧忽略（见 Scene.applyMeshIsolation）。
+         * 网格工具**正在编辑谁**：只决定「线框 / 顶点画在哪个插槽上、顶点拾取抓谁」
+         * （见 Scene.editingSlotIndex）。**不隐藏其它 display** —— 网格工具下角色照常
+         * 完整显示，与选择 / Pose 工具一致（那两个工具用 focusMeshSlot 表达同一件事）。
          */
-        isolateMeshSlot: tools.tool === 'ffd' && selection.kind === 'attachment' ? selection.slot : '',
-        isolateMeshAttachment:
-          tools.tool === 'ffd' && selection.kind === 'attachment' ? selection.attachment : '',
+        editMeshSlot: tools.tool === 'ffd' && selection.kind === 'attachment' ? selection.slot : '',
         /*
          * 「自己绘制边界」的目标附件：视口据此把旧网格线框 / 顶点 / 选中轮廓全藏起来，
          * 改成画图片的 region 框（见 Scene.drawOverlays）。只在「Pose 态 + 网格工具 + 该子工具

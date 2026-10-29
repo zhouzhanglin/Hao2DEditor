@@ -307,7 +307,7 @@ export const useToolStore = create<ToolState>((set, get) => ({
 
   /**
    * 换工具**不再改任何显示层**：网格线框与顶点、FFD、权重着色都由工具与选中项驱动
-   *（视口把它们作为 `isolateMeshSlot` / `focusMeshSlot` / `weightTool` 推给场景，
+   *（视口把它们作为 `editMeshSlot` / `focusMeshSlot` / `weightTool` 推给场景，
    * 见 Scene.drawOverlays）。这里的 overlay 只留给「骨架 / 约束」两个纯显示开关。
    */
   setTool: (tool) => {

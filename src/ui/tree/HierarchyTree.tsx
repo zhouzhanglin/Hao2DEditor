@@ -253,8 +253,9 @@ function TreeRow({
   return (
     <div
       className={[
-        // macOS 列表行：24px 行高；选中是「左右留白的圆角色块」（Finder 的选中不是通栏色块）
-        'group relative mx-1 flex h-[22px] items-center gap-1 rounded-[5px] px-1 text-panel transition-colors duration-panel cursor-pointer',
+        // macOS 列表行：行高就是行间距（行与行之间没有额外 gap），压到 20px 让树更紧凑；
+        // 选中是「左右留白的圆角色块」（Finder 的选中不是通栏色块）
+        'group relative mx-1 flex h-[20px] items-center gap-1 rounded-[5px] px-1 text-panel transition-colors duration-panel cursor-pointer',
         active
           ? secondary
             ? 'bg-accent-deep/60 text-white'

@@ -388,13 +388,15 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
         >
           <Flag size={12} />
         </button>
+        {/* 没选中关键帧时置灰（`.hao-btn:disabled` 自带 opacity-40）：点了也没东西可删 */}
         <button
           type="button"
-          className="hao-btn h-[20px] px-1.5 text-3xs"
+          className="hao-btn h-[20px] w-[22px] shrink-0 justify-center px-0"
           title={t('删除选中的关键帧（Delete）')}
+          disabled={timeline.selectedKeys.length === 0}
           onClick={removeSelected}
         >
-          <Trash2 size={11} />
+          <Trash2 size={12} />
         </button>
 
         <div className="mx-1 h-[18px] w-px bg-line" />

@@ -38,6 +38,14 @@ export interface MeshOverlayOptions {
   /** 选中的顶点下标集合（全局顶点缓冲下标） */
   selectedVertices: ReadonlySet<number>
   hoveredVertex: number
+  /**
+   * 插槽当前附件的**世界矩阵**（`boneWorld × TRS(附件)`）。
+   *
+   * FFD 偏移存的是「附件显示空间」里的位移（见 `AttachmentData.ffdInBoneSpace` 的说明），
+   * 而叠加层画在世界坐标里 —— 要把它乘过这个矩阵的线性部分，虚线才指向真正的偏移方向。
+   * 拿不到（附件此刻没显示）时返回 null，退回直接当世界位移画。
+   */
+  attachmentWorldOf?: (slotIndex: number) => Float32Array | null
 }
 
 /**
@@ -123,7 +131,9 @@ export function drawMeshOverlay(
     }
   }
 
-  drawFfdOffsets(strokes, fills, skeleton, result, w)
+  // FFD 手柄同样只画**正在编辑的那个插槽**：不分青红皂白铺满全场的话，
+  // 选中一个网格就能看到整只角色身上所有被 FFD 推过的顶点（紫菱形满天飞）
+  drawFfdOffsets(strokes, fills, skeleton, result, w, options.onlySlot, options.attachmentWorldOf)
 }
 
 /** 一组权重（最多 4 根骨骼）的取值形状 —— 运行期附件的 weights 就是它 */
@@ -252,13 +262,20 @@ function drawFfdOffsets(
   fills: Graphics,
   skeleton: Skeleton,
   result: MeshBuildResult,
-  w: number
+  w: number,
+  onlySlot: number,
+  attachmentWorldOf?: (slotIndex: number) => Float32Array | null
 ): void {
   const handles: number[] = []
   for (let slotIndex = 0; slotIndex < skeleton.slotCount; slotIndex++) {
+    // 只画正在编辑的那个插槽：否则选中一个网格，整只角色身上所有带 FFD 的顶点都会亮成紫菱形
+    if (onlySlot >= 0 && slotIndex !== onlySlot) continue
     const deform = skeleton.deformOffsets[slotIndex]
     const base = skeleton.deformOffsetBase[slotIndex]
     if (!deform || base < 0) continue
+
+    // 偏移在**附件显示空间**里，要经附件世界矩阵的线性部分换到世界空间，虚线方向才对
+    const m = attachmentWorldOf?.(slotIndex) ?? null
 
     for (let i = 0; i < result.vertexCount; i++) {
       if (result.sourceSlot[i] !== slotIndex) continue
@@ -271,7 +288,10 @@ function drawFfdOffsets(
       if (dx === 0 && dy === 0) continue
       const x = result.positions[i * 2]
       const y = result.positions[i * 2 + 1]
-      strokes.moveTo(x - dx, y - dy).lineTo(x, y)
+      // 局部位移 → 世界位移（只乘 2×2 线性部分：平移对向量没有意义）
+      const wx = m ? m[0] * dx + m[4] * dy : dx
+      const wy = m ? m[1] * dx + m[5] * dy : dy
+      strokes.moveTo(x - wx, y - wy).lineTo(x, y)
       handles.push(x, y)
     }
   }

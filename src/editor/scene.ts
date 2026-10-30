@@ -2143,7 +2143,22 @@ export class EditorScene {
         showWeights: state.weightTool,
         weightBoneColors,
         selectedVertices: new Set(state.selectedVertices),
-        hoveredVertex: state.hoveredVertex
+        hoveredVertex: state.hoveredVertex,
+        /*
+         * FFD 偏移在附件显示空间里：叠加层靠这个矩阵把虚线换到世界空间（见 drawFfdOffsets）。
+         * 例外是 `ffdInBoneSpace`（只有老工程 / 手动开过的数据，导入器一律写 false）——
+         * 那种偏移已经是骨内坐标，只该乘骨骼世界矩阵。
+         */
+        attachmentWorldOf: (slotIndex) => {
+          const attachment = this.attachmentAt(slotIndex, bundle.skeleton.slotDisplayIndex[slotIndex])
+          if (attachment?.ffdInBoneSpace) {
+            const boneIndex = bundle.asset.slots[slotIndex]?.boneIndex ?? -1
+            if (boneIndex < 0) return null
+            // subarray 是视图，不复制：这里每帧都会调
+            return bundle.skeleton.world.subarray(boneIndex * MAT4_LENGTH, boneIndex * MAT4_LENGTH + MAT4_LENGTH)
+          }
+          return this.attachmentWorldAt(slotIndex)
+        }
       }
     )
   }

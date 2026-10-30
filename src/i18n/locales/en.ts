@@ -48,7 +48,11 @@ export const en: Record<string, string> = {
   '绑定状态：编辑 setup 姿态、网格与权重（Tab 切换）': 'Bind mode: edit setup pose, meshes and weights (Tab to switch)',
   '动画编辑状态：时间轴与关键帧（Tab 切换）': 'Animate mode: timeline and keyframes (Tab to switch)',
 
-  // ── 叠加层 ────────────────────────────────────────────────────────────
+  // ── 叠加层 / 坐标空间 ──────────────────────────────────────────────────
+  '本地': 'Local',
+  '世界': 'World',
+  '本地空间（默认）：小坐标轴跟着骨骼自身朝向，拖 X 轴 = 沿骨骼方向': 'Local space (default): the gizmo axes follow the bone orientation, dragging X moves along the bone',
+  '世界空间：小坐标轴固定对齐世界 X / Y（画面上永远水平 / 竖直），拖动也只沿世界方向': 'World space: the gizmo axes are aligned to the world X / Y (always horizontal / vertical on screen), and dragging follows world directions',
   '骨骼': 'Bones',
   '显示 / 隐藏骨骼骨架': 'Show / hide bone skeleton',
   '约束': 'Constraints',

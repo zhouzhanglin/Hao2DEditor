@@ -2,7 +2,7 @@ import { Graphics } from 'pixi.js'
 import type { Skeleton } from '@core/model/skeleton'
 import type { Constraint } from '@core/model/constraints'
 import { attachmentGizmoFrame, gizmoGeometry, unshearedWorldRot } from '@render/picking'
-import type { GizmoGeometry } from '@render/picking'
+import type { GizmoGeometry, GizmoSpace } from '@render/picking'
 import { circlePolygon, DOT_SEGMENTS } from './shapes'
 import { boneStyleAlpha, boneStyleColor, DEFAULT_BONE_STYLE } from './boneStyle'
 import type { BoneOverlayStyle } from './boneStyle'
@@ -88,10 +88,12 @@ export function drawBoneGizmo(
   skeleton: Skeleton,
   index: number,
   mode: GizmoDrawMode,
-  unitsPerPixel: number
+  unitsPerPixel: number,
+  space: GizmoSpace = 'local'
 ): void {
   const w = unitsPerPixel
-  const geometry = gizmoGeometry(skeleton, index, w * GIZMO_AXIS_LENGTH)
+  // 世界空间下这里拿到的是固定对齐世界 X / Y 的轴，方向与骨骼自身朝向无关
+  const geometry = gizmoGeometry(skeleton, index, w * GIZMO_AXIS_LENGTH, space)
   if (!geometry) return
   drawGizmoFrame(stroke, fill, geometry, mode, w)
 }

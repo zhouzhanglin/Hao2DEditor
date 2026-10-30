@@ -1,6 +1,7 @@
 
 import { create } from 'zustand'
 import type { AutoWeightMethod } from '@editor/commands/authoringCommands'
+import type { GizmoSpace } from '@render/picking'
 import { t } from '@i18n'
 
 /**
@@ -128,6 +129,18 @@ export function weightSubtools(): Array<{ id: WeightSubtool; label: string; hint
 export type GizmoMode = 'move' | 'rotate' | 'scale' | 'shear'
 
 /**
+ * 小坐标轴（以及拖动换算）用的坐标空间：
+ * - `local`（默认）：轴跟着骨骼自身朝向走，拖 X 轴 = 沿骨骼方向平移 / 拉长；
+ * - `world`：轴始终对齐世界 X / Y（画面上永远水平 / 竖直），拖动也按世界方向换算。
+ *
+ * 斜切不受它影响：斜切量（shearX / shearY）本身就是相对骨骼的，画面上仍是骨骼的包围盒。
+ *
+ * 类型本体声明在 `@render/picking`（渲染层要按它画轴与拾取），这里只做转出，
+ * 免得 render 反过来依赖编辑层（与 `GizmoDrawMode` 同一处理）。
+ */
+export type { GizmoSpace } from '@render/picking'
+
+/**
  * 小坐标轴工具顺序（快捷键与工具栏共用，改一处即可）。
  * 文案随语言切换，所以是函数不是常量。
  */
@@ -239,6 +252,8 @@ export interface ToolState {
   tool: EditorTool
   /** 骨骼变换 gizmo 的当前模式 */
   gizmo: GizmoMode
+  /** 小坐标轴的坐标空间：本地（沿骨骼朝向）/ 世界（对齐世界 X / Y），默认本地 */
+  gizmoSpace: GizmoSpace
   overlay: OverlayState
   brush: BrushState
   /** 网格创建的栅格细分数量（Region 转网格） */
@@ -270,6 +285,7 @@ export interface ToolState {
   autoMethod: AutoWeightMethod
   setTool: (tool: EditorTool) => void
   setGizmo: (mode: GizmoMode) => void
+  setGizmoSpace: (space: GizmoSpace) => void
   setMeshSubtool: (subtool: MeshSubtool) => void
   setWeightSubtool: (subtool: WeightSubtool) => void
   setOverlay: (overlay: OverlayState) => void
@@ -284,6 +300,8 @@ export interface ToolState {
 export const useToolStore = create<ToolState>((set, get) => ({
   tool: 'select',
   gizmo: 'move',
+  // 默认本地：轴跟着骨骼朝向走，摆姿态时最符合直觉（世界空间是想对齐画面时才切）
+  gizmoSpace: 'local',
   overlay: { bones: true, constraints: true },
   /*
    * 笔刷参数（Mode / Size / Strength / Feather / Normalize），面板见属性最下面的「权重刷」一栏。
@@ -328,6 +346,11 @@ export const useToolStore = create<ToolState>((set, get) => ({
         : { gizmo, pendingWeightBone: null, meshSubtool: 'edit', weightSubtool: 'paint' }
     )
   },
+  /**
+   * 切换本地 / 世界空间：只改「轴朝哪、拖动按哪个方向换算」，不动工具与子工具 ——
+   * 它改的是同一件事的参照系，不是又在做别的事。
+   */
+  setGizmoSpace: (gizmoSpace) => set({ gizmoSpace }),
   setOverlay: (overlay) => set({ overlay }),
   toggleOverlay: (key) => set({ overlay: { ...get().overlay, [key]: !get().overlay[key] } }),
   setBrush: (brush) => set({ brush: { ...get().brush, ...brush } }),

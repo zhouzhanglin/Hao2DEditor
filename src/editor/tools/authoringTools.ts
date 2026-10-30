@@ -1,7 +1,7 @@
 import type { Vec2 } from '@core/math/matrix'
 import { invert, mulPoint, mulVector, trs } from '@core/math/matrix'
 import { attachmentGizmoFrame, gizmoGeometry } from '@render/picking'
-import type { GizmoPart, ShearEdge } from '@render/picking'
+import type { GizmoPart, GizmoSpace, ShearEdge } from '@render/picking'
 import { GIZMO_AXIS_LENGTH } from '@render/overlays/boneOverlay'
 import { RAD2DEG } from '@core/math/utils'
 import type { EditorDocument } from '@core/model/authoring'
@@ -120,13 +120,25 @@ interface DragSession {
   /** gizmo 拖拽：模式 + 抓到的部位（中心 / X 轴 / Y 轴），以及按下时的骨骼本地值 */
   gizmoMode: GizmoMode
   gizmoPart: GizmoPart
+  /** 按下时的小坐标轴空间：本地（沿骨骼轴向）/ 世界（对齐世界 X / Y） */
+  gizmoSpace: GizmoSpace
   startLocal: { pos: Vec2; rot: number; scale: Vec2; shear: Vec2 }
   parentWorld: Float32Array | null
   /** 骨骼局部 X / Y 轴在**父骨骼局部空间**中的单位方向（平移要在这个空间里分解） */
   localAxisX: Vec2
   localAxisY: Vec2
+  /**
+   * 骨骼自身 X / Y 轴在**世界空间**中的单位方向。
+   *
+   * 世界空间下 `axisDir` / `axisPerp` 是固定的世界轴（1,0）/（0,1），缩放时要把
+   * 「沿世界轴拉了多少」折算回这两条**骨骼自己的**轴上，所以按下时另存一份。
+   */
+  boneAxisX: Vec2
+  boneAxisY: Vec2
   /** 按下时指针在父骨骼局部空间的位置：平移要扣掉它，否则骨骼会先跳到指针下 */
   startPointerLocal: Vec2
+  /** 按下时指针的**世界**位置：世界空间下按世界位移换算（局部空间不用它） */
+  startPointerWorld: Vec2
   /** 斜切包围盒拖拽：命中的边 + 按下时的局部包围盒（决定该边的坐标） */
   shearEdge: ShearEdge
   shearBox: { minX: number; minY: number; maxX: number; maxY: number } | null
@@ -219,11 +231,15 @@ const IDLE: DragSession = {
   startScale: { x: 1, y: 1 },
   gizmoMode: 'move',
   gizmoPart: 'center',
+  gizmoSpace: 'local',
   startLocal: { pos: { x: 0, y: 0 }, rot: 0, scale: { x: 1, y: 1 }, shear: { x: 0, y: 0 } },
   parentWorld: null,
   localAxisX: { x: 1, y: 0 },
   localAxisY: { x: 0, y: 1 },
+  boneAxisX: { x: 1, y: 0 },
+  boneAxisY: { x: 0, y: 1 },
   startPointerLocal: { x: 0, y: 0 },
+  startPointerWorld: { x: 0, y: 0 },
   shearEdge: 'top',
   shearBox: null,
   scaleAxis: 'both',
@@ -1236,6 +1252,20 @@ function axisFactor(current: number, start: number): number {
   return raw
 }
 
+/**
+ * 世界空间缩放的折算：世界非等比缩放 `diag(sx, sy)` 作用在骨骼某条本地轴方向上之后，
+ * 那条轴的长度比 —— 也就是该乘到这根骨骼 `localScale` 上的倍数。
+ *
+ * 为什么要折算：`localScale.x / y` 只能沿骨骼自身两条轴缩放，骨骼斜着时「只沿世界 X 拉」
+ * 需要斜切才表达得了。取长度比正好落在两端都正确的位置：轴平行世界 X 时得 sx（准确）、
+ * 垂直世界 X 时得 1（本来就不该变长），中间平滑过渡 —— 抬手看就是「朝世界 X 方向拉长了」。
+ * 符号按投影方向取，拖过轴心仍然是镜像。
+ */
+function worldStretch(axis: Vec2, sx: number, sy: number): number {
+  const sign = Math.sign(axis.x * sx + axis.y * sy) || 1
+  return sign * Math.hypot(axis.x * sx, axis.y * sy)
+}
+
 /** 骨骼锁定时不允许通过小坐标轴改动（返回 false 表示被拦下） */
 function boneLocked(name: string): boolean {
   const bone = useProjectStore.getState().document.bones.find((item) => item.name === name)
@@ -1307,8 +1337,12 @@ function beginGizmoDrag(
   }
   const bone = bundle.asset.bones[boneIndex]
   const skeleton = bundle.skeleton
-  const geometry = gizmoGeometry(skeleton, boneIndex, 0)
-  if (!bone || !geometry) return true
+  // 空间在**按下那一刻**定下来：拖动途中切开关不会让同一次拖拽换参照系
+  const space = host.tools.gizmoSpace
+  const geometry = gizmoGeometry(skeleton, boneIndex, 0, space)
+  // 骨骼自身轴向（世界空间的缩放折算要用）：本地空间下与 geometry 的轴一致
+  const boneGeometry = space === 'world' ? gizmoGeometry(skeleton, boneIndex, 0, 'local') : geometry
+  if (!bone || !geometry || !boneGeometry) return true
 
   const origin: Vec2 = { x: geometry.ox, y: geometry.oy }
   const mode = host.tools.gizmo
@@ -1333,8 +1367,11 @@ function beginGizmoDrag(
    * 之后每帧只累计「这一帧转了多少」→ 抓着旋转圈任意位置按下，骨骼都不会先跳一下。
    */
   const startAngle =
-    Math.atan2(startPointerLocal.y - startLocal.pos.y, startPointerLocal.x - startLocal.pos.x) *
-    (180 / Math.PI)
+    space === 'world'
+      ? // 世界空间：直接量世界坐标里的指针角（旋转量与骨骼自身朝向无关）
+        Math.atan2(world.y - origin.y, world.x - origin.x) * (180 / Math.PI)
+      : Math.atan2(startPointerLocal.y - startLocal.pos.y, startPointerLocal.x - startLocal.pos.x) *
+        (180 / Math.PI)
   drag = {
     ...IDLE,
     kind: 'gizmo',
@@ -1344,11 +1381,15 @@ function beginGizmoDrag(
     origin,
     gizmoMode: mode,
     gizmoPart: part,
+    gizmoSpace: space,
     startLocal,
     parentWorld,
     localAxisX: { x: Math.cos(xAngle), y: Math.sin(xAngle) },
     localAxisY: { x: Math.cos(yAngle), y: Math.sin(yAngle) },
+    boneAxisX: { x: boneGeometry.dx, y: boneGeometry.dy },
+    boneAxisY: { x: boneGeometry.px, y: boneGeometry.py },
     startPointerLocal,
+    startPointerWorld: { x: world.x, y: world.y },
     startDistance: Math.max(1e-4, Math.hypot(world.x - origin.x, world.y - origin.y)),
     startProject: (world.x - origin.x) * axisVector.x + (world.y - origin.y) * axisVector.y,
     axisDir: { x: geometry.dx, y: geometry.dy },
@@ -1484,6 +1525,7 @@ function dragGizmo(host: ToolHost, world: Vec2): void {
   const store = useProjectStore.getState()
   const animation = host.mode === 'animate' ? currentAnimationName(host) : null
   const { gizmoMode: mode, gizmoPart: part } = drag
+  const worldSpace = drag.gizmoSpace === 'world'
   const rx = world.x - drag.origin.x
   const ry = world.y - drag.origin.y
   // 指针在父骨骼局部空间的位置，以及相对**按下点**的位移
@@ -1493,6 +1535,8 @@ function dragGizmo(host: ToolHost, world: Vec2): void {
     x: pointerLocal.x - drag.startPointerLocal.x,
     y: pointerLocal.y - drag.startPointerLocal.y
   }
+  /** 指针的**世界**位移（世界空间下的平移 / 缩放都按它算） */
+  const movedWorld = { x: world.x - drag.startPointerWorld.x, y: world.y - drag.startPointerWorld.y }
 
   if (mode === 'rotate') {
     /*
@@ -1502,10 +1546,13 @@ function dragGizmo(host: ToolHost, world: Vec2): void {
      * 连续转好几圈也不会被打断，每一度都由鼠标实际划过的弧决定。
      *
      * 增量在**父空间**里量（与骨骼本地旋转同一个空间），所以写进每根骨骼的本地值是对得上的。
+     * 世界空间改在**世界坐标**里量同一条弧 —— 骨骼转过多少度与母骨骼怎么摆无关，两种量法等价，
+     * 区别只在世界空间下指针的转向就是画面上的转向（母骨骼被镜像 / 拉伸时更直观）。
      */
-    const angle =
-      Math.atan2(pointerLocal.y - drag.startLocal.pos.y, pointerLocal.x - drag.startLocal.pos.x) *
-      (180 / Math.PI)
+    const angle = worldSpace
+      ? Math.atan2(ry, rx) * (180 / Math.PI)
+      : Math.atan2(pointerLocal.y - drag.startLocal.pos.y, pointerLocal.x - drag.startLocal.pos.x) *
+        (180 / Math.PI)
     drag.sweep += wrapDegrees(angle - drag.lastAngle)
     drag.lastAngle = angle
     store.updateSilent((draft) => {
@@ -1517,15 +1564,32 @@ function dragGizmo(host: ToolHost, world: Vec2): void {
     // 位移存在**父骨骼局部空间**里，位移量相对按下点算（否则骨骼会先跳到指针底下）
     // 拖 X 轴 = 沿骨骼方向平移，拖 Y 轴 = 沿垂直方向平移，拖中心 = 自由平移
     const start = drag.startLocal.pos
-    let next = { x: start.x + moved.x, y: start.y + moved.y }
-    if (part !== 'center') {
-      // 只保留沿该轴的分量：拖 X 轴就只沿骨骼方向走，Y 方向完全不动
-      const axis = part === 'y' ? drag.localAxisY : drag.localAxisX
-      const along = moved.x * axis.x + moved.y * axis.y
-      next = { x: start.x + axis.x * along, y: start.y + axis.y * along }
+    let delta: Vec2
+    if (worldSpace) {
+      /*
+       * 世界空间：先按**世界轴**把位移限成单轴，再换算回父骨骼局部空间 ——
+       * 位移字段存的仍是父空间量，所以这一步是「世界位移 → 父空间位移」的线性变换
+       *（父矩阵的旋转 / 缩放 / 斜切都算进去，否则父骨骼被转过之后世界轴就拖不直）。
+       * 多选时沿用按下那根骨骼的父空间位移（与局部空间同一口径：谁也不替谁代劳）。
+       */
+      let offset = movedWorld
+      if (part !== 'center') {
+        const axis = part === 'y' ? { x: 0, y: 1 } : { x: 1, y: 0 }
+        const along = offset.x * axis.x + offset.y * axis.y
+        offset = { x: axis.x * along, y: axis.y * along }
+      }
+      delta = drag.parentWorld ? mulVector(invert(drag.parentWorld), offset) : offset
+    } else {
+      let next = { x: start.x + moved.x, y: start.y + moved.y }
+      if (part !== 'center') {
+        // 只保留沿该轴的分量：拖 X 轴就只沿骨骼方向走，Y 方向完全不动
+        const axis = part === 'y' ? drag.localAxisY : drag.localAxisX
+        const along = moved.x * axis.x + moved.y * axis.y
+        next = { x: start.x + axis.x * along, y: start.y + axis.y * along }
+      }
+      // 多选：同一个位移增量（按下那根骨骼父空间里的位移）加到每根选中骨骼各自的本地位置上
+      delta = { x: next.x - start.x, y: next.y - start.y }
     }
-    // 多选：同一个位移增量（按下那根骨骼父空间里的位移）加到每根选中骨骼各自的本地位置上
-    const delta = { x: next.x - start.x, y: next.y - start.y }
     store.updateSilent((draft) => {
       for (const item of drag.bones) {
         writeBoneValue(draft, animation, host.time, item.name, 'translate', {
@@ -1547,11 +1611,21 @@ function dragGizmo(host: ToolHost, world: Vec2): void {
       factorX = axisFactor(Math.hypot(rx, ry), drag.startDistance)
       factorY = factorX
     }
+    let mulX = factorX
+    let mulY = factorY
+    if (worldSpace && part !== 'center') {
+      // 世界空间：把「沿世界轴拉了几倍」折算成骨骼两条本地轴各自的伸长比（见 worldStretch）。
+      // 等比缩放与空间无关，走原路（factorX === factorY，不会丢正负号）
+      const stretchX = part === 'y' ? 1 : factorX
+      const stretchY = part === 'x' ? 1 : factorY
+      mulX = worldStretch(drag.boneAxisX, stretchX, stretchY)
+      mulY = worldStretch(drag.boneAxisY, stretchX, stretchY)
+    }
     store.updateSilent((draft) => {
       for (const item of drag.bones) {
         writeBoneValue(draft, animation, host.time, item.name, 'scale', {
-          x: item.scale.x * factorX,
-          y: item.scale.y * factorY
+          x: item.scale.x * mulX,
+          y: item.scale.y * mulY
         })
       }
     })
@@ -1589,12 +1663,15 @@ function beginAttachmentGizmoDrag(
   const boneIndex = bundle.boneIndex[slot.bone] ?? -1
   if (boneIndex < 0) return false
 
+  // 空间与骨骼 gizmo 同一开关：世界空间下操作器的轴固定对齐世界 X / Y
+  const space = host.tools.gizmoSpace
   const frame = attachmentGizmoFrame(
     bundle.skeleton,
     boneIndex,
     attachment.position,
     attachment.rotation,
-    scene.viewport.pixelsToWorld(GIZMO_AXIS_LENGTH)
+    scene.viewport.pixelsToWorld(GIZMO_AXIS_LENGTH),
+    space
   )
   if (!frame) return false
 
@@ -1617,6 +1694,7 @@ function beginAttachmentGizmoDrag(
     startWorld: { ...world },
     gizmoMode: mode,
     gizmoPart: part,
+    gizmoSpace: space,
     attBoneIndex: boneIndex,
     attStart: {
       position: { ...attachment.position },
@@ -1655,6 +1733,8 @@ function dragAttachmentGizmo(host: ToolHost, world: Vec2): void {
     const angle = (Math.atan2(ry, rx) * 180) / Math.PI
     rotation = start.rotation + (angle - drag.attStartAngle)
   } else if (mode === 'scale') {
+    // 世界空间下 `attAxisWorld` 就是世界轴：拖动量按世界方向量，写回仍是附件自己的 scale.x / y。
+    // 附件只有一个旋转、没有斜切通道，所以「沿世界轴非等比拉」在这里取的是同一轴的近似。
     scale = { x: start.scale.x, y: start.scale.y }
     const project = rx * drag.attAxisWorld.x + ry * drag.attAxisWorld.y
     if (part === 'x') {
@@ -1669,11 +1749,19 @@ function dragAttachmentGizmo(host: ToolHost, world: Vec2): void {
   } else {
     // 位置存在**宿主骨骼局部空间**里；拖中心 = 自由移动，拖轴 = 只沿该轴
     const boneWorld = bundle.skeleton.world.slice(drag.attBoneIndex * 16, drag.attBoneIndex * 16 + 16)
-    if (part === 'center') {
-      const delta = mulVector(invert(boneWorld), {
-        x: world.x - drag.startWorld.x,
-        y: world.y - drag.startWorld.y
-      })
+    const moveWorld = drag.gizmoSpace === 'world' && part !== 'center'
+    if (part === 'center' || moveWorld) {
+      /*
+       * 自由移动，或**世界空间**下的单轴移动：都先拿世界位移，再换算回宿主骨骼局部空间。
+       * 世界空间下多一步「只保留世界轴分量」—— 轴是画面水平 / 竖直的，附件就只沿那个方向走。
+       */
+      let offset = { x: world.x - drag.startWorld.x, y: world.y - drag.startWorld.y }
+      if (moveWorld) {
+        const axis = part === 'y' ? { x: 0, y: 1 } : { x: 1, y: 0 }
+        const along = offset.x * axis.x + offset.y * axis.y
+        offset = { x: axis.x * along, y: axis.y * along }
+      }
+      const delta = mulVector(invert(boneWorld), offset)
       position = { x: start.position.x + delta.x, y: start.position.y + delta.y }
     } else {
       const project = rx * drag.attAxisWorld.x + ry * drag.attAxisWorld.y

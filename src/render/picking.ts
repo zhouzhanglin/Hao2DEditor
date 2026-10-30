@@ -9,6 +9,16 @@ import type { AttachmentData } from '@core/model/types'
 const PICK_TIE_EPSILON = 1e-6
 
 /**
+ * 小坐标轴（以及拖动换算）的坐标空间：
+ * - `local`：轴跟着对象自身朝向（骨骼的旋转 / 斜切 / 缩放都算进去）；
+ * - `world`：轴固定对齐世界 X / Y —— 画面上的轴永远是水平 / 竖直的。
+ *
+ * 声明在渲染层（画轴、拾取都要用），编辑层的 toolStore 直接引用这个类型，
+ * 免得 render 反过来依赖 editor（与 `GizmoDrawMode` 同一处理）。
+ */
+export type GizmoSpace = 'local' | 'world'
+
+/**
  * 骨骼变换小坐标轴（gizmo）：中心 + 局部 X / Y 轴。
  * 轴按屏幕恒定长度绘制，因此这里的轴向是世界单位向量，长度由调用方按 zoom 换算。
  */
@@ -46,11 +56,18 @@ export function gizmoFrameAt(
   return { ox, oy, dx, dy, px, py, len, tx: ox + dx * len, ty: oy + dy * len, sx: ox + px * len, sy: oy + py * len }
 }
 
-export function gizmoGeometry(skeleton: Skeleton, index: number, axisLength: number): GizmoGeometry | null {
+export function gizmoGeometry(
+  skeleton: Skeleton,
+  index: number,
+  axisLength: number,
+  space: GizmoSpace = 'local'
+): GizmoGeometry | null {
   if (index < 0 || index >= skeleton.boneCount) return null
   const o = index * 16
   const ox = skeleton.world[o + 12]
   const oy = skeleton.world[o + 13]
+  // 世界空间：轴心仍是骨骼原点，但轴向固定成世界 X / Y（与骨骼自身朝向无关）
+  if (space === 'world') return gizmoFrameAt(ox, oy, 1, 0, 0, 1, axisLength)
   const ax = skeleton.world[o]
   const ay = skeleton.world[o + 1]
   const bx = skeleton.world[o + 4]
@@ -81,7 +98,8 @@ export function attachmentGizmoFrame(
   boneIndex: number,
   position: { x: number; y: number },
   rotation: number,
-  axisLength: number
+  axisLength: number,
+  space: GizmoSpace = 'local'
 ): AttachmentGizmoGeometry | null {
   if (boneIndex < 0 || boneIndex >= skeleton.boneCount) return null
   const o = boneIndex * 16
@@ -91,6 +109,10 @@ export function attachmentGizmoFrame(
   // 附件原点：骨骼世界矩阵 · position
   const ox = skeleton.world[o] * position.x + skeleton.world[o + 4] * position.y + skeleton.world[o + 12]
   const oy = skeleton.world[o + 1] * position.x + skeleton.world[o + 5] * position.y + skeleton.world[o + 13]
+  // 世界空间：轴心仍是附件原点，轴向换成世界 X / Y；拖动按世界位移反算，用不到「世界长度」换算
+  if (space === 'world') {
+    return { ...gizmoFrameAt(ox, oy, 1, 0, 0, 1, axisLength), axisScaleA: 1, axisScaleB: 1 }
+  }
   // 附件局部轴（骨骼空间里旋转 rotation 后的 X/Y）变换到世界
   const ax = skeleton.world[o] * cos + skeleton.world[o + 4] * sin
   const ay = skeleton.world[o + 1] * cos + skeleton.world[o + 5] * sin
@@ -133,9 +155,11 @@ export function pickGizmo(
   y: number,
   axisLength: number,
   centerRadius: number,
-  axisTolerance: number
+  axisTolerance: number,
+  space: GizmoSpace = 'local'
 ): GizmoPart | null {
-  const g = gizmoGeometry(skeleton, index, axisLength)
+  // 拾取必须与绘制用**同一个空间**：世界空间下轴是画面水平 / 竖直的，按局部轴判会点不中
+  const g = gizmoGeometry(skeleton, index, axisLength, space)
   if (!g) return null
   if (Math.hypot(x - g.ox, y - g.oy) <= centerRadius) return 'center'
   if (distanceToSegment(x, y, g.ox, g.oy, g.tx, g.ty) <= axisTolerance) return 'x'

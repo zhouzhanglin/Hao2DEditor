@@ -419,6 +419,8 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       scene.setViewState({
         overlay: tools.overlay,
         gizmo: tools.gizmo,
+        // 本地 / 世界空间：视口据此决定小坐标轴的朝向与拖动的换算方向
+        gizmoSpace: tools.gizmoSpace,
         // 绘制类工具激活时操作器不可用，直接不画（否则是点不动的假手柄）；
         // Pose 工具要拖骨骼改绑定姿态（蒙皮随之变形），所以和选择工具一样给操作器
         showGizmo: tools.tool === 'select' || tools.tool === 'pose',

@@ -38,7 +38,7 @@ import {
   pickShearEdge,
   pickVertex
 } from '@render/picking'
-import type { BoneHandleHit, BoneHit, GizmoPart, ShearEdge, VertexHit } from '@render/picking'
+import type { BoneHandleHit, BoneHit, GizmoPart, GizmoSpace, ShearEdge, VertexHit } from '@render/picking'
 import { ImageAlphaCache } from '@render/imageAlpha'
 import { OffscreenCapture } from '@render/offscreenCapture'
 import type { ExportView } from '@render/exportCamera'
@@ -119,6 +119,11 @@ export interface SceneViewState {
   onionSkin: boolean
   /** 骨骼变换小坐标轴的操作模式（移动 / 旋转 / 缩放 / 斜切） */
   gizmo: GizmoDrawMode
+  /**
+   * 小坐标轴画在哪个空间里：`local` 沿骨骼自身朝向（默认），`world` 对齐世界 X / Y。
+   * 画与拾取都用它 —— 否则世界轴画出来却按局部轴判定，轴就成了点不中的装饰。
+   */
+  gizmoSpace: GizmoSpace
   /** 是否绘制骨骼操作器：绘制类工具（权重刷 / FFD / 网格）激活时隐藏，避免出现点不动的假手柄 */
   showGizmo: boolean
   /** 正在拖拽新建骨骼时的预览（世界坐标的两端），松开即生成 */
@@ -310,6 +315,7 @@ export class EditorScene {
     time: 0,
     onionSkin: false,
     gizmo: 'move',
+    gizmoSpace: 'local',
     showGizmo: true,
     pendingBone: null,
     selectedAttachment: null,
@@ -497,6 +503,8 @@ export class EditorScene {
       this.markDirty()
     }
     if (patch.overlay || patch.selectedVertices || patch.hoveredVertex !== undefined) this.markDirty()
+    // 切换本地 / 世界空间要立刻重画：轴的方向本身就是画面内容
+    if (patch.gizmoSpace !== undefined) this.markDirty()
     // 刷子半径圈跟着鼠标走，每帧都可能变（拖动 / 修饰键切换模式）
     if (patch.brushRing !== undefined) this.markDirty()
     // 顶点框选矩形同理：拖动中每一下都要重画
@@ -1093,7 +1101,12 @@ export class EditorScene {
     if (this.viewState.gizmo === 'shear') return null
     if (this.viewState.gizmo === 'rotate') {
       // 旋转没有轴向：圆环与中心都算同一个「一起转」
-      const geometry = gizmoGeometry(bundle.skeleton, index, this.viewport.pixelsToWorld(GIZMO_AXIS_LENGTH))
+      const geometry = gizmoGeometry(
+        bundle.skeleton,
+        index,
+        this.viewport.pixelsToWorld(GIZMO_AXIS_LENGTH),
+        this.viewState.gizmoSpace
+      )
       if (!geometry) return null
       const distance = Math.hypot(worldX - geometry.ox, worldY - geometry.oy)
       const ring = this.viewport.pixelsToWorld(GIZMO_RING_RADIUS)
@@ -1109,7 +1122,8 @@ export class EditorScene {
       worldY,
       this.viewport.pixelsToWorld(GIZMO_AXIS_LENGTH),
       this.viewport.pixelsToWorld(GIZMO_CENTER_RADIUS),
-      this.viewport.pixelsToWorld(7)
+      this.viewport.pixelsToWorld(7),
+      this.viewState.gizmoSpace
     )
   }
 
@@ -1183,7 +1197,8 @@ export class EditorScene {
       state.boneIndex,
       state.position,
       state.rotation,
-      this.viewport.pixelsToWorld(GIZMO_AXIS_LENGTH)
+      this.viewport.pixelsToWorld(GIZMO_AXIS_LENGTH),
+      this.viewState.gizmoSpace
     )
     if (!frame) return null
     if (this.viewState.gizmo === 'rotate') {
@@ -2102,7 +2117,8 @@ export class EditorScene {
             attachmentGizmo.boneIndex,
             attachmentGizmo.position,
             attachmentGizmo.rotation,
-            unitPerPixel * GIZMO_AXIS_LENGTH
+            unitPerPixel * GIZMO_AXIS_LENGTH,
+            state.gizmoSpace
           )
           if (frame) {
             drawAttachmentGizmo(this.gizmoStroke, this.gizmoFill, frame, state.gizmo, unitPerPixel)
@@ -2113,7 +2129,15 @@ export class EditorScene {
         const box = this.shearBoxAt()
         if (box) drawShearBox(this.gizmoStroke, this.gizmoFill, box.corners, unitPerPixel)
       } else {
-        drawBoneGizmo(this.gizmoStroke, this.gizmoFill, bundle.skeleton, selectedIndex, state.gizmo, unitPerPixel)
+        drawBoneGizmo(
+          this.gizmoStroke,
+          this.gizmoFill,
+          bundle.skeleton,
+          selectedIndex,
+          state.gizmo,
+          unitPerPixel,
+          state.gizmoSpace
+        )
       }
     }
 

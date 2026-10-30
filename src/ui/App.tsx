@@ -939,7 +939,9 @@ export default function App() {
               <ViewportOverlays
                 zoom={zoom}
                 overlay={tools.overlay}
+                space={tools.gizmoSpace}
                 onToggleOverlay={tools.toggleOverlay}
+                onSetSpace={tools.setGizmoSpace}
                 onFitViewport={() => handleCommand('view:fitViewport')}
               />
               <ViewportTools onStatus={flash} onOpenStage={() => setStageOpen(true)} />

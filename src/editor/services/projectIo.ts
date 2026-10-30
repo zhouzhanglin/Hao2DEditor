@@ -201,6 +201,9 @@ export async function openProject(): Promise<IoResult> {
  * 收进 ai/ 子目录而不撒在工程根：AI 工具打开文件夹一眼锁定，不和工程文件 / 图片混放。
  * 这样 Codex / CodeBuddy 这类在本工程目录里干活的 AI 工具，打开文件夹就能直接上手，
  * 不用配 MCP、也不用手粘提示词。文档本身已说明「优先读工程 ai/ 目录下的 hao2d-ai-server.json」。
+ *
+ * `force` 由「打开工程」传 true：文档与连接信息本来每次都重写，Skill 副本也一并强制刷新，
+ * 并把 `ai/skills/` 下别的 Skill 旧目录清掉 —— 工程里留一份过期手册，AI 会照着旧做法执行。
  */
 const AI_DIR_NAME = 'ai'
 const AI_API_DOC_NAME = 'hao2d-ai-command-api.md'
@@ -212,7 +215,7 @@ const AI_SKILL_MARKER_NAME = '.hao2d-skill.json'
 /** 客户端已装同版本时，工程里只留这个指路文件（不放副本） */
 const AI_SKILL_POINTER_NAME = 'README.md'
 
-async function exportAiCompanionFiles(projectDir: string): Promise<void> {
+async function exportAiCompanionFiles(projectDir: string, force = false): Promise<void> {
   if (!projectDir) return
   const platform = getPlatform()
   // writeText 在主进程侧会自动建目录：ai/ 不存在也没关系
@@ -233,7 +236,7 @@ async function exportAiCompanionFiles(projectDir: string): Promise<void> {
     }
     await platform.writeText(joinPath(aiDir, AI_SERVER_INFO_NAME), `${JSON.stringify(payload, null, 2)}\n`)
   }
-  await exportAiSkillCopy(projectDir)
+  await exportAiSkillCopy(projectDir, force)
 }
 
 /** 客户端已装同版本时，工程里只留这个指路文件，不放副本 */
@@ -279,9 +282,11 @@ async function removeSkillCopy(platform: Platform, targetDir: string, markerPath
  * 成本控制：
  * - 面板开关 `aiSkillInProject` 关掉就完全不写；
  * - 版本 + 文件数没变就跳过（复用 `.hao2d-skill.json`），保存工程是高频动作；
+ * - **打开工程时 `force` 为真**：版本号没跟着改、内容却变了（改手册忘了 bump 版本）
+ *   是最常见的「工程里躺着一份旧手册」，打开时无条件刷一遍就不会踩；
  * - 复制失败（工程目录只读等）只记日志，不阻断保存。
  */
-async function exportAiSkillCopy(projectDir: string): Promise<void> {
+async function exportAiSkillCopy(projectDir: string, force = false): Promise<void> {
   if (!projectDir) return
   const settings = useSettingsStore.getState()
   if (!settings.aiSkillInProject) return
@@ -310,8 +315,9 @@ async function exportAiSkillCopy(projectDir: string): Promise<void> {
     await platform.deleteFile(readmePath)
 
     // 先 exists 再读：readText 读不到会走主进程的 error 分支，白白在日志里刷一条
+    // force（打开工程）时跳过这层快速返回，无条件重写一遍
     const markerText = (await platform.exists(markerPath)) ? await platform.readText(markerPath) : ''
-    if (markerText) {
+    if (!force && markerText) {
       try {
         const marker = JSON.parse(markerText) as { version?: string; files?: number }
         if (marker.version === (skill.version ?? '') && marker.files === skill.files) return
@@ -339,8 +345,26 @@ async function exportAiSkillCopy(projectDir: string): Promise<void> {
       note: '由 Hao2DEditor 自动生成：随包 AI Skill 的副本。源码在 App 的 resources/skills，改这里不会同步回去。'
     }
     await platform.writeText(markerPath, `${JSON.stringify(marker, null, 2)}\n`)
+    if (force) await pruneStaleSkillDirs(platform, skillsDir, skill.dirName)
   } catch (error) {
     console.warn('[hao2d] 复制 AI Skill 到工程失败：', error)
+  }
+}
+
+/**
+ * 清掉 `ai/skills/*` 里**不是当前 Skill** 的旧目录（只在打开工程时做）。
+ *
+ * 典型残留：Skill 改过名 / 拆成两个之后，工程里那份老目录会一直被 AI 当权威手册读，
+ * 与新版并存时会给出互相矛盾的做法。逐文件删（没有删目录的 IPC），空目录留着无害。
+ */
+async function pruneStaleSkillDirs(platform: Platform, skillsDir: string, keepName: string): Promise<void> {
+  const entries = await platform.listDir(skillsDir, false)
+  for (const entry of entries) {
+    if (!entry.isDirectory || entry.name === keepName) continue
+    const files = await platform.listDir(entry.path, true)
+    for (const file of files) {
+      if (!file.isDirectory) await platform.deleteFile(file.path)
+    }
   }
 }
 
@@ -400,8 +424,12 @@ export async function openProjectAt(path: string): Promise<IoResult> {
   useSelectionStore.getState().select({ skin: restoredSkin })
   await platform.recentAdd(path)
   const suffix = parsed.skeletons.length > 1 ? t('（{0} 个骨架）', parsed.skeletons.length) : ''
-  // 命令服务的 token 可能已变：刷新工程目录里的连接信息，让 AI 工具拿到有效凭证
-  await exportAiCompanionFiles(projectDir)
+  /*
+   * 打开工程时**强制刷新** ai/ 目录：连接 token 可能已变，随包的手册 / Skill 也可能换了新版
+   * 而版本号没跟着改。工程里躺着一份过期手册是隐形的坑（AI 会照着旧做法执行），
+   * 而这一刷新只写几十 KB，开一次工程做一次完全值得 —— 保存时仍走版本标记快速返回。
+   */
+  await exportAiCompanionFiles(projectDir, true)
   return { ok: true, message: t('已打开 {0}{1}', [baseName(path), suffix]), warnings: parsed.warnings }
 }
 

@@ -214,42 +214,45 @@ export class Viewport {
   }
 
   /**
-   * 适配视野：**世界原点固定在视口中心**，缩放到刚好能装下全部内容（留出 padding 像素）。
+   * 适配视野：把**内容包围盒居中**并缩放到刚好装下（四周留 padding 像素）。
    *
-   * 与「按内容包围盒居中」的区别：原点始终是屏幕中心这个稳定参照，
-   * 骨骼/网格都在原点附近建模时观感更符合直觉；缩放按内容相对原点的最大半径来算，
-   * 因此即使角色不完全对称也不会跑出视野。
+   * 曾经是「世界原点钉在屏幕中心」：角色不在原点附近建模时（导入的 Spine 资源、
+   * 被拖到别处的部件），点适配后内容会偏在一角、甚至半个身子在视野外。
+   * 现在直接以包围盒中心为屏幕中心，横纵各算一次缩放取较小的那个。
    */
   fit(bounds: ViewportBounds | null, padding = 48): void {
-    const width = this.width
-    const height = this.height
-    // offset 归零 = 世界原点落在视口中心
-    this.offsetX = 0
-    this.offsetY = 0
-
-    const halfWidth = width * 0.5 - padding
-    const halfHeight = height * 0.5 - padding
+    const usableWidth = this.width - padding * 2
+    const usableHeight = this.height - padding * 2
     const degenerate =
       !bounds ||
       bounds.maxX - bounds.minX < 1e-6 ||
       bounds.maxY - bounds.minY < 1e-6 ||
-      halfWidth <= 1 ||
-      halfHeight <= 1
+      usableWidth <= 1 ||
+      usableHeight <= 1
 
     if (degenerate) {
-      // 空场景的默认尺度取 PPU（1 单位 = 100px，与附件尺寸折算一致）：
-      // 这个比例下屏幕像素与原图像素一一对应，拖图落点数值也符合直觉
-      // （zoom=1 时屏幕 1px 的误差会 1:1 写进 position，看起来像「坐标错了」）
+      // 空场景 / 退化包围盒：回到原点居中 + 默认尺度。
+      // 默认尺度取 PPU（1 单位 = 100px，与附件尺寸折算一致）：这个比例下屏幕像素
+      // 与原图像素一一对应，拖图落点数值也符合直觉（zoom=1 时屏幕 1px 的误差会
+      // 1:1 写进 position，看起来像「坐标错了」）
+      this.offsetX = 0
+      this.offsetY = 0
       this.zoomValue = EMPTY_SCENE_ZOOM
       this.applyCamera()
       this.onZoomChange(this.zoomValue)
       return
     }
 
-    // 内容相对原点向四方的最大延伸（原点居中时必须同时满足四个方向）
-    const reachX = Math.max(1e-6, Math.abs(bounds.minX), Math.abs(bounds.maxX))
-    const reachY = Math.max(1e-6, Math.abs(bounds.minY), Math.abs(bounds.maxY))
-    this.zoomValue = clampZoom(Math.min(halfWidth / reachX, halfHeight / reachY))
+    const contentWidth = bounds.maxX - bounds.minX
+    const contentHeight = bounds.maxY - bounds.minY
+    this.zoomValue = clampZoom(Math.min(usableWidth / contentWidth, usableHeight / contentHeight))
+    // 包围盒中心 → 屏幕中心。由 worldToScreen 反解：
+    //   screenX = cx * zoom + width/2 + offsetX = width/2  ⇒ offsetX = -cx * zoom
+    //   screenY = -cy * zoom + height/2 + offsetY = height/2 ⇒ offsetY = cy * zoom
+    const centerX = (bounds.minX + bounds.maxX) * 0.5
+    const centerY = (bounds.minY + bounds.maxY) * 0.5
+    this.offsetX = -centerX * this.zoomValue
+    this.offsetY = centerY * this.zoomValue
     this.applyCamera()
     this.onZoomChange(this.zoomValue)
   }
@@ -257,9 +260,10 @@ export class Viewport {
   /**
    * 把世界点居中并缩放（层级树里双击节点聚焦）。
    *
-   * 与 `fit` 的差别见 camera.ts 的 framingCamera：fit 把**世界原点**钉在屏幕中心，
-   * 这个把**目标点**摆到屏幕中心 —— 双击一个偏在角落的节点时它才会落在正中间。
-   * `fill` 是内容最多占视口的比例，默认 0.5（与 camera.ts 的 FRAME_FILL 一致）。
+   * 与 `fit` 的差别：fit 是「全部内容铺满视口」（只留固定的 padding 像素），
+   * 这里只把**一个目标点**摆到屏幕中心、内容只占 `fill` 比例 ——
+   * 双击一个偏在角落的节点时，希望看到它和周围的上下文，而不是把整个角色塞满屏幕。
+   * `fill` 默认 0.5（与 camera.ts 的 FRAME_FILL 一致）。
    */
   frame(worldX: number, worldY: number, contentWidth: number, contentHeight: number, fill = 0.5): void {
     const camera = framingCamera({

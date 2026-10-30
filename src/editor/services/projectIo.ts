@@ -744,7 +744,8 @@ function finishImportProject(
   // 一上来就导入、工程还没名字：用被导入文件的名字当项目名（导出产物都跟它走）
   adoptProjectNameFromImport(sourcePath)
   // 导入（整份替换骨架）后：回到 Pose（绑定）态、清空时间轴选中的动画，
-  // 并把视口复位到「原点居中」——空场景默认缩放 100%，有内容时按包围盒适配到合适大小。
+  // 并把视口复位到「按内容适配」——空场景回到原点居中 + 默认缩放 100%，
+  // 有内容时把包围盒居中并缩放到刚好装下。
   // 菜单与拖入两条导入路都汇聚到这里，统一处理，避免各入口行为不一致。
   useTimelineStore.getState().setAnimation(null)
   useModeStore.getState().setMode('pose')

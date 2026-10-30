@@ -902,8 +902,9 @@ export class EditorScene {
   /**
    * 把某块世界范围摆到视口**中央**（层级树里双击骨骼 / display / 约束时用）。
    *
-   * 与 `fit` 的区别：fit 是「世界原点固定在屏幕中心、按内容半径定缩放」；
-   * 这里是「目标点居中」—— 双击一个偏在一角的节点，希望它出现在正中间。
+   * 与 `fit` 的区别：fit 把全部内容铺满视口（只留固定 padding）；
+   * 这里是「目标点居中 + 只占 fill 比例」—— 双击一个偏在一角的节点，
+   * 希望它出现在正中间，同时还能看到周围一圈上下文。
    */
   frameContent(worldX: number, worldY: number, contentWidth: number, contentHeight: number, fill = 0.5): void {
     this.viewport.frame(worldX, worldY, contentWidth, contentHeight, fill)

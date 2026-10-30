@@ -277,9 +277,9 @@ export default function App() {
   }, [])
 
   // 工程切换（打开 / 最近列表 / 拖入 .hao2d.proj）后重置视口：
-  // 上个会话的缩放与偏移若残留，屏幕中心就不再是世界原点，拖图落点会和「看到的原点」对不上
+  // 上个会话的缩放与偏移若残留，新工程的角色可能整个落在视野外
   const viewResetForPath = useRef<string | null | undefined>(undefined)
-  /** 视口重置到「原点居中 + 适配内容」：新建 / 打开工程后调用，避免缩放偏移残留 */
+  /** 视口重置到「按内容适配」：新建 / 打开工程后调用，避免缩放偏移残留 */
   const resetSceneView = useCallback(() => {
     getActiveScene()?.fit()
   }, [])

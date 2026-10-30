@@ -10,7 +10,8 @@ import type {
   SkillBundleInfo,
   SkillInstallReport,
   SpinePreviewInfo,
-  SpinePreviewSession
+  SpinePreviewSession,
+  VideoExportOptions
 } from '@shared/ipcTypes'
 
 /**
@@ -91,6 +92,19 @@ export interface Platform {
   systemLocale(): Promise<string>
   /** 语言：把当前界面语言同步给主进程（重建菜单）；浏览器模式为空实现 */
   setAppLocale(locale: string): Promise<void>
+  /**
+   * 视频导出：开会话（主进程 spawn ffmpeg 并打开 rawvideo 管道）。
+   *
+   * 这几个方法**不做 unwrap**：失败原因（没装 ffmpeg / 路径不可写 / 编码器报错）
+   * 必须原样交给面板显示，不能吞成空值。
+   */
+  startVideoExport(options: VideoExportOptions): Promise<IpcResult<{ sessionId: string; ffmpeg: string }>>
+  /** 推一帧 RGBA；返回即代表已写进管道（自带背压） */
+  pushVideoFrame(sessionId: string, frame: Uint8Array): Promise<IpcResult<void>>
+  /** 收尾：关闭管道等编码完成，成功返回成品路径 */
+  finishVideoExport(sessionId: string): Promise<IpcResult<{ path: string }>>
+  /** 取消：杀掉 ffmpeg 并删除半成品 */
+  cancelVideoExport(sessionId: string): Promise<IpcResult<void>>
 }
 
 function unwrap<T>(result: IpcResult<T>, fallback: T): T {
@@ -293,6 +307,22 @@ class ElectronPlatform implements Platform {
     const call = this.bridge.setAppLocale
     if (typeof call !== 'function') return
     await call.call(this.bridge, locale)
+  }
+
+  startVideoExport(options: VideoExportOptions): Promise<IpcResult<{ sessionId: string; ffmpeg: string }>> {
+    return this.bridge.startVideoExport(options)
+  }
+
+  pushVideoFrame(sessionId: string, frame: Uint8Array): Promise<IpcResult<void>> {
+    return this.bridge.pushVideoFrame(sessionId, frame)
+  }
+
+  finishVideoExport(sessionId: string): Promise<IpcResult<{ path: string }>> {
+    return this.bridge.finishVideoExport(sessionId)
+  }
+
+  cancelVideoExport(sessionId: string): Promise<IpcResult<void>> {
+    return this.bridge.cancelVideoExport(sessionId)
   }
 }
 
@@ -507,6 +537,23 @@ class MemoryPlatform implements Platform {
   /** 浏览器模式没有主进程菜单，空实现 */
   async setAppLocale(): Promise<void> {
     // no-op
+  }
+
+  /** 浏览器模式没有 ffmpeg：明确报错，别让面板以为「导出成功了」 */
+  async startVideoExport(): Promise<IpcResult<{ sessionId: string; ffmpeg: string }>> {
+    return { ok: false, error: t('浏览器模式不支持导出视频（请在桌面版里导出）') }
+  }
+
+  async pushVideoFrame(): Promise<IpcResult<void>> {
+    return { ok: false, error: t('浏览器模式不支持导出视频（请在桌面版里导出）') }
+  }
+
+  async finishVideoExport(): Promise<IpcResult<{ path: string }>> {
+    return { ok: false, error: t('浏览器模式不支持导出视频（请在桌面版里导出）') }
+  }
+
+  async cancelVideoExport(): Promise<IpcResult<void>> {
+    return { ok: true, data: undefined }
   }
 
   private async storeFile(file: File): Promise<string> {

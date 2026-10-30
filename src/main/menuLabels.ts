@@ -29,6 +29,7 @@ export interface MenuLabels {
   exportRuntime: string
   exportHao2d: string
   exportSpine: string
+  exportVideo: string
   closeWindow: string
   quit: string
   edit: string
@@ -73,6 +74,7 @@ const ZH: MenuLabels = {
   exportRuntime: '导出运行时数据…',
   exportHao2d: '导出 Unity…',
   exportSpine: '导出 Spine…',
+  exportVideo: '导出视频…',
   closeWindow: '关闭窗口',
   quit: '退出',
   edit: '编辑',
@@ -117,6 +119,7 @@ const EN: MenuLabels = {
   exportRuntime: 'Export Runtime Data…',
   exportHao2d: 'Export Unity…',
   exportSpine: 'Export Spine…',
+  exportVideo: 'Export Video…',
   closeWindow: 'Close Window',
   quit: 'Quit',
   edit: 'Edit',

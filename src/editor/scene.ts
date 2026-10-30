@@ -40,6 +40,8 @@ import {
 } from '@render/picking'
 import type { BoneHandleHit, BoneHit, GizmoPart, ShearEdge, VertexHit } from '@render/picking'
 import { ImageAlphaCache } from '@render/imageAlpha'
+import { OffscreenCapture } from '@render/offscreenCapture'
+import type { ExportView } from '@render/exportCamera'
 import { AttachmentType, attachmentFrameBox } from '@core/model/types'
 
 /**
@@ -279,6 +281,10 @@ export class EditorScene {
   private tint = { r: 1, g: 1, b: 1, a: 1 }
   private animationName: string | null = null
   private dirty = true
+  /** 导出视频模式：true 时 rAF 循环不再推进时间（见 setExportMode） */
+  private exportMode = false
+  /** 离屏渲染器（导出视频用，首次捕获时创建） */
+  private offscreen: OffscreenCapture | null = null
   /**
    * 上一帧画坐标轴时的可见世界范围（见 `drawAxes`）。
    * 播放时相机不动，这份几何却每帧被 clear + 重新 stroke 一遍 —— 缓存后只有相机变化才重建。
@@ -741,6 +747,8 @@ export class EditorScene {
 
   /** 每帧：推进播放、重建蒙皮、重绘叠加层，必要时渲染 */
   update(dtSeconds: number): void {
+    // 导出视频期间时间完全由导出服务控制：循环里什么都不做，免得与逐帧 seek 打架
+    if (this.exportMode) return
     // 兜底：面板尺寸/相机若因任何原因没同步（窗口初始化、面板折叠、HMR 旧实例…），这里每帧纠正
     if (this.viewport.syncFrame()) this.dirty = true
     if (!this.bundle || !this.view || !this.document) {
@@ -1567,10 +1575,85 @@ export class EditorScene {
 
   destroy(): void {
     this.clearNestedViews()
+    this.offscreen?.destroy()
+    this.offscreen = null
     this.view?.destroy()
     this.view = null
     this.bundle = null
     this.viewport.destroy()
+  }
+
+  /**
+   * 进入 / 退出「导出视频」模式。
+   *
+   * 导出期间渲染循环**整个让位**：rAF 里的 `update()` 直接返回，时间只由导出服务
+   * 按 `player.seek(第 i 帧)` 精确控制。不这么做的话，`update()` 会在非播放态把
+   * `player.time` 拉回 `viewState.time`（见 update 里的静态同步分支），
+   * 与导出逐帧 seek 打架 —— 成片会出现重复帧 / 跳帧。
+   */
+  setExportMode(on: boolean): void {
+    this.exportMode = on
+  }
+
+  /**
+   * 渲染一帧到离屏纹理（导出视频用），返回左上原点的 RGBA 字节。
+   *
+   * 只画角色本身：棋盘格 / 坐标轴 / 骨骼与网格叠加层 / 舞台参考图都不会进画面
+   * （见 OffscreenCapture）。
+   */
+  captureFrame(options: { time: number; width: number; height: number; background: number; view: ExportView }): Uint8Array | null {
+    const bundle = this.bundle
+    const view = this.view
+    if (!bundle || !view) return null
+    // seek 到目标时间（播放器的 time setter 会顺带把姿态算出来）
+    bundle.player.time = Math.max(0, options.time)
+    view.markDirty()
+    view.update(bundle.skeleton)
+    // 子骨架的动画时间由父播放器确定，必须跟着重算，否则成片里子角色停在上一帧
+    if (bundle.nest) this.syncNestedViews()
+    if (!this.offscreen) this.offscreen = new OffscreenCapture(this.viewport)
+    return this.offscreen.capture({
+      width: options.width,
+      height: options.height,
+      background: options.background,
+      view: options.view
+    })
+  }
+
+  /**
+   * 当前动画**整段**的世界包围盒（导出面板用来算默认取景）。
+   *
+   * 只取当前姿态不够：抬手动作可能把角色伸出画面。这里沿动画均匀采样若干帧取并集，
+   * 采完把播放器恢复到调用前的时间。
+   */
+  measureAnimationBounds(samples = 12): { minX: number; minY: number; maxX: number; maxY: number } | null {
+    const bundle = this.bundle
+    const view = this.view
+    if (!bundle || !view) return null
+    const duration = bundle.player.duration
+    const restoreTime = bundle.player.time
+    let box: { minX: number; minY: number; maxX: number; maxY: number } | null = null
+    const count = Math.max(1, Math.min(48, Math.round(samples)))
+    for (let i = 0; i < count; i++) {
+      bundle.player.time = duration > 0 ? (duration * i) / Math.max(1, count - 1) : 0
+      view.markDirty()
+      view.update(bundle.skeleton)
+      if (bundle.nest) this.syncNestedViews()
+      const bounds = view.result?.bounds
+      if (!bounds) continue
+      if (!box) box = { ...bounds }
+      else {
+        box.minX = Math.min(box.minX, bounds.minX)
+        box.minY = Math.min(box.minY, bounds.minY)
+        box.maxX = Math.max(box.maxX, bounds.maxX)
+        box.maxY = Math.max(box.maxY, bounds.maxY)
+      }
+    }
+    bundle.player.time = restoreTime
+    view.markDirty()
+    view.update(bundle.skeleton)
+    if (bundle.nest) this.syncNestedViews()
+    return box
   }
 
   /**

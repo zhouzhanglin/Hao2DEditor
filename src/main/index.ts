@@ -6,6 +6,7 @@ import { registerIpcHandlers } from './ipc'
 import { buildAppMenu } from './menu'
 import { setLocale, systemLocale } from './i18n'
 import { startCommandServer, stopCommandServer } from './commandServer'
+import { cancelAllVideoExports } from './videoExport'
 
 const log = createLogger('main')
 
@@ -96,6 +97,8 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   void stopCommandServer()
+  // 还开着的视频导出会话：杀掉子进程，别留下孤儿 ffmpeg
+  cancelAllVideoExports()
 })
 
 app.on('window-all-closed', () => {

@@ -3,6 +3,7 @@ import {
   ArrowUpRight,
   ChevronDown,
   FilePlus2,
+  Film,
   FolderOpen,
   History,
   Import,
@@ -64,6 +65,12 @@ function exportActions() {
       label: t('导出 Spine'),
       icon: Package,
       hint: t('导出 Spine 4.3 骨骼数据：{名称}.json + {名称}.atlas + 图集 png (Ctrl+Alt+E)')
+    },
+    {
+      command: 'project:exportVideo',
+      label: t('导出视频'),
+      icon: Film,
+      hint: t('把当前动画渲染成 mp4 视频：可选画幅 / 背景色 / 取景，按工程帧率导出')
     }
   ]
 }

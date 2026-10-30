@@ -61,6 +61,23 @@ export interface BatchFile {
   bytes?: Uint8Array
 }
 
+/**
+ * 导出视频：一次会话 = 一个动画 = 一个 mp4。
+ *
+ * 渲染层逐帧把 RGBA 像素推进来（rawvideo 管道），主进程用 ffmpeg 编成 H.264。
+ * 宽高必须是**偶数**（H.264 的 4:2:0 色度采样要求，渲染层负责对齐后再传）。
+ */
+export interface VideoExportOptions {
+  /** 输出 mp4 的绝对路径 */
+  outputPath: string
+  width: number
+  height: number
+  /** 帧率取自工程的动画帧率 */
+  fps: number
+  /** H.264 质量（CRF，越小越清晰，默认 18） */
+  crf?: number
+}
+
 export const IPC = {
   openDialog: 'dialog:open',
   saveDialog: 'dialog:save',
@@ -92,7 +109,12 @@ export const IPC = {
   aiOpenSkillsDir: 'ai:openSkillsDir',
   aiInstallSkill: 'ai:installSkill',
   i18nSystemLocale: 'i18n:systemLocale',
-  i18nSetLocale: 'i18n:setLocale'
+  i18nSetLocale: 'i18n:setLocale',
+  /** 视频导出：开会话 / 推一帧 / 收尾 / 取消 */
+  videoStart: 'video:start',
+  videoFrame: 'video:frame',
+  videoFinish: 'video:finish',
+  videoCancel: 'video:cancel'
 } as const
 
 export type MenuCommand =
@@ -107,6 +129,7 @@ export type MenuCommand =
   | 'project:exportRuntime'
   | 'project:exportHao2d'
   | 'project:exportSpine'
+  | 'project:exportVideo'
   | 'edit:undo'
   | 'edit:redo'
   | 'edit:delete'
@@ -326,6 +349,17 @@ export interface HaoBridge {
   systemLocale(): Promise<IpcResult<string>>
   /** 语言：把当前界面语言同步给主进程，让它按该语言重建菜单 */
   setAppLocale(locale: string): Promise<IpcResult<void>>
+  /**
+   * 视频导出：开会话（spawn ffmpeg）。返回会话 id 与实际使用的 ffmpeg 路径
+   * （路径进日志 / 错误提示，方便确认用的是随包二进制还是系统装的）。
+   */
+  startVideoExport(options: VideoExportOptions): Promise<IpcResult<{ sessionId: string; ffmpeg: string }>>
+  /** 推一帧 RGBA 像素（长度必须 = width*height*4）；返回时主进程已写进管道（自带背压） */
+  pushVideoFrame(sessionId: string, frame: Uint8Array): Promise<IpcResult<void>>
+  /** 收尾：关闭管道并等 ffmpeg 退出；成功返回成品路径 */
+  finishVideoExport(sessionId: string): Promise<IpcResult<{ path: string }>>
+  /** 取消：杀掉 ffmpeg 并删掉半成品 */
+  cancelVideoExport(sessionId: string): Promise<IpcResult<void>>
   /**
    * 本地命令服务（AI / 脚本用）：监听主进程转来的命令请求。
    * 执行完用 `sendCommandResult` 送回结果；返回值是取消监听的函数。

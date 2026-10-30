@@ -12,13 +12,20 @@ import { installMcpIntoClients } from './aiClientConfig'
 import { installSkillToClients, openSkillsFolder, skillsInfo } from './aiSkills'
 import { normalizeLocale, setLocale } from './i18n'
 import { buildAppMenu } from './menu'
+import {
+  cancelVideoExport,
+  finishVideoExport,
+  pushVideoFrame,
+  startVideoExport
+} from './videoExport'
 import { IPC } from '@shared/ipcTypes'
 import type {
   BatchFile,
   Hao2dPreviewSession,
   OpenDialogOptions,
   SaveDialogOptions,
-  SpinePreviewSession
+  SpinePreviewSession,
+  VideoExportOptions
 } from '@shared/ipcTypes'
 
 function focusedWindow(): BrowserWindow | null {
@@ -118,6 +125,15 @@ export function registerIpcHandlers(): void {
     (_e, options: { name?: string; dir?: string } | undefined) =>
       fs.safe(() => installSkillToClients(options ?? {}))
   )
+
+  // 视频导出：渲染层逐帧推 RGBA，主进程用 ffmpeg 编成 mp4。
+  // 推帧用 handle（invoke）而不是 send：渲染层 await 它才能拿到背压（见 videoExport.ts）
+  ipcMain.handle(IPC.videoStart, (_e, options: VideoExportOptions) => fs.safe(() => startVideoExport(options)))
+  ipcMain.handle(IPC.videoFrame, (_e, sessionId: string, frame: Uint8Array) =>
+    fs.safe(() => pushVideoFrame(sessionId, frame))
+  )
+  ipcMain.handle(IPC.videoFinish, (_e, sessionId: string) => fs.safe(() => finishVideoExport(sessionId)))
+  ipcMain.handle(IPC.videoCancel, (_e, sessionId: string) => fs.safe(() => cancelVideoExport(sessionId)))
 
   // 语言：把系统语言标签交给渲染进程（首启判定界面语言用）
   ipcMain.handle(IPC.i18nSystemLocale, () => fs.safe(() => app.getLocale()))

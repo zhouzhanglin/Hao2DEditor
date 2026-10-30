@@ -134,6 +134,7 @@ import {
 import type { ImportTarget } from '@editor/services/projectIo'
 import ExportDialog from '@ui/widgets/ExportDialog'
 import type { ExportMode } from '@ui/widgets/ExportDialog'
+import VideoExportDialog from '@ui/widgets/VideoExportDialog'
 import NewProjectDialog from '@ui/widgets/NewProjectDialog'
 import SettingsDialog from '@ui/widgets/SettingsDialog'
 import AiIntegrationDialog from '@ui/widgets/AiIntegrationDialog'
@@ -188,6 +189,8 @@ export default function App() {
   const [slotOrderHeight, setSlotOrderHeight] = useState(() => loadPanelHeight(SLOT_ORDER_KEY, SLOT_ORDER_HEIGHT, SLOT_ORDER_MIN, SLOT_ORDER_MAX))
   /** 导出弹窗（选目录 / 调图集缩放 / 预览）：null = 未打开 */
   const [exportMode, setExportMode] = useState<ExportMode | null>(null)
+  /** 导出视频面板（画幅 / 取景 / 动画选择 / 逐帧编码）：false = 未打开 */
+  const [videoExportOpen, setVideoExportOpen] = useState(false)
   /** 全局设置弹窗（与工程无关、跨工程保留）：false = 未打开 */
   const [settingsOpen, setSettingsOpen] = useState(false)
   /** AI 接入弹窗：false = 未打开 */
@@ -552,6 +555,9 @@ export default function App() {
           return
         case 'project:exportSpine':
           setExportMode('spine')
+          return
+        case 'project:exportVideo':
+          setVideoExportOpen(true)
           return
         case 'app:settings':
           setSettingsOpen(true)
@@ -967,6 +973,10 @@ export default function App() {
 
       {exportMode ? (
         <ExportDialog mode={exportMode} onClose={() => setExportMode(null)} onStatus={flash} />
+      ) : null}
+
+      {videoExportOpen ? (
+        <VideoExportDialog onClose={() => setVideoExportOpen(false)} onStatus={flash} />
       ) : null}
 
       {newProjectOpen ? (

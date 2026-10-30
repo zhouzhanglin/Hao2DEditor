@@ -91,7 +91,12 @@ export default function DockLayout(props: DockLayoutProps) {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-ink-900">
-      <div className="z-20 shrink-0">{props.menuBar}</div>
+      {/*
+        菜单栏的层级必须**高于视口里的浮动面板**（它们都是 z-20 / z-30）：
+        导出 / 最近列表这些下拉是从菜单栏里弹出来的，被「准备 / 动画」切换按钮压住
+        会直接挡住点击。窗口内的弹窗（z-[900]）走 portal 到 body，不受这里影响。
+      */}
+      <div className="z-40 shrink-0">{props.menuBar}</div>
       {/* 原来这里是一整行工具条（骨骼 / 约束 + 缩放）；那两块已并进视口右上角的浮动面板 */}
       {props.toolbar ? <div className="z-10 shrink-0">{props.toolbar}</div> : null}
 

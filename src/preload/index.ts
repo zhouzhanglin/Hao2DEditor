@@ -44,6 +44,14 @@ const bridge: HaoBridge = {
   revealInFolder: (path: string) => invoke<void>(IPC.revealInFolder, path),
   setTitle: (title: string) => invoke<void>(IPC.setTitle, title),
 
+  // 视频导出：逐帧把 RGBA 推给主进程的 ffmpeg（invoke 返回即代表这一帧已写进管道，
+  // 渲染层 await 它就自然拿到了背压）
+  startVideoExport: (options) => invoke(IPC.videoStart, options),
+  pushVideoFrame: (sessionId: string, frame: Uint8Array) =>
+    invoke<void>(IPC.videoFrame, sessionId, frame),
+  finishVideoExport: (sessionId: string) => invoke(IPC.videoFinish, sessionId),
+  cancelVideoExport: (sessionId: string) => invoke<void>(IPC.videoCancel, sessionId),
+
   startSpinePreview: (session) => invoke(IPC.spinePreviewStart, session),
   stopSpinePreview: () => invoke<void>(IPC.spinePreviewStop),
   startHao2dPreview: (session) => invoke(IPC.hao2dPreviewStart, session),

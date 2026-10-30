@@ -2419,4 +2419,35 @@ export const en: Record<string, string> = {
     'Changing the source only swaps the geometry source; texture and UVs are recomputed',
   '几何（顶点 / 三角面 / 权重）来自源网格，这里只决定贴图与 UV。附件名与源同名 = 覆盖该插槽的显示':
     'Geometry (vertices / triangles / weights) comes from the source mesh; this dialog only decides texture and UVs. Using the same name as the source replaces what this slot displays',
+
+  // ── 导出视频（VideoExportDialog） ────────────────────────────────────
+  '导出视频': 'Export Video',
+  '把当前动画渲染成 mp4 视频：可选画幅 / 背景色 / 取景，按工程帧率导出':
+    'Render the current animation to an mp4: pick the frame size / background color / framing; exports at the project frame rate',
+  '选择视频导出目录': 'Choose the video output folder',
+  '先选择导出目录': 'Choose an output folder first',
+  '已取消导出': 'Export cancelled',
+  '视频已导出': 'Video exported',
+  '拖动平移 · 滚轮缩放 · {0} × {1} · {2} 帧 · {3} · {4} fps':
+    'Drag to pan · wheel to zoom · {0} × {1} · {2} frames · {3} · {4} fps',
+  '背景色': 'Background',
+  '自定义': 'Custom',
+  '宽（自动对齐到偶数）': 'Width (rounded up to an even number)',
+  '高（自动对齐到偶数）': 'Height (rounded up to an even number)',
+  '缩放 %': 'Zoom %',
+  '偏移 X': 'Offset X',
+  '偏移 Y': 'Offset Y',
+  '重置取景': 'Reset framing',
+  '目录': 'Folder',
+  '（未选择）': '(none)',
+  '选择目录': 'Choose folder',
+  '第 {0} / {1} 帧': 'Frame {0} / {1}',
+  '导出 MP4': 'Export MP4',
+  '已导出：{0}': 'Exported: {0}',
+  '在文件夹中显示': 'Show in folder',
+  '导出中，先取消再关闭': 'Exporting — cancel before closing',
+  '（没有动画）': '(no animations)',
+  '视口还没就绪：等编辑器画完一帧再导出': 'The viewport is not ready yet: let the editor render one frame, then export',
+  '浏览器模式不支持导出视频（请在桌面版里导出）':
+    'Exporting video is not available in the browser build (use the desktop app)',
 }

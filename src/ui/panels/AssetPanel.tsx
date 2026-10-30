@@ -24,7 +24,7 @@ export interface AssetPanelProps {
 export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
   const document = useProjectStore((s) => s.document)
   const update = useProjectStore((s) => s.update)
-  const removeImage = useProjectStore((s) => s.removeImage)
+  const removeImages = useProjectStore((s) => s.removeImages)
   const replaceImage = useProjectStore((s) => s.replaceImage)
   const selection = useSelectionStore()
   /**
@@ -85,25 +85,46 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
     if (result.message) onStatus?.(result.message)
   }
 
-  /** 删除图片：被附件引用时先确认，确认后清空引用（纯色）并移除条目 */
-  const handleDeleteImage = (name: string): void => {
-    const refs = countImageReferences(document, name)
+  /**
+   * 删除图片（可批量）：被附件引用时先确认，确认后清空引用（纯色）并移除条目。
+   *
+   * 批量删除走 store 的 `removeImages`：**只压一条撤销记录**，撤销一次就全回来
+   *（逐张调用 removeImage 会变成 N 条历史，撤销要按 N 次）。
+   */
+  const handleDeleteImages = (names: readonly string[]): void => {
+    const targets = names.filter((name) => document.images.some((item) => item.name === name))
+    if (targets.length === 0) return
+    const refs = targets.reduce((sum, name) => sum + countImageReferences(document, name), 0)
     if (refs > 0) {
       const ok = window.confirm(
-        t('图片「{0}」正被 {1} 个附件引用。\n删除后这些附件会丢失贴图、退化为纯色块（附件本身保留）。\n确定删除？', [
-          name,
-          refs
-        ])
+        targets.length === 1
+          ? t('图片「{0}」正被 {1} 个附件引用。\n删除后这些附件会丢失贴图、退化为纯色块（附件本身保留）。\n确定删除？', [
+              targets[0],
+              refs
+            ])
+          : t('选中的 {0} 张图片共被 {1} 个附件引用。\n删除后这些附件会丢失贴图、退化为纯色块（附件本身保留）。\n确定删除？', [
+              targets.length,
+              refs
+            ])
       )
       if (!ok) return
     }
-    removeImage(name)
+    removeImages(targets)
     // 读 store 的现值而不是渲染闭包里的 `picked`：删除是右键菜单触发的，用最新值更稳
-    setPicked(useSelectionStore.getState().pickedImages.filter((item) => item !== name))
+    const removed = new Set(targets)
+    setPicked(useSelectionStore.getState().pickedImages.filter((item) => !removed.has(item)))
+    if (targets.length === 1) {
+      onStatus?.(
+        refs > 0
+          ? t('已删除「{0}」（{1} 个附件的贴图已清空）', [targets[0], refs])
+          : t('已删除「{0}」', targets[0])
+      )
+      return
+    }
     onStatus?.(
       refs > 0
-        ? t('已删除「{0}」（{1} 个附件的贴图已清空）', [name, refs])
-        : t('已删除「{0}」', name)
+        ? t('已删除 {0} 张图片（{1} 个附件的贴图已清空）', [targets.length, refs])
+        : t('已删除 {0} 张图片', targets.length)
     )
   }
 
@@ -239,25 +260,46 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
     ]
   }
 
-  /** 右键菜单项 */
-  const imageMenuItems = (name: string): ContextMenuItem[] => [
-    {
-      key: 'replace',
-      label: t('替换图片…'),
-      icon: <RefreshCw size={12} />,
-      hint: t('选一张新图，保持原名（引用它的附件自动跟随）'),
-      onSelect: () => void handleReplaceImage(name)
-    },
-    { key: 'sep', separator: true },
-    {
-      key: 'delete',
-      label: t('删除图片'),
-      icon: <Trash2 size={12} />,
-      danger: true,
-      hint: t('从工程移除该图片（被引用的附件退化为纯色）'),
-      onSelect: () => handleDeleteImage(name)
+  /**
+   * 图片右键菜单。
+   *
+   * - **多选时只给「删除」**：替换 / 其它逐项操作在多选语义下都要问「对哪一张」，
+   *   留着反而要先想一下；删除则天然作用在整组上（一次撤销）。
+   * - 单选时保持原来的「替换 + 删除」两项。
+   */
+  const imageMenuItems = (name: string): ContextMenuItem[] => {
+    const targets = selectedSet.has(name) && selected.length > 1 ? selected : [name]
+    if (targets.length > 1) {
+      return [
+        {
+          key: 'delete',
+          label: t('删除 {0} 张图片', targets.length),
+          icon: <Trash2 size={12} />,
+          danger: true,
+          hint: t('从工程移除选中的所有图片（被引用的附件退化为纯色，可一次撤销）'),
+          onSelect: () => handleDeleteImages(targets)
+        }
+      ]
     }
-  ]
+    return [
+      {
+        key: 'replace',
+        label: t('替换图片…'),
+        icon: <RefreshCw size={12} />,
+        hint: t('选一张新图，保持原名（引用它的附件自动跟随）'),
+        onSelect: () => void handleReplaceImage(name)
+      },
+      { key: 'sep', separator: true },
+      {
+        key: 'delete',
+        label: t('删除图片'),
+        icon: <Trash2 size={12} />,
+        danger: true,
+        hint: t('从工程移除该图片（被引用的附件退化为纯色）'),
+        onSelect: () => handleDeleteImages([name])
+      }
+    ]
+  }
 
   const activeSkin = selection.skin && document.skins.some((s) => s.name === selection.skin) ? selection.skin : ''
   // 新附件的挂载骨骼：优先用当前选中的骨骼，否则退回第一根骨骼
@@ -408,6 +450,9 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
                 title={t('拖到视口 = 在落点新建插槽（先多选可以一次拖多张）；拖到层级树的插槽行 = 给该插槽加一个 display；拖到骨骼行 = 在该骨骼下新建插槽；右键可替换 / 删除')}
                 onContextMenu={(event) => {
                   event.preventDefault()
+                  // 右键点在没有被选中的行上：先把它变成当前选择（macOS 列表惯例），
+                  // 否则会出现「高亮的是 A、菜单却作用在 B 上」
+                  if (!selectedSet.has(image.name)) setPicked([image.name])
                   setRowMenu({ x: event.clientX, y: event.clientY, name: image.name })
                 }}
                 className={[
@@ -543,7 +588,11 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
         <ContextMenu
           x={rowMenu.x}
           y={rowMenu.y}
-          title={t('图片「{0}」', rowMenu.name)}
+          title={
+            selectedSet.has(rowMenu.name) && selected.length > 1
+              ? t('已选中 {0} 张图片', selected.length)
+              : t('图片「{0}」', rowMenu.name)
+          }
           items={imageMenuItems(rowMenu.name)}
           onClose={() => setRowMenu(null)}
         />

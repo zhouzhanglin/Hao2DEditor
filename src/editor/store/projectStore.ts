@@ -73,6 +73,8 @@ export interface ProjectState {
   renameSkeleton: (index: number, name: string) => void
   /** 删除图片（跨所有骨架清理引用，引用它的附件退化为纯色） */
   removeImage: (name: string) => void
+  /** 批量删除图片：一次撤销，语义与逐张删除一致（图片池被所有骨架共享，只深拷贝一遍） */
+  removeImages: (names: readonly string[]) => void
   /** 替换图片：保持 name 不变，更新 path / width / height */
   replaceImage: (name: string, info: { path: string; width: number; height: number }) => void
   /**
@@ -601,13 +603,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   removeImage: (name) => {
+    get().removeImages([name])
+  },
+
+  removeImages: (names) => {
     const state = get()
-    if (!state.document.images.some((image) => image.name === name)) return
-    history.push('删除图片', snapshotOf(state))
+    const exists = new Set(state.document.images.map((image) => image.name))
+    const targets = names.filter((name) => exists.has(name))
+    if (targets.length === 0) return
+    history.push(targets.length > 1 ? `删除 ${targets.length} 张图片` : '删除图片', snapshotOf(state))
     // 图片池被所有骨架共享：逐个骨架深拷贝后清理，再重新对齐回同一个池子
     const list = state.skeletons.map((skeleton) => {
       const draft = cloneDocument(skeleton)
-      deleteImage(draft, name)
+      for (const name of targets) deleteImage(draft, name)
       return draft
     })
     const withPool = shareImages(list, state.activeSkeleton)

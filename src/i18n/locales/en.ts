@@ -2420,6 +2420,17 @@ export const en: Record<string, string> = {
   '几何（顶点 / 三角面 / 权重）来自源网格，这里只决定贴图与 UV。附件名与源同名 = 覆盖该插槽的显示':
     'Geometry (vertices / triangles / weights) comes from the source mesh; this dialog only decides texture and UVs. Using the same name as the source replaces what this slot displays',
 
+  // ── 资源面板：图片多选删除 ──────────────────────────────────────────
+  '已选中 {0} 张图片': '{0} images selected',
+  '删除 {0} 张图片': 'Delete {0} images',
+  '从工程移除选中的所有图片（被引用的附件退化为纯色，可一次撤销）':
+    'Remove all selected images from the project (attachments that use them fall back to a solid color; undone in one step)',
+  '已删除 {0} 张图片': 'Deleted {0} images',
+  '已删除 {0} 张图片（{1} 个附件的贴图已清空）':
+    'Deleted {0} images ({1} attachments had their texture cleared)',
+  '选中的 {0} 张图片共被 {1} 个附件引用。\n删除后这些附件会丢失贴图、退化为纯色块（附件本身保留）。\n确定删除？':
+    'The {0} selected images are referenced by {1} attachments.\nAfter deleting, those attachments lose their texture and fall back to a solid color (the attachments themselves stay).\nDelete anyway?',
+
   // ── 导出视频（VideoExportDialog） ────────────────────────────────────
   '导出视频': 'Export Video',
   '把当前动画渲染成 mp4 视频：可选画幅 / 背景色 / 取景，按工程帧率导出':

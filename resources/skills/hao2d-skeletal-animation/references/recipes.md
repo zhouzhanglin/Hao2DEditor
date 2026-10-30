@@ -311,5 +311,6 @@
 验收清单：
 1. `getProjectState` → `dirty:false`、`projectPath` 正确；
 2. `getAnimationKeys` → 每条动画的轨道数与时间点符合预期；
-3. `captureViewport` → 打几个关键时刻看一眼姿态；
+3. `captureViewport {time}` → 打几个关键时刻看一眼姿态（**必带 time**：窗口在后台时播放时钟不走，
+   不指定时间就只会拍到第 0 帧，看着像「动画没生效」）；
 4. `exportProject` 返回的 `warnings` 为空；有 warning 就复述给用户。

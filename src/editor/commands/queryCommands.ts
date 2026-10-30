@@ -5,6 +5,7 @@ import { currentSelection } from '../store/selectionStore'
 import { useProjectStore } from '../store/projectStore'
 import { useModeStore } from '../store/modeStore'
 import { useTimelineStore } from '../store/timelineStore'
+import { usePlayheadStore } from '../store/playheadStore'
 import { defineRead } from './registry'
 import type { Args } from './registry'
 import { t } from '@i18n'
@@ -594,20 +595,52 @@ export function registerQueryCommands(): void {
       name: 'captureViewport',
       title: '截视口画面',
       description:
-        '把视口当前画面截成 PNG（含背景棋盘格、角色与叠加层），返回 base64 data URL。AI 想「亲眼看到」编辑器里显示的画面时用它。窗口在后台 / 没激活也能截（命令执行前会自己刷新一帧），失败直接重试即可',
-      args: {},
-      returns: 'dataUrl（data:image/png;base64,…）/ width / height'
+        '把视口画面截成 PNG（含背景棋盘格、角色与叠加层），返回 base64 data URL。AI 想「亲眼看到」编辑器里显示的画面时用它。**要预览动画动作时必须传 time**（或先 setTime）：AI 通常在别的窗口里驱动编辑器，窗口在后台时播放时钟不走，不指定时间就只会拍到第 0 帧 —— 看起来「只有绑定姿态、动画没生效」。窗口在后台也能截（命令会自己刷新一帧再取像素）',
+      args: {
+        time: { type: 'number', description: '先 seek 到该时间点（秒）再截图；预览某个动作请务必传' },
+        animation: { type: 'string', description: '动画名（可选）：截图前先切到该动画' }
+      },
+      returns: 'dataUrl（data:image/png;base64,…）/ width / height / animation / time（实际截取的时间点）'
     },
-    () => {
+    (args) => {
       const scene = getActiveScene()
       if (!scene) throw new Error(t('视口还没就绪（窗口未打开或正在初始化）'))
-      const dataUrl = scene.captureViewport()
+
+      const animationName = str(args, 'animation')
+      if (animationName) {
+        const exists = doc().animations.some((item) => item.name === animationName)
+        if (!exists) throw new Error(t('没有这个动画：{0}（用 listAnimations 查全部动画名）', animationName))
+        useTimelineStore.getState().setAnimation(animationName)
+      }
+
+      const requested = args.time
+      const time = typeof requested === 'number' && Number.isFinite(requested) ? Math.max(0, requested) : undefined
+      const dataUrl = scene.captureViewport(time)
       if (!dataUrl) {
         throw new Error(
           '截图失败：渲染器没就绪，或 WebGL 上下文丢了（编辑器长时间在后台、系统休眠 / GPU 重置后会出现）。先直接重试一次；仍失败就把编辑器窗口切到前台再试，最后手段是重启编辑器'
         )
       }
-      return { dataUrl, width: scene.viewport.width, height: scene.viewport.height }
+      // 实际时间以播放器为准：seek 会被夹到动画末尾（传 10 秒、动画只有 1.2 秒时）
+      const actualTime = scene.runtime?.player.time ?? 0
+      if (time !== undefined) {
+        /*
+         * 两处时钟都要对齐：
+         * - `timelineStore` 是暂停态的权威时间（视口 push 读它）；
+         * - `playheadStore` 是播放态的权威时间（播放时 push 读它）。
+         * 只写一个的话，另一条 push 路径会把刚 seek 的位置改回去 —— AI 连续截图就会
+         * 看到时间在跳。
+         */
+        useTimelineStore.getState().setTime(actualTime)
+        usePlayheadStore.getState().setTime(actualTime)
+      }
+      return {
+        dataUrl,
+        width: scene.viewport.width,
+        height: scene.viewport.height,
+        animation: scene.currentAnimation,
+        time: actualTime
+      }
     }
   )
 

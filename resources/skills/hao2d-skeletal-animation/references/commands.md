@@ -15,7 +15,7 @@
 
 | 命令 | 参数 | 说明 | 返回 |
 | --- | --- | --- | --- |
-| `captureViewport` | — | 把视口当前画面截成 PNG（含背景棋盘格、角色与叠加层），返回 base64 data URL。AI 想「亲眼看到」编辑器里显示的画面时用它。窗口在后台 / 没激活也能截（命令执行前会自己刷新一帧），失败直接重试即可 | dataUrl（data:image/png;base64,…）/ width / height |
+| `captureViewport` | `time?` `animation?` | 把视口画面截成 PNG（含背景棋盘格、角色与叠加层），返回 base64 data URL。AI 想「亲眼看到」编辑器里显示的画面时用它。**要预览动画动作必须传 `time`**：你在别的窗口里驱动编辑器，窗口在后台时播放时钟不走，只 `setTime` 不 seek 只会拍到第 0 帧（看起来「只有绑定姿态」）。窗口在后台也能截（命令会自己刷新一帧再取像素），失败直接重试即可 | dataUrl（data:image/png;base64,…）/ width / height / animation / time（实际截取的时间点） |
 | `getAnimationKeys` | `animation`?(string) 动画名（可选，默认当前编辑动画）<br>`bone`?(string) 只查这根骨骼的轨道（可选）<br>`slot`?(string) 只查这个插槽的轨道（可选） | 把某条动画的关键帧明细拉出来（可只查一根骨骼 / 一个插槽），用来核对打帧结果或做批量改帧前的读取 | animation / duration / bones[{ bone, channel, keys:[{time,value,easing}] }] / slots[...] / deforms[...] / drawOrder[...] |
 | `getAttachmentVertices` | `slot`*(string) 插槽名<br>`attachment`*(string) 附件名<br>`skin`?(string) 皮肤名（可选，默认当前皮肤） | 拉出某个网格或遮罩附件的全部顶点：坐标 + 每根骨骼的权重。蒙皮调试、手写权重或给遮罩打 FFD 前读它 | type / vertexCount / vertices: [{ index, x, y, weights: [{bone, weight}] }] / triangles / boundBones |
 | `getBoneWorldTransform` | `bone`*(string) 骨骼名 | 骨骼在视口世界坐标下的位置 / 旋转 / 缩放（含父级累积）。要在世界坐标里摆东西（IK 节点骨、附件落点）时用它换算 | x / y / rotation（度）/ scaleX / scaleY；场景未就绪时 ok:false |

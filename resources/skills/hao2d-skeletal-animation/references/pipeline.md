@@ -85,8 +85,9 @@ getAnimationKeys                     // 自查：轨道与时间点
 自查怎么做（都**不要**发消息打断用户）：
 
 - `getAnimationKeys` 文本核对就够：轨道数、时间点、首尾同帧；
-- 想确认画面就自己 `setTime` + `captureViewport`（或 `scripts/shot.py` 落 PNG 再 `read_file` 看一眼），
-  看完自己判断、自己修；
+- 想确认画面就自己 `captureViewport {time, animation}`（或 `scripts/shot.py --times 0,0.5,1` 落 PNG
+  再 `read_file` 看一眼），看完自己判断、自己修。
+  **裁图务必带 `time`**：窗口在后台时播放时钟不走，只 `setTime` 再截会一直拿到第 0 帧；
 - 只有明显错位 / 穿模，且不确定用户要哪种效果时，才发一张图 + 一个具体问题；
 - 帧率换算 `t = 帧号 / fps`（30fps 下 1 帧 ≈ 0.0333s）。
 

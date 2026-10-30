@@ -40,7 +40,16 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      webSecurity: true
+      webSecurity: true,
+      /**
+       * 窗口切到后台 / 被遮挡时**不要节流**。
+       *
+       * 默认 Chromium 会把 rAF 与定时器降频甚至停掉：视口定格在绑定姿态、播放时钟不走，
+       * 于是后台截图（AI 预览、录屏工具、系统截图）只能拍到一张静止画面。
+       * 编辑器需要「看不见时也照常推进动画」，所以关掉节流（配合 ViewportCanvas 里
+       * 页面不可见时改用 setTimeout 的兜底调度）。
+       */
+      backgroundThrottling: false
     }
   })
 

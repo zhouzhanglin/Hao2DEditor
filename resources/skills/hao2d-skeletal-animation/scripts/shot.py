@@ -43,8 +43,11 @@ def decode(data_url: str) -> bytes:
     return base64.b64decode(payload)
 
 
-def save_png(base: str, token: str, out: str) -> bool:
-    result = call(base, token, "captureViewport")
+def save_png(base: str, token: str, out: str, time: float | None = None) -> bool:
+    # 时间点一并交给 captureViewport：AI 通常在这个窗口之外驱动编辑器，
+    # 窗口在后台时播放时钟不走，只 setTime 不 seek 的话截到的永远是第 0 帧（绑定姿态）
+    args = None if time is None else {"time": time}
+    result = call(base, token, "captureViewport", args)
     if result.get("ok") is False:
         print(f"截图失败：{result.get('error')}", file=sys.stderr)
         return False
@@ -104,7 +107,7 @@ def main() -> int:
                 ok = False
                 continue
         target = args.out if len(times) == 1 else f"{stem}_{time:.2f}{ext or '.png'}"
-        ok = save_png(base, token, target) and ok
+        ok = save_png(base, token, target, time) and ok
     return 0 if ok else 1
 
 

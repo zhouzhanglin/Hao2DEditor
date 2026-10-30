@@ -128,6 +128,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     observer.observe(host)
 
     let raf = 0
+    let timer = 0
     let last = performance.now()
     /** 上一帧是否在播放：用于在「播放 → 停止」的那一帧把最终时间落回主 store */
     let playing = false
@@ -218,13 +219,32 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         perfWorst = 0
       }
 
+      schedule()
+    }
+
+    /**
+     * 下一帧的调度器：可见时走 rAF，**不可见时改用 setTimeout**。
+     *
+     * 窗口最小化 / 被完全遮挡时，Chromium 会停掉 rAF（主进程的 `backgroundThrottling: false`
+     * 管不到「完全不可见」这一档）。停了就意味着：播放时钟不走、画面定格在绑定姿态，
+     * 后台截图 / AI 预览只能拍到一张静止图。这里在 hidden 态用 16ms 定时器接着驱动，
+     * 配合主进程关闭节流，后台也能照常推进动画。
+     */
+    const schedule = (): void => {
+      if (disposed) return
+      if (document.visibilityState === 'hidden') {
+        timer = window.setTimeout(() => loop(performance.now()), 16)
+        return
+      }
       raf = requestAnimationFrame(loop)
     }
-    raf = requestAnimationFrame(loop)
+
+    schedule()
 
     return () => {
       disposed = true
       cancelAnimationFrame(raf)
+      window.clearTimeout(timer)
       observer.disconnect()
       scene.destroy()
       textures.clear()

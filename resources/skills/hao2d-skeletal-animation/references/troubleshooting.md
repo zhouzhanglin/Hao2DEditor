@@ -75,7 +75,8 @@
 ```text
 1. getProjectState        → dirty:false、projectPath 正确、skeletons 数量对
 2. getAnimationKeys       → 每条动画的轨道 / 时间点符合预期
-3. captureViewport        → 自己看一眼关键时刻的姿态（不发给用户等确认）
+3. captureViewport{time}  → 自己看一眼关键时刻的姿态（不发给用户等确认）；time 一定要传，
+                             否则窗口在后台时只会拿到第 0 帧（看着像「动画没生效」）
 4. exportProject          → 仅用户明确要求时才导；导了再看 warnings 是否为空
 ```
 

@@ -815,12 +815,15 @@ export class EditorScene {
   }
 
   /**
-   * 截取视口当前画面为 PNG data URL（含背景棋盘格、角色与叠加层）。
+   * 截取视口画面为 PNG data URL（含背景棋盘格、角色与叠加层）。
    *
    * 供外部 AI 工具「看」编辑器里显示的画面用。**与窗口是否激活无关**：
    * 窗口失焦 / 被别的应用挡住 / 最小化时浏览器会暂停 rAF，渲染循环停摆、dirty 留在原地，
    * 直接读画布只会拿到「命令跑完之前」的旧帧（甚至空白）。所以这里先自己同步跑一帧
    * （`update(0)`，dt 为 0 不推进播放），再离屏读取。
+   *
+   * @param time 可选：先 seek 到该时间点再截。**AI 在后台驱动编辑器时应当总是传它** ——
+   *   后台窗口里播放时钟不走，不 seek 就只能拍到第 0 帧（绑定姿态）。
    *
    * 读取顺序：
    * 1. pixi `extract`：把 stage 离屏渲染到临时纹理再 readPixels —— 不读屏幕帧、不依赖
@@ -831,7 +834,20 @@ export class EditorScene {
    * WebGL 上下文丢失（系统休眠 / GPU 重置后会出现）时返回 null：宁可失败也不要交出
    * 一张空白图让 AI 以为「画面就是这样」。
    */
-  captureViewport(): string | null {
+  captureViewport(time?: number): string | null {
+    /*
+     * 指定时间点时**自己 seek**，不能指望播放时钟：AI 一般是在别的窗口里驱动编辑器，
+     * 窗口在后台时 rAF 会被压住，播放时钟根本不走 —— 它先 setPlaying(true) 再截图，
+     * 拍到的永远是第 0 帧（看起来就是「只有绑定姿态」）。显式 seek 才谈得上确定性。
+     */
+    if (typeof time === 'number' && Number.isFinite(time)) {
+      const target = Math.max(0, time)
+      this.viewState.time = target
+      if (this.bundle) this.bundle.player.time = target
+      this.view?.markDirty()
+      if (this.bundle?.nest) this.syncNestedViews()
+    }
+
     // 后台时 rAF 停摆：先把这一帧该算的算完（蒙皮重建、尺寸/相机兜底、叠加层重画）
     try {
       this.update(0)

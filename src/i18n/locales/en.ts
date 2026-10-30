@@ -626,12 +626,7 @@ export const en: Record<string, string> = {
   '插槽只能放到骨骼下面（不能挂到插槽或 display 之下）':
     'Slots can only be dropped under a bone (they cannot go under a slot or display)',
   'display 只能放到插槽下面': 'A display can only be dropped under a slot',
-  '新建骨骼（挂在当前选中骨骼下；未选中时挂在根骨骼 root 下）':
-    'New bone (under the selected bone; under the root bone when nothing is selected)',
-  '新建插槽（挂到当前选中骨骼；未选中时挂到第一根骨骼）':
-    'New slot (on the selected bone; on the first bone when nothing is selected)',
-  '新建 IK 约束（自动新建一根 IK 节点骨挂在根骨骼 root 下、摆在链尾末端；先多选链根 → 链尾再点，可一次配好骨链）':
-    'New IK constraint (creates an IK node bone under the root bone at the end of the chain; multi-select from chain root to chain tip first to set up the whole chain at once)',
+  '新建 IK 约束': 'New IK constraint',
   '新建变换约束': 'New transform constraint',
   '新建路径约束': 'New path constraint',
   '全部展开（骨骼 / 插槽 / display）': 'Expand all (bones / slots / displays)',

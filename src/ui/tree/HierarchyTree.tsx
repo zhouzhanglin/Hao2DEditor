@@ -577,12 +577,26 @@ function RootBoneIcon({ size = 11, style }: { size?: number; style?: React.CSSPr
   )
 }
 
+/**
+ * 约束图标的**默认颜色**：树里的约束行与工具栏的「新建」按钮共用这一份 ——
+ * 同一个约束类型在两处必须是同一个颜色，否则「上面点了绿箭头、下面出现绿箭头」这种对应关系就断了。
+ *
+ * IK 的红由图标自己带（`IkConstraintIcon` 写死了约束红），这里留空串；
+ * 变换用 `ok`（绿）、路径用 `warn`（橙），与视口叠加层里约束手柄的配色同源。
+ */
+const CONSTRAINT_ICON_COLOR: Record<AuthoringConstraint['type'], string> = {
+  ik: '',
+  transform: 'text-ok/80',
+  path: 'text-warn/80',
+  // 物理约束仅在导入时保留数据（不参与求解），用弱化颜色区分
+  physics: 'text-content-lo'
+}
+
 const CONSTRAINT_ICON: Record<AuthoringConstraint['type'], React.ReactNode> = {
   ik: <IkConstraintIcon />,
-  transform: <Maximize2 size={13} className="text-ok/80" />,
-  path: <Route size={13} className="text-warn/80" />,
-  // 物理约束仅在导入时保留数据（不参与求解），用弱化图标区分
-  physics: <Activity size={13} className="text-content-lo" />
+  transform: <Maximize2 size={13} className={CONSTRAINT_ICON_COLOR.transform} />,
+  path: <Route size={13} className={CONSTRAINT_ICON_COLOR.path} />,
+  physics: <Activity size={13} className={CONSTRAINT_ICON_COLOR.physics} />
 }
 
 /** 约束类型的短名（IK 保持原文，其余走词典）；文案随语言切换，故是函数 */
@@ -2134,18 +2148,31 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex h-[24px] shrink-0 items-center gap-1 border-b border-line/60 bg-ink-800/80 px-1">
-        <button type="button" title={t('新建骨骼（挂在当前选中骨骼下；未选中时挂在根骨骼 root 下）')} className="hao-btn h-[18px] px-1.5 text-3xs" onClick={poseOnly(() => addBone())}>
+        {/*
+          左侧全是「新建」按钮：**只留图标、不写字**（图标本身已经说明新建的是什么，
+          再加文字这一行就挤不下五个入口了）。提示也只要短名 —— 括号里那些「挂在哪根骨骼下」
+          属于读一次就记住的细节，挂在悬停提示里反而每次都要读完才知道点的是什么。
+        */}
+        <button
+          type="button"
+          title={t('新建骨骼')}
+          className="hao-btn h-[18px] px-1.5"
+          onClick={poseOnly(() => addBone())}
+        >
           <Bone size={11} />
-          <span>{t('骨骼')}</span>
-        </button>
-        <button type="button"           title={t('新建插槽（挂到当前选中骨骼；未选中时挂到第一根骨骼）')} className="hao-btn h-[18px] px-1.5 text-3xs" onClick={poseOnly(() => addSlot())}>
-          <SlotIcon size={11} />
-          <span>{t('插槽')}</span>
         </button>
         <button
           type="button"
-          title={t('新建 IK 约束（自动新建一根 IK 节点骨挂在根骨骼 root 下、摆在链尾末端；先多选链根 → 链尾再点，可一次配好骨链）')}
-          className="hao-btn h-[18px] px-1.5 text-3xs"
+          title={t('新建插槽')}
+          className="hao-btn h-[18px] px-1.5"
+          onClick={poseOnly(() => addSlot())}
+        >
+          <SlotIcon size={11} />
+        </button>
+        <button
+          type="button"
+          title={t('新建 IK 约束')}
+          className="hao-btn h-[18px] px-1.5"
           onClick={poseOnly(() => addConstraint('ik'))}
         >
           <IkConstraintIcon size={14} />
@@ -2153,18 +2180,19 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         <button
           type="button"
           title={t('新建变换约束')}
-          className="hao-btn h-[18px] px-1.5 text-3xs"
+          className="hao-btn h-[18px] px-1.5"
           onClick={poseOnly(() => addConstraint('transform'))}
         >
-          <Maximize2 size={14} />
+          {/* 颜色与树里对应行一致（见 CONSTRAINT_ICON_COLOR）：新建出来的是哪一类，点之前就看得出 */}
+          <Maximize2 size={14} className={CONSTRAINT_ICON_COLOR.transform} />
         </button>
         <button
           type="button"
           title={t('新建路径约束')}
-          className="hao-btn h-[18px] px-1.5 text-3xs"
+          className="hao-btn h-[18px] px-1.5"
           onClick={poseOnly(() => addConstraint('path'))}
         >
-          <Route size={14} />
+          <Route size={14} className={CONSTRAINT_ICON_COLOR.path} />
         </button>
         {/* 右侧两个显示开关（`ml-auto` 靠右，与左边的「新建」按钮分开）：
             全部折叠 / 全部展开，以及树里 display 行的显隐 */}

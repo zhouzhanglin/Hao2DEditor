@@ -1,7 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
 import { formatPerf, perfStats, subscribePerf } from '@editor/store/perfStore'
 import type { PerfStats } from '@editor/store/perfStore'
+import { toStatusMessage } from '@shared/status'
+import type { StatusLevel, StatusMessage } from '@shared/status'
 import { t } from '@i18n'
+
+/**
+ * 提示文字的颜色：档位 → 颜色，**只在这里定义一次**（提示的「要紧程度」由上报方决定，
+ * 见 `@shared/status`）。info 用强调色而不是正文色：它只是「刚才做了什么」，不该抢注意力；
+ * warn / error 才需要被看到。
+ */
+const HINT_COLOR: Record<StatusLevel, string> = {
+  info: 'text-accent/80',
+  warn: 'text-warn',
+  error: 'text-danger'
+}
 
 export interface StatusBarProps {
   stats: {
@@ -15,7 +28,8 @@ export interface StatusBarProps {
     texturesTotal: number
   }
   selection: string
-  hint?: string
+  /** 操作提示：字符串按 `info` 处理，需要橙色 / 红色时传 `{ text, level }`（见 `@shared/status`） */
+  hint?: string | StatusMessage
   /** 正在执行的耗时操作（导入 / 导出 / 打包），非空时显示进度提示 */
   busy?: string | null
 }
@@ -58,6 +72,9 @@ export default function StatusBar({ stats, selection, hint, busy }: StatusBarPro
     })
   }
 
+  /** 提示统一成 `{ text, level }` 再渲染：颜色只看档位，调用方传字符串也不会漏掉默认色 */
+  const hintMessage = hint === undefined ? null : toStatusMessage(hint)
+
   return (
     <footer className="flex h-[22px] items-center gap-3 border-t border-line bg-ink-800 px-2 text-2xs text-content-lo">
       <span className="flex items-center gap-2 font-mono">
@@ -99,7 +116,12 @@ export default function StatusBar({ stats, selection, hint, busy }: StatusBarPro
             {busy}
           </span>
         ) : null}
-        {hint ? <span className="animate-fade-in text-accent/80">{hint}</span> : null}
+        {hintMessage ? (
+          // key 带上文字：连续两条同类提示也要重播淡入，否则第二条看起来像没刷新
+          <span key={hintMessage.text} className={`animate-fade-in ${HINT_COLOR[hintMessage.level]}`}>
+            {hintMessage.text}
+          </span>
+        ) : null}
         {/* 帧率读数开关：关闭时只是一个 `FPS` 按钮，打开后原地显示读数（内容由上面的 effect 写） */}
         <button
           type="button"

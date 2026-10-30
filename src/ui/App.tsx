@@ -147,6 +147,8 @@ import { deleteSelectedTrack, keyframeNow, removeSelectedKeys } from '@editor/ti
 import { PPU, deleteMeshVertex } from '@editor/commands/authoringCommands'
 import { deleteSelectedMaskPoint, undoMaskDraftPoint, undoMeshBoundaryPoint } from '@editor/tools/authoringTools'
 import { copySelection, pasteSelection, duplicateSelection } from '@editor/commands/clipboardCommands'
+import { statusWarn } from '@shared/status'
+import type { StatusMessage } from '@shared/status'
 
 export default function App() {
   // 订阅界面语言：切换语言时整棵子树重渲染，所有 t() 重新求值
@@ -173,7 +175,7 @@ export default function App() {
     }))
   )
 
-  const [hint, setHint] = useState<string | undefined>(undefined)
+  const [hint, setHint] = useState<string | StatusMessage | undefined>(undefined)
   const [busy, setBusy] = useState<string | null>(null)
   const [zoom, setZoom] = useState(100)
   const [stats, setStats] = useState<ViewportStats>({
@@ -247,7 +249,11 @@ export default function App() {
 
   const booted = useRef(false)
 
-  const flash = useCallback((message: string) => {
+  /**
+   * 状态栏提示：收 `string | StatusMessage`（后者带档位，决定颜色，见 `@shared/status`）。
+   * 既有调用点传字符串即 `info`，需要橙色 / 红色时用 `statusWarn` / `statusError` 包一层。
+   */
+  const flash = useCallback((message: string | StatusMessage) => {
     setHint(message)
     window.setTimeout(() => setHint(undefined), 2600)
   }, [])
@@ -345,14 +351,15 @@ export default function App() {
     (index: number) => {
       const store = useProjectStore.getState()
       if (store.skeletons.length <= 1) {
-        flash(t('项目里至少保留一个骨架'))
+        // 拒绝执行 → warn（橙色）：用户以为删掉了，实际没有，需要被看到
+        flash(statusWarn(t('项目里至少保留一个骨架')))
         return
       }
       // 被别的骨架嵌套引用时 store 会拒绝删除：照实提示原因，且不做「切换骨架」那套收尾
       // （停播 / 清选中 / 重置视口）。以前不看返回值，明明没删也报「已删除」，还会把编辑状态清掉
       const result = store.removeSkeleton(index)
       if (!result.ok) {
-        flash(result.message)
+        flash(statusWarn(result.message))
         return
       }
       resetForSkeletonChange()

@@ -37,6 +37,8 @@ import { CONSTRAINT_CHANNEL_LABEL, CONSTRAINT_CHANNELS, slotDisplayNameAt } from
 import type { KeyframeTarget } from '@editor/timeline/model'
 import { getActiveScene } from '@editor/activeScene'
 import { getPlatform } from '@editor/platform'
+import { statusWarn } from '@shared/status'
+import type { StatusReporter } from '@shared/status'
 import { focusNode } from '@editor/focusNode'
 import type { FocusTarget } from '@editor/focusNode'
 import { createIkConstraint, createPathConstraint, createTransformConstraint } from '@core/model/constraints'
@@ -638,8 +640,11 @@ function constraintHost(constraint: AuthoringConstraint): string {
 }
 
 export interface HierarchyTreeProps {
-  /** 状态栏提示（Animate 态拒绝改绑定数据时说明原因） */
-  onStatus?: (text: string) => void
+  /**
+   * 状态栏提示。**被拒绝的操作**（Animate 态改绑定数据、拖到不合法位置、缺被驱动骨…）
+   * 一律用 `statusWarn()` 包一层 —— 用户以为做了、其实没做，这句得是橙色才看得见。
+   */
+  onStatus?: StatusReporter
 }
 
 /** 网格型附件（含 linkedmesh）：层级树里用网格图标，和贴图区分开 */
@@ -1034,7 +1039,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
   const canEditBinding = (): boolean => {
     if (useModeStore.getState().mode === 'pose') return true
     // 这句话服务于所有入口：拖行改层级、拖图片建插槽 / 加 display、工具栏新建、行尾删除
-    onStatus?.(t('切到 Pose 状态才能改绑定数据（骨骼 / 插槽 / display / 约束）'))
+    onStatus?.(statusWarn(t('切到 Pose 状态才能改绑定数据（骨骼 / 插槽 / display / 约束）')))
     return false
   }
 
@@ -1106,17 +1111,17 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
      */
     if (payload.kind === 'armature') {
       if (target.kind !== 'slot' && target.kind !== 'bone') {
-        onStatus?.(t('骨架只能拖到骨骼或插槽上（拖到骨骼行 = 自动新建插槽）'))
+        onStatus?.(statusWarn(t('骨架只能拖到骨骼或插槽上（拖到骨骼行 = 自动新建插槽）')))
         return
       }
       const parent = document.armatureName
       if (parent === payload.name) {
-        onStatus?.(t('不能把骨架拖到它自己的层级里'))
+        onStatus?.(statusWarn(t('不能把骨架拖到它自己的层级里')))
         return
       }
       const reason = checkNestDrop(useProjectStore.getState().skeletons, parent, payload.name)
       if (reason) {
-        onStatus?.(t(reason))
+        onStatus?.(statusWarn(t(reason)))
         return
       }
       const created: Array<{ slot: string; attachment: string }> = []
@@ -1160,12 +1165,12 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
 
     if (payload.kind === 'bone') {
       if (target.kind !== 'bone') {
-        onStatus?.(t('骨骼只能放到骨骼下面（拖到列表空白处 = 挂到根骨骼下）'))
+        onStatus?.(statusWarn(t('骨骼只能放到骨骼下面（拖到列表空白处 = 挂到根骨骼下）')))
         return
       }
       const check = validateBoneMove(document, payload.name, target.name)
       if (!check.ok) {
-        onStatus?.(check.message)
+        onStatus?.(statusWarn(check.message))
         return
       }
       let result: MoveResult = check
@@ -1191,7 +1196,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         }
         const targetSlot = document.slots.find((item) => item.name === target.name)
         if (!targetSlot) {
-          onStatus?.(t('找不到插槽「{0}」', target.name))
+          onStatus?.(statusWarn(t('找不到插槽「{0}」', target.name)))
           return
         }
         // 目标在「根层」时沿用源插槽的宿主骨骼：这里只调绘制顺序，不要因为目标没挂骨骼就失败
@@ -1199,7 +1204,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         const hostBone = targetSlot.bone || sourceSlot?.bone || ''
         const check = validateSlotMove(document, payload.name, hostBone)
         if (!check.ok) {
-          onStatus?.(check.message)
+          onStatus?.(statusWarn(check.message))
           return
         }
         let result: MoveResult = check
@@ -1227,12 +1232,12 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       }
 
       if (target.kind !== 'bone') {
-        onStatus?.(t('插槽只能放到骨骼或另一条插槽旁边'))
+        onStatus?.(statusWarn(t('插槽只能放到骨骼或另一条插槽旁边')))
         return
       }
       const check = validateSlotMove(document, payload.name, target.name)
       if (!check.ok) {
-        onStatus?.(check.message)
+        onStatus?.(statusWarn(check.message))
         return
       }
       let result: MoveResult = check
@@ -1255,7 +1260,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       runDisplayMove(payload, target.slot, { name: target.name, side: before })
       return
     }
-    onStatus?.(t('display 只能放到插槽下面'))
+    onStatus?.(statusWarn(t('display 只能放到插槽下面')))
   }
 
   /** display 的移动/排序统一走这里：先校验再落历史，落点提示交给命令层的返回消息 */
@@ -1307,7 +1312,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     )
     const first = created[0]
     if (!first) {
-      onStatus?.(t('无法用「{0}」新建插槽', images[0].name))
+      onStatus?.(statusWarn(t('无法用「{0}」新建插槽', images[0].name)))
       return
     }
     selection.selectAttachment(first.slot, first.attachment)
@@ -1391,7 +1396,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
      * 那根骨加了约束，实际却和用户想的那根骨无关。说清楚、什么都不建更省事。
      */
     if ((kind === 'transform' || kind === 'path') && !bone) {
-      onStatus?.(t('先选中要被驱动的骨骼，再新建变换 / 路径约束'))
+      onStatus?.(statusWarn(t('先选中要被驱动的骨骼，再新建变换 / 路径约束')))
       return
     }
     /*
@@ -2327,7 +2332,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             if (!payload) return
             // 骨架必须落到骨骼 / 插槽行（空白处没有宿主可挂）
             if (payload.kind === 'armature') {
-              onStatus?.(t('骨架只能拖到骨骼或插槽上（拖到骨骼行 = 自动新建插槽）'))
+              onStatus?.(statusWarn(t('骨架只能拖到骨骼或插槽上（拖到骨骼行 = 自动新建插槽）')))
               return
             }
             if (payload.kind === 'bone') {
@@ -2387,7 +2392,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
               )
               return
             }
-            onStatus?.(t('display 只能放到插槽下面'))
+            onStatus?.(statusWarn(t('display 只能放到插槽下面')))
             return
           }
           /*
@@ -2399,7 +2404,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           const imageNames = readImageDrag(event.dataTransfer)
           if (imageNames.length === 0) return
           if (!rootName) {
-            onStatus?.(t('场景里还没有骨骼：先用工具栏的「骨骼」新建一根骨骼，再把图片拖进来'))
+            onStatus?.(statusWarn(t('场景里还没有骨骼：先用工具栏的「骨骼」新建一根骨骼，再把图片拖进来')))
             return
           }
           addSlotFromImage(rootName, imageNames)

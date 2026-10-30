@@ -599,6 +599,19 @@ const CONSTRAINT_ICON: Record<AuthoringConstraint['type'], React.ReactNode> = {
   physics: <Activity size={13} className={CONSTRAINT_ICON_COLOR.physics} />
 }
 
+/**
+ * 变换 / 路径约束的**前提**：先选中要被驱动的骨骼（它们不像 IK 能自己造一个目标骨）。
+ * 工具栏 title 与右键菜单的 hint 共用这一句，别各写一份。
+ */
+function drivenBoneHint(): string {
+  return t('先选中要被驱动的骨骼')
+}
+
+/** 提示统一格式 `名称（补充）`：词条 `{0}（{1}）` 让英文那边自动换成半角括号 */
+function labelledHint(label: string, hint: string): string {
+  return t('{0}（{1}）', [label, hint])
+}
+
 /** 约束类型的短名（IK 保持原文，其余走词典）；文案随语言切换，故是函数 */
 function constraintKind(type: AuthoringConstraint['type']): string {
   return t({ ik: 'IK', transform: '变换', path: '路径', physics: '物理' }[type])
@@ -1373,6 +1386,15 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
 
   const addConstraint = (kind: AuthoringConstraint['type'], bone = selectedBone()): void => {
     /*
+     * 变换 / 路径必须指定「谁被驱动」—— 它们不像 IK 能自己造一个目标骨，约束的另一方是
+     * 工程里已有的骨骼。没选中骨骼时**不要猜**：早先会静默退回第一根骨骼，点一下看着像给
+     * 那根骨加了约束，实际却和用户想的那根骨无关。说清楚、什么都不建更省事。
+     */
+    if ((kind === 'transform' || kind === 'path') && !bone) {
+      onStatus?.(t('先选中要被驱动的骨骼，再新建变换 / 路径约束'))
+      return
+    }
+    /*
      * IK 的链在进 draft 前先定好：取当前多选（父→子连续，右键骨会被 openMenu 追加进组，
      * 右键链尾的子骨骼正好把链延长）；没多选就驱动右键的那一根 —— 单骨 IK 立刻可用
      * （链尾指向目标），两骨以上的链走解析解。
@@ -1391,8 +1413,10 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
     const tip = tail ? boneTipWorld(tail, tailBone?.length ?? 0) : null
     // 名字在进 draft 前定好：创建完要选中新节点（名字与约束名是两个命名空间，互不冲突）
     const nodeName = uniqueName(document.bones.map((item) => item.name), tail ? `${tail}_ik` : 'ik')
+    // 约束名同样提前定好：建完要把选中切到它上面（见下面 selectConstraint），闭包里那段拿不到它
+    const constraintName = uniqueName(document.constraints.map((item) => item.name), kind)
     update(t('新建约束'), (draft) => {
-      const name = uniqueName(draft.constraints.map((c) => c.name), kind)
+      const name = constraintName
       const base = { name, order: draft.constraints.length, enabled: true, bones: [] as string[], target: '' }
       if (kind === 'ik') {
         // IK 节点骨：挂在层级根骨骼 root 下、零长度（就是个把手）、约束红 —— 与视口里 IK 手柄同色
@@ -1407,9 +1431,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         )
         draft.constraints.push({ ...createIkConstraint(), ...base, type: 'ik', target: nodeName, bones: chain })
       } else {
-        // 变换 / 路径的宿主是第一根被驱动骨：点中的骨骼进骨链，目标（来源骨 / 路径骨）在面板里选
-        const host = bone || draft.bones[0]?.name || ''
-        const bones = host ? [host] : []
+        // 变换 / 路径：点中的那根骨就是被驱动骨（没有就上面已经拦掉了），目标（来源骨 / 路径骨）在面板里选
+        const bones = bone ? [bone] : []
         if (kind === 'transform') {
           draft.constraints.push({ ...createTransformConstraint(), ...base, type: 'transform', bones })
         } else draft.constraints.push({ ...createPathConstraint(), ...base, type: 'path', bones })
@@ -1421,6 +1444,12 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       return
     }
     if (bone) setCollapsed((prev) => (prev.has(bone) ? new Set([...prev].filter((n) => n !== bone)) : prev))
+    /*
+     * 变换 / 路径建出来时**目标还是空的**（来源骨 / 路径骨得工程里真的有），而求解器见到
+     * 空目标直接返回 —— 不把人带到「选目标」那一步，点完就只是多了一行徽标，看着像没生效。
+     * 选中新约束 = 检查器切到约束页并给出「目标」下拉，接着就能选。
+     */
+    selection.selectConstraint(constraintName)
   }
 
   /** 右键菜单：记录点击位置与目标对象 */
@@ -1690,15 +1719,15 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
             {
               key: 'transform',
               label: t('添加变换约束'),
-              hint: t('继承位移 / 旋转 / 缩放 / 斜切'),
-              icon: <Maximize2 size={12} />,
+              hint: labelledHint(t('继承位移 / 旋转 / 缩放 / 斜切'), drivenBoneHint()),
+              icon: <Maximize2 size={12} className={CONSTRAINT_ICON_COLOR.transform} />,
               onSelect: () => addConstraint('transform', host)
             },
             {
               key: 'path',
               label: t('添加路径约束'),
-              hint: t('骨骼沿路径曲线排布'),
-              icon: <Route size={12} />,
+              hint: labelledHint(t('骨骼沿路径折线排布'), drivenBoneHint()),
+              icon: <Route size={12} className={CONSTRAINT_ICON_COLOR.path} />,
               onSelect: () => addConstraint('path', host)
             }
           ]
@@ -2179,7 +2208,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         </button>
         <button
           type="button"
-          title={t('新建变换约束')}
+          title={labelledHint(t('新建变换约束'), drivenBoneHint())}
           className="hao-btn h-[18px] px-1.5"
           onClick={poseOnly(() => addConstraint('transform'))}
         >
@@ -2188,7 +2217,7 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         </button>
         <button
           type="button"
-          title={t('新建路径约束')}
+          title={labelledHint(t('新建路径约束'), drivenBoneHint())}
           className="hao-btn h-[18px] px-1.5"
           onClick={poseOnly(() => addConstraint('path'))}
         >

@@ -177,6 +177,8 @@ function ConstraintEditor({
   const chainBones = constraint.bones
   const chainCandidates = document.bones.filter((bone) => !chainBones.includes(bone.name))
   const targetBoneExists = constraint.target !== '' && document.bones.some((bone) => bone.name === constraint.target)
+  /** 约束的自称（IK / 变换 / 路径），用在下面「…不会生效」之类的提醒里 */
+  const kindLabel = constraintLabel(constraint.type)
 
   /** 「目标」的写入口：下拉选择与「从层级树拖骨骼进来」共用（拖进来的骨骼一定存在） */
   const setTargetBone = (name: string): void => {
@@ -268,16 +270,31 @@ function ConstraintEditor({
           />
         ) : null}
         {/*
-          IK 静默失效的两个坑：「没选目标」和「链是空的」——求解器直接返回，
-          视口里看不出任何异常。这里就地提醒，比等编译告警直观
+          「静默失效」的坑 —— 求解器遇到这些情况**直接返回**，视口里看不出任何异常，
+          只能在这里就地提醒（比等编译告警直观）：
+          - IK / 变换：必须有目标骨，且被驱动链非空；
+          - 路径：目标骨 + 被约束骨骼连成折线，**至少 2 个点**才谈得上排布（只选一根骨又没目标 = 永远不生效）；
+          - 物理：本来就不参与求解，不在此列。
         */}
-        {constraint.type === 'ik' && !targetBoneExists ? (
-          <span className="text-3xs text-warn">
-            {constraint.target ? t('目标骨骼「{0}」不存在，IK 不会生效', constraint.target) : t('没有目标骨骼，IK 不会生效')}
-          </span>
-        ) : null}
-        {constraint.type === 'ik' && chainBones.length === 0 ? (
-          <span className="text-3xs text-warn">{t('受约束骨骼链是空的，IK 不会生效')}</span>
+        {constraint.type === 'path' ? (
+          chainBones.length + (targetBoneExists ? 1 : 0) < 2 ? (
+            <span className="text-3xs text-warn">
+              {t('路径约束至少要有 2 个点（目标骨 + 被约束骨骼），当前只有 {0} 个，不会生效', chainBones.length + (targetBoneExists ? 1 : 0))}
+            </span>
+          ) : null
+        ) : constraint.type !== 'physics' ? (
+          <>
+            {!targetBoneExists ? (
+              <span className="text-3xs text-warn">
+                {constraint.target
+                  ? t('目标骨骼「{0}」不存在，{1} 不会生效', [constraint.target, kindLabel])
+                  : t('没有目标骨骼，{0} 不会生效', [kindLabel])}
+              </span>
+            ) : null}
+            {chainBones.length === 0 ? (
+              <span className="text-3xs text-warn">{t('受约束骨骼链是空的，{0} 不会生效', [kindLabel])}</span>
+            ) : null}
+          </>
         ) : null}
         <div className="flex flex-col gap-1">
           <span className="text-3xs text-content-lo">
@@ -386,31 +403,37 @@ function ConstraintEditor({
 
       {constraint.type === 'transform' ? (
         <FieldGroup title={t('变换混合')}>
-          {(
-            [
-              ['mixRotate', '旋转'],
-              ['mixX', 'X 位移'],
-              ['mixY', 'Y 位移'],
-              ['mixScaleX', 'X 缩放'],
-              ['mixScaleY', 'Y 缩放'],
-              ['mixShearY', '斜切']
-            ] as const
-          ).map(([key, label]) => (
-            <NumberField
-              key={key}
-              label={t(label)}
-              value={constraint[key]}
-              step={0.05}
-              min={0}
-              max={1}
-              onChange={(value) =>
-                update(t('修改变换约束'), (draft) => {
-                  const item = draft.constraints.find((c) => c.name === constraint.name)
-                  if (item && item.type === 'transform') item[key] = value
-                })
-              }
-            />
-          ))}
+          {/*
+            两列排布：位移一行、缩放一行（X / Y 并排才对照得出来），旋转与斜切共用第三行。
+            六个字段竖排会把整块面板占满一屏，而它们本来就是成对的量 —— 并排看比上下对照直观。
+          */}
+          <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
+            {(
+              [
+                ['mixX', 'X 位移'],
+                ['mixY', 'Y 位移'],
+                ['mixScaleX', 'X 缩放'],
+                ['mixScaleY', 'Y 缩放'],
+                ['mixRotate', '旋转'],
+                ['mixShearY', '斜切']
+              ] as const
+            ).map(([key, label]) => (
+              <NumberField
+                key={key}
+                label={t(label)}
+                value={constraint[key]}
+                step={0.05}
+                min={0}
+                max={1}
+                onChange={(value) =>
+                  update(t('修改变换约束'), (draft) => {
+                    const item = draft.constraints.find((c) => c.name === constraint.name)
+                    if (item && item.type === 'transform') item[key] = value
+                  })
+                }
+              />
+            ))}
+          </div>
         </FieldGroup>
       ) : null}
 

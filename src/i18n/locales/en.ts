@@ -591,7 +591,8 @@ export const en: Record<string, string> = {
   '添加变换约束': 'Add transform constraint',
   '继承位移 / 旋转 / 缩放 / 斜切': 'Inherit translation / rotation / scale / shear',
   '添加路径约束': 'Add path constraint',
-  '骨骼沿路径曲线排布': 'Lay bones out along a path curve',
+  '骨骼沿路径折线排布': 'Lay bones out along a polyline path',
+  '先选中要被驱动的骨骼': 'Select the bone to be driven first',
   '未指定驱动骨骼：先选中骨骼再点': 'No driven bones specified: select bones first, then click',
   '新建 IK 节点骨驱动：{0}（节点骨挂在 root 下，可拖动 / 可打帧）':
     'Creates an IK node bone driving: {0} (the node bone lives under the root bone and can be dragged / keyframed)',
@@ -991,9 +992,13 @@ export const en: Record<string, string> = {
   '（无）': '(none)',
   '在层级树里定位「{0}」': 'Locate "{0}" in the hierarchy tree',
   '还没有可定位的目标骨骼': 'No target bone to locate yet',
-  '目标骨骼「{0}」不存在，IK 不会生效': 'Target bone "{0}" does not exist; IK will not take effect',
-  '没有目标骨骼，IK 不会生效': 'No target bone; IK will not take effect',
-  '受约束骨骼链是空的，IK 不会生效': 'The constrained bone chain is empty; IK will not take effect',
+  '目标骨骼「{0}」不存在，{1} 不会生效': 'Target bone "{0}" does not exist; {1} will not take effect',
+  '没有目标骨骼，{0} 不会生效': 'No target bone; {0} will not take effect',
+  '受约束骨骼链是空的，{0} 不会生效': 'The constrained bone chain is empty; {0} will not take effect',
+  '路径约束至少要有 2 个点（目标骨 + 被约束骨骼），当前只有 {0} 个，不会生效':
+    'A path constraint needs at least 2 points (target bone + constrained bones); only {0} right now, so it will not take effect',
+  '先选中要被驱动的骨骼，再新建变换 / 路径约束':
+    'Select the bone to be driven first, then add a transform / path constraint',
   '受约束骨骼链（': 'Constrained bone chain (',
   '链根 → 链尾，IK 按这个顺序驱动（单骨 = 让链尾指向目标，两骨及以上逐节弯曲）':
     'Chain root → chain tip; IK drives in this order (one bone = point the tip at the target; two or more bend joint by joint)',

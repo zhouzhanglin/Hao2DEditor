@@ -3,7 +3,14 @@ import { t } from '@i18n'
 import { AI_TRANSPORT_NOTICE } from '@shared/commandTypes'
 import { AI_COMMAND_API_DOC, AI_PLAYBOOK } from '@shared/aiGuides'
 import type { Platform } from '../platform'
-import { parseProject, projectNameFromPath, serializeProject, PROJECT_EXTENSION } from '@core/codec/projectJson'
+import {
+  parseProject,
+  projectNameFromPath,
+  serializeProject,
+  migrateLegacyProjectExtension,
+  LEGACY_PROJECT_EXTENSIONS,
+  PROJECT_EXTENSION
+} from '@core/codec/projectJson'
 import { decompileAsset } from '@core/codec/decompile'
 import type { AuthoringImage, EditorDocument } from '@core/model/authoring'
 import { importSpine } from '@importers/spine'
@@ -60,11 +67,11 @@ async function askImportTarget(kind: string): Promise<ImportTarget | null> {
 }
 
 /**
- * 工程文件过滤器。除了新后缀 `.hao2d.proj`，也放开旧的 `.hao2dproj` 与 `.json`，
+ * 工程文件过滤器。除了新后缀 `.hao2dproj`，也放开旧的 `.hao2d.proj` 与 `.json`，
  * 这样早期存下来的工程仍然能在文件对话框里选到（解析只看内容，不看后缀）。
  */
 function projectFilter(): { name: string; extensions: string[] }[] {
-  return [{ name: t('Hao2D 工程'), extensions: [PROJECT_EXTENSION, 'hao2dproj', 'json'] }]
+  return [{ name: t('Hao2D 工程'), extensions: [PROJECT_EXTENSION, ...LEGACY_PROJECT_EXTENSIONS] }]
 }
 
 /** 保存对话框里的默认文件名：优先用骨架名，为空时用 project */
@@ -456,9 +463,16 @@ export async function saveProject(saveAs: boolean): Promise<IoResult> {
     })
   }
   if (!path) return { ok: false, message: t('已取消') }
-  // 统一成 .hao2d.proj：没写后缀就补上，写了别的后缀（.json 除外，兼容老工程）就替换掉。
-  // 复合后缀必须整串判断——`path.extname('a.hao2d.proj')` 只会给出 `.proj`。
-  if (!new RegExp(`\\.(${PROJECT_EXTENSION.replace(/\./g, '\\.')}|json)$`, 'i').test(path)) {
+  /*
+   * 后缀统一成 `.hao2dproj`，分两步：
+   * 1. 旧复合后缀 `.hao2d.proj` → 新后缀（**保存即迁移**：老工程第一次保存时自动换掉，
+   *    下面写完再把旧文件删掉，工程目录里不留两份）；
+   * 2. 用户手打的其它后缀 / 干脆没写 → 补上或替换（`.json` 除外，那是更早的老工程，保持原样）。
+   */
+  const migration = migrateLegacyProjectExtension(path)
+  const legacyPath = migration.migrated ? path : null
+  path = migration.path
+  if (!new RegExp(`\\.(${PROJECT_EXTENSION}|json)$`, 'i').test(path)) {
     path = `${path.replace(/\.[^./\\]+$/, '')}.${PROJECT_EXTENSION}`
   }
 
@@ -483,12 +497,27 @@ export async function saveProject(saveAs: boolean): Promise<IoResult> {
   store.markSaved(path)
   await platform.recentAdd(path)
 
+  /*
+   * 后缀迁移的收尾：新文件已经写成功，才动手删旧文件 + 清掉最近列表里的旧路径。
+   * 顺序不能反 —— 先删后写，一旦写失败用户的工程就没了。
+   */
+  if (legacyPath) {
+    try {
+      await platform.deleteFile(legacyPath)
+      await platform.recentRemove(legacyPath)
+    } catch (error) {
+      console.warn('[hao2d] 迁移工程后缀后清理旧文件失败（新文件已保存）：', error)
+    }
+  }
+
   const total = store.document.images.length
   const parts: string[] = []
   if (copied.copied > 0) parts.push(t('{0} 张图片已复制到 {1}/', [copied.copied, ASSET_DIR]))
   // 没有复制任务：图片本来就随工程（上次已复制过，或本身就是工程内联数据）
   else if (total > 0 && copied.warnings.length === 0) parts.push(t('{0} 张图片已在工程内', total))
   let message = t('已保存到 {0}', baseName(path))
+  // 后缀迁移要说一句：用户下次在文件夹里看到的文件名变了，得知道是编辑器干的
+  if (legacyPath) message += t('（后缀已升级为 .{0}）', PROJECT_EXTENSION)
   if (parts.length > 0) message += t('（{0}）', parts.join(t('，')))
   if (copied.warnings.length > 0) message += t('；{0}', copied.warnings[0])
   if (copied.warnings.length > 0) console.warn('[hao2d] 图片复制告警：', copied.warnings)
@@ -907,8 +936,9 @@ export async function importDroppedPaths(paths: readonly string[]): Promise<IoRe
     }
   }
 
-  // 拖入工程文件 = 打开工程
-  const project = list.find((p) => /\.(hao2d\.proj|hao2dproj)$/i.test(p))
+  // 拖入工程文件 = 打开工程（新后缀 + 旧复合后缀都认；`.json` 不算，下面按图集 json 处理）
+  const projectExtension = `(${PROJECT_EXTENSION}|${LEGACY_PROJECT_EXTENSIONS[0]})`
+  const project = list.find((p) => new RegExp(`\\.${projectExtension}$`, 'i').test(p))
   if (project) return openProjectAt(project)
 
   const images = list.filter((p) => IMAGE_EXT_RE.test(p))

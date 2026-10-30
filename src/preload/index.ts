@@ -41,6 +41,7 @@ const bridge: HaoBridge = {
   registerAssetRoot: (dir: string) => invoke<void>(IPC.registerAssetRoot, dir),
   recentList: () => invoke<string[]>(IPC.recentList),
   recentAdd: (path: string) => invoke<void>(IPC.recentAdd, path),
+  recentRemove: (path: string) => invoke<void>(IPC.recentRemove, path),
   revealInFolder: (path: string) => invoke<void>(IPC.revealInFolder, path),
   setTitle: (title: string) => invoke<void>(IPC.setTitle, title),
 
@@ -79,6 +80,8 @@ const bridge: HaoBridge = {
       ipcRenderer.off(IPC.menuCommand, listener)
     }
   },
+
+  consumeOpenRequests: () => invoke<string[]>(IPC.consumeOpenRequests),
 
   onOpenProjectRequest: (cb: (path: string) => void) => {
     const listener = (_e: unknown, p: string): void => cb(p)

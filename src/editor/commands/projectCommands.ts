@@ -84,7 +84,7 @@ export function registerProjectCommands(): void {
       name: 'createProject',
       title: '新建并存盘工程',
       description:
-        '新建工程并**立刻写出**工程文件到 dir 目录下（文件名为 <name>.hao2d.proj）。新工程图片池是空的，随后的图片靠 importImage / splitAtlas 等补',
+        '新建工程并**立刻写出**工程文件到 dir 目录下（文件名为 <name>.hao2dproj）。新工程图片池是空的，随后的图片靠 importImage / splitAtlas 等补',
       args: {
         name: { type: 'string', description: '项目名（不能为空，也用于工程文件名）', required: true },
         dir: { type: 'string', description: '保存目录（绝对路径）', required: true },
@@ -140,7 +140,7 @@ export function registerProjectCommands(): void {
         path: { type: 'string', description: '另存到的文件路径；不传则写回当前工程路径' }
       },
       returns: '{ path, warnings }',
-      example: { path: '/Users/me/projects/hero.hao2d.proj' }
+      example: { path: '/Users/me/projects/hero.hao2dproj' }
     },
     async (args) => {
       const store = useProjectStore.getState()

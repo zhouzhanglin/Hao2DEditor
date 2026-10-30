@@ -400,14 +400,24 @@ export default function App() {
   )
 
   /**
-   * 首次进入：不再载入内置示例，而是**自动打开上次的工程**。
-   * 最近列表由主进程持久化（打开与保存都会写入），这里只取第一条并确认文件还在；
-   * 没有历史、或文件已被移动/删除时保持空白工程，用户从「新建 / 打开 / 导入」开始。
+   * 首次进入：优先打开**双击进来的那个工程**，否则**自动打开上次的工程**。
+   *
+   * 双击 `.hao2dproj` 启动时，主进程在 ready 之前就收到了路径，先排队等渲染层来取
+   * （见 main/openRequests.ts）—— 这里取一次，取到就以它优先，绝不能再按「上次工程」覆盖一遍。
+   * 最近列表由主进程持久化（打开与保存都会写入）；没有历史、或文件已被移动/删除时
+   * 保持空白工程，用户从「新建 / 打开 / 导入」开始。
    */
   useEffect(() => {
     if (booted.current) return
     booted.current = true
     void (async () => {
+      const requested = await getPlatform().consumeOpenRequests()
+      const requestedPath = requested[requested.length - 1]
+      if (requestedPath) {
+        const opened = await openProjectAt(requestedPath)
+        flash(opened.message)
+        return
+      }
       const path = await lastProject()
       if (!path) {
         flash(t('新建空白工程：可导入图片或 Spine / DragonBones 资源开始'))
@@ -697,6 +707,18 @@ export default function App() {
     globalThis.document.title = `${projectName}${dirty ? ' *' : ''} — Hao2D Editor`
     return getPlatform().onMenuCommand(handleCommand)
   }, [projectName, dirty, handleCommand])
+
+  /**
+   * 双击 `.hao2dproj` 打开工程（程序**已经在跑**的情况）。
+   *
+   * 主进程在渲染层就绪后直接推路径过来；启动时就被双击的那一次走 boot 里的
+   * `consumeOpenRequests`（事件早于挂载，只能排队等取）。
+   */
+  useEffect(() => {
+    return getPlatform().onOpenProjectRequest((path) => {
+      void run(openProjectAt(path), t('正在打开工程…'))
+    })
+  }, [run])
 
   // 快捷键
   useEffect(() => {

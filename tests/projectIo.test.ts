@@ -32,9 +32,15 @@ vi.mock('@editor/platform', async (importOriginal) => {
         env.files.set(p, text)
       },
       exists: async (p: string) => env.files.has(p),
+      deleteFile: async (p: string) => {
+        env.files.delete(p)
+      },
       recentList: async () => [...env.recents],
       recentAdd: async (p: string) => {
         env.recents = [p, ...env.recents.filter((v) => v !== p)]
+      },
+      recentRemove: async (p: string) => {
+        env.recents = env.recents.filter((v) => v !== p)
       },
       pickSavePath: async (options?: { defaultPath?: string }) => {
         env.saveOptions = options ?? null
@@ -59,8 +65,8 @@ const { createProjectAt, lastProject, newProject, openProjectAt, saveProject } =
 )
 
 describe('工程文件后缀', () => {
-  it('使用 .hao2d.proj', () => {
-    expect(PROJECT_EXTENSION).toBe('hao2d.proj')
+  it('使用 .hao2dproj', () => {
+    expect(PROJECT_EXTENSION).toBe('hao2dproj')
   })
 })
 
@@ -77,14 +83,14 @@ describe('启动时恢复上次工程', () => {
   })
 
   it('上次的工程已被删除 / 移动时返回 null', async () => {
-    env.recents = ['/proj/moved.hao2d.proj']
+    env.recents = ['/proj/moved.hao2dproj']
     expect(await lastProject()).toBeNull()
   })
 
   it('上次的工程仍在时返回该路径', async () => {
-    env.files.set('/proj/hero.hao2d.proj', serializeDocument(createSampleDocument()))
-    env.recents = ['/proj/hero.hao2d.proj']
-    expect(await lastProject()).toBe('/proj/hero.hao2d.proj')
+    env.files.set('/proj/hero.hao2dproj', serializeDocument(createSampleDocument()))
+    env.recents = ['/proj/hero.hao2dproj']
+    expect(await lastProject()).toBe('/proj/hero.hao2dproj')
   })
 })
 
@@ -99,9 +105,9 @@ describe('打开工程', () => {
   it('解析失败时不动当前文档，并给出可读错误', async () => {
     useProjectStore.getState().setDocument(createSampleDocument(), null, false)
     const before = useProjectStore.getState().document.bones.length
-    env.files.set('/proj/broken.hao2d.proj', '{ this is not json')
+    env.files.set('/proj/broken.hao2dproj', '{ this is not json')
 
-    const result = await openProjectAt('/proj/broken.hao2d.proj')
+    const result = await openProjectAt('/proj/broken.hao2dproj')
 
     expect(result.ok).toBe(false)
     expect(result.message).toContain('解析失败')
@@ -110,21 +116,21 @@ describe('打开工程', () => {
 
   it('成功后替换文档并写入最近列表', async () => {
     const sample = createSampleDocument()
-    env.files.set('/proj/hero.hao2d.proj', serializeDocument(sample))
+    env.files.set('/proj/hero.hao2dproj', serializeDocument(sample))
 
-    const result = await openProjectAt('/proj/hero.hao2d.proj')
+    const result = await openProjectAt('/proj/hero.hao2dproj')
 
     expect(result.ok).toBe(true)
-    expect(useProjectStore.getState().projectPath).toBe('/proj/hero.hao2d.proj')
+    expect(useProjectStore.getState().projectPath).toBe('/proj/hero.hao2dproj')
     expect(useProjectStore.getState().document.bones.length).toBe(sample.bones.length)
-    expect(env.recents[0]).toBe('/proj/hero.hao2d.proj')
+    expect(env.recents[0]).toBe('/proj/hero.hao2dproj')
   })
 
   it('打开工程后把 AI 陪伴文件写进工程 ai/ 子目录（文档 + 手册；服务没跑则不写 server.json）', async () => {
     const sample = createSampleDocument()
-    env.files.set('/proj/hero.hao2d.proj', serializeDocument(sample))
+    env.files.set('/proj/hero.hao2dproj', serializeDocument(sample))
 
-    const result = await openProjectAt('/proj/hero.hao2d.proj')
+    const result = await openProjectAt('/proj/hero.hao2dproj')
 
     expect(result.ok).toBe(true)
     // 文档与手册来自 docs/*.md 的构建期内联（@shared/aiGuides），断言真实内容的特征串
@@ -137,7 +143,7 @@ describe('打开工程', () => {
   it('打开工程时登记工程目录与图片目录（资源面板缩略图靠它才能读文件）', async () => {
     const sample = createEmptyDocument()
     env.files.set(
-      '/proj/hero.hao2d.proj',
+      '/proj/hero.hao2dproj',
       serializeDocument({
         ...sample,
         images: [
@@ -149,7 +155,7 @@ describe('打开工程', () => {
     )
     env.assetRoots = []
 
-    const result = await openProjectAt('/proj/hero.hao2d.proj')
+    const result = await openProjectAt('/proj/hero.hao2dproj')
 
     expect(result.ok).toBe(true)
     expect(env.assetRoots).toContain('/proj')
@@ -169,43 +175,65 @@ describe('保存工程', () => {
     newProject()
   })
 
-  it('默认文件名用骨架名 + .hao2d.proj', async () => {
+  it('默认文件名用骨架名 + .hao2dproj', async () => {
     useProjectStore.getState().setDocument(createSampleDocument(), null, false)
-    env.savePath = '/proj/out.hao2d.proj'
+    env.savePath = '/proj/out.hao2dproj'
 
     await saveProject(true)
 
-    expect(env.saveOptions?.defaultPath).toBe('sample-hero.hao2d.proj')
+    expect(env.saveOptions?.defaultPath).toBe('sample-hero.hao2dproj')
   })
 
-  it('骨架名为空时退回 project.hao2d.proj', async () => {
+  it('骨架名为空时退回 project.hao2dproj', async () => {
     // createEmptyDocument 默认叫 armature，这里显式清空来验证兜底
     useProjectStore.getState().setDocument({ ...createEmptyDocument(), armatureName: '  ' }, null, false)
-    env.savePath = '/proj/out.hao2d.proj'
+    env.savePath = '/proj/out.hao2dproj'
 
     await saveProject(true)
 
-    expect(env.saveOptions?.defaultPath).toBe('project.hao2d.proj')
+    expect(env.saveOptions?.defaultPath).toBe('project.hao2dproj')
   })
 
-  it('用户没写后缀时自动补上 .hao2d.proj', async () => {
+  it('用户没写后缀时自动补上 .hao2dproj', async () => {
     env.savePath = '/proj/noext'
 
     const result = await saveProject(true)
 
     expect(result.ok).toBe(true)
-    expect(env.files.has('/proj/noext.hao2d.proj')).toBe(true)
-    expect(useProjectStore.getState().projectPath).toBe('/proj/noext.hao2d.proj')
+    expect(env.files.has('/proj/noext.hao2dproj')).toBe(true)
+    expect(useProjectStore.getState().projectPath).toBe('/proj/noext.hao2dproj')
   })
 
-  it('写了别的后缀时替换成 .hao2d.proj（.json 除外，兼容老工程）', async () => {
+  it('写了别的后缀时替换成 .hao2dproj（.json 除外，兼容老工程）', async () => {
     env.savePath = '/proj/foo.hao2d'
     await saveProject(true)
-    expect(useProjectStore.getState().projectPath).toBe('/proj/foo.hao2d.proj')
+    expect(useProjectStore.getState().projectPath).toBe('/proj/foo.hao2dproj')
 
     env.savePath = '/proj/legacy.json'
     await saveProject(true)
     expect(useProjectStore.getState().projectPath).toBe('/proj/legacy.json')
+  })
+
+  it('旧后缀 .hao2d.proj 保存时自动迁移成 .hao2dproj，并清掉旧文件与最近列表', async () => {
+    const old = '/proj/old.hao2d.proj'
+    env.files.set(old, serializeDocument(createSampleDocument()))
+    env.recents = [old]
+    expect((await openProjectAt(old)).ok).toBe(true)
+
+    // 打开不迁移（用户没保存就不该动他的文件）
+    expect(useProjectStore.getState().projectPath).toBe(old)
+    expect(env.files.has(old)).toBe(true)
+
+    const result = await saveProject(false)
+    expect(result.ok).toBe(true)
+    // 新文件就位、旧文件删掉、最近列表换成新路径
+    expect(env.files.has('/proj/old.hao2dproj')).toBe(true)
+    expect(env.files.has(old)).toBe(false)
+    expect(useProjectStore.getState().projectPath).toBe('/proj/old.hao2dproj')
+    expect(env.recents).toContain('/proj/old.hao2dproj')
+    expect(env.recents).not.toContain(old)
+    // 状态栏提示要说清后缀变了
+    expect(result.message).toContain('hao2dproj')
   })
 })
 
@@ -219,7 +247,7 @@ describe('多骨架工程的保存 / 打开', () => {
 
   it('保存写出全部骨架与共享图片池，重新打开能逐个还原', async () => {
     const pool = [{ name: 'tex', path: '/img/tex.png', width: 8, height: 8, loose: false }]
-    useProjectStore.getState().setDocument({ ...createEmptyDocument('骨架A'), images: pool }, '/proj/multi.hao2d.proj', false)
+    useProjectStore.getState().setDocument({ ...createEmptyDocument('骨架A'), images: pool }, '/proj/multi.hao2dproj', false)
 
     // 第二个骨架：改帧率，验证「各自的动画 / 数据互相独立」
     useProjectStore.getState().addSkeleton('骨架B')
@@ -235,11 +263,11 @@ describe('多骨架工程的保存 / 打开', () => {
 
     const saved = await saveProject(false)
     expect(saved.ok).toBe(true)
-    const raw = JSON.parse(env.files.get('/proj/multi.hao2d.proj') ?? '{}') as Record<string, unknown>
+    const raw = JSON.parse(env.files.get('/proj/multi.hao2dproj') ?? '{}') as Record<string, unknown>
     expect(raw.activeSkeleton).toBe(2)
     expect((raw.skeletons as unknown[]).length).toBe(3)
 
-    const opened = await openProjectAt('/proj/multi.hao2d.proj')
+    const opened = await openProjectAt('/proj/multi.hao2dproj')
     expect(opened.ok).toBe(true)
     const after = useProjectStore.getState()
     expect(after.skeletons.map((skeleton) => skeleton.armatureName)).toEqual(['骨架A', '骨架B', '骨架C'])
@@ -261,7 +289,7 @@ describe('皮肤随工程文件走', () => {
   })
 
   it('切换皮肤 → 保存 → 重新打开，恢复上次的皮肤', async () => {
-    useProjectStore.getState().setDocument(createEmptyDocument('角色'), '/proj/skin.hao2d.proj', false)
+    useProjectStore.getState().setDocument(createEmptyDocument('角色'), '/proj/skin.hao2dproj', false)
     useProjectStore.getState().update('新建皮肤', (draft) => {
       draft.skins.push({ name: 'skin1', slots: draft.slots.map((slot) => ({ slot: slot.name, attachments: [] })) })
     })
@@ -270,23 +298,23 @@ describe('皮肤随工程文件走', () => {
 
     expect((await saveProject(false)).ok).toBe(true)
     // 单骨架工程：骨架字段平铺在顶层，`editorMeta.activeSkin` 直接写在文件里
-    const raw = JSON.parse(env.files.get('/proj/skin.hao2d.proj') ?? '{}') as {
+    const raw = JSON.parse(env.files.get('/proj/skin.hao2dproj') ?? '{}') as {
       editorMeta: { activeSkin: string }
     }
     expect(raw.editorMeta.activeSkin).toBe('skin1')
 
     // 模拟重开工程：先把选中态改回默认，打开后必须回到工程里记的那个皮肤
     useSelectionStore.getState().select({ skin: '' })
-    expect((await openProjectAt('/proj/skin.hao2d.proj')).ok).toBe(true)
+    expect((await openProjectAt('/proj/skin.hao2dproj')).ok).toBe(true)
     expect(useSelectionStore.getState().skin).toBe('skin1')
   })
 
   it('文件里的皮肤已经不存在（被删 / 改名）时退回默认皮肤', async () => {
     const doc = createEmptyDocument('角色')
     doc.editorMeta.activeSkin = 'gone'
-    env.files.set('/proj/stale.hao2d.proj', serializeProject([doc], 0, 'stale'))
+    env.files.set('/proj/stale.hao2dproj', serializeProject([doc], 0, 'stale'))
 
-    expect((await openProjectAt('/proj/stale.hao2d.proj')).ok).toBe(true)
+    expect((await openProjectAt('/proj/stale.hao2dproj')).ok).toBe(true)
     expect(useSelectionStore.getState().skin).toBe('')
   })
 })
@@ -301,7 +329,7 @@ describe('新建项目（弹窗确认后）', () => {
   })
 
   it('默认项目名 hao2dProject + 默认一根 root（快捷新建与弹窗流程一致）', () => {
-    useProjectStore.getState().setProjectInfo({ projectName: 'x', projectPath: '/tmp/x.hao2d.proj' })
+    useProjectStore.getState().setProjectInfo({ projectName: 'x', projectPath: '/tmp/x.hao2dproj' })
     newProject()
     const state = useProjectStore.getState()
     expect(state.projectName).toBe(DEFAULT_PROJECT_NAME)
@@ -322,26 +350,26 @@ describe('新建项目（弹窗确认后）', () => {
     expect(env.imageCacheReleases).toBe(1)
     const state = useProjectStore.getState()
     expect(state.projectName).toBe('dragon')
-    expect(state.projectPath).toBe('/proj/dragon.hao2d.proj')
+    expect(state.projectPath).toBe('/proj/dragon.hao2dproj')
     expect(state.skeletons).toHaveLength(1)
     // 新项目默认带一根 root，且是共享图片池的单骨架项目
     expect(state.skeletons[0].bones.map((bone) => bone.name)).toEqual(['root'])
     expect(state.skeletons[0].images).toEqual([])
-    const raw = JSON.parse(env.files.get('/proj/dragon.hao2d.proj') ?? '{}') as Record<string, unknown>
+    const raw = JSON.parse(env.files.get('/proj/dragon.hao2dproj') ?? '{}') as Record<string, unknown>
     expect(raw.projectName).toBe('dragon')
   })
 
   it('项目名里的非法文件名字符会被替换成下划线', async () => {
     const result = await createProjectAt('a/b:c', '/proj')
     expect(result.ok).toBe(true)
-    expect(useProjectStore.getState().projectPath).toBe('/proj/a_b_c.hao2d.proj')
+    expect(useProjectStore.getState().projectPath).toBe('/proj/a_b_c.hao2dproj')
   })
 })
 
 describe('项目名（导出目录 / 图集名 / 图集页名都跟它走）', () => {
   it('已命名的工程：导入资源（setDocument）不会把项目名换成骨架名', () => {
     const store = useProjectStore.getState()
-    store.setProjectInfo({ projectName: 'MyGame', projectPath: '/proj/MyGame.hao2d.proj' })
+    store.setProjectInfo({ projectName: 'MyGame', projectPath: '/proj/MyGame.hao2dproj' })
     store.setDocument({ ...createEmptyDocument('Rooster'), images: [] }, null, false)
     expect(useProjectStore.getState().projectName).toBe('MyGame')
   })
@@ -353,7 +381,7 @@ describe('项目名（导出目录 / 图集名 / 图集页名都跟它走）', (
   })
 
   it('老工程没有 projectName 字段时，用工程文件名兜底', () => {
-    expect(projectNameFromPath('/proj/My.Game.hao2d.proj')).toBe('My.Game')
+    expect(projectNameFromPath('/proj/My.Game.hao2dproj')).toBe('My.Game')
     expect(projectNameFromPath('C:\\proj\\legacy.hao2dproj')).toBe('legacy')
     expect(projectNameFromPath('mem:/x.json')).toBe('x')
     expect(projectNameFromPath('/proj/noext')).toBe('noext')

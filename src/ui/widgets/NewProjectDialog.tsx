@@ -19,7 +19,7 @@ const FRAME_RATES = [24, 30, 60]
 /**
  * 「新建项目」弹窗：填**项目名** + 选**保存位置** + 选**帧率**，前两个都不能空。
  *
- * 项目名会直接当文件名用（`<目录>/<项目名>.hao2d.proj`），也是导出的图集名与输出目录名；
+ * 项目名会直接当文件名用（`<目录>/<项目名>.hao2dproj`），也是导出的图集名与输出目录名；
  * 与骨架名无关（一个项目里可以有多个骨架）。
  */
 export default function NewProjectDialog({ onClose, onConfirm }: NewProjectDialogProps) {
@@ -68,7 +68,7 @@ export default function NewProjectDialog({ onClose, onConfirm }: NewProjectDialo
     const picked = await getPlatform().pickFiles({
       directory: true,
       multi: false,
-      title: t('选择项目的保存位置（会在里面建一个 <项目名>.hao2d.proj）')
+      title: t('选择项目的保存位置（会在里面建一个 <项目名>.hao2dproj）')
     })
     const next = picked[0]
     if (!next) return

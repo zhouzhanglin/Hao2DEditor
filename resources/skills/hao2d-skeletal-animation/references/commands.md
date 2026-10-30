@@ -38,7 +38,7 @@
 
 | 命令 | 参数 | 说明 | 返回 |
 | --- | --- | --- | --- |
-| `createProject` | `name`*(string) 项目名（不能为空，也用于工程文件名）<br>`dir`*(string) 保存目录（绝对路径）<br>`frameRate`?(number) 帧率 24 / 30 / 60；不传用 30 | 新建工程并**立刻写出**工程文件到 dir 目录下（文件名为 <name>.hao2d.proj）。新工程图片池是空的，随后的图片靠 importImage / splitAtlas 等补 | { projectName, path, next } |
+| `createProject` | `name`*(string) 项目名（不能为空，也用于工程文件名）<br>`dir`*(string) 保存目录（绝对路径）<br>`frameRate`?(number) 帧率 24 / 30 / 60；不传用 30 | 新建工程并**立刻写出**工程文件到 dir 目录下（文件名为 <name>.hao2dproj）。新工程图片池是空的，随后的图片靠 importImage / splitAtlas 等补 | { projectName, path, next } |
 | `deleteImage` | `image`*(string) 图片名（用 listImages 查）<br>`force`?(boolean=false) 有附件引用时也照删 | 从图片池删掉一张图。仍被附件引用时默认拒绝执行，确认要删就带 force: true（引用它的附件会退化成纯色，附件本身保留） | { image, references } |
 | `importDragonBones` | `jsonPath`*(string) DragonBones 骨骼 JSON 的绝对路径 | 按路径导入 DragonBones 骨骼 JSON（**整份替换**当前文档，不弹「新建工程 / 并入当前工程」确认框）。同目录的 texture_*.json 图集会被自动收集 | { bones, slots, animations } |
 | `importImage` | `data`?(string) 图片字节：base64 或 dataURL（与 path 二选一）<br>`path`?(string) 本地图片绝对路径（与 data 二选一）<br>`name`?(string) 图片名（不含目录与扩展名）；不传用原文件名<br>`ext`?(string) data 模式下的格式（png/jpg/jpeg/webp/gif），不传从 dataURL 推断或默认 png | 把一张图片写进工程目录的 images/ 并登记到图片池，供 addDisplay 做成附件。图片来源二选一：data（base64 或 dataURL）/ path（本地绝对路径）。工程需先保存或创建（确定 images/ 目录）。name 不传用原文件名自动命名，重名自动加序号 | { name, width, height, path } |

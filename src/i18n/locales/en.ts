@@ -321,8 +321,8 @@ export const en: Record<string, string> = {
   '导入': 'Import',
 
   // ── 新建项目弹窗 ────────────────────────────────────────────────────
-  '选择项目的保存位置（会在里面建一个 <项目名>.hao2d.proj）':
-    'Choose where to save the project (a <project name>.hao2d.proj will be created inside)',
+  '选择项目的保存位置（会在里面建一个 <项目名>.hao2dproj）':
+    'Choose where to save the project (a <project name>.hao2dproj will be created inside)',
   '项目名': 'Project name',
   '必填，不能含空格或 / \\ : * ? " < > |，例如 dragon_01 或 龙_01':
     'Required; no spaces or / \ : * ? " < > |, e.g. dragon_01',
@@ -1462,6 +1462,8 @@ export const en: Record<string, string> = {
   '{0} 张图片已复制到 {1}/': '{0} image(s) copied to {1}/',
   '{0} 张图片已在工程内': '{0} image(s) already inside the project',
   '已保存到 {0}': 'Saved to {0}',
+  '正在打开工程…': 'Opening project…',
+  '（后缀已升级为 .{0}）': ' (extension upgraded to .{0})',
   '（{0}）': ' ({0})',
   '，': ', ',
   '；{0}': '; {0}',

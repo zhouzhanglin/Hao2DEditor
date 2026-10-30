@@ -16,9 +16,8 @@ const log = createLogger('fs')
 /**
  * 允许读写的文本扩展名（导入/导出与工程文件）。
  *
- * 注意工程文件用的是**复合后缀** `.hao2d.proj`，而 `path.extname()` 只会返回最后一段
- * （`.proj`），所以这里既要放 `.proj`，也要保留旧的 `.hao2dproj`，
- * 否则工程文件的读写会被这道白名单拦掉。
+ * 工程文件现在用单段后缀 `.hao2dproj`；`.proj` 留着是为了**旧工程**（`.hao2d.proj`
+ * 的 extname 只会给出最后一段 `.proj`）仍能读写 —— 它们在下一次保存时才会被改成新后缀。
  */
 const TEXT_EXT = new Set([
   '.json',
@@ -266,6 +265,15 @@ export async function recentList(): Promise<string[]> {
 export async function recentAdd(p: string): Promise<void> {
   const list = await recentList()
   const next = [p, ...list.filter((v) => v !== p)].slice(0, 12)
+  await fsp.mkdir(path.dirname(recentFile()), { recursive: true })
+  await fsp.writeFile(recentFile(), JSON.stringify(next, null, 2), 'utf8')
+}
+
+/** 从最近列表移除一条：工程改名 / 后缀迁移后，旧路径已经是死链，留着只会让人点空 */
+export async function recentRemove(p: string): Promise<void> {
+  const list = await recentList()
+  const next = list.filter((v) => v !== p)
+  if (next.length === list.length) return
   await fsp.mkdir(path.dirname(recentFile()), { recursive: true })
   await fsp.writeFile(recentFile(), JSON.stringify(next, null, 2), 'utf8')
 }

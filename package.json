@@ -85,6 +85,15 @@
     ],
     "artifactName": "Hao2D.Editor-${version}-${os}-${arch}.${ext}",
     "afterPack": "./scripts/afterPack.cjs",
+    "fileAssociations": [
+      {
+        "ext": "hao2dproj",
+        "name": "Hao2D Project",
+        "description": "Hao2D 工程文件",
+        "role": "Editor",
+        "rank": "Owner"
+      }
+    ],
     "mac": {
       "category": "public.app-category.graphics-design",
       "icon": "build/icon.icns",

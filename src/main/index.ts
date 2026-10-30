@@ -7,6 +7,8 @@ import { buildAppMenu } from './menu'
 import { setLocale, systemLocale } from './i18n'
 import { startCommandServer, stopCommandServer } from './commandServer'
 import { cancelAllVideoExports } from './videoExport'
+import { findProjectArg, isRendererReady, queueOpenProject, resetRendererReady } from './openRequests'
+import { IPC } from '@shared/ipcTypes'
 
 const log = createLogger('main')
 
@@ -20,6 +22,28 @@ let mainWindow: BrowserWindow | null = null
 function devIconPath(): string | undefined {
   if (app.isPackaged) return undefined
   return path.join(app.getAppPath(), 'build', 'icon.png')
+}
+
+/**
+ * 「用编辑器打开这个工程」（双击文件 / 拖到 Dock 图标 / 命令行带路径）。
+ *
+ * 渲染层已就绪就直接推事件；否则先排队，等它挂载后自己来取（见 openRequests.ts）。
+ * 无论哪种情况都把窗口叫到前面 —— 双击文件的用户期待看到编辑器。
+ */
+function handleOpenProjectFile(filePath: string): void {
+  if (!filePath) return
+  // 窗口被关掉后（macOS 关窗不退出）又双击工程：先把窗口建回来，否则路径只能躺在队列里
+  if (!mainWindow && app.isReady()) createWindow()
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+    if (isRendererReady()) {
+      mainWindow.webContents.send(IPC.openProjectRequest, filePath)
+      return
+    }
+  }
+  queueOpenProject(filePath)
 }
 
 function createWindow(): void {
@@ -62,6 +86,9 @@ function createWindow(): void {
     mainWindow = null
   })
 
+  // 渲染层重新加载（刷新 / HMR）后要重新走「取一次队列 + 之后推事件」的握手
+  mainWindow.webContents.on('did-start-loading', () => resetRendererReady())
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
@@ -80,6 +107,37 @@ registerSchemes()
 // 菜单栏 / 「关于」显示的应用名。dev 下 Electron 默认叫 "Electron"，
 // 必须在 ready 之前显式改名，否则 macOS app 菜单标题会一直是 "Electron"。
 app.setName('Hao2D')
+
+/*
+ * 双击 `.hao2dproj`：macOS 通过 `open-file` 事件把路径交过来，而**首次启动（双击打开）
+ * 时这个事件会在 ready 之前就到达** —— 监听必须注册在模块顶层，放进 whenReady 里会漏掉。
+ */
+app.on('open-file', (event, filePath) => {
+  event.preventDefault()
+  handleOpenProjectFile(filePath)
+})
+
+/*
+ * 单实例：双击第二个工程文件时不该再开一个编辑器窗口（两个进程抢同一份工程 = 互相覆盖）。
+ * 拿不到锁的实例直接退出，把 argv 交给已运行的那一个。
+ */
+const singleInstanceLock = app.requestSingleInstanceLock()
+if (!singleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', (_event, argv) => {
+    const filePath = findProjectArg(argv)
+    if (filePath) handleOpenProjectFile(filePath)
+    else if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+  // Windows / Linux：双击打开的文件路径就在启动参数里（macOS 走上面的 open-file）
+  const startupFile = process.platform === 'darwin' ? null : findProjectArg(process.argv)
+  if (startupFile) queueOpenProject(startupFile)
+}
 
 app.whenReady().then(() => {
   registerProtocolHandlers()

@@ -8,6 +8,7 @@ import {
   stopHao2dPreview
 } from './previewServer'
 import { commandServerInfo } from './commandServer'
+import { markRendererReady } from './openRequests'
 import { installMcpIntoClients } from './aiClientConfig'
 import { installSkillToClients, openSkillsFolder, skillsInfo } from './aiSkills'
 import { normalizeLocale, setLocale } from './i18n'
@@ -71,6 +72,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.recentList, () => fs.safe(() => fs.recentList()))
   ipcMain.handle(IPC.recentAdd, (_e, p: string) => fs.safe(() => fs.recentAdd(p)))
+  ipcMain.handle(IPC.recentRemove, (_e, p: string) => fs.safe(() => fs.recentRemove(p)))
   ipcMain.handle(IPC.revealInFolder, (_e, p: string) => fs.safe(() => fs.revealInFolder(p)))
 
   ipcMain.handle(IPC.setTitle, (_e, title: string) =>
@@ -134,6 +136,9 @@ export function registerIpcHandlers(): void {
   )
   ipcMain.handle(IPC.videoFinish, (_e, sessionId: string) => fs.safe(() => finishVideoExport(sessionId)))
   ipcMain.handle(IPC.videoCancel, (_e, sessionId: string) => fs.safe(() => cancelVideoExport(sessionId)))
+
+  // 双击工程文件启动时，渲染层挂载后来取一次排队的路径（取完即清空，之后走事件推送）
+  ipcMain.handle(IPC.consumeOpenRequests, () => fs.safe(() => markRendererReady()))
 
   // 语言：把系统语言标签交给渲染进程（首启判定界面语言用）
   ipcMain.handle(IPC.i18nSystemLocale, () => fs.safe(() => app.getLocale()))

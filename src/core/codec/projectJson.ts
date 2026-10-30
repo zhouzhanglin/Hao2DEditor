@@ -24,11 +24,17 @@ import type {
 } from '../model/authoring'
 import { CURRENT_SCHEMA_VERSION, createDefaultMeta, createEmptyDocument } from '../model/authoring'
 
-/** 工程文件后缀（含点，落盘文件名形如 `hero.hao2d.proj`） */
-export const PROJECT_EXTENSION = 'hao2d.proj'
+/**
+ * 工程文件后缀（不含点，落盘文件名形如 `hero.hao2dproj`）。
+ *
+ * 为什么从 `.hao2d.proj` 改成单段后缀：复合后缀在文件对话框、`path.extname()`、
+ * 双击打开、命令行补全里处处要特判（extname 只给最后的 `.proj`），
+ * 而 `.hao2dproj` 一段就能表达「Hao2D 工程」。
+ */
+export const PROJECT_EXTENSION = 'hao2dproj'
 
-/** 旧后缀也认（早期工程用过 `.hao2dproj`，手改过的也用 `.json`） */
-const LEGACY_PROJECT_EXTENSIONS = ['hao2dproj', 'json']
+/** 旧后缀也认：`.hao2d.proj` 是改动之前的正式后缀，`.json` 是更早手改过的工程 */
+export const LEGACY_PROJECT_EXTENSIONS = ['hao2d.proj', 'json']
 
 /**
  * 工程文件路径 → 项目名：`My.Game.hao2d.proj` → `My.Game`。
@@ -45,6 +51,25 @@ export function projectNameFromPath(path: string): string {
   }
   const dot = base.lastIndexOf('.')
   return dot > 0 ? base.slice(0, dot) : base
+}
+
+/** 路径是否已经是工程文件（新后缀 / 旧后缀都算，用于文件对话框与拖放判断） */
+export function isProjectPath(path: string): boolean {
+  const lower = path.toLowerCase()
+  return [PROJECT_EXTENSION, ...LEGACY_PROJECT_EXTENSIONS].some((ext) => lower.endsWith(`.${ext}`))
+}
+
+/**
+ * 旧后缀 → 新后缀：`hero.hao2d.proj` → `hero.hao2dproj`。
+ *
+ * 只在保存时用（打开老工程不改名，用户没保存就不该动他的文件）。
+ * 不是旧后缀（已经是新的、或是 `.json` 老工程）时原样返回。
+ */
+export function migrateLegacyProjectExtension(path: string): { path: string; migrated: boolean } {
+  const lower = path.toLowerCase()
+  const legacy = `.${LEGACY_PROJECT_EXTENSIONS[0]}`
+  if (!lower.endsWith(legacy)) return { path, migrated: false }
+  return { path: `${path.slice(0, path.length - legacy.length)}.${PROJECT_EXTENSION}`, migrated: true }
 }
 
 export interface ParseDocumentResult {

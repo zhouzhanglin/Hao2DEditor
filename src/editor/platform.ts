@@ -45,6 +45,8 @@ export interface Platform {
   registerAssetRoot(dir: string): Promise<void>
   recentList(): Promise<string[]>
   recentAdd(path: string): Promise<void>
+  /** 从最近列表移除一条（工程改名 / 后缀迁移后旧路径会变成死链） */
+  recentRemove(path: string): Promise<void>
   revealInFolder(path: string): Promise<void>
   setTitle(title: string): Promise<void>
   fileUrl(path: string): string
@@ -78,6 +80,10 @@ export interface Platform {
   /** 用系统默认浏览器打开链接（在线预览面板的「在浏览器打开」；起预览后也走这一条） */
   openExternal(url: string): Promise<void>
   onMenuCommand(cb: (command: string) => void): () => void
+  /** 双击工程文件（或从 Finder 拖到图标上）时，主进程把路径推过来 */
+  onOpenProjectRequest(cb: (path: string) => void): () => void
+  /** 取走启动时排队的「打开这个工程」（双击 `.hao2dproj` 启动的那一次），取完即清空 */
+  consumeOpenRequests(): Promise<string[]>
   /** AI 接入：当前命令服务的 MCP 信息（是否在跑、带 token 的 MCP URL） */
   aiMcpInfo(): Promise<IpcResult<{ running: boolean; mcpUrl: string; url: string; token: string }>>
   /** AI 接入：把 MCP URL 写进已识别的 AI 客户端配置（一键安装） */
@@ -179,6 +185,10 @@ class ElectronPlatform implements Platform {
     unwrap(await this.bridge.recentAdd(path), undefined)
   }
 
+  async recentRemove(path: string): Promise<void> {
+    unwrap(await this.bridge.recentRemove(path), undefined)
+  }
+
   async revealInFolder(path: string): Promise<void> {
     unwrap(await this.bridge.revealInFolder(path), undefined)
   }
@@ -253,6 +263,15 @@ class ElectronPlatform implements Platform {
 
   onMenuCommand(cb: (command: string) => void): () => void {
     return this.bridge.onMenuCommand(cb as never)
+  }
+
+  onOpenProjectRequest(cb: (path: string) => void): () => void {
+    return this.bridge.onOpenProjectRequest(cb)
+  }
+
+  async consumeOpenRequests(): Promise<string[]> {
+    const result = await this.bridge.consumeOpenRequests()
+    return result.ok ? result.data : []
   }
 
   async aiMcpInfo(): Promise<IpcResult<{ running: boolean; mcpUrl: string; url: string; token: string }>> {
@@ -361,7 +380,7 @@ class MemoryPlatform implements Platform {
   }
 
   async pickSavePath(options?: { defaultPath?: string }): Promise<string | null> {
-    const suggested = options?.defaultPath ?? 'project.hao2d.proj'
+    const suggested = options?.defaultPath ?? 'project.hao2dproj'
     const value = typeof window === 'undefined' ? null : window.prompt('保存到（内存路径）', suggested)
     return value && value.length > 0 ? value : null
   }
@@ -449,6 +468,10 @@ class MemoryPlatform implements Platform {
     this.recents = [path, ...this.recents.filter((v) => v !== path)].slice(0, 12)
   }
 
+  async recentRemove(path: string): Promise<void> {
+    this.recents = this.recents.filter((v) => v !== path)
+  }
+
   async revealInFolder(path: string): Promise<void> {
     console.log(`[hao2d] 内存模式无文件系统，定位：${path}`)
   }
@@ -507,6 +530,14 @@ class MemoryPlatform implements Platform {
 
   onMenuCommand(): () => void {
     return () => undefined
+  }
+
+  onOpenProjectRequest(): () => void {
+    return () => undefined
+  }
+
+  async consumeOpenRequests(): Promise<string[]> {
+    return []
   }
 
   async aiMcpInfo(): Promise<IpcResult<{ running: boolean; mcpUrl: string; url: string; token: string }>> {

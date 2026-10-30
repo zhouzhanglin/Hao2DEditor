@@ -16,7 +16,7 @@ description: "Hao2DEditor 骨骼动画制作助手（通过编辑器本机命令
 把「一句话的动画需求」变成 Hao2DEditor 里真正落地的骨架与动画：通过编辑器自带的**本机命令服务**
 （HTTP / MCP）驱动，不手改工程文件、不猜命令名、不让用户去点菜单。
 
-最终产出：`.hao2d.proj` 工程 + `exportProject` 导出的 runtime / unity / Spine 资源，
+最终产出：`.hao2dproj` 工程 + `exportProject` 导出的 runtime / unity / Spine 资源，
 或对已有工程的增量修改。
 
 ## 第一步：连上编辑器
@@ -116,7 +116,7 @@ description: "Hao2DEditor 骨骼动画制作助手（通过编辑器本机命令
 - 参考图对位要用 `setStage` + `captureViewport` 逐步比对，**不要**在外部算好一堆坐标一口气灌进去。
 - 有装配参考图时按 `references/recipes.md` 的「贴图对位」流程走：铺底图 → 标定尺寸 → 一张张放 →
   **停下等用户确认** → 再 `setSlotHost` 绑骨 → `removeStage`。
-- 不改用户的工程文件（`.hao2d.proj` / `ai/` 目录）——所有改动都通过命令服务。
+- 不改用户的工程文件（`.hao2dproj` / `ai/` 目录）——所有改动都通过命令服务。
 
 ## 脚本
 

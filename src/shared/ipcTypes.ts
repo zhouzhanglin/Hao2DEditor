@@ -94,10 +94,13 @@ export const IPC = {
   registerAssetRoot: 'assets:registerRoot',
   recentList: 'recent:list',
   recentAdd: 'recent:add',
+  recentRemove: 'recent:remove',
   revealInFolder: 'shell:reveal',
   setTitle: 'win:setTitle',
   menuCommand: 'menu:command',
   openProjectRequest: 'app:openProjectRequest',
+  /** 渲染层就绪后取走「双击工程文件」排队的路径（主进程 → 渲染层拉取，避免时序竞争） */
+  consumeOpenRequests: 'app:consumeOpenRequests',
   spinePreviewStart: 'preview:spineStart',
   spinePreviewStop: 'preview:spineStop',
   hao2dPreviewStart: 'preview:hao2dStart',
@@ -311,6 +314,8 @@ export interface HaoBridge {
   registerAssetRoot(dir: string): Promise<IpcResult<void>>
   recentList(): Promise<IpcResult<string[]>>
   recentAdd(path: string): Promise<IpcResult<void>>
+  /** 从最近列表移除一条（工程换名 / 后缀迁移后，旧路径不该继续留在列表里） */
+  recentRemove(path: string): Promise<IpcResult<void>>
   revealInFolder(path: string): Promise<IpcResult<void>>
   setTitle(title: string): Promise<IpcResult<void>>
   /** 把绝对路径转成渲染层可直接加载的 URL */
@@ -369,6 +374,11 @@ export interface HaoBridge {
   sendCommandResult(response: CommandResponse): void
   onMenuCommand(cb: (command: MenuCommand) => void): () => void
   onOpenProjectRequest(cb: (path: string) => void): () => void
+  /**
+   * 取走启动时排队的「用编辑器打开这个工程」路径（双击 `.hao2dproj` 启动的那一次）。
+   * 渲染层挂载后调一次；之后再双击走 `onOpenProjectRequest` 事件。
+   */
+  consumeOpenRequests(): Promise<IpcResult<string[]>>
 }
 
 declare global {

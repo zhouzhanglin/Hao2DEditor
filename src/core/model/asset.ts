@@ -32,6 +32,13 @@ export interface RuntimeAsset {
    */
   defaultSkin: string
   runtimeIK: boolean
+  /** 运行期是否跑物理仿真（采样烘焙过的旧资源可关掉，避免双重叠加） */
+  runtimePhysics: boolean
+  /** 骨架级风向 / 重力方向（物理约束的加速度方向，与 Spine 一致） */
+  windX: number
+  windY: number
+  gravityX: number
+  gravityY: number
   /** 编辑器扩展：图集页尺寸与来源路径 */
   images: ImageRef[]
 }
@@ -51,6 +58,11 @@ export function createRuntimeAsset(partial?: Partial<RuntimeAsset>): RuntimeAsse
     defaultSkinIndex: 0,
     defaultSkin: '',
     runtimeIK: true,
+    runtimePhysics: true,
+    windX: 1,
+    windY: 0,
+    gravityX: 0,
+    gravityY: 1,
     images: [],
     ...partial
   }

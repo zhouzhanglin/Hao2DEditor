@@ -6,8 +6,8 @@ import type { RuntimeAsset } from '../model/asset'
 import { t } from '@i18n'
 import { computeBindposes, createSetupPose } from '../model/setup'
 import { fillLinkedMeshUvs } from '../skin/linkedMesh'
-import type { AnimData, BoneAnim, ConstraintAnim, DeformAnim, DrawOrderKeyframe, IkAnim, SlotAnim } from '../model/animation'
-import { emptyConstraintAnim } from '../model/animation'
+import type { AnimData, BoneAnim, ConstraintAnim, DeformAnim, DrawOrderKeyframe, IkAnim, PhysicsAnim, SlotAnim } from '../model/animation'
+import { emptyConstraintAnim, emptyPhysicsGlobalAnim } from '../model/animation'
 import type { Constraint, IkConstraint } from '../model/constraints'
 import {
   createIkConstraint,
@@ -403,6 +403,7 @@ function compileAnimations(
   constraintIndex: Record<string, number>,
   constraints: Constraint[],
   ikIndices: number[],
+  physicsIndices: number[],
   warnings: string[]
 ): AnimData {
   const bones = anim.bones
@@ -464,6 +465,7 @@ function compileAnimations(
   }))
 
   const constraintTracks: ConstraintAnim[] = []
+  const physicsTracks: PhysicsAnim[] = []
   const iks: IkAnim[] = []
   for (const track of anim.constraints) {
     const index = constraintIndex[track.constraint]
@@ -471,9 +473,26 @@ function compileAnimations(
       warnings.push(t('动画「{0}」的约束轨道「{1}」不存在，已忽略', [anim.name, track.constraint]))
       continue
     }
+    const type = constraints[index]?.type
+    if (type === 'physics') {
+      const order = physicsIndices.indexOf(index)
+      if (order < 0) continue
+      physicsTracks.push({
+        physicsIndex: order,
+        reset: (track.reset ?? []).map((key) => key.time).sort((a, b) => a - b),
+        inertia: track.inertia ?? [],
+        strength: track.strength ?? [],
+        damping: track.damping ?? [],
+        mass: track.mass ?? [],
+        wind: track.wind ?? [],
+        gravity: track.gravity ?? [],
+        mix: track.mix
+      })
+      continue
+    }
     constraintTracks.push({ ...emptyConstraintAnim(index), ...track, constraintIndex: index })
     // 同步产出 Unity 端 Hao2D 运行时风格的 iks 轨道（.hao2d v5 只认这一份）
-    if (constraints[index]?.type === 'ik' && track.mix.length > 0) {
+    if (type === 'ik' && track.mix.length > 0) {
       const ikOrder = ikIndices.indexOf(index)
       if (ikOrder >= 0) iks.push({ ikIndex: ikOrder, mix: track.mix })
     }
@@ -491,7 +510,9 @@ function compileAnimations(
     drawOrder,
     events: anim.events,
     iks,
-    constraints: constraintTracks
+    constraints: constraintTracks,
+    physics: physicsTracks,
+    physicsGlobal: anim.physicsGlobal ? { ...anim.physicsGlobal } : emptyPhysicsGlobalAnim()
   }
 }
 
@@ -543,6 +564,11 @@ export function compileDocument(doc: EditorDocument): CompileResult {
     .map((constraint, i) => ({ constraint, i }))
     .filter((entry) => entry.constraint.type === 'ik')
     .map((entry) => entry.i)
+  const physicsIndices = constraints
+    .map((constraint, i) => ({ constraint, i }))
+    .filter((entry) => entry.constraint.type === 'physics')
+    .map((entry) => entry.i)
+
 
   // 先算 setup pose，再据此推导 bindposes，最后编译附件权重
   const skeletonOnly = createRuntimeAsset({
@@ -579,7 +605,17 @@ export function compileDocument(doc: EditorDocument): CompileResult {
   }))
 
   const animations = doc.animations.map((anim) =>
-    compileAnimations(anim, index, slotIndex, slots.length, constraintIndex, constraints, ikIndices, warnings)
+    compileAnimations(
+      anim,
+      index,
+      slotIndex,
+      slots.length,
+      constraintIndex,
+      constraints,
+      ikIndices,
+      physicsIndices,
+      warnings
+    )
   )
 
   /*

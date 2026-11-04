@@ -52,6 +52,8 @@ export interface BoneOverlayOptions {
 const COLOR_ROTATE_RING = 0xff453a
 /** 约束（连线 + 准星手柄）的红：与层级树里 IK 图标的颜色一致（HierarchyTree 的 IkConstraintIcon） */
 const COLOR_CONSTRAINT = 0xe4572e
+/** 物理约束（弹簧 / 惯性）的蓝紫色，与层级树里 Activity 图标同色系 */
+const COLOR_PHYSICS = 0x8b9cf7
 /** 目标骨被选中时准星提亮成白色：骨骼层关掉时这是「选中了它」的唯一视口反馈 */
 const COLOR_CONSTRAINT_SELECTED = 0xffffff
 const COLOR_LINK = 0x8e8e93
@@ -499,7 +501,8 @@ function drawPendingBone(
  * - IK：**顺着骨骼链**走（根骨原点 → 各关节 → 末端尖端），再从尖端拉到目标点
  * - 变换 / 路径：多根骨骼共同受某个目标影响，保持「每根 → 目标」的扇形连线
  *
- * 目标骨骼缺失、约束停用、以及不参与求解的 physics 都不画。
+ * 目标骨骼缺失 / 约束停用不画。物理约束没有「目标点」，改成在被约束骨骼上画一个弹簧标记
+ *（见 drawPhysicsMarker），让它在视口里能像 IK 准星一样被认出来。
  */
 function drawConstraintLinks(
   g: Graphics,
@@ -510,7 +513,11 @@ function drawConstraintLinks(
 ): void {
   const targets = skeleton.constraintTarget
   for (const constraint of constraints) {
-    if (!constraint.enabled || constraint.type === 'physics') continue
+    if (!constraint.enabled) continue
+    if (constraint.type === 'physics') {
+      drawPhysicsMarker(g, skeleton, constraint, w, selectedBones)
+      continue
+    }
     if (constraint.targetBoneIndex < 0 || constraint.targetBoneIndex >= skeleton.boneCount) continue
     /*
      * 目标点取**约束求解前**的快照（见 Skeleton.constraintTarget）。
@@ -590,4 +597,41 @@ function drawConstraintLinks(
     g.poly(circlePolygon(targetX, targetY, ring * 0.58))
     g.stroke({ width: w * 1.1, color: markerColor, alpha: 0.45 })
   }
+}
+
+/**
+ * 物理约束标记：被约束骨骼的**原点**画一个圆 + 右侧一段弹簧折线。
+ *
+ * 物理没有「目标点」，所以不画准星 / 连线（那会让人以为它能拖）；
+ * 圆的中心就是它作用的那根骨骼，弹簧图标表示「惯性 / 回弹」。
+ * 选中该骨骼时提亮成白色，与 IK 准星的选中反馈一致。
+ */
+function drawPhysicsMarker(
+  g: Graphics,
+  skeleton: Skeleton,
+  constraint: Constraint,
+  w: number,
+  selectedBones: ReadonlySet<number>
+): void {
+  const bone = constraint.boneIndices[0]
+  if (bone === undefined || bone < 0 || bone >= skeleton.boneCount) return
+  const x = skeleton.boneWorldX(bone)
+  const y = skeleton.boneWorldY(bone)
+  const color = selectedBones.has(bone) ? COLOR_CONSTRAINT_SELECTED : COLOR_PHYSICS
+  const r = w * 6
+
+  g.poly(circlePolygon(x, y, r))
+  g.stroke({ width: w * 1.6, color, alpha: 0.85 })
+
+  // 弹簧：三折线（视觉上区别于 IK 准星的四向凸点）
+  const x0 = x + r + w * 1.2
+  const amp = w * 3.2
+  g.moveTo(x0, y)
+    .lineTo(x0 + w * 2, y - amp)
+    .lineTo(x0 + w * 4, y + amp)
+    .lineTo(x0 + w * 6, y)
+  g.stroke({ width: w * 1.6, color, alpha: 0.9, cap: 'round', join: 'round' })
+
+  // 圆心一个小点：对应「这根骨骼就是被约束对象」
+  g.circle(x, y, w * 1.5).fill({ color, alpha: 0.9 })
 }

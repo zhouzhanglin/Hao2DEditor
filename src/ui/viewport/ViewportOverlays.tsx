@@ -25,7 +25,7 @@ export interface ViewportOverlaysProps {
 function overlays(): Array<{ key: keyof OverlayState; label: string; hint: string; icon: LucideIcon }> {
   return [
     { key: 'bones', label: t('骨骼'), icon: Bone, hint: t('显示 / 隐藏骨骼骨架') },
-    { key: 'constraints', label: t('约束'), icon: Waypoints, hint: t('显示 / 隐藏约束手柄（IK / 路径）') }
+    { key: 'constraints', label: t('约束'), icon: Waypoints, hint: t('显示 / 隐藏约束手柄（IK / 变换 / 路径 / 物理）') }
   ]
 }
 

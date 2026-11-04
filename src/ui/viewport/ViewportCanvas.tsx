@@ -911,6 +911,17 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       selection.selectBone(name)
       onStatus(t('选中骨骼「{0}」（骨骼体=旋转 / 原点圈=移动 / 末端方块=缩放）', name))
     } else {
+      // 物理约束标记：没有目标点，标记就在被约束骨骼的原点上 —— 点圆环外侧 / 右侧弹簧即选中该约束
+      const physics = scene.pickPhysicsConstraintAt(world.x, world.y)
+      if (physics) {
+        useSelectionStore.getState().selectConstraint(physics.name)
+        onStatus(
+          t('选中物理约束「{0}」：惯性 / 强度 / 阻尼等在检查器「约束」页与视口参数条里编辑', [
+            physics.name
+          ])
+        )
+        return
+      }
       selection.clear()
       onStatus(t('已取消选择'))
     }
@@ -1071,7 +1082,10 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
      *    而点下去选中的只有骨骼；右键菜单走同一条判定（见 onContextMenu）；
      * ③ 只在**变化时**写状态 —— pointermove 的频率远高于帧率，每次都写会白重绘。
      */
-    const overBoneUi = hit !== null || scene.pickConstraintTargetAt(world.x, world.y) !== null
+    const overBoneUi =
+      hit !== null ||
+      scene.pickConstraintTargetAt(world.x, world.y) !== null ||
+      scene.pickPhysicsConstraintAt(world.x, world.y) !== null
     const picked =
       useToolStore.getState().tool === 'select' && !overBoneUi ? scene.pickAttachmentAt(world.x, world.y) : null
     // 锁定的插槽不参与悬停高亮 —— 与「视口里点不中」保持一致，不然会看着能选却选不上

@@ -970,6 +970,40 @@ export class EditorScene {
   }
 
   /**
+   * 物理约束标记的拾取：命中返回约束名（点它 = 选中这条约束，检查器 / 视口参数条随之显示）。
+   *
+   * 与 IK 准星的区别：物理没有目标点，标记画在被约束骨骼的原点上，所以和骨骼原点圈天然重叠。
+   * 这里用**稍大**的半径（10px，骨骼原点圈是 8px）做兜底：点圆心仍然是选骨骼、可以拖，
+   * 点圆环外侧那一圈（以及右侧弹簧折线附近）就是选中约束本身。
+   */
+  pickPhysicsConstraintAt(worldX: number, worldY: number): { name: string; boneIndex: number } | null {
+    if (!this.bundle || !this.viewState.overlay.constraints) return null
+    const tolerance = this.viewport.pixelsToWorld(10)
+    // 弹簧折线画在圆环右侧，再往外留一段可点区域（否则只有圆环能点，弹簧看着像装饰）
+    const springReach = this.viewport.pixelsToWorld(10 + 6 * 6 + 6)
+    let best: { name: string; boneIndex: number } | null = null
+    let bestDistance = Number.POSITIVE_INFINITY
+    for (const constraint of this.bundle.asset.constraints) {
+      if (!constraint.enabled || constraint.type !== 'physics') continue
+      const bone = constraint.boneIndices[0]
+      if (bone === undefined || bone < 0 || bone >= this.bundle.skeleton.boneCount) continue
+      const bx = this.bundle.skeleton.boneWorldX(bone)
+      const by = this.bundle.skeleton.boneWorldY(bone)
+      const distance = Math.hypot(bx - worldX, by - worldY)
+      // 圆环附近或「原点 → 弹簧末端」这条水平带内都算命中
+      const onSpring =
+        worldX >= bx && worldX <= bx + springReach && Math.abs(worldY - by) <= tolerance
+      if (distance > tolerance && !onSpring) continue
+      const rank = Math.min(distance, tolerance)
+      if (rank < bestDistance) {
+        bestDistance = rank
+        best = { name: constraint.name, boneIndex: bone }
+      }
+    }
+    return best
+  }
+
+  /**
    * 约束目标准星的拾取：开关与画手柄的「约束」叠加层一致（enabled、非 physics、有目标）。
    * 返回目标骨骼下标（合并显示后「点约束」语义上就是点它的节点骨）；没命中返回 -1。
    * 公开给工具层用：准星要排在附件拾取前面（IK 节点常压在角色图片上）

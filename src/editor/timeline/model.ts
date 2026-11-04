@@ -285,12 +285,24 @@ export function buildTimeline(animation: AuthoringAnimData | null): TimelineTrac
     }
   }
 
+  /*
+   * 约束：与骨骼 / 插槽一致用「分组行 + 通道子轨」。
+   *
+   * 以前是一条扁平轨道，把各通道的关键帧全塞进同一行：同一时刻打了多条通道（例如物理约束一次打
+   * 权重 / 惯性 / 强度 / 阻尼 / 质量 / 风力 / 重力 7 条）就会重叠成同一个菱形，看起来像"只打了一个"。
+   * 分组后每条通道一行，重叠是各通道自己的时间点，group 行只显示总帧数。
+   */
   for (const track of animation.constraints) {
-    const keys: TimelineKey[] = []
-    for (const [channel, list] of Object.entries(constraintFrames(track))) {
-      pushKeys(keys, track.constraint, '', 'constraint', channel, list)
-    }
-    if (keys.length > 0) tracks.push(makeTrack('constraint', track.constraint, '', track.constraint, keys))
+    pushGroupedTracks(
+      tracks,
+      'constraint',
+      track.constraint,
+      Object.entries(constraintFrames(track)).map(([channel, list]) => {
+        const keys: TimelineKey[] = []
+        pushKeys(keys, track.constraint, '', 'constraint', channel, list)
+        return { channel, label: CONSTRAINT_CHANNEL_LABEL[channel] ?? channel, keys }
+      })
+    )
   }
 
   // 顺序：事件 → 骨骼（分组行 + 通道子轨）→ 插槽 → FFD → 约束。
@@ -701,7 +713,7 @@ export const CONSTRAINT_CHANNELS: Record<string, readonly string[]> = {
     'offsetShearY'
   ],
   path: ['position', 'spacing', 'rotateMix', 'translateMix'],
-  physics: []
+  physics: ['mix', 'inertia', 'strength', 'damping', 'mass', 'wind', 'gravity']
 }
 
 /**
@@ -846,7 +858,14 @@ export const CONSTRAINT_CHANNEL_LABEL: Record<string, string> = {
   position: '位置',
   spacing: '间距',
   rotateMix: '旋转混合',
-  translateMix: '位移混合'
+  translateMix: '位移混合',
+  // ---- 物理约束 ----
+  inertia: '惯性',
+  strength: '强度',
+  damping: '阻尼',
+  mass: '质量',
+  wind: '风力',
+  gravity: '重力'
 }
 
 /**
@@ -973,7 +992,14 @@ function constraintFrames(track: AuthoringAnimData['constraints'][number]): Reco
     position: track.position,
     spacing: track.spacing,
     rotateMix: track.rotateMix,
-    translateMix: track.translateMix
+    translateMix: track.translateMix,
+    // ---- 物理约束 ----
+    inertia: track.inertia,
+    strength: track.strength,
+    damping: track.damping,
+    mass: track.mass,
+    wind: track.wind,
+    gravity: track.gravity
   }
 }
 

@@ -1,4 +1,13 @@
-import { Easing, emptyBoneAnim, emptyConstraintAnim, emptyDeformAnim, emptyIkAnim, emptySlotAnim } from '@core/model/animation'
+import {
+  Easing,
+  emptyBoneAnim,
+  emptyConstraintAnim,
+  emptyDeformAnim,
+  emptyIkAnim,
+  emptyPhysicsAnim,
+  emptyPhysicsGlobalAnim,
+  emptySlotAnim
+} from '@core/model/animation'
 import { t } from '@i18n'
 import type {
   AnimData,
@@ -10,6 +19,8 @@ import type {
   EventKeyframe,
   FloatKeyframe,
   IkAnim,
+  PhysicsAnim,
+  PhysicsGlobalAnim,
   SlotAnim
 } from '@core/model/animation'
 import type { BoneData, VertexWeight } from '@core/model/types'
@@ -370,6 +381,62 @@ export function importSpineAnimations(
     constraintTracks.push(track)
   }
 
+  /*
+   * 物理约束时间轴（Spine 4.3）：`animations.<动画>.physics.<约束名>.<通道>`。
+   * 约束名为空串 = 全局轨道（constraintIndex = -1），只影响勾了 `*Global` 的约束。
+   */
+  const physicsTracks: PhysicsAnim[] = []
+  let physicsGlobal: PhysicsGlobalAnim | undefined
+  const physicsRoot = animation.physics as
+    | Record<string, Record<string, unknown>>
+    | undefined
+  if (physicsRoot) {
+    const physicsIndices = ctx.constraints
+      .map((constraint, i) => ({ constraint, i }))
+      .filter((entry) => entry.constraint.type === 'physics')
+      .map((entry) => entry.i)
+    const physicsChannels = ['inertia', 'strength', 'damping', 'mass', 'wind', 'gravity', 'mix'] as const
+
+    for (const [constraintName, rawChannels] of Object.entries(physicsRoot)) {
+      if (!rawChannels || typeof rawChannels !== 'object') continue
+      const channels = rawChannels as Record<string, unknown>
+      const readKeys = (name: string): SpineCurveKeyframe[] =>
+        Array.isArray(channels[name]) ? (channels[name] as SpineCurveKeyframe[]) : []
+
+      if (constraintName === '') {
+        const global = emptyPhysicsGlobalAnim()
+        for (const channel of physicsChannels) {
+          for (const key of readKeys(channel)) {
+            const time = timeOf(key)
+            global[channel].push(scalarKey(time, pickNumber(key, 'value') ?? 0))
+            duration = Math.max(duration, time)
+          }
+        }
+        physicsGlobal = global
+        continue
+      }
+
+      const constraintIdx = ctx.constraints.findIndex((c) => c.name === constraintName && c.type === 'physics')
+      const order = physicsIndices.indexOf(constraintIdx)
+      if (order < 0) continue
+
+      const track = emptyPhysicsAnim(order)
+      for (const key of readKeys('reset')) {
+        const time = timeOf(key)
+        track.reset.push(time)
+        duration = Math.max(duration, time)
+      }
+      for (const channel of physicsChannels) {
+        for (const key of readKeys(channel)) {
+          const time = timeOf(key)
+          track[channel].push(scalarKey(time, pickNumber(key, 'value') ?? 0))
+          duration = Math.max(duration, time)
+        }
+      }
+      physicsTracks.push(track)
+    }
+  }
+
   return {
     name,
     duration: duration > 0 ? duration : 1,
@@ -379,7 +446,10 @@ export function importSpineAnimations(
     drawOrder,
     events,
     iks,
-    constraints: constraintTracks
+    constraints: constraintTracks,
+    physics: physicsTracks,
+    physicsGlobal:
+      physicsGlobal ?? { inertia: [], strength: [], damping: [], mass: [], wind: [], gravity: [], mix: [] }
   }
 }
 

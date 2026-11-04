@@ -143,6 +143,43 @@ export interface ConstraintAnim {
   spacing: FloatKeyframe[]
   rotateMix: FloatKeyframe[]
   translateMix: FloatKeyframe[]
+  // ---- 物理通道（type = physics；编译期拆进 AnimData.physics） ----
+  inertia: FloatKeyframe[]
+  strength: FloatKeyframe[]
+  damping: FloatKeyframe[]
+  mass: FloatKeyframe[]
+  wind: FloatKeyframe[]
+  gravity: FloatKeyframe[]
+  /** 「重置」帧：只用 time，值无意义（到该时刻清空物理状态） */
+  reset: FloatKeyframe[]
+}
+
+/** 物理约束的动画轨道（与 `.hao2d` v10 的 physics 轨道段一一对应） */
+export interface PhysicsAnim {
+  physicsIndex: number
+  /** 重置时刻（秒，升序） */
+  reset: number[]
+  inertia: FloatKeyframe[]
+  strength: FloatKeyframe[]
+  damping: FloatKeyframe[]
+  mass: FloatKeyframe[]
+  wind: FloatKeyframe[]
+  gravity: FloatKeyframe[]
+  mix: FloatKeyframe[]
+}
+
+/**
+ * 全局物理轨道（对齐 Spine 的 `physics[""]`：constraintIndex = -1）。
+ * 只有对应 `*Global` 勾选的约束才会采用这里的值。
+ */
+export interface PhysicsGlobalAnim {
+  inertia: FloatKeyframe[]
+  strength: FloatKeyframe[]
+  damping: FloatKeyframe[]
+  mass: FloatKeyframe[]
+  wind: FloatKeyframe[]
+  gravity: FloatKeyframe[]
+  mix: FloatKeyframe[]
 }
 
 export interface AnimData {
@@ -156,6 +193,10 @@ export interface AnimData {
   events: EventKeyframe[]
   iks: IkAnim[]
   constraints: ConstraintAnim[]
+  /** 物理约束轨道（.hao2d v10 起） */
+  physics: PhysicsAnim[]
+  /** 全局物理轨道（.hao2d v10 起；只有 *Global 参数采用它的值） */
+  physicsGlobal: PhysicsGlobalAnim
 }
 
 // ---------------- 工厂与工具 ----------------
@@ -189,6 +230,26 @@ export function lastKeyframeTime(anim: AnimData): number {
     for (const list of Object.values(track)) {
       if (Array.isArray(list)) consider(list as ReadonlyArray<{ time: number }>)
     }
+  }
+  // 物理 / 滑块轨道：老资源没有这两个数组，按空处理
+  for (const track of anim.physics ?? []) {
+    consider(track.inertia)
+    consider(track.strength)
+    consider(track.damping)
+    consider(track.mass)
+    consider(track.wind)
+    consider(track.gravity)
+    consider(track.mix)
+    for (const time of track.reset) if (time > last) last = time
+  }
+  if (anim.physicsGlobal) {
+    consider(anim.physicsGlobal.inertia)
+    consider(anim.physicsGlobal.strength)
+    consider(anim.physicsGlobal.damping)
+    consider(anim.physicsGlobal.mass)
+    consider(anim.physicsGlobal.wind)
+    consider(anim.physicsGlobal.gravity)
+    consider(anim.physicsGlobal.mix)
   }
   consider(anim.drawOrder)
   consider(anim.events)
@@ -261,8 +322,33 @@ export function emptyConstraintAnim(constraintIndex: number): ConstraintAnim {
     position: [],
     spacing: [],
     rotateMix: [],
-    translateMix: []
+    translateMix: [],
+    inertia: [],
+    strength: [],
+    damping: [],
+    mass: [],
+    wind: [],
+    gravity: [],
+    reset: []
   }
+}
+
+export function emptyPhysicsAnim(physicsIndex: number): PhysicsAnim {
+  return {
+    physicsIndex,
+    reset: [],
+    inertia: [],
+    strength: [],
+    damping: [],
+    mass: [],
+    wind: [],
+    gravity: [],
+    mix: []
+  }
+}
+
+export function emptyPhysicsGlobalAnim(): PhysicsGlobalAnim {
+  return { inertia: [], strength: [], damping: [], mass: [], wind: [], gravity: [], mix: [] }
 }
 
 export function emptyAnimData(name = 'animation'): AnimData {
@@ -275,7 +361,9 @@ export function emptyAnimData(name = 'animation'): AnimData {
     drawOrder: [],
     events: [],
     iks: [],
-    constraints: []
+    constraints: [],
+    physics: [],
+    physicsGlobal: emptyPhysicsGlobalAnim()
   }
 }
 

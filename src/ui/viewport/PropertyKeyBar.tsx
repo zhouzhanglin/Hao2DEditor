@@ -3,14 +3,19 @@ import type { ReactNode } from 'react'
 import {
   Droplet,
   Film,
+  Gauge,
   Image as ImageIcon,
   Move,
   MoveDiagonal2,
   Palette,
   RotateCw,
-  Scaling
+  Scaling,
+  Waves,
+  Weight,
+  Wind,
+  Zap
 } from 'lucide-react'
-import { sampleAngle, sampleVec2 } from '@core/anim/interpolation'
+import { sampleAngle, sampleNumber, sampleVec2 } from '@core/anim/interpolation'
 import { AttachmentType } from '@core/model/types'
 import { sampleSubArmature } from '@core/nesting/nest'
 import { hexToRgba, rgbaToHex } from '@core/util/color'
@@ -26,7 +31,8 @@ import {
   keySlotSubArmatureNow,
   noAnimationMessage,
   resolveAnimationName,
-  setBoneChannelNow
+  setBoneChannelNow,
+  setConstraintChannelNow
 } from '@editor/timeline/actions'
 import { findKeyframe } from '@editor/timeline/model'
 import { CommitTextField, createDragWriter, format, parseHexColor, PX_PER_UNIT, VectorInput } from '@ui/widgets/fields'
@@ -93,17 +99,20 @@ function Field({
   value,
   unitScale = 1,
   step = 1,
-  onCommit
+  onCommit,
+  className = 'w-[70px] shrink-0'
 }: {
   value: number
   unitScale?: number
   step?: number
   onCommit: (next: number) => boolean
+  /** 输入框外层宽度（键条是 70px 定宽；物理面板的两列布局改成 flex-1 自适应） */
+  className?: string
 }) {
   const [ticket, setTicket] = useState(0)
   const scale = unitScale > 0 ? unitScale : 1
   return (
-    <span className="w-[70px] shrink-0">
+    <span className={className}>
       <VectorInput
         key={ticket}
         value={value}
@@ -439,9 +448,9 @@ export interface PropertyKeyBarProps {
  * 3. **读值**与运行期同一规则：有轨按当前时间采样（旋转走跨 0° 的角度规则），没轨 / 首帧之前
  *    用绑定姿态（`setup`）值。
  *
- * 显示条件：`Animate` 态且选中的是骨骼 / 插槽。选中 display 时按它**所在的插槽**显示 ——
+ * 显示条件：`Animate` 态且选中的是骨骼 / 插槽 / 物理约束。选中 display 时按它**所在的插槽**显示 ——
  * 附件永远挂在插槽里，颜色与显示选择本来就是那个插槽的属性，这时把面板收起来看着像「选中丢了」。
- * 约束 / 空选 / Pose 态不显示。
+ * 物理约束列出 7 条可打帧参数；IK / 变换 / 路径约束、空选、Pose 态不显示。
  *
  * 位置：左下角与网格子工具条（MeshSubtoolBar）同一处，但两者一个只出现在 Pose 态、一个只出现在
  * Animate 态，永远不会同时在场。
@@ -451,6 +460,7 @@ export default function PropertyKeyBar({ onStatus }: PropertyKeyBarProps) {
   const kind = useSelectionStore((s) => s.kind)
   const boneName = useSelectionStore((s) => s.bone)
   const slotName = useSelectionStore((s) => s.slot)
+  const constraintName = useSelectionStore((s) => s.constraint)
   const document = useProjectStore((s) => s.document)
   const animationName = useTimelineStore((s) => s.currentAnimation)
   /**
@@ -467,9 +477,15 @@ export default function PropertyKeyBar({ onStatus }: PropertyKeyBarProps) {
       ? 'bone'
       : (kind === 'slot' || kind === 'attachment') && slotName !== ''
         ? 'slot'
-        : null
+        : kind === 'constraint' && constraintName !== ''
+          ? 'constraint'
+          : null
   if (keyKind === null) return null
-  const target = keyKind === 'bone' ? boneName : slotName
+  const target = keyKind === 'bone' ? boneName : keyKind === 'slot' ? slotName : constraintName
+  // 约束里只有物理约束有「可打帧的数值通道」；IK / 变换 / 路径的参数仍在检查器里编辑
+  const constraintData =
+    keyKind === 'constraint' ? document.constraints.find((item) => item.name === target) : undefined
+  if (keyKind === 'constraint' && constraintData?.type !== 'physics') return null
 
   /**
    * 读哪份数据：动画按「当前选中的，没选就用第一个」——
@@ -485,12 +501,18 @@ export default function PropertyKeyBar({ onStatus }: PropertyKeyBarProps) {
   // 宽度 206 是照着行内布局倒推的：图标 13 + 缝 4 + 输入区 143 + 缝 4 + 菱形列 22，再加上
   // 行的边框与内边距 10、面板自己的边框与内边距 10。菱形列那 22px 不能省：它是打帧热区，
   // 挤到 14px 就紧贴着输入框了，想打帧却点进输入框是最烦的误操作。
+  // 物理面板是两列：每列一个图标 + 自适应输入框 + 菱形，需要再宽一些。
+  const widthClass = keyKind === 'constraint' ? 'w-[240px]' : 'w-[206px]'
   return (
-    <div className="pointer-events-auto absolute bottom-3 left-3 z-20 flex w-[206px] flex-col gap-px rounded-[8px] border border-white/10 bg-ink-900/70 p-1 shadow-lg shadow-black/30 backdrop-blur-md">
+    <div
+      className={`pointer-events-auto absolute bottom-3 left-3 z-20 flex ${widthClass} flex-col gap-px rounded-[8px] border border-white/10 bg-ink-900/70 p-1 shadow-lg shadow-black/30 backdrop-blur-md`}
+    >
       {keyKind === 'bone' ? (
         <BoneRows bone={target} animation={animation} time={time} keyed={keyed} onStatus={onStatus} />
-      ) : (
+      ) : keyKind === 'slot' ? (
         <SlotRows slot={target} animation={animation} scope={scope} time={time} keyed={keyed} onStatus={onStatus} />
+      ) : (
+        <PhysicsRows constraint={target} animation={animation} time={time} keyed={keyed} onStatus={onStatus} />
       )}
     </div>
   )
@@ -583,6 +605,115 @@ function BoneRows({
         <Field value={shear.y} step={0.1} onCommit={(y) => write('shear', { x: shear.x, y })} />
       </KeyRow>
     </>
+  )
+}
+
+/** 物理约束可打帧的 7 条通道（与时间轴子轨同名同序） */
+type PhysicsChannel = 'inertia' | 'strength' | 'damping' | 'mass' | 'wind' | 'gravity' | 'mix'
+
+const PHYSICS_ROWS: ReadonlyArray<{
+  channel: PhysicsChannel
+  label: string
+  icon: typeof Move
+  step: number
+}> = [
+  { channel: 'inertia', label: '惯性', icon: Gauge, step: 0.01 },
+  { channel: 'strength', label: '强度', icon: Zap, step: 1 },
+  { channel: 'damping', label: '阻尼', icon: Waves, step: 0.01 },
+  { channel: 'mass', label: '质量', icon: Weight, step: 0.01 },
+  { channel: 'wind', label: '风力', icon: Wind, step: 0.01 },
+  { channel: 'gravity', label: '重力', icon: MoveDiagonal2, step: 0.01 },
+  { channel: 'mix', label: '权重', icon: Palette, step: 0.05 }
+]
+
+/**
+ * 物理约束的 7 行参数（惯性 / 强度 / 阻尼 / 质量 / 风力 / 重力 / 权重）。
+ *
+ * 只列**可打帧**的通道；影响通道（x/y/rotate/scaleX/shearX）、limit、step、scaleYMode 是静态参数，
+ * 仍在检查器的「约束」页编辑 —— 把它们塞进视口这条 12 行的窄面板里没法看。
+ */
+function PhysicsRows({
+  constraint,
+  animation,
+  time,
+  keyed,
+  onStatus
+}: {
+  constraint: string
+  animation: AuthoringAnimData | null
+  time: number
+  keyed: (channel: string) => boolean
+  onStatus: (text: string) => void
+}) {
+  const document = useProjectStore((s) => s.document)
+  const data = document.constraints.find((item) => item.name === constraint)
+  if (data === undefined || data.type !== 'physics') return null
+  const track = animation?.constraints.find((item) => item.constraint === constraint)
+
+  return (
+    <div className="grid grid-cols-2 gap-x-1 gap-y-px">
+      {PHYSICS_ROWS.map(({ channel, label, icon, step }) => {
+        const keys = track?.[channel]
+        const fallback = data[channel]
+        const value = keys !== undefined && keys.length > 0 ? sampleNumber(keys, time) ?? fallback : fallback
+        /** 改值 = 打帧；返回是否真的写下去了（没写下去时输入框要复原） */
+        const write = (next: number): boolean => {
+          const result = setConstraintChannelNow(constraint, channel, next)
+          onStatus(result.message)
+          return result.ok
+        }
+        return (
+          <CompactCell
+            key={channel}
+            icon={icon}
+            title={hintOf(t(label), constraint, t('（物理参数）'), keyed(channel), time)}
+            keyed={keyed(channel)}
+            onKey={() => write(value)}
+          >
+            <Field className="min-w-0 flex-1" value={value} step={step} onCommit={write} />
+          </CompactCell>
+        )
+      })}
+    </div>
+  )
+}
+
+/** 两列布局用的紧凑单元格：图标 + 自适应输入框 + 菱形（比 KeyRow 窄，去掉固定 143px 输入区） */
+function CompactCell({
+  icon: Icon,
+  title,
+  keyed,
+  onKey,
+  children
+}: {
+  icon: typeof Move
+  title: string
+  keyed: boolean
+  onKey: () => void
+  children: ReactNode
+}) {
+  return (
+    <div
+      title={title}
+      className="group flex h-[24px] min-w-0 items-center gap-1 rounded-[5px] border border-transparent px-1 transition-colors duration-panel hover:border-white/10 hover:bg-white/[0.06]"
+    >
+      <Icon size={12} className="shrink-0 text-content-mid group-hover:text-content-hi" />
+      <span className="flex min-w-0 flex-1 items-center gap-[3px] [&_input]:px-1">{children}</span>
+      <button
+        type="button"
+        onClick={onKey}
+        aria-label={t('在当前帧打关键帧')}
+        aria-pressed={keyed}
+        className="flex h-[20px] w-[16px] shrink-0 cursor-pointer items-center justify-center rounded-[4px] outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+      >
+        <span
+          className={[
+            'h-[7px] w-[7px] rotate-45 rounded-[1px] border transition-colors duration-panel',
+            keyed ? 'border-accent bg-accent' : 'border-content-lo/70 bg-transparent group-hover:border-content-mid'
+          ].join(' ')}
+        />
+      </button>
+    </div>
   )
 }
 

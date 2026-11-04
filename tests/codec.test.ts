@@ -180,7 +180,14 @@ describe('compileDocument', () => {
       position: [],
       spacing: [],
       rotateMix: [],
-      translateMix: []
+      translateMix: [],
+      inertia: [],
+      strength: [],
+      damping: [],
+      mass: [],
+      wind: [],
+      gravity: [],
+      reset: []
     })
     const { asset } = compileDocument(doc)
     expect(asset.animations[0].iks).toHaveLength(1)

@@ -15,9 +15,11 @@ import type {
   FloatKeyframe,
   IkAnim,
   IntKeyframe,
+  PhysicsAnim,
+  PhysicsGlobalAnim,
   SlotAnim
 } from '../model/animation'
-import type { IkConstraint } from '../model/constraints'
+import type { IkConstraint, PhysicsConstraint } from '../model/constraints'
 import { t } from '@i18n'
 
 export const HAO2D_MAGIC = 0x44324f48
@@ -34,12 +36,14 @@ export const HAO2D_MAGIC = 0x44324f48
  *   `type = Armature(5)` 真正落盘；插槽动画段补「子骨架」控制帧。
  * - **9**：文件尾补 `defaultSkin`（编辑器当前皮肤，作为叠加皮肤；基底仍是 `defaultSkinIndex` 那套），
  *   否则只在非默认皮肤里的 display（例如挂在 goblin 皮肤上的嵌套骨架）导出后不显示。
+ * - **10**：新增物理约束：`iks` 段后补 `physics` 与 `sliders` 两段，每个动画补物理 / 滑块轨道段，
+ *   文件尾补骨架级风向 / 重力方向（windX/windY/gravityX/gravityY）。旧文件需重新导出。
  *
  * ⚠️ 附件段**只写 Unity 端 Hao2D 运行时 `Hao2DCodec` 认识的字段**。编辑器内部还有 `frameSize`
  * （未裁剪原图尺寸，只用于检查器显示与选中框），它**不进二进制**：写进去会让 Unity 读端
  * 从附件段开始整体错位（EndOfStreamException）。展示用的 frameSize 请放工程 JSON。
  */
-export const HAO2D_VERSION = 9
+export const HAO2D_VERSION = 10
 
 export interface Hao2dInspectResult {
   magic: number
@@ -70,6 +74,7 @@ export function writeHao2d(asset: RuntimeAsset): Uint8Array {
   writeSlots(writer, asset.slots)
   writeSkins(writer, asset.skins)
   writeIks(writer, asset)
+  writePhysics(writer, asset)
   writeAnimations(writer, asset)
   writeBindposes(writer, asset.bindposes)
   writer.writeStringArray(asset.textureNames)
@@ -77,6 +82,11 @@ export function writeHao2d(asset: RuntimeAsset): Uint8Array {
   writer.writeInt32(asset.defaultSkinIndex)
   // v9：叠加皮肤（编辑器当前皮肤）。空串 = 只用基底皮肤
   writer.writeString(asset.defaultSkin ?? '')
+  // v10：骨架级风向 / 重力方向（物理约束的加速度方向）
+  writer.writeFloat32(asset.windX ?? 1)
+  writer.writeFloat32(asset.windY ?? 0)
+  writer.writeFloat32(asset.gravityX ?? 0)
+  writer.writeFloat32(asset.gravityY ?? 1)
 
   return writer.toUint8Array()
 }
@@ -223,6 +233,39 @@ function writeIks(writer: ByteWriter, asset: RuntimeAsset): void {
   }
 }
 
+function writePhysics(writer: ByteWriter, asset: RuntimeAsset): void {
+  const list = asset.constraints.filter((c): c is PhysicsConstraint => c.type === 'physics')
+  writer.writeInt32(list.length)
+  for (const p of list) {
+    writer.writeString(p.name)
+    // 物理约束只作用于**单根**骨骼：写 int，而不是 int 数组（与 C# WritePhysics 对齐）
+    writer.writeInt32(p.boneIndices.length > 0 ? p.boneIndices[0] : -1)
+    writer.writeFloat32(p.x)
+    writer.writeFloat32(p.y)
+    writer.writeFloat32(p.rotate)
+    writer.writeFloat32(p.scaleX)
+    writer.writeFloat32(p.shearX)
+    writer.writeFloat32(p.limit)
+    writer.writeFloat32(p.step)
+    writer.writeInt32(p.scaleYMode)
+    // 7 个 Global 标记，顺序固定：inertia / strength / damping / mass / wind / gravity / mix
+    writer.writeBool(p.inertiaGlobal)
+    writer.writeBool(p.strengthGlobal)
+    writer.writeBool(p.dampingGlobal)
+    writer.writeBool(p.massGlobal)
+    writer.writeBool(p.windGlobal)
+    writer.writeBool(p.gravityGlobal)
+    writer.writeBool(p.mixGlobal)
+    writer.writeFloat32(p.inertia)
+    writer.writeFloat32(p.strength)
+    writer.writeFloat32(p.damping)
+    writer.writeFloat32(p.mass)
+    writer.writeFloat32(p.wind)
+    writer.writeFloat32(p.gravity)
+    writer.writeFloat32(p.mix)
+  }
+}
+
 function writeAnimations(writer: ByteWriter, asset: RuntimeAsset): void {
   writer.writeInt32(asset.animations.length)
   for (const anim of asset.animations) {
@@ -234,8 +277,36 @@ function writeAnimations(writer: ByteWriter, asset: RuntimeAsset): void {
     writeDrawOrder(writer, anim.drawOrder)
     writeEvents(writer, anim.events)
     writeIkAnims(writer, anim.iks)
+    writePhysicsAnims(writer, anim.physics ?? [])
+    writePhysicsGlobal(writer, anim.physicsGlobal)
     void anim.constraints
   }
+}
+
+function writePhysicsAnims(writer: ByteWriter, tracks: readonly PhysicsAnim[]): void {
+  writer.writeInt32(tracks.length)
+  for (const track of tracks) {
+    writer.writeInt32(track.physicsIndex)
+    writer.writeFloatArray(track.reset ?? [])
+    writeFloatKeyframes(writer, track.inertia)
+    writeFloatKeyframes(writer, track.strength)
+    writeFloatKeyframes(writer, track.damping)
+    writeFloatKeyframes(writer, track.mass)
+    writeFloatKeyframes(writer, track.wind)
+    writeFloatKeyframes(writer, track.gravity)
+    writeFloatKeyframes(writer, track.mix)
+  }
+}
+
+/** 全局物理轨道（7 条，顺序固定；空数组表示该参数没有全局轨道） */
+function writePhysicsGlobal(writer: ByteWriter, global: PhysicsGlobalAnim | undefined): void {
+  writeFloatKeyframes(writer, global?.inertia ?? [])
+  writeFloatKeyframes(writer, global?.strength ?? [])
+  writeFloatKeyframes(writer, global?.damping ?? [])
+  writeFloatKeyframes(writer, global?.mass ?? [])
+  writeFloatKeyframes(writer, global?.wind ?? [])
+  writeFloatKeyframes(writer, global?.gravity ?? [])
+  writeFloatKeyframes(writer, global?.mix ?? [])
 }
 
 function writeBoneAnims(writer: ByteWriter, arr: readonly BoneAnim[]): void {
@@ -375,14 +446,18 @@ function writeBindposes(writer: ByteWriter, bindposes: Float32Array): void {
  */
 export function collectHao2dWarnings(asset: RuntimeAsset): string[] {
   const warnings: string[] = []
-  const dropped = asset.constraints.filter((c) => c.type !== 'ik')
+  // v10 起 IK / 物理 / 滑块都能落盘；变换与路径约束仍然只能留在编辑器里
+  const dropped = asset.constraints.filter((c) => c.type === 'transform' || c.type === 'path')
   if (dropped.length > 0) {
     warnings.push(
-      t('.hao2d 的 iks 段只能表达 IK 约束：已丢弃 {0} 个非 IK 约束（{1}），Unity 侧不会有这些约束', [
+      t('.hao2d 目前只能导出 IK / 物理 / 滑块约束：已丢弃 {0} 个变换 / 路径约束（{1}），Unity 侧不会有这些约束', [
         dropped.length,
         dropped.map((c) => `${c.name}(${c.type})`).join('、')
       ])
     )
+  }
+  if (asset.constraints.some((c) => c.type === 'physics') && !asset.runtimeIK) {
+    warnings.push(t('该资源 runtimeIK = false：Unity 运行期不会跑任何约束求解（含物理）'))
   }
   if (!asset.runtimeIK) {
     warnings.push(t('该资源 runtimeIK = false：Unity 运行期不会再解算 IK（IK 已烘焙进骨骼轨道）'))

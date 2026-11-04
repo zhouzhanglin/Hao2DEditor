@@ -3,6 +3,34 @@ import type { Skeleton } from '../model/skeleton'
 import type { Constraint, IkConstraint, PathConstraint, TransformConstraint } from '../model/constraints'
 import { sortConstraints } from '../model/constraints'
 import { setupPoseOf } from '../model/setup'
+import type { PhysicsGlobalValues, PhysicsParams, PhysicsState } from './physicsSolver'
+import { stepPhysics } from './physicsSolver'
+
+/**
+ * 物理求解上下文：物理是有状态的仿真，必须由播放器逐帧传入 dt 与持久状态。
+ * 不传 = 只解 IK / 变换 / 路径（旧行为，测试与一次性求值仍可用）。
+ */
+export interface SolveContext {
+  /** 本帧时长（秒） */
+  dt: number
+  /** 与 physicsConstraints 同序的物理状态 */
+  physicsStates: PhysicsState[]
+  /**
+   * 参与仿真的物理约束（单独一份列表；缺省 = 用外层 constraints）。
+   *
+   * 不能复用外层 `constraints`：导入的 Spine 资源 `runtimeIK === false` 时那个列表是空的，
+   * 但物理必须照常推进；并且 `physicsStates` 的下标按物理约束自己排。
+   */
+  physicsConstraints?: readonly Constraint[]
+  /** 动画轨道覆盖后的物理参数（null = 用约束静态值） */
+  physicsOverrides?: ReadonlyArray<PhysicsParams | null>
+  /** 全局物理轨道当前值（只有 *Global 参数采用） */
+  physicsGlobal?: PhysicsGlobalValues | null
+  windX?: number
+  windY?: number
+  gravityX?: number
+  gravityY?: number
+}
 
 /**
  * 约束的每帧可变状态（由动画轨道覆盖；无轨道时取约束自身的静态值）。
@@ -26,6 +54,13 @@ export interface ConstraintState {
   spacing: number
   rotateMix: number
   translateMix: number
+  /** 物理参数（打帧 / 面板显示用；求解走 physicsOverrides） */
+  inertia: number
+  strength: number
+  damping: number
+  mass: number
+  wind: number
+  gravity: number
 }
 
 export function defaultConstraintState(constraint: Constraint): ConstraintState {
@@ -46,7 +81,13 @@ export function defaultConstraintState(constraint: Constraint): ConstraintState 
     position: 0,
     spacing: 0,
     rotateMix: 1,
-    translateMix: 1
+    translateMix: 1,
+    inertia: 0.5,
+    strength: 100,
+    damping: 0.85,
+    mass: 1,
+    wind: 0,
+    gravity: 0
   }
   if (constraint.type === 'ik') {
     state.mix = constraint.mix
@@ -68,6 +109,14 @@ export function defaultConstraintState(constraint: Constraint): ConstraintState 
     state.spacing = constraint.spacing
     state.rotateMix = constraint.rotateMix
     state.translateMix = constraint.translateMix
+  } else if (constraint.type === 'physics') {
+    state.mix = constraint.mix
+    state.inertia = constraint.inertia
+    state.strength = constraint.strength
+    state.damping = constraint.damping
+    state.mass = constraint.mass
+    state.wind = constraint.wind
+    state.gravity = constraint.gravity
   }
   return state
 }
@@ -82,15 +131,18 @@ export function resetConstraintStates(constraints: readonly Constraint[], states
 }
 
 /**
- * 求解全部约束：按 order 升序，ik → transform → path。
- * 物理约束只做数据保留，不参与求解。
+ * 求解全部约束：按 order 升序，ik → transform → path → slider → physics。
+ * 滑块本身不改姿态（数值由播放器采样），物理在最后一步推进（需要 `context`）。
  */
 export function solveConstraints(
   skeleton: Skeleton,
   constraints: readonly Constraint[],
-  states: readonly ConstraintState[]
+  states: readonly ConstraintState[],
+  context?: SolveContext
 ): void {
-  if (constraints.length === 0) return
+  const physics = context?.physicsConstraints ?? constraints
+  // 没有 IK / 变换 / 路径时仍要推进物理（导入的 Spine 资源 runtimeIK=false，上面那个列表是空的）
+  if (constraints.length === 0 && physics.length === 0) return
 
   /*
    * 求解前先把每条约束的目标世界坐标快照下来（供视口叠加层画准星 / 连线）。
@@ -109,7 +161,9 @@ export function solveConstraints(
   }
 
   for (const constraint of sortConstraints(constraints)) {
-    if (!constraint.enabled || constraint.type === 'physics') continue
+    if (!constraint.enabled) continue
+    // 物理由下面的 stepPhysics 推进（需要持久状态，不能当无状态约束解）
+    if (constraint.type === 'physics') continue
     let state: ConstraintState | undefined
     for (let i = 0; i < constraints.length; i++) {
       if (constraints[i] === constraint) {
@@ -121,6 +175,21 @@ export function solveConstraints(
     if (constraint.type === 'ik') solveIk(skeleton, constraint, resolved)
     else if (constraint.type === 'transform') solveTransform(skeleton, constraint, resolved)
     else if (constraint.type === 'path') solvePath(skeleton, constraint, resolved)
+  }
+
+  if (context) {
+    stepPhysics(
+      skeleton,
+      context.physicsConstraints ?? constraints,
+      context.physicsStates,
+      context.dt,
+      context.windX,
+      context.windY,
+      context.gravityX,
+      context.gravityY,
+      context.physicsOverrides,
+      context.physicsGlobal
+    )
   }
 }
 

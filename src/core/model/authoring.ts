@@ -248,6 +248,26 @@ export interface AuthoringConstraintAnim {
   spacing: FloatKeyframe[]
   rotateMix: FloatKeyframe[]
   translateMix: FloatKeyframe[]
+  // ---- 物理通道（type = physics） ----
+  inertia: FloatKeyframe[]
+  strength: FloatKeyframe[]
+  damping: FloatKeyframe[]
+  mass: FloatKeyframe[]
+  wind: FloatKeyframe[]
+  gravity: FloatKeyframe[]
+  /** 重置帧：只用 time */
+  reset: FloatKeyframe[]
+}
+
+/** 全局物理轨道（对应 Spine 的 `physics[""]`；只有勾了 Global 的参数采用） */
+export interface AuthoringPhysicsGlobalAnim {
+  inertia: FloatKeyframe[]
+  strength: FloatKeyframe[]
+  damping: FloatKeyframe[]
+  mass: FloatKeyframe[]
+  wind: FloatKeyframe[]
+  gravity: FloatKeyframe[]
+  mix: FloatKeyframe[]
 }
 
 export interface AuthoringAnimData {
@@ -260,6 +280,8 @@ export interface AuthoringAnimData {
   drawOrder: AuthoringDrawOrderKeyframe[]
   events: EventKeyframe[]
   constraints: AuthoringConstraintAnim[]
+  /** 全局物理轨道（可选，老工程没有） */
+  physicsGlobal?: AuthoringPhysicsGlobalAnim
 }
 
 export interface EditorMeta {

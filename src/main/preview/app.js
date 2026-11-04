@@ -427,6 +427,11 @@
     if (!app.state || !animationName) return
     var entry = app.state.setAnimation(0, animationName, $('loopCheck').checked)
     if (entry) entry.trackTime = 0
+    // 重新播放 = 从干净状态开始：清骨骼时间 + 复位物理，避免上一段的甩动残留
+    if (app.skeleton) {
+      app.skeleton.time = 0
+      app.skeleton.updateWorldTransform(spine.Physics.reset)
+    }
     app.playing = true
     $('playBtn').textContent = '暂停'
   }
@@ -628,6 +633,8 @@
     if (!entry || !entry.animation) return
     entry.trackTime = (Number(event.target.value) / 1000) * entry.animation.duration
     if (app.state) app.state.update(0)
+    // 拖进度条是时间跳变：物理状态必须复位，否则会拿旧速度在错误的时间点继续甩
+    if (app.skeleton) app.skeleton.updateWorldTransform(spine.Physics.reset)
     app.dirty = true
   })
   $('progress').addEventListener('change', function () {
@@ -656,7 +663,12 @@
     lastTime = now
     var shouldRender = app.dirty || app.playing
     if (app.state && app.skeleton && (app.playing || app.dirty)) {
-      if (app.playing) app.state.update(delta)
+      if (app.playing) {
+        app.state.update(delta)
+        // 物理约束的 delta 取自 skeleton.time（不是 state 的时间），必须显式推进，
+        // 否则 updateWorldTransform(Physics.update) 里 delta 恒为 0 —— 表现出来就是「预览没有物理」。
+        app.skeleton.update(delta)
+      }
       app.state.apply(app.skeleton)
       app.skeleton.updateWorldTransform(spine.Physics.update)
       shouldRender = true

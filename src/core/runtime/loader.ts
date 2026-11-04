@@ -2,7 +2,12 @@ import { AttachmentType, BlendMode, createAttachmentData, createBoneData } from 
 import type { AttachmentData, BoneData, SkinData, SlotData, VertexWeight } from '../model/types'
 import { createRuntimeAsset } from '../model/asset'
 import type { RuntimeAsset } from '../model/asset'
-import { createIkConstraint, createPathConstraint, createPhysicsConstraint, createTransformConstraint } from '../model/constraints'
+import {
+  createIkConstraint,
+  createPathConstraint,
+  createPhysicsConstraint,
+  createTransformConstraint
+} from '../model/constraints'
 import type { Constraint } from '../model/constraints'
 import type { AnimData } from '../model/animation'
 import type { RuntimeAtlasJson, RuntimeSkeJson, RuntimeSkeNested } from '../codec/runtimeSkeJson'
@@ -189,6 +194,11 @@ export function assetFromJson(ske: RuntimeSkeJson, atlas: RuntimeAtlasJson | nul
     textureNames: [...(ske.textureNames ?? [])],
     defaultSkinIndex: 0,
     runtimeIK: true,
+    runtimePhysics: ske.runtimePhysics !== false,
+    windX: num(ske.windX, 1),
+    windY: num(ske.windY, 0),
+    gravityX: num(ske.gravityX, 0),
+    gravityY: num(ske.gravityY, 1),
     images: (atlas?.pages ?? []).map((page) => ({
       name: page.image,
       path: page.image,

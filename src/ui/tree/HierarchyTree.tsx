@@ -41,7 +41,12 @@ import { statusWarn } from '@shared/status'
 import type { StatusReporter } from '@shared/status'
 import { focusNode } from '@editor/focusNode'
 import type { FocusTarget } from '@editor/focusNode'
-import { createIkConstraint, createPathConstraint, createTransformConstraint } from '@core/model/constraints'
+import {
+  createIkConstraint,
+  createPathConstraint,
+  createPhysicsConstraint,
+  createTransformConstraint
+} from '@core/model/constraints'
 import type {
   AuthoringAttachment,
   AuthoringBone,
@@ -590,8 +595,8 @@ const CONSTRAINT_ICON_COLOR: Record<AuthoringConstraint['type'], string> = {
   ik: '',
   transform: 'text-ok/80',
   path: 'text-warn/80',
-  // 物理约束仅在导入时保留数据（不参与求解），用弱化颜色区分
-  physics: 'text-content-lo'
+  // 物理：弹簧 / 惯性仿真，用蓝紫与 IK（红）、变换（绿）、路径（橙）区分
+  physics: 'text-[#8b9cf7]'
 }
 
 const CONSTRAINT_ICON: Record<AuthoringConstraint['type'], React.ReactNode> = {
@@ -758,7 +763,13 @@ function constraintRowTitle(constraint: AuthoringConstraint): string {
   if (constraint.type === 'path') {
     lines.push(t('位置 {0} · 间距 {1}', [constraint.position.toFixed(2), constraint.spacing.toFixed(2)]))
   }
-  if (constraint.type === 'physics') lines.push(t('仅保留数据：不参与求解，导出直通'))
+  if (constraint.type === 'physics') {
+    lines.push(t('惯性 {0} · 强度 {1} · 阻尼 {2}', [
+      constraint.inertia.toFixed(2),
+      constraint.strength.toFixed(1),
+      constraint.damping.toFixed(2)
+    ]))
+  }
   if (!constraint.enabled) lines.push(t('已停用（enabled = false）'))
   return lines.join('\n')
 }
@@ -1395,8 +1406,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
      * 工程里已有的骨骼。没选中骨骼时**不要猜**：早先会静默退回第一根骨骼，点一下看着像给
      * 那根骨加了约束，实际却和用户想的那根骨无关。说清楚、什么都不建更省事。
      */
-    if ((kind === 'transform' || kind === 'path') && !bone) {
-      onStatus?.(statusWarn(t('先选中要被驱动的骨骼，再新建变换 / 路径约束')))
+    if ((kind === 'transform' || kind === 'path' || kind === 'physics') && !bone) {
+      onStatus?.(statusWarn(t('先选中要被驱动的骨骼，再新建变换 / 路径 / 物理约束')))
       return
     }
     /*
@@ -1436,10 +1447,12 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         )
         draft.constraints.push({ ...createIkConstraint(), ...base, type: 'ik', target: nodeName, bones: chain })
       } else {
-        // 变换 / 路径：点中的那根骨就是被驱动骨（没有就上面已经拦掉了），目标（来源骨 / 路径骨）在面板里选
+        // 变换 / 路径 / 物理：点中的那根骨就是被驱动骨（没有就上面已经拦掉了）
         const bones = bone ? [bone] : []
         if (kind === 'transform') {
           draft.constraints.push({ ...createTransformConstraint(), ...base, type: 'transform', bones })
+        } else if (kind === 'physics') {
+          draft.constraints.push({ ...createPhysicsConstraint(), ...base, type: 'physics', bones })
         } else draft.constraints.push({ ...createPathConstraint(), ...base, type: 'path', bones })
       }
     })
@@ -1734,6 +1747,13 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
               hint: labelledHint(t('骨骼沿路径折线排布'), drivenBoneHint()),
               icon: <Route size={12} className={CONSTRAINT_ICON_COLOR.path} />,
               onSelect: () => addConstraint('path', host)
+            },
+            {
+              key: 'physics',
+              label: t('添加物理约束'),
+              hint: labelledHint(t('弹簧 / 惯性仿真：让这根骨在运动时滞后、甩出与回弹'), drivenBoneHint()),
+              icon: <Activity size={12} className={CONSTRAINT_ICON_COLOR.physics} />,
+              onSelect: () => addConstraint('physics', host)
             }
           ]
         : [])
@@ -2227,6 +2247,14 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
           onClick={poseOnly(() => addConstraint('path'))}
         >
           <Route size={14} className={CONSTRAINT_ICON_COLOR.path} />
+        </button>
+        <button
+          type="button"
+          title={labelledHint(t('新建物理约束'), t('弹簧 / 惯性仿真：需要先选中被驱动的骨骼'))}
+          className="hao-btn h-[18px] px-1.5"
+          onClick={poseOnly(() => addConstraint('physics'))}
+        >
+          <Activity size={14} className={CONSTRAINT_ICON_COLOR.physics} />
         </button>
         {/* 右侧两个显示开关（`ml-auto` 靠右，与左边的「新建」按钮分开）：
             全部折叠 / 全部展开，以及树里 display 行的显隐 */}

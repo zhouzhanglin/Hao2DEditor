@@ -489,19 +489,36 @@ function buildConstraints(asset: RuntimeAsset): SpineJson['constraints'] {
       })
     } else if (c.type === 'physics') {
       /*
-       * 4.3 的 physics 约束按**单根骨骼**定位（`bone`），且 `scaleY` 是枚举模式。
-       * 老文件里 `bones` 是数组、`scaleY` 是数字，直接展开会被官方运行库读成非法枚举。
+       * 4.3 的 physics 约束按**单根骨骼**定位（`bone`），`limit` 用像素、`fps` 表示步长倒数，
+       * `scaleY` 是枚举字符串。内部模型存的是世界单位 + 秒，这里换算回 Spine 的口径。
        */
-      const raw = { ...((c as { raw: Record<string, unknown> }).raw ?? {}) }
-      const bones = (c as { boneIndices: number[] }).boneIndices
-      const bone = (raw.bone as string | undefined) ?? asset.bones[bones[0]]?.name ?? ''
-      delete raw.type
-      delete raw.name
-      delete raw.order
-      delete raw.bones
-      delete raw.bone
-      if (typeof raw.scaleY === 'number') delete raw.scaleY
-      out.push({ type: 'physics', name: c.name, bone, ...raw })
+      out.push({
+        type: 'physics',
+        name: c.name,
+        bone: asset.bones[c.boneIndices[0]]?.name ?? '',
+        x: c.x,
+        y: c.y,
+        rotate: c.rotate,
+        scaleX: c.scaleX,
+        shearX: c.shearX,
+        limit: c.limit * RUNTIME_PPU,
+        fps: c.step > 0 ? Math.round(1 / c.step) : 60,
+        scaleY: c.scaleYMode === 1 ? 'uniform' : c.scaleYMode === 2 ? 'volume' : 'none',
+        inertia: c.inertia,
+        strength: c.strength,
+        damping: c.damping,
+        mass: c.mass,
+        wind: c.wind,
+        gravity: c.gravity,
+        mix: c.mix,
+        inertiaGlobal: c.inertiaGlobal,
+        strengthGlobal: c.strengthGlobal,
+        dampingGlobal: c.dampingGlobal,
+        massGlobal: c.massGlobal,
+        windGlobal: c.windGlobal,
+        gravityGlobal: c.gravityGlobal,
+        mixGlobal: c.mixGlobal
+      })
     }
   }
   // 逐项是手工拼的 JSON 片（ik / transform / path / physics 四种形状），与联合类型不同构
@@ -957,6 +974,66 @@ function buildConstraintTimelines(asset: RuntimeAsset, animation: AnimData): Pic
   return { ik, transform, path }
 }
 
+/**
+ * 物理约束时间轴（Spine 4.3）：`physics.<约束名>.<通道>`，通道值写法固定是 `{ time, value, curve? }`；
+ * `reset` 只有时间。约束名为空串 = 全局轨道（只影响勾了 `*Global` 的约束）。
+ */
+function buildPhysicsTimelines(
+  asset: RuntimeAsset,
+  animation: AnimData
+): SpineAnimationJson['physics'] {
+  const out: Record<string, Record<string, SpineCurveKeyframe[]>> = {}
+  const scalarTrack = (keys: FloatKeyframe[]): SpineCurveKeyframe[] =>
+    keys.map((k, i) => {
+      const next = keys[i + 1]
+      const curve = channelCurve(
+        k.easing,
+        k.curve,
+        k.time,
+        next ? next.time : k.time,
+        [k.value],
+        [next ? next.value : k.value]
+      )
+      return constraintKey(k.time, 'value', k.value, curve)
+    })
+
+  for (const track of animation.physics ?? []) {
+    const c = asset.constraints[track.physicsIndex]
+    if (!c || c.type !== 'physics') continue
+    const map: Record<string, SpineCurveKeyframe[]> = {}
+    if (track.reset.length > 0) map.reset = track.reset.map((time) => ({ time }))
+    const channels: Array<[string, FloatKeyframe[]]> = [
+      ['inertia', track.inertia],
+      ['strength', track.strength],
+      ['damping', track.damping],
+      ['mass', track.mass],
+      ['wind', track.wind],
+      ['gravity', track.gravity],
+      ['mix', track.mix]
+    ]
+    for (const [name, keys] of channels) if (keys.length > 0) map[name] = scalarTrack(keys)
+    if (Object.keys(map).length > 0) out[c.name] = map
+  }
+
+  const global = animation.physicsGlobal
+  if (global) {
+    const map: Record<string, SpineCurveKeyframe[]> = {}
+    const channels: Array<[string, FloatKeyframe[]]> = [
+      ['inertia', global.inertia],
+      ['strength', global.strength],
+      ['damping', global.damping],
+      ['mass', global.mass],
+      ['wind', global.wind],
+      ['gravity', global.gravity],
+      ['mix', global.mix]
+    ]
+    for (const [name, keys] of channels) if (keys.length > 0) map[name] = scalarTrack(keys)
+    if (Object.keys(map).length > 0) out[''] = map
+  }
+
+  return out
+}
+
 function buildAnimations(asset: RuntimeAsset): SpineJson['animations'] {
   const out: SpineJson['animations'] = {}
   for (const animation of asset.animations) {
@@ -972,6 +1049,7 @@ function buildAnimations(asset: RuntimeAsset): SpineJson['animations'] {
       Object.assign(slots, buildSlotTimeline(track, asset))
     }
     const { ik, transform, path } = buildConstraintTimelines(asset, animation)
+    const physics = buildPhysicsTimelines(asset, animation)
     const anim: SpineAnimationJson = { bones, slots }
     const attachments = buildDeforms(asset, animation)
     // 这几个通道在 JSON 类型里都是可选的（构建函数可能返回 undefined）：取 keys 前先兜成空对象
@@ -990,6 +1068,7 @@ function buildAnimations(asset: RuntimeAsset): SpineJson['animations'] {
     if (Object.keys(ik ?? {}).length > 0) anim.ik = ik
     if (Object.keys(transform ?? {}).length > 0) anim.transform = transform
     if (Object.keys(path ?? {}).length > 0) anim.path = path
+    if (physics && Object.keys(physics).length > 0) anim.physics = physics
     out[animation.name] = anim
   }
   return out

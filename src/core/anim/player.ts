@@ -8,6 +8,8 @@ import type { Skeleton } from '../model/skeleton'
 import type { Constraint } from '../model/constraints'
 import { createConstraintStates, resetConstraintStates, solveConstraints } from '../constraints/solver'
 import type { ConstraintState } from '../constraints/solver'
+import type { PhysicsGlobalValues, PhysicsParams, PhysicsState } from '../constraints/physicsSolver'
+import { applyPhysicsGlobals, createPhysicsState, resetPhysicsState } from '../constraints/physicsSolver'
 
 /** 采样目标缓冲（A/B 两份用于交叉淡化） */
 export interface PoseBuffer {
@@ -54,6 +56,24 @@ export class AnimationPlayer {
   private readonly activeStates: ConstraintState[]
   /** asset.constraints 里 IK 约束的下标（供 Unity 端 Hao2D 运行时风格的 iks 轨道使用） */
   private readonly ikIndices: number[]
+
+  /**
+   * 参与仿真的物理约束（**独立列表**，与 physicsStates 同序）。
+   *
+   * 不复用 activeConstraints：导入的 Spine 资源 `runtimeIK === false`（动画已烘焙）时那里面是空的，
+   * 但物理是运行期新能力，必须照常推进；另外 Spore 的 physicsIndex 也是按物理约束自己排的下标。
+   */
+  private readonly physicsConstraints: Constraint[]
+  /** 物理约束的持久仿真状态（与 physicsConstraints 同序） */
+  private readonly physicsStates: PhysicsState[]
+  /** 每帧由轨道算出的物理参数（null = 用约束静态值） */
+  private readonly physicsOverrides: Array<PhysicsParams | null>
+  /** 全局物理轨道当前值（*Global 参数用） */
+  private physicsGlobal: PhysicsGlobalValues | null = null
+  /** 上一帧的动画时间（用于判断「重置帧」是否被跨过） */
+  private physicsLastTime = 0
+  /** seek 重放期间不派发事件 / 完成回调 */
+  private replaying = false
 
   private readonly bufA: PoseBuffer
   private readonly bufB: PoseBuffer
@@ -107,6 +127,60 @@ export class AnimationPlayer {
       this.activeConstraints.push(constraint)
       this.activeStates.push(this.states[i])
     }
+
+    // 物理：独立列表（不受 runtimeIK 影响），下标与 animations[].physics[].physicsIndex 一致
+    this.physicsConstraints = this.constraints.filter(
+      (constraint) => constraint.type === 'physics' && asset.runtimePhysics !== false
+    )
+    this.physicsStates = this.physicsConstraints.map(() => createPhysicsState())
+    this.physicsOverrides = this.physicsConstraints.map(() => null)
+  }
+
+  /** 清空全部物理状态（切动画 / seek / 回 setup 时调用） */
+  private resetPhysics(): void {
+    for (const state of this.physicsStates) resetPhysicsState(state)
+    this.physicsLastTime = 0
+  }
+
+  /** 当前资源是否真的会跑物理（没有物理约束或被 runtimePhysics 关掉都不算） */
+  private hasPhysics(): boolean {
+    return this.physicsConstraints.length > 0
+  }
+
+  /**
+   * 固定步长重放：从动画起点按 1/60 秒推进到目标时间。
+   *
+   * 物理是有状态的仿真，直接跳到某个时间点会得到「上一帧残留的状态」；
+   * 重放保证同一动画、同一时间点的结果一致（拖动时间轴 / 洋葱皮 / 切帧都受益）。
+   */
+  private replayPhysicsTo(target: number): void {
+    const anim = this.cur
+    if (!anim) return
+    const step = 1 / 60
+    this.timeValue = 0
+    this.elapsedValue = 0
+    this.lastTime = 0
+    this.fading = false
+    this.prev = null
+    this.replaying = true
+    this.step(0)
+    const dur = this.durationOf(anim)
+    const limit = this.loopFlag ? Math.max(0, target) : Math.min(Math.max(0, target), dur)
+    let t = 0
+    while (t < limit - 1e-9) {
+      const dt = Math.min(step, limit - t)
+      this.step(dt)
+      t += dt
+    }
+    this.replaying = false
+    this.timeValue = this.loopFlag
+      ? Math.abs(target - dur) < 1e-6
+        ? dur
+        : ((target % dur) + dur) % dur
+      : Math.min(Math.max(0, target), dur)
+    this.lastTime = this.timeValue
+    this.elapsedValue = target
+    this.completed = !this.loopFlag && this.timeValue >= dur
   }
 
   // ---------------- 播放控制 ----------------
@@ -125,6 +199,7 @@ export class AnimationPlayer {
     this.timeValue = 0
     this.elapsedValue = 0
     this.lastTime = 0
+    this.resetPhysics()
     this.step(0)
     return true
   }
@@ -147,6 +222,7 @@ export class AnimationPlayer {
     this.timeValue = 0
     this.elapsedValue = 0
     this.lastTime = 0
+    this.resetPhysics()
     this.step(0)
     return true
   }
@@ -160,8 +236,9 @@ export class AnimationPlayer {
     this.timeValue = 0
     this.elapsedValue = 0
     this.lastTime = 0
+    this.resetPhysics()
     this.skeleton.setToSetupPose()
-    this.solveCurrentConstraints(null, 0)
+    this.solveCurrentConstraints(null, 0, 0)
   }
 
   seek(seconds: number): void {
@@ -184,11 +261,17 @@ export class AnimationPlayer {
       // 会因此退回上一帧的值，看起来就是「这一帧位置不对」
       else if (next < 0 || next >= dur) next = ((next % dur) + dur) % dur
     } else next = Math.max(0, Math.min(dur, next))
-    this.timeValue = next
-    this.lastTime = next
+    this.resetPhysics()
     this.fading = false
     this.prev = null
     this.completed = !this.loopFlag && next >= dur
+    if (this.hasPhysics()) {
+      // 有物理：从起点重放到目标时间，保证拖动播放头 / 逐帧单步的结果可复现
+      this.replayPhysicsTo(next)
+      return
+    }
+    this.timeValue = next
+    this.lastTime = next
     this.step(0)
   }
 
@@ -329,7 +412,7 @@ export class AnimationPlayer {
     const anim = this.cur
     if (!anim) {
       this.skeleton.updateFk(0)
-      this.solveCurrentConstraints(null, 0)
+      this.solveCurrentConstraints(null, 0, dt)
       return
     }
 
@@ -369,13 +452,13 @@ export class AnimationPlayer {
     }
 
     this.applyDeform(anim, this.timeValue)
-    this.fireEvents(anim, this.lastTime, this.timeValue)
+    if (!this.replaying) this.fireEvents(anim, this.lastTime, this.timeValue)
     this.lastTime = this.timeValue
     this.skeleton.applyDisplayOverrides()
     this.skeleton.updateFk(0)
-    this.solveCurrentConstraints(anim, this.timeValue)
+    this.solveCurrentConstraints(anim, this.timeValue, dt)
 
-    if (reachedEnd && !this.completed) {
+    if (reachedEnd && !this.completed && !this.replaying) {
       this.completed = true
       this.onComplete?.(anim.name)
     }
@@ -599,9 +682,14 @@ export class AnimationPlayer {
 
   // ---------------- 约束 ----------------
 
-  private solveCurrentConstraints(anim: AnimData | null, time: number): void {
-    if (this.activeConstraints.length === 0) return
+  private solveCurrentConstraints(anim: AnimData | null, time: number, dt: number): void {
+    // 物理独立于 IK：runtimeIK=false 的烘焙资源也要推进物理
+    if (this.activeConstraints.length === 0 && this.physicsConstraints.length === 0) return
     resetConstraintStates(this.constraints, this.states)
+
+    // 物理参数每帧先回到 setup 值，再由轨道覆盖
+    this.physicsOverrides.fill(null)
+    this.physicsGlobal = null
 
     if (anim) {
       for (const track of anim.constraints) {
@@ -616,9 +704,96 @@ export class AnimationPlayer {
         const value = sampleNumber(ik.mix, time)
         if (value !== null) this.states[index].mix = value
       }
+      this.samplePhysicsTracks(anim, time)
     }
 
-    solveConstraints(this.skeleton, this.activeConstraints, this.activeStates)
+    solveConstraints(this.skeleton, this.activeConstraints, this.activeStates, {
+      dt,
+      physicsConstraints: this.physicsConstraints,
+      physicsStates: this.physicsStates,
+      physicsOverrides: this.physicsOverrides,
+      physicsGlobal: this.physicsGlobal,
+      windX: this.asset.windX,
+      windY: this.asset.windY,
+      gravityX: this.asset.gravityX,
+      gravityY: this.asset.gravityY
+    })
+    this.physicsLastTime = time
+  }
+
+  /** 采样物理参数轨道、全局滑块与「重置」帧 */
+  private samplePhysicsTracks(anim: AnimData, time: number): void {
+    for (const track of anim.physics ?? []) {
+      const index = track.physicsIndex
+      // physicsIndex 是「物理约束列表」里的下标（不是 asset.constraints 全集下标）
+      const data = this.physicsConstraints[index]
+      if (!data || data.type !== 'physics') continue
+
+      // 跨过重置帧 → 清空该约束的仿真状态（循环回卷时不判定）
+      if (time >= this.physicsLastTime - 1e-9) {
+        for (const resetTime of track.reset) {
+          if (resetTime > this.physicsLastTime + 1e-9 && resetTime <= time + 1e-9) {
+            resetPhysicsState(this.physicsStates[index])
+            break
+          }
+        }
+      }
+
+      const base: PhysicsParams = {
+        inertia: data.inertia,
+        strength: data.strength,
+        damping: data.damping,
+        mass: data.mass,
+        wind: data.wind,
+        gravity: data.gravity,
+        mix: data.mix
+      }
+      const assign = (keys: FloatKeyframe[], key: keyof PhysicsParams): void => {
+        if (keys.length === 0) return
+        const value = sampleNumber(keys, time)
+        if (value !== null) base[key] = value
+      }
+      assign(track.inertia, 'inertia')
+      assign(track.strength, 'strength')
+      assign(track.damping, 'damping')
+      assign(track.mass, 'mass')
+      assign(track.wind, 'wind')
+      assign(track.gravity, 'gravity')
+      assign(track.mix, 'mix')
+      this.physicsOverrides[index] = base
+
+      // 面板 / 打帧读的是**当前生效值**（含全局参数覆盖）
+      const state = this.states[this.constraints.indexOf(data)]
+      if (state) {
+        const effective = applyPhysicsGlobals(data, base, this.physicsGlobal)
+        state.inertia = effective.inertia
+        state.strength = effective.strength
+        state.damping = effective.damping
+        state.mass = effective.mass
+        state.wind = effective.wind
+        state.gravity = effective.gravity
+        state.mix = effective.mix
+      }
+    }
+
+    // 全局物理轨道（Spine 的 physics[""]）：只有勾了 Global 的参数会采用
+    const global = anim.physicsGlobal
+    if (global) {
+      const values: PhysicsGlobalValues = {}
+      const read = (keys: FloatKeyframe[], key: keyof PhysicsGlobalValues): void => {
+        if (keys.length === 0) return
+        const value = sampleNumber(keys, time)
+        if (value !== null) values[key] = value
+      }
+      read(global.inertia, 'inertia')
+      read(global.strength, 'strength')
+      read(global.damping, 'damping')
+      read(global.mass, 'mass')
+      read(global.wind, 'wind')
+      read(global.gravity, 'gravity')
+      read(global.mix, 'mix')
+      this.physicsGlobal = values
+    }
   }
 
   private applyConstraintTrack(track: ConstraintAnim, time: number, state: ConstraintState): void {

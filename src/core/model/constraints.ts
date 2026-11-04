@@ -3,11 +3,10 @@ import type { Vec2 } from '../math/matrix'
 /**
  * 约束系统。
  *
- * Unity 端 Hao2D 运行时只实现了 IK（`IkData`），变换 / 路径 / 物理约束为编辑器新增，按 Spine 语义设计；
- * 其中物理约束仅做数据保留与导出直通，**不参与求解**。
- *
- * 求解顺序：按 order 升序，依次 ik → transform → path（physics 跳过）。
- * 注意 `.hao2d` v5 的 iks 段只能表达 IK，导出时其余约束会被裁剪并告警。
+ * 求解顺序：按 order 升序，依次 ik → transform → path → physics。
+ * - IK / 变换 / 路径：改骨骼局部姿态（`.hao2d` v10 起只有 IK 能落盘）；
+ * - 物理：按 Spine 4.3 的弹簧/惯性模型仿真，见 `core/constraints/physicsSolver.ts`；
+ *   标了 `*Global` 的参数由动画的「全局物理轨道」驱动（与 Spine 的 constraintIndex = -1 一致）。
  */
 export type ConstraintType = 'ik' | 'transform' | 'path' | 'physics'
 
@@ -83,10 +82,43 @@ export interface PathConstraint extends ConstraintBase {
   rotateMode: PathRotateMode
 }
 
-/** 物理约束：仅数据保留，不求解；`raw` 保存源文件原始字段以便导出直通。 */
+/** scaleY 的处理方式（对齐 Spine 的 ScaleYMode）。 */
+export type PhysicsScaleYMode = 0 | 1 | 2   // 0 = 不处理 / 1 = Uniform / 2 = Volume
+
+/**
+ * 物理约束：单根骨骼相对父骨骼的弹簧-惯性仿真（Spine 4.3 语义）。
+ *
+ * 字段顺序与语义严格对齐 Spine：`x/y/rotate/scaleX/shearX` 是五个「影响通道」（0..1），
+ * `inertia/strength/damping/mass/wind/gravity/mix` 是动力学参数，
+ * `limit` 限制单帧位移参与仿真的幅度，`step`（秒）是固定仿真步长。
+ * `*Global` 为真时该参数改由 `sliderIndices` 指向的滑块约束取值。
+ */
 export interface PhysicsConstraint extends ConstraintBase {
   type: 'physics'
-  raw: Record<string, unknown>
+  x: number
+  y: number
+  rotate: number
+  scaleX: number
+  shearX: number
+  limit: number
+  /** 固定仿真步长（秒） */
+  step: number
+  scaleYMode: PhysicsScaleYMode
+  inertia: number
+  strength: number
+  /** 质量（>0）；运行期用 1/mass 参与计算 */
+  mass: number
+  damping: number
+  wind: number
+  gravity: number
+  mix: number
+  inertiaGlobal: boolean
+  strengthGlobal: boolean
+  dampingGlobal: boolean
+  massGlobal: boolean
+  windGlobal: boolean
+  gravityGlobal: boolean
+  mixGlobal: boolean
 }
 
 export type Constraint = IkConstraint | TransformConstraint | PathConstraint | PhysicsConstraint
@@ -177,7 +209,29 @@ export function createPhysicsConstraint(partial?: Partial<PhysicsConstraint>): P
     enabled: true,
     boneIndices: [],
     targetBoneIndex: -1,
-    raw: {},
+    // 默认值取 Spine 编辑器的物理约束默认参数
+    x: 0,
+    y: 0,
+    rotate: 0,
+    scaleX: 0,
+    shearX: 0,
+    limit: 0.1,
+    step: 1 / 60,
+    scaleYMode: 1,
+    inertia: 1,
+    strength: 100,
+    mass: 1,
+    damping: 1,
+    wind: 0,
+    gravity: 0,
+    mix: 1,
+    inertiaGlobal: false,
+    strengthGlobal: false,
+    dampingGlobal: false,
+    massGlobal: false,
+    windGlobal: false,
+    gravityGlobal: false,
+    mixGlobal: false,
     ...partial
   }
 }

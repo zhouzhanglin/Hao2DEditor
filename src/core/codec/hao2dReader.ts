@@ -5,8 +5,8 @@ import { AnimType, AttachmentType, BlendMode, createAttachmentData, createBoneDa
 import type { AttachmentData, BoneData, SkinData, SkinSlotData, SlotData, VertexWeight } from '../model/types'
 import { createRuntimeAsset } from '../model/asset'
 import type { RuntimeAsset } from '../model/asset'
-import { createIkConstraint } from '../model/constraints'
-import type { IkConstraint } from '../model/constraints'
+import { createIkConstraint, createPhysicsConstraint } from '../model/constraints'
+import type { IkConstraint, PhysicsConstraint, PhysicsScaleYMode } from '../model/constraints'
 import type {
   AnimData,
   BoneAnim,
@@ -20,6 +20,8 @@ import type {
   FloatKeyframe,
   IkAnim,
   IntKeyframe,
+  PhysicsAnim,
+  PhysicsGlobalAnim,
   SlotAnim,
   SubArmatureKeyframe
 } from '../model/animation'
@@ -30,7 +32,7 @@ export interface Hao2dReadResult {
   warnings: string[]
 }
 
-/** 解析 `.hao2d`（支持 Version 5 / 6 / 7 / 8 / 9）。magic / version 不匹配时抛出可读错误。 */
+/** 解析 `.hao2d`（支持 Version 5 / 6 / 7 / 8 / 9 / 10）。magic / version 不匹配时抛出可读错误。 */
 export function readHao2d(bytes: Uint8Array): Hao2dReadResult {
   const warnings: string[] = []
   const reader = new ByteReader(bytes)
@@ -40,11 +42,17 @@ export function readHao2d(bytes: Uint8Array): Hao2dReadResult {
   }
   const version = reader.readUint16()
   // v5 的附件段没有 contentOffset，按 0 读 —— 等价于「没被裁剪过」
-  // 5 / 6 / 7 是历史格式（字段更少，按默认值补齐）；8 = 当前格式（含骨架嵌套）
-  const supported = version === 5 || version === 6 || version === 7 || version === 8 || version === HAO2D_VERSION
+  // 5 / 6 / 7 / 8 / 9 是历史格式（字段更少，按默认值补齐）；10 = 当前格式（含物理约束）
+  const supported =
+    version === 5 ||
+    version === 6 ||
+    version === 7 ||
+    version === 8 ||
+    version === 9 ||
+    version === HAO2D_VERSION
   if (!supported) {
     throw new Error(
-      t('Hao2D: 不支持的数据版本 {0}（支持 5 / 6 / 7 / 8 / {1}），请重新导出', [version, HAO2D_VERSION])
+      t('Hao2D: 不支持的数据版本 {0}（支持 5 / 6 / 7 / 8 / 9 / {1}），请重新导出', [version, HAO2D_VERSION])
     )
   }
 
@@ -53,7 +61,9 @@ export function readHao2d(bytes: Uint8Array): Hao2dReadResult {
   const bones = readBones(reader)
   const slots = readSlots(reader, version, warnings)
   const skins = readSkins(reader, version)
-  const constraints = readIks(reader)
+  const iks = readIks(reader)
+  const physics = version >= 10 ? readPhysics(reader) : []
+  const constraints = [...iks, ...physics]
   const animations = readAnimations(reader, version)
   const bindposes = readBindposes(reader)
   const textureNames = reader.readStringArray()
@@ -61,6 +71,11 @@ export function readHao2d(bytes: Uint8Array): Hao2dReadResult {
   const defaultSkinIndex = reader.readInt32()
   // v9：叠加皮肤（编辑器当前皮肤）；旧文件没有 → 只显示基底皮肤
   const defaultSkin = version >= 9 ? reader.readString() : ''
+  // v10：骨架级风向 / 重力方向
+  const windX = version >= 10 ? reader.readFloat32() : 1
+  const windY = version >= 10 ? reader.readFloat32() : 0
+  const gravityX = version >= 10 ? reader.readFloat32() : 0
+  const gravityY = version >= 10 ? reader.readFloat32() : 1
 
   const asset = createRuntimeAsset({
     dataType,
@@ -76,6 +91,11 @@ export function readHao2d(bytes: Uint8Array): Hao2dReadResult {
     defaultSkinIndex,
     defaultSkin,
     runtimeIK: true,
+    runtimePhysics: true,
+    windX,
+    windY,
+    gravityX,
+    gravityY,
     images: textureNames.map((name) => ({ name, path: name, width: 0, height: 0 }))
   })
 
@@ -300,6 +320,98 @@ function readIks(reader: ByteReader): IkConstraint[] {
   return iks
 }
 
+function readPhysics(reader: ByteReader): PhysicsConstraint[] {
+  const count = reader.readInt32()
+  const list: PhysicsConstraint[] = []
+  for (let i = 0; i < count; i++) {
+    const name = reader.readString()
+    const boneIndex = reader.readInt32()
+    const boneIndices = boneIndex >= 0 ? [boneIndex] : []
+    const x = reader.readFloat32()
+    const y = reader.readFloat32()
+    const rotate = reader.readFloat32()
+    const scaleX = reader.readFloat32()
+    const shearX = reader.readFloat32()
+    const limit = reader.readFloat32()
+    const step = reader.readFloat32()
+    const scaleYMode = reader.readInt32() as PhysicsScaleYMode
+    const inertiaGlobal = reader.readBool()
+    const strengthGlobal = reader.readBool()
+    const dampingGlobal = reader.readBool()
+    const massGlobal = reader.readBool()
+    const windGlobal = reader.readBool()
+    const gravityGlobal = reader.readBool()
+    const mixGlobal = reader.readBool()
+    const inertia = reader.readFloat32()
+    const strength = reader.readFloat32()
+    const damping = reader.readFloat32()
+    const mass = reader.readFloat32()
+    const wind = reader.readFloat32()
+    const gravity = reader.readFloat32()
+    const mix = reader.readFloat32()
+    list.push(
+      createPhysicsConstraint({
+        name,
+        boneIndices,
+        x,
+        y,
+        rotate,
+        scaleX,
+        shearX,
+        limit,
+        step,
+        scaleYMode,
+        inertiaGlobal,
+        strengthGlobal,
+        dampingGlobal,
+        massGlobal,
+        windGlobal,
+        gravityGlobal,
+        mixGlobal,
+        inertia,
+        strength,
+        damping,
+        mass,
+        wind,
+        gravity,
+        mix
+      })
+    )
+  }
+  return list
+}
+
+function readPhysicsAnims(reader: ByteReader): PhysicsAnim[] {
+  const count = reader.readInt32()
+  const tracks: PhysicsAnim[] = []
+  for (let i = 0; i < count; i++) {
+    tracks.push({
+      physicsIndex: reader.readInt32(),
+      reset: reader.readFloatArray(),
+      inertia: readFloatKeyframes(reader),
+      strength: readFloatKeyframes(reader),
+      damping: readFloatKeyframes(reader),
+      mass: readFloatKeyframes(reader),
+      wind: readFloatKeyframes(reader),
+      gravity: readFloatKeyframes(reader),
+      mix: readFloatKeyframes(reader)
+    })
+  }
+  return tracks
+}
+
+function readPhysicsGlobal(reader: ByteReader): PhysicsGlobalAnim {
+  return {
+    inertia: readFloatKeyframes(reader),
+    strength: readFloatKeyframes(reader),
+    damping: readFloatKeyframes(reader),
+    mass: readFloatKeyframes(reader),
+    wind: readFloatKeyframes(reader),
+    gravity: readFloatKeyframes(reader),
+    mix: readFloatKeyframes(reader)
+  }
+}
+
 function readAnimations(reader: ByteReader, version: number): AnimData[] {
   const count = reader.readInt32()
   const animations: AnimData[] = []
@@ -312,6 +424,10 @@ function readAnimations(reader: ByteReader, version: number): AnimData[] {
     const drawOrder = readDrawOrder(reader)
     const events = readEvents(reader)
     const iks = readIkAnims(reader)
+    const physics = version >= 10 ? readPhysicsAnims(reader) : []
+    const physicsGlobal = version >= 10
+      ? readPhysicsGlobal(reader)
+      : { inertia: [], strength: [], damping: [], mass: [], wind: [], gravity: [], mix: [] }
     animations.push({
       name,
       duration,
@@ -321,7 +437,9 @@ function readAnimations(reader: ByteReader, version: number): AnimData[] {
       drawOrder,
       events,
       iks,
-      constraints: []
+      constraints: [],
+      physics,
+      physicsGlobal
     })
   }
   return animations

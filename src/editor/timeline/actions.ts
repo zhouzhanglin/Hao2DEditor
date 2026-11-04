@@ -8,6 +8,7 @@ import { buildTimeline, deleteKeys, keyframeTargets, syncDuration } from './mode
 import {
   eventFrameAt,
   keyBoneChannel,
+  keyConstraintChannel,
   keyEventFrame,
   keySlotDisplay,
   keySlotSubArmature,
@@ -505,13 +506,37 @@ export function setBoneChannelNow(bone: string, channel: BoneChannel, value: num
   return { ok: true, message: t('已在 {0}s 打「{1}」关键帧', [at.toFixed(2), label]) }
 }
 
+/**
+ * 给约束的某条数值通道打一帧（视口属性条用；物理约束的 7 条参数就是走这里）。
+ * 返回是否真的写下去（命令不存在 / 没动画时返回 false，输入框会复原）。
+ */
+export function setConstraintChannelNow(constraint: string, channel: string, value: number): ActionResult {
+  const animScope = resolveAnimationName()
+  if (!animScope) return { ok: false, message: noAnimationMessage() }
+  const at = useTimelineStore.getState().time
+  const label = trackLabelOf({ kind: 'constraint', target: constraint, channel })
+  let written = false
+  useProjectStore.getState().update(t('{0}关键帧', label), (draft) => {
+    const animation = draft.animations.find((item) => item.name === animScope)
+    if (!animation) return
+    if (!keyConstraintChannel(animation, constraint, channel, at, value)) return
+    syncDuration(animation)
+    written = true
+  })
+  if (!written) return { ok: false, message: t('该约束没有「{0}」这条通道', channel) }
+
+  useTimelineStore.getState().notifyKeyed(`constraint:${constraint}:${channel}`, at)
+  useTimelineStore.getState().setSelectedKeys([{ kind: 'constraint', target: constraint, attachment: '', channel, time: at }])
+  return { ok: true, message: t('已在 {0}s 打「{1}」关键帧', [at.toFixed(2), label]) }
+}
+
 /** 通道名 → 当前语言下的 label（提示文案用） */
 function trackLabelOf(focus: { kind: string; target: string; channel: string }): string {
   const channel = channelLabel(focus.channel)
   if (focus.kind === 'drawOrder') return t('插槽层级')
   if (focus.kind === 'event') return t('事件 {0}', focus.target)
   // 分组行没有通道名：只报对象名，别留一个「 · 」尾巴
-  if (focus.kind === 'bone' || focus.kind === 'slot') {
+  if (focus.kind === 'bone' || focus.kind === 'slot' || focus.kind === 'constraint') {
     return channel ? `${focus.target} · ${channel}` : focus.target
   }
   if (focus.kind === 'deform') return `${focus.target} · FFD`

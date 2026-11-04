@@ -4,6 +4,7 @@ import type { ConstraintType, InheritMode } from '../model/constraints'
 import {
   createIkConstraint,
   createPathConstraint,
+  createPhysicsConstraint,
   createTransformConstraint
 } from '../model/constraints'
 import type { AnimData, ConstraintAnim, DeformKeyframe, EventKeyframe, KeyframeBase } from '../model/animation'
@@ -506,12 +507,37 @@ function normalizeConstraint(raw: Record<string, unknown>): AuthoringConstraint 
   }
 
   if (resolved === 'physics') {
+    const base = createPhysicsConstraint()
+    const flags = raw as Record<string, unknown>
     return {
-      ...constraintCommon(raw, 'physics'),
+      ...constraintCommon(raw, base.name),
       type: 'physics',
-      raw: isRecord(raw.raw) ? raw.raw : {}
+      x: num(raw.x, base.x),
+      y: num(raw.y, base.y),
+      rotate: num(raw.rotate, base.rotate),
+      scaleX: num(raw.scaleX, base.scaleX),
+      shearX: num(raw.shearX, base.shearX),
+      limit: num(raw.limit, base.limit),
+      step: num(raw.step, base.step),
+      scaleYMode: Math.max(0, Math.min(2, Math.round(num(raw.scaleYMode, base.scaleYMode)))) as 0 | 1 | 2,
+      inertia: num(raw.inertia, base.inertia),
+      strength: num(raw.strength, base.strength),
+      damping: num(raw.damping, base.damping),
+      mass: num(raw.mass, base.mass),
+      wind: num(raw.wind, base.wind),
+      gravity: num(raw.gravity, base.gravity),
+      mix: num(raw.mix, base.mix),
+      inertiaGlobal: bool(flags.inertiaGlobal, base.inertiaGlobal),
+      strengthGlobal: bool(flags.strengthGlobal, base.strengthGlobal),
+      dampingGlobal: bool(flags.dampingGlobal, base.dampingGlobal),
+      massGlobal: bool(flags.massGlobal, base.massGlobal),
+      windGlobal: bool(flags.windGlobal, base.windGlobal),
+      gravityGlobal: bool(flags.gravityGlobal, base.gravityGlobal),
+      mixGlobal: bool(flags.mixGlobal, base.mixGlobal)
     }
   }
+
+
 
   const base = createIkConstraint()
   return {
@@ -545,7 +571,14 @@ function normalizeConstraintAnim(raw: Record<string, unknown>): ConstraintAnim {
     position: floatKeys(raw.position),
     spacing: floatKeys(raw.spacing),
     rotateMix: floatKeys(raw.rotateMix),
-    translateMix: floatKeys(raw.translateMix)
+    translateMix: floatKeys(raw.translateMix),
+    inertia: floatKeys(raw.inertia),
+    strength: floatKeys(raw.strength),
+    damping: floatKeys(raw.damping),
+    mass: floatKeys(raw.mass),
+    wind: floatKeys(raw.wind),
+    gravity: floatKeys(raw.gravity),
+    reset: floatKeys(raw.reset)
   }
 }
 
@@ -593,7 +626,21 @@ function normalizeAnimation(raw: Record<string, unknown>): AuthoringAnimData {
       const track = isRecord(item) ? item : {}
       const anim = normalizeConstraintAnim(track)
       return { ...anim, constraint: str(track.constraint) }
-    })
+    }),
+    // 全局物理轨道（可选；老工程没有）
+    ...(isRecord(raw.physicsGlobal)
+      ? {
+          physicsGlobal: {
+            inertia: floatKeys((raw.physicsGlobal as Record<string, unknown>).inertia),
+            strength: floatKeys((raw.physicsGlobal as Record<string, unknown>).strength),
+            damping: floatKeys((raw.physicsGlobal as Record<string, unknown>).damping),
+            mass: floatKeys((raw.physicsGlobal as Record<string, unknown>).mass),
+            wind: floatKeys((raw.physicsGlobal as Record<string, unknown>).wind),
+            gravity: floatKeys((raw.physicsGlobal as Record<string, unknown>).gravity),
+            mix: floatKeys((raw.physicsGlobal as Record<string, unknown>).mix)
+          }
+        }
+      : {})
   }
 }
 

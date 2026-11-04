@@ -305,7 +305,7 @@ function ConstraintEditor({
             */}
             {constraint.type === 'ik' ? t('链根 → 链尾，IK 按这个顺序驱动（单骨 = 让链尾指向目标，两骨及以上逐节弯曲）') : t('按顺序排布')}
             {t('）')}
-            {constraint.type === 'physics' ? t(' · 物理约束仅保留数据，不参与求解') : ''}
+            {constraint.type === 'physics' ? t(' · 物理约束只作用于这根骨骼（弹簧 / 惯性仿真）') : ''}
           </span>
           {chainBones.length === 0 ? <span className="text-3xs text-content-lo">{t('（未设置）')}</span> : null}
           {chainBones.map((name, index) => (
@@ -469,6 +469,116 @@ function ConstraintEditor({
             onChange={(value) => update(t('修改路径位移混合'), (draft) => { const item = draft.constraints.find((c) => c.name === constraint.name); if (item && item.type === 'path') item.translateMix = value })}
           />
         </FieldGroup>
+      ) : null}
+
+      {constraint.type === 'physics' ? (
+        <>
+          <FieldGroup title={t('物理影响通道')}>
+            <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
+              {(
+                [
+                  ['x', 'X 位移'],
+                  ['y', 'Y 位移'],
+                  ['rotate', '旋转'],
+                  ['scaleX', 'X 缩放'],
+                  ['shearX', '斜切']
+                ] as const
+              ).map(([key, label]) => (
+                <NumberField
+                  key={key}
+                  label={t(label)}
+                  value={constraint[key]}
+                  step={0.05}
+                  min={0}
+                  max={1}
+                  onChange={(value) =>
+                    update(t('修改物理影响通道'), (draft) => {
+                      const item = draft.constraints.find((c) => c.name === constraint.name)
+                      if (item && item.type === 'physics') item[key] = value
+                    })
+                  }
+                />
+              ))}
+            </div>
+          </FieldGroup>
+
+          <FieldGroup title={t('物理动力学')}>
+            <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
+              {(
+                [
+                  ['inertia', '惯性'],
+                  ['strength', '强度'],
+                  ['damping', '阻尼'],
+                  ['mass', '质量'],
+                  ['wind', '风力'],
+                  ['gravity', '重力'],
+                  ['mix', '权重'],
+                  ['limit', '幅度上限'],
+                  ['step', '步长(秒)']
+                ] as const
+              ).map(([key, label]) => (
+                <NumberField
+                  key={key}
+                  label={t(label)}
+                  value={constraint[key]}
+                  step={0.01}
+                  onChange={(value) =>
+                    update(t('修改物理参数'), (draft) => {
+                      const item = draft.constraints.find((c) => c.name === constraint.name)
+                      if (item && item.type === 'physics') item[key] = value
+                    })
+                  }
+                />
+              ))}
+            </div>
+            <SelectField
+              label={t('scaleY 模式')}
+              value={String(constraint.scaleYMode)}
+              options={[
+                { value: '0', label: t('不处理') },
+                { value: '1', label: t('等比') },
+                { value: '2', label: t('体积') }
+              ]}
+              onChange={(value) =>
+                update(t('修改物理 scaleY 模式'), (draft) => {
+                  const item = draft.constraints.find((c) => c.name === constraint.name)
+                  if (item && item.type === 'physics') item.scaleYMode = Number(value) as 0 | 1 | 2
+                })
+              }
+            />
+          </FieldGroup>
+
+          <FieldGroup title={t('全局参数（*Global）')}>
+            <span className="text-3xs text-content-lo">
+              {t('勾选后该参数改由动画的「全局物理轨道」驱动（Spine 的 physics[""]）；否则用上面的本地值。')}
+            </span>
+            <div className="grid grid-cols-2 gap-x-2 gap-y-1.5">
+              {(
+                [
+                  ['inertiaGlobal', '惯性'],
+                  ['strengthGlobal', '强度'],
+                  ['dampingGlobal', '阻尼'],
+                  ['massGlobal', '质量'],
+                  ['windGlobal', '风力'],
+                  ['gravityGlobal', '重力'],
+                  ['mixGlobal', '权重']
+                ] as const
+              ).map(([key, label]) => (
+                <ToggleField
+                  key={key}
+                  label={t(label)}
+                  value={constraint[key]}
+                  onChange={(value) =>
+                    update(t('修改物理全局参数'), (draft) => {
+                      const item = draft.constraints.find((c) => c.name === constraint.name)
+                      if (item && item.type === 'physics') item[key] = value
+                    })
+                  }
+                />
+              ))}
+            </div>
+          </FieldGroup>
+        </>
       ) : null}
 
       {/*

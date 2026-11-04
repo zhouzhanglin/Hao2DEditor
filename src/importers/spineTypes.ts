@@ -264,6 +264,11 @@ export interface SpineAnimationJson {
     | SpineCurveKeyframe[]
     | { position?: SpineCurveKeyframe[]; spacing?: SpineCurveKeyframe[]; mix?: SpineCurveKeyframe[] }
   >
+  /**
+   * 4.3 物理约束时间轴：`physics.<约束名>.<reset|inertia|strength|damping|mass|wind|gravity|mix>`。
+   * 约束名为空串 = 全局轨道（只影响勾了 `*Global` 的约束）。
+   */
+  physics?: Record<string, Record<string, SpineCurveKeyframe[]>>
 }
 
 export interface SpineJson {

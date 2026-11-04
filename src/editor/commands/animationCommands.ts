@@ -77,6 +77,21 @@ export function ensureDeformAnim(
   return track
 }
 
+/** 约束的数值通道打一帧（物理 / 变换 / 路径 / IK 共用；通道不存在返回 false） */
+export function keyConstraintChannel(
+  anim: AuthoringAnimData,
+  constraint: string,
+  channel: string,
+  time: number,
+  value: number
+): boolean {
+  const track = ensureConstraintAnim(anim, constraint)
+  const keys = (track as unknown as Record<string, FloatKeyframe[] | undefined>)[channel]
+  if (!Array.isArray(keys)) return false
+  upsertKeyframe(keys, emptyFloatKeyframe(time, value))
+  return true
+}
+
 export function ensureConstraintAnim(anim: AuthoringAnimData, constraint: string): AuthoringConstraintAnim {
   let track = anim.constraints.find((item) => item.constraint === constraint)
   if (!track) {
@@ -98,7 +113,14 @@ export function ensureConstraintAnim(anim: AuthoringAnimData, constraint: string
       position: [],
       spacing: [],
       rotateMix: [],
-      translateMix: []
+      translateMix: [],
+      inertia: [],
+      strength: [],
+      damping: [],
+      mass: [],
+      wind: [],
+      gravity: [],
+      reset: []
     }
     anim.constraints.push(track)
   }

@@ -1254,7 +1254,9 @@ function importDbAnimation(animation: DbAnimationJson, ctx: DbAnimContext): Anim
     drawOrder,
     events,
     iks,
-    constraints: []
+    constraints: [],
+    physics: [],
+    physicsGlobal: { inertia: [], strength: [], damping: [], mass: [], wind: [], gravity: [], mix: [] }
   }
 }
 

@@ -59,9 +59,11 @@ export interface RuntimeSkeJson {
   format: 'hao2d-ske'
   /**
    * - **1**：单骨架（没有嵌套）；
-   * - **2**：新增 `nested`（被嵌套引用的子骨架清单）。
+   * - **2**：新增 `nested`（被嵌套引用的子骨架清单）；
+   * - **3**：新增物理约束（`physics` / `slider` 约束与动画轨道，随 `constraints` / `animations` 直出）
+   *   与骨架级风向 / 重力方向。
    */
-  version: 1 | 2
+  version: 1 | 2 | 3
   armatureName: string
   frameRate: number
   /** 骨架单位 → 像素（1 单位 = ppu 像素），方便游戏侧按像素布局 */
@@ -89,6 +91,13 @@ export interface RuntimeSkeJson {
    * 两者叠加（同名覆盖）。缺省 = 只显示基底皮肤。
    */
   defaultSkin?: string
+  /** v3 起：运行期是否跑物理仿真 */
+  runtimePhysics?: boolean
+  /** v3 起：骨架级风向 / 重力方向（默认 1,0,0,1） */
+  windX?: number
+  windY?: number
+  gravityX?: number
+  gravityY?: number
 }
 
 export const RUNTIME_PPU = 100
@@ -109,7 +118,7 @@ export function serializeRuntimeSke(
 ): string {
   const json: RuntimeSkeJson = {
     format: 'hao2d-ske',
-    version: 2,
+    version: 3,
     armatureName: asset.armatureName,
     frameRate: asset.frameRate,
     ppu: options.ppu ?? RUNTIME_PPU,
@@ -162,6 +171,12 @@ export function serializeRuntimeSke(
     bindposes: Array.from(asset.bindposes),
     defaultSkinIndex: asset.defaultSkinIndex,
     defaultSkin: asset.defaultSkin,
+    // v3：物理仿真开关与骨架级方向向量
+    runtimePhysics: asset.runtimePhysics,
+    windX: asset.windX,
+    windY: asset.windY,
+    gravityX: asset.gravityX,
+    gravityY: asset.gravityY,
     nested: options.nested ? options.nested.map((item) => ({ ...item })) : []
   }
   return `${JSON.stringify(json, null, 2)}\n`
@@ -173,8 +188,8 @@ export function parseRuntimeSke(text: string): RuntimeSkeJson {
   if (!raw || raw.format !== 'hao2d-ske') {
     throw new Error(t('不是 hao2d-ske 格式的骨骼数据'))
   }
-  // v1 是「无嵌套」的老格式：继续可读，缺的字段读成空
-  if (raw.version !== 1 && raw.version !== 2) {
+  // v1 = 无嵌套；v2 = 有 nested；v3 = 物理约束。三者都继续可读，缺的字段读成空
+  if (raw.version !== 1 && raw.version !== 2 && raw.version !== 3) {
     throw new Error(t('不支持的 hao2d-ske 版本 {0}', raw.version))
   }
   if (typeof raw.defaultSkinIndex !== 'number' || raw.defaultSkinIndex < 0) delete raw.defaultSkinIndex

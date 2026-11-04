@@ -1110,6 +1110,14 @@ function buildConstraints(
   for (const physics of legacyPhysics) {
     // 4.2+ 用单个 `bone`；更早的写法是 `bones` 数组
     const names = Array.isArray(physics.bones) ? physics.bones : physics.bone ? [physics.bone] : []
+    const raw = physics as Record<string, unknown>
+    const numberOr = (key: string, fallback: number): number => {
+      const value = raw[key]
+      return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+    }
+    const scaleYModeRaw = raw.scaleY
+    const scaleYMode: 0 | 1 | 2 =
+      scaleYModeRaw === 'uniform' ? 1 : scaleYModeRaw === 'volume' ? 2 : 0
     constraints.push(
       createPhysicsConstraint({
         name: physics.name,
@@ -1117,7 +1125,30 @@ function buildConstraints(
         enabled: true,
         boneIndices: remapBones(names, boneIndex),
         targetBoneIndex: -1,
-        raw: { ...physics }
+        x: numberOr('x', 0),
+        y: numberOr('y', 0),
+        rotate: numberOr('rotate', 0),
+        scaleX: numberOr('scaleX', 0),
+        shearX: numberOr('shearX', 0),
+        // Spine 的 limit 以像素写，内部统一用世界单位
+        limit: pxToUnit(numberOr('limit', 5000)),
+        // Spine 写的是仿真频率 fps，内部存步长（秒）
+        step: 1 / Math.max(1, numberOr('fps', 60)),
+        scaleYMode,
+        inertia: numberOr('inertia', 0.5),
+        strength: numberOr('strength', 100),
+        damping: numberOr('damping', 0.85),
+        mass: Math.max(1e-3, numberOr('mass', 1)),
+        wind: numberOr('wind', 0),
+        gravity: numberOr('gravity', 0),
+        mix: numberOr('mix', 1),
+        inertiaGlobal: raw.inertiaGlobal === true,
+        strengthGlobal: raw.strengthGlobal === true,
+        dampingGlobal: raw.dampingGlobal === true,
+        massGlobal: raw.massGlobal === true,
+        windGlobal: raw.windGlobal === true,
+        gravityGlobal: raw.gravityGlobal === true,
+        mixGlobal: raw.mixGlobal === true
       })
     )
   }

@@ -448,6 +448,8 @@ function emptyAnimData(name: string): AnimData {
     drawOrder: [],
     events: [],
     iks: [],
-    constraints: []
+    constraints: [],
+    physics: [],
+    physicsGlobal: { inertia: [], strength: [], damping: [], mass: [], wind: [], gravity: [], mix: [] }
   }
 }

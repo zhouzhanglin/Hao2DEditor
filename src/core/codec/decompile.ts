@@ -4,7 +4,7 @@ import type { AttachmentData, VertexWeight } from '../model/types'
 import type { RuntimeAsset } from '../model/asset'
 import { setupPoseOf } from '../model/setup'
 import type { AnimData, ConstraintAnim } from '../model/animation'
-import { emptyConstraintAnim } from '../model/animation'
+import { emptyConstraintAnim, emptyFloatKeyframe } from '../model/animation'
 import type { Constraint } from '../model/constraints'
 import { rgbaToHex } from '../util/color'
 import type {
@@ -148,6 +148,30 @@ function decompileAnim(anim: AnimData, asset: RuntimeAsset, constraints: Constra
     constraintTracks.push({ ...emptyConstraintAnim(index), mix: ik.mix })
   }
 
+  // 物理 / 滑块轨道：运行期是独立段，作者态合并回同一条「约束轨道」列表
+  const physicsIndices = constraints
+    .map((constraint, i) => ({ constraint, i }))
+    .filter((entry) => entry.constraint.type === 'physics')
+    .map((entry) => entry.i)
+
+  for (const track of anim.physics ?? []) {
+    const index = physicsIndices[track.physicsIndex]
+    if (index === undefined) continue
+    constraintTracks.push({
+      ...emptyConstraintAnim(index),
+      constraintIndex: index,
+      reset: track.reset.map((time) => emptyFloatKeyframe(time, 1)),
+      inertia: track.inertia,
+      strength: track.strength,
+      damping: track.damping,
+      mass: track.mass,
+      wind: track.wind,
+      gravity: track.gravity,
+      mix: track.mix
+    })
+  }
+
+
   return {
     name: anim.name,
     duration: anim.duration,
@@ -181,7 +205,9 @@ function decompileAnim(anim: AnimData, asset: RuntimeAsset, constraints: Constra
     constraints: constraintTracks.map((track) => ({
       ...track,
       constraint: constraints[track.constraintIndex]?.name ?? ''
-    }))
+    })),
+    // 全局物理轨道：运行期是独立结构，作者态原样带回
+    ...(anim.physicsGlobal ? { physicsGlobal: { ...anim.physicsGlobal } } : {})
   }
 }
 

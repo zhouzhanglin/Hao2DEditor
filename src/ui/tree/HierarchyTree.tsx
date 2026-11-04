@@ -1707,7 +1707,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         key: 'slot',
         label: t('添加插槽'),
         hint: host ? t('挂在骨骼「{0}」上', host) : t('挂到第一根骨骼'),
-        icon: <Plus size={12} />,
+        // 与工具栏「新建插槽」用同一个图标（圆环 + 圆心点），不要用通用的 +，否则看不出加的是什么
+        icon: <SlotIcon size={12} />,
         onSelect: () => addSlot(host)
       },
       // 插槽行额外给「从别的皮肤借网格」的入口：源网格必须来自**同一个插槽**

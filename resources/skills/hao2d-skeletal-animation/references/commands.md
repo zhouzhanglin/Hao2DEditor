@@ -9,14 +9,14 @@
 
 参数写法：`名字`*(类型) 表示必填；`名字`?(类型=默认值) 表示可选；`'a'|'b'` 表示取值枚举。
 
-共 136 条命令，分 11 组。
+共 137 条命令，分 11 组。
 
 ## 状态与查询（开工前、收工后）
 
 | 命令 | 参数 | 说明 | 返回 |
 | --- | --- | --- | --- |
-| `captureViewport` | `time?` `animation?` | 把视口画面截成 PNG（含背景棋盘格、角色与叠加层），返回 base64 data URL。AI 想「亲眼看到」编辑器里显示的画面时用它。**要预览动画动作必须传 `time`**：你在别的窗口里驱动编辑器，窗口在后台时播放时钟不走，只 `setTime` 不 seek 只会拍到第 0 帧（看起来「只有绑定姿态」）。窗口在后台也能截（命令会自己刷新一帧再取像素），失败直接重试即可 | dataUrl（data:image/png;base64,…）/ width / height / animation / time（实际截取的时间点） |
-| `getAnimationKeys` | `animation`?(string) 动画名（可选，默认当前编辑动画）<br>`bone`?(string) 只查这根骨骼的轨道（可选）<br>`slot`?(string) 只查这个插槽的轨道（可选） | 把某条动画的关键帧明细拉出来（可只查一根骨骼 / 一个插槽），用来核对打帧结果或做批量改帧前的读取 | animation / duration / bones[{ bone, channel, keys:[{time,value,easing}] }] / slots[...] / deforms[...] / drawOrder[...] |
+| `captureViewport` | `time`?(number) 先 seek 到该时间点（秒）再截图；预览某个动作请务必传<br>`animation`?(string) 动画名（可选）：截图前先切到该动画 | 把视口画面截成 PNG（含背景棋盘格、角色与叠加层），返回 base64 data URL。AI 想「亲眼看到」编辑器里显示的画面时用它。**要预览动画动作时必须传 time**（或先 setTime）：AI 通常在别的窗口里驱动编辑器，窗口在后台时播放时钟不走，不指定时间就只会拍到第 0 帧 —— 看起来「只有绑定姿态、动画没生效」。窗口在后台也能截（命令会自己刷新一帧再取像素） | dataUrl（data:image/png;base64,…）/ width / height / animation / time（实际截取的时间点） |
+| `getAnimationKeys` | `animation`?(string) 动画名（可选，默认当前编辑动画）<br>`bone`?(string) 只查这根骨骼的轨道（可选）<br>`slot`?(string) 只查这个插槽的轨道（可选）<br>`constraint`?(string) 只查这条约束的数值轨道（可选，物理约束的关键帧也在这里） | 把某条动画的关键帧明细拉出来（可只查一根骨骼 / 一个插槽），用来核对打帧结果或做批量改帧前的读取 | animation / duration / bones[...] / slots[...] / deforms[...] / drawOrder[...] / constraints[{ constraint, mix, inertia, strength, damping, mass, wind, gravity, ... }] |
 | `getAttachmentVertices` | `slot`*(string) 插槽名<br>`attachment`*(string) 附件名<br>`skin`?(string) 皮肤名（可选，默认当前皮肤） | 拉出某个网格或遮罩附件的全部顶点：坐标 + 每根骨骼的权重。蒙皮调试、手写权重或给遮罩打 FFD 前读它 | type / vertexCount / vertices: [{ index, x, y, weights: [{bone, weight}] }] / triangles / boundBones |
 | `getBoneWorldTransform` | `bone`*(string) 骨骼名 | 骨骼在视口世界坐标下的位置 / 旋转 / 缩放（含父级累积）。要在世界坐标里摆东西（IK 节点骨、附件落点）时用它换算 | x / y / rotation（度）/ scaleX / scaleY；场景未就绪时 ok:false |
 | `getDisplayWorldBounds` | `slot`*(string) 插槽名<br>`attachment`*(string) 附件名<br>`skin`?(string) 皮肤名（可选，默认当前皮肤） | 附件在视口世界坐标下的 AABB（当前 setup pose）。**参考图对位的主力命令**：挂上一个部件就读它，与参考图量出的目标框对比，再用 setDisplayTransform 修——数值闭环，不用截图也不用在外部自己算坐标。网格按绑定姿态顶点近似（蒙皮形变不含在内） | type / worldBounds{minX,minY,maxX,maxY} / center{x,y} / width / height |
@@ -27,7 +27,7 @@
 | `getViewport` | — | 视口相机与可见范围：像素尺寸、缩放、平移量、当前可见的世界矩形、角色包围盒，以及当前模式 / 皮肤 / 动画 / 播放状态。AI 想「看屏幕」或做屏幕↔世界坐标换算时用它 | width / height / zoom / offset{x,y} / unitsPerPixel / worldView{minX,minY,maxX,maxY} / contentBounds / mode / activeSkin / animation / playing / time / next（建议的下一步） |
 | `listAnimations` | — | 列出全部动画：时长、各轨道的关键帧数量与最后一帧时间。打帧前先读它确认动画名 | animations: [{ name, duration, lastKeyTime, bones, slots, deforms, drawOrder, active }] |
 | `listBones` | `name`?(string) 只看某一根（可选，按名字精确匹配） | 列出全部骨骼（按工程里的顺序），含父级、局部变换、骨长。构建骨架前先读它拿准名字 | bones: [{ name, parent, localPosition, rotation, localScale, length, color, locked, children }] |
-| `listConstraints` | — | 列出全部约束：类型、被驱动的骨链、目标骨、是否启用、优先级 | constraints: [{ name, type, bones, target, order, enabled }] |
+| `listConstraints` | — | 列出全部约束：类型、被驱动的骨链、目标骨、是否启用、优先级；物理约束额外带影响通道 / 动力学参数 / 全局标记 | constraints: [{ name, type, bones, target, order, enabled, physics?: { x, y, rotate, scaleX, shearX, inertia, strength, damping, mass, wind, gravity, mix, limit, step, scaleYMode, global: [...] } }] |
 | `listDisplays` | `slot`?(string) 插槽名（可选，不传则列全部）<br>`skin`?(string) 皮肤名（可选，默认当前皮肤） | 列出某个插槽（或全部插槽）在各皮肤下的附件：类型、图片、顶点数、权重绑了哪些骨骼；嵌套骨架 display 还带引用的骨架与默认播放参数 | displays: [{ slot, skin, name, type, image, size, vertexCount, bones, nested?: { armature, animation, playTimes, offset, speed } }] |
 | `listImages` | — | 列出图片池里可用的图片（名字与像素尺寸）。addDisplay 要用这里的名字 | images: [{ name, path, width, height }] |
 | `listMasks` | — | 列出工程里所有遮罩附件（按皮肤 / 插槽）。要控制点明细用 getMask | { masks: [{ skin, slot, bone, attachment, pointCount, endSlot, inverse, convex, displayed }] } |
@@ -66,7 +66,7 @@
 
 | 命令 | 参数 | 说明 | 返回 |
 | --- | --- | --- | --- |
-| `addConstraint` | `kind`*('ik'\|'transform'\|'path') 约束类型<br>`name`?(string) 约束名；不传则用类型名，重名自动加序号<br>`bones`?(array) 被驱动的骨链，父 → 子顺序（字符串数组）<br>`target`?(string) 目标骨骼名（IK 目标 / 变换来源骨 / 路径骨）<br>`nodePosition`?(object) IK 自动新建节点骨时的落点（世界坐标 {x,y}）<br>`nodeName`?(string) IK 自动新建节点骨的名字，默认「链尾_ik」 | 新建 IK / 变换 / 路径约束。IK 的 bones 要给「父 → 子」连续的骨链（顺序反了会自动翻转）；不传 target 会自动新建一根 IK 节点骨摆在链尾末端 | { name, kind, bones, target, nodeBone? } |
+| `addConstraint` | `kind`*('ik'\|'transform'\|'path'\|'physics') 约束类型<br>`name`?(string) 约束名；不传则用类型名，重名自动加序号<br>`bones`?(array) 被驱动的骨链，父 → 子顺序（字符串数组）<br>`target`?(string) 目标骨骼名（IK 目标 / 变换来源骨 / 路径骨）<br>`nodePosition`?(object) IK 自动新建节点骨时的落点（世界坐标 {x,y}）<br>`nodeName`?(string) IK 自动新建节点骨的名字，默认「链尾_ik」 | 新建 IK / 变换 / 路径 / 物理约束。IK 的 bones 要给「父 → 子」连续的骨链（顺序反了会自动翻转），不传 target 会自动新建一根 IK 节点骨摆在链尾末端；物理约束只挂单根骨骼（弹簧 / 惯性仿真，用 setConstraint 调参数） | { name, kind, bones, target, nodeBone? } |
 | `addDisplay` | `slot`*(string) 插槽名<br>`image`*(string) 图片名（用 listImages 查）<br>`name`?(string) 附件名；不传则用图片名去扩展名，重名自动加序号<br>`position`?(object) 附件在骨骼局部空间的位置 {x,y}<br>`skin`?(string) 目标皮肤；不传则用当前皮肤 | 往插槽里加一个图片附件。尺寸自动从图片池取，不用自己算 | { slot, attachment } |
 | `addSlot` | `name`?(string) 插槽名；不传则为 slot<br>`bone`?(string) 宿主骨骼名；不传则用层级根骨骼<br>`zOrder`?(number) 绘制层序（越小越先画）；不传则排到最后<br>`color`?(string) 插槽颜色 #RRGGBBAA<br>`visible`?(boolean) 是否可见<br>`locked`?(boolean) 锁定 | 新建插槽（插槽是附件的载体，必须挂在骨骼上）。不传 bone 就挂到层级根骨骼下 | { name, bone } |
 | `deleteConstraint` | `constraint`*(string) 约束名 | 删除约束（不会删掉它引用的骨骼） | { constraint } |
@@ -74,7 +74,7 @@
 | `deleteSlot` | `slot`*(string) 插槽名 | 删除插槽（连带它的附件与相关动画轨道） | { slot } |
 | `moveDisplay` | `slot`*(string) 附件当前所在插槽<br>`display`*(string) 附件名<br>`toSlot`*(string) 目标插槽名<br>`anchorDisplay`?(string) 排序锚点：放到这个附件的前 / 后（目标插槽内）<br>`side`?('before'\|'after'=after) 相对锚点的位置<br>`skin`?(string) 皮肤名；不传用当前皮肤 | 把附件搬到另一个插槽（会自动换算保持世界位姿、并同步 display 帧），或在同一插槽内排序。anchorDisplay / side 指定落点 | { slot, display, toSlot } |
 | `moveSlot` | `slot`*(string) 插槽名<br>`bone`*(string) 新的宿主骨骼名<br>`anchorSlot`?(string) 排序锚点：插到这个插槽的前 / 后<br>`side`?('before'\|'after'=after) 相对锚点的位置（只在给了 anchorSlot 时有意义） | 把插槽挂到另一根骨骼下，并用 anchorSlot / side 指定在目标骨骼插槽列表里的落点（不传 anchorSlot 则排到末尾）。会把附件换算到新骨骼空间，画面位置不变 | { slot, bone } |
-| `setConstraint` | `constraint`*(string) 约束名<br>`enabled`?(boolean) 是否启用<br>`target`?(string) 新的目标骨骼名<br>`order`?(number) 优先级（越小越先算）<br>`bones`?(array) IK 的新骨链，父 → 子顺序（字符串数组） | 改约束的启用状态 / 目标骨 / 优先级（计算顺序）。IK 也可以重设骨链 | { constraint, changedFields: [...] } |
+| `setConstraint` | `constraint`*(string) 约束名<br>`enabled`?(boolean) 是否启用<br>`target`?(string) 新的目标骨骼名<br>`order`?(number) 优先级（越小越先算）<br>`bones`?(array) IK 的新骨链（父 → 子）或物理约束的唯一宿主骨（字符串数组）<br>`x`?(number) 物理：X 位移影响权重 0~1<br>`y`?(number) 物理：Y 位移影响权重 0~1<br>`rotate`?(number) 物理：旋转影响权重 0~1（最常用）<br>`scaleX`?(number) 物理：X 缩放影响权重 0~1<br>`shearX`?(number) 物理：斜切影响权重 0~1（运行期折算成旋转）<br>`inertia`?(number) 物理：惯性（越大越跟丢目标）<br>`strength`?(number) 物理：回正强度<br>`damping`?(number) 物理：阻尼 0~1（越大越快停）<br>`mass`?(number) 物理：质量（> 0）<br>`wind`?(number) 物理：风力<br>`gravity`?(number) 物理：重力<br>`mix`?(number) 物理：总权重 0~1<br>`limit`?(number) 物理：单帧位移幅度上限（世界单位）<br>`step`?(number) 物理：固定仿真步长（秒，默认 1/60）<br>`scaleYMode`?(number) 物理：0 = 不处理 scaleY / 1 = 等比 / 2 = 体积<br>`global`?(array) 物理：这些参数改由动画的全局物理轨道驱动（inertia/strength/damping/mass/wind/gravity/mix 的子集） | 改约束的启用状态 / 目标骨 / 优先级（计算顺序）。IK 可以重设骨链；物理约束可以改 5 个影响通道、7 个动力学参数、limit / step / scaleYMode 与「由全局轨道驱动」的标记 | { constraint, changedFields: [...] } |
 | `setDisplayTransform` | `slot`*(string) 插槽名<br>`attachment`*(string) 附件名<br>`position`?(object) 位置 {x,y}（骨骼局部空间）<br>`rotation`?(number) 旋转（度）<br>`scale`?(object) 缩放 {x,y}<br>`size`?(object) Region 显示尺寸 {x,y}<br>`color`?(string) 附件颜色 #RRGGBBAA<br>`image`?(string) 换图（图片名） | 写入附件的位移 / 旋转 / 缩放 / 尺寸 / 颜色 / 换图（跨所有皮肤同步改） | { slot, attachment, changedFields: [...] } |
 | `setDrawOrder` | `order`*(array) 插槽名数组（绘制顺序：先画的在前） | 一次性重排全部插槽的绘制顺序。order 必须**包含所有插槽名**（只给一部分无法确定唯一顺序），第 0 个最先画（最底层） | { order } |
 | `setSlotHost` | `slot`*(string) 插槽名<br>`bone`*(string) 新的宿主骨骼名 | 把插槽挂到另一根骨骼下，并保持内容的全局位置 / 旋转 / 缩放不变 | { slot, bone } |
@@ -109,6 +109,7 @@
 | `clearTrack` | `animation`?(string) 动画名；不传则用当前编辑动画<br>`kind`*('bone'\|'slot'\|'deform'\|'drawOrder') 轨道种类<br>`target`?(string) 骨骼名 / 插槽名；kind=drawOrder 时忽略<br>`attachment`?(string) kind=deform 时的附件名<br>`channel`*(string) 通道：bone 用 translate/rotate/scale/shear，slot 用 display/color/visible/subArmature<br>`time`?(number) 只删这一帧（秒）；不传则清空整条轨道 | 清空一条轨道上全部关键帧；只给 time 时删那一帧 | { cleared, animation } |
 | `copyKeyframes` | — | 把时间轴上当前选中的关键帧复制进剪贴板（不改文档）。粘贴用 pasteKeyframes；轨道上有哪些关键帧用 getAnimationKeys 查 | { count } |
 | `keyBoneFrame` | `animation`?(string) 动画名；不传则用当前编辑动画<br>`bone`*(string) 骨骼名<br>`channel`*('translate'\|'rotate'\|'scale'\|'shear') 变换通道<br>`time`*(number) 时间点（秒）<br>`value`?(object) rotate 传数字（度）；translate / scale / shear 传 {x,y} | 给某根骨骼的某个变换通道打一帧。同一时间点重复打即覆盖，单位是秒 | { animation, bone, channel, time, value } |
+| `keyConstraintFrame` | `animation`?(string) 动画名；不传则用当前编辑动画<br>`constraint`*(string) 约束名<br>`channel`*(string) 数值通道名<br>`time`*(number) 时间点（秒）<br>`value`*(number) 该通道在这一帧的值 | 给约束的数值通道打一帧。物理约束的通道是 mix / inertia / strength / damping / mass / wind / gravity；IK 是 mix；变换 / 路径用各自的混合通道。同一时间点重复打即覆盖，单位是秒 | { animation, constraint, channel, time, value } |
 | `keyDeformFrame` | `animation`?(string) 动画名；不传则用当前编辑动画<br>`slot`*(string) 插槽名<br>`attachment`*(string) 网格 / 遮罩 / 链接网格附件名<br>`time`*(number) 时间点（秒）<br>`offsets`*(array) 顶点偏移数组，长度 = 顶点数 × 2（全 0 表示复位）<br>`skin`?(string) 附件所在皮肤；不传则按默认皮肤 + 当前皮肤解析 | 打一帧网格 / 遮罩形变（FFD）。offsets 是每个顶点的偏移 [x0,y0,x1,y1,...]，长度必须是顶点数的 2 倍（链接网格按源网格的点数算）；遮罩顶点用 getMask 读 | { animation, slot, attachment, time, vertexCount } |
 | `keyDrawOrderFrame` | `animation`?(string) 动画名；不传则用当前编辑动画<br>`time`*(number) 时间点（秒）<br>`order`?(array) 完整插槽名序列（第 0 个最先画） | 打一帧绘制顺序。order 必须是**完整**的插槽名序列（第 0 个最先画）；不传则按当前层序 | { animation, time, order } |
 | `keyEvent` | `animation`?(string) 动画名；不传则用当前编辑动画<br>`time`?(number) 时间点（秒）；不传用当前播放头<br>`name`?(string) 事件名；不传自动取 event / event2…<br>`stringParam`?(string) 字符串参数<br>`intParam`?(number) 整数参数<br>`floatParam`?(number) 浮点参数 | 在指定时间点插入一个事件帧（时间轴最上面那条事件轨）。不传 time 用当前播放头，不传 name 自动取 event / event2…。**同一时间点只有一个事件帧**：该时刻已有事件时只覆盖传入的字段（不会叠出第二个） | { animation, time, name } |
@@ -197,7 +198,7 @@
 | `duplicateSelection` | — | 复制当前选择并立即粘贴（骨骼 / 插槽新副本，改名加序号）。依赖当前选择，配合 setSelection 使用 | { count } |
 | `pasteNodes` | — | 把剪贴板里的节点粘贴到当前选择之下（粘贴骨骼时挂到选中骨骼下；粘贴插槽时挂到选中骨骼 / 插槽所在骨骼） | { count } |
 | `setOnionSkin` | `enabled`?(boolean) true = 开，false = 关；不传 = 切换 | 显示 / 隐藏时间轴的洋葱皮（前后帧骨骼姿态）。enabled 不传 = 切换 | { onionSkin } |
-| `setOverlay` | `key`*('bones'\|'constraints') 开关哪一层<br>`visible`?(boolean) true = 显示，false = 隐藏；不传 = 切换 | 显示 / 隐藏视口叠加层：bones = 骨骼骨架，constraints = 约束手柄（IK / 变换 / 路径）。与视口右上角的「骨骼 / 约束」开关等效。visible 不传 = 切换 | { overlay: { bones, constraints } } |
+| `setOverlay` | `key`*('bones'\|'constraints') 开关哪一层<br>`visible`?(boolean) true = 显示，false = 隐藏；不传 = 切换 | 显示 / 隐藏视口叠加层：bones = 骨骼骨架，constraints = 约束手柄（IK / 变换 / 路径 / 物理）。与视口右上角的「骨骼 / 约束」开关等效。visible 不传 = 切换 | { overlay: { bones, constraints } } |
 | `setSelection` | `kind`*('none'\|'bone'\|'slot'\|'attachment'\|'constraint') 选什么<br>`name`?(string) 骨骼 / 插槽 / 约束名<br>`bones`?(array) 骨骼名数组（多选；给了就用它，否则用 name）<br>`slot`?(string) 附件所在插槽（kind=attachment 时必给）<br>`attachment`?(string) 附件名（kind=attachment 时必给） | 改变编辑器里当前选中的对象（骨骼 / 插槽 / 附件 / 约束 / 取消选择）。copyNodes、pasteNodes 等依赖「当前选择」的操作要先用它定位 | { kind, bone, bones, slot, attachment, constraint } |
 | `setSmartFilter` | `enabled`?(boolean) true = 开，false = 关；不传 = 切换 | 只显示当前选中对象（骨骼 / 插槽 / 约束）的时间轴轨道。先用 setSelection 选中对象再开过滤才有效。enabled 不传 = 切换 | { smartFilter } |
 | `setTimelineZoom` | `zoom`*(number) 缩放倍数（0.5 ~ 2） | 设置时间轴时间缩放：1 = 完整适配动画长度；越大时间轴越长、关键帧越松散（逐帧精修），最小 0.5、最大 2。超范围会自动夹住 | { zoom } |

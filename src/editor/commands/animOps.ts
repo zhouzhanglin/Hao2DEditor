@@ -2,9 +2,11 @@ import { Easing } from '@core/model/animation'
 import type { KeyframeBase } from '@core/model/animation'
 import type { AuthoringAnimData, AuthoringSkin, EditorDocument } from '@core/model/authoring'
 import { hexToRgba } from '@core/util/color'
+import { CONSTRAINT_CHANNELS, syncDuration } from '@editor/timeline/model'
 import {
   deformSkinTag,
   keyBoneChannel,
+  keyConstraintChannel,
   keyDeform,
   keyDrawOrder,
   keySlotColor,
@@ -98,6 +100,47 @@ export function keyBoneFrame(
   const time = requireTime(options.time)
   keyBoneChannel(anim, options.bone, options.channel, time, options.value)
   return { animation: anim.name, bone: options.bone, channel: options.channel, time, value: options.value }
+}
+
+export interface KeyConstraintFrameOptions {
+  animation?: string
+  constraint: string
+  channel: string
+  time: number
+  value: number
+}
+
+/**
+ * 给约束的某个数值通道打一帧（物理 / 变换 / 路径 / IK 通用）。
+ *
+ * 物理约束的关键帧就是 7 条数值曲线（惯性 / 强度 / 阻尼 / 质量 / 风力 / 重力 / 权重），
+ * 与时间轴上的子轨、视口参数条写的是同一份数据。
+ */
+export function keyConstraintFrame(
+  doc: EditorDocument,
+  options: KeyConstraintFrameOptions
+): { animation: string; constraint: string; channel: string; time: number; value: number } {
+  const constraint = doc.constraints.find((item) => item.name === options.constraint)
+  if (!constraint) {
+    throw new Error(t('约束不存在：{0}（用 listConstraints 查现有约束名）', options.constraint))
+  }
+  const allowed = CONSTRAINT_CHANNELS[constraint.type] ?? []
+  if (allowed.length > 0 && !allowed.includes(options.channel)) {
+    throw new Error(
+      t('{0} 约束的 channel 只能是 {1}，收到 {2}', [
+        constraint.type,
+        allowed.join(' / '),
+        options.channel
+      ])
+    )
+  }
+  const anim = requireAnimation(doc, options.animation)
+  const time = requireTime(options.time)
+  if (!keyConstraintChannel(anim, constraint.name, options.channel, time, options.value)) {
+    throw new Error(t('「{0}」没有「{1}」这条通道', [constraint.name, options.channel]))
+  }
+  syncDuration(anim)
+  return { animation: anim.name, constraint: constraint.name, channel: options.channel, time, value: options.value }
 }
 
 export interface RemoveBoneFrameOptions {

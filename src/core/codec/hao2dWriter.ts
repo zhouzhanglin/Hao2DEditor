@@ -446,18 +446,15 @@ function writeBindposes(writer: ByteWriter, bindposes: Float32Array): void {
  */
 export function collectHao2dWarnings(asset: RuntimeAsset): string[] {
   const warnings: string[] = []
-  // v10 起 IK / 物理 / 滑块都能落盘；变换与路径约束仍然只能留在编辑器里
+  // v10 起 IK / 物理都能落盘；变换与路径约束仍然只能留在编辑器里
   const dropped = asset.constraints.filter((c) => c.type === 'transform' || c.type === 'path')
   if (dropped.length > 0) {
     warnings.push(
-      t('.hao2d 目前只能导出 IK / 物理 / 滑块约束：已丢弃 {0} 个变换 / 路径约束（{1}），Unity 侧不会有这些约束', [
+      t('.hao2d 目前只能导出 IK / 物理约束：已丢弃 {0} 个变换 / 路径约束（{1}），Unity 侧不会有这些约束', [
         dropped.length,
         dropped.map((c) => `${c.name}(${c.type})`).join('、')
       ])
     )
-  }
-  if (asset.constraints.some((c) => c.type === 'physics') && !asset.runtimeIK) {
-    warnings.push(t('该资源 runtimeIK = false：Unity 运行期不会跑任何约束求解（含物理）'))
   }
   if (!asset.runtimeIK) {
     warnings.push(t('该资源 runtimeIK = false：Unity 运行期不会再解算 IK（IK 已烘焙进骨骼轨道）'))

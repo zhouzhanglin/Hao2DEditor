@@ -71,7 +71,7 @@ const GROUPS = [
     title: '动画与关键帧（时间单位：秒，绝对时间点）',
     names: [
       'addAnimation', 'setAnimation', 'setActiveAnimation', 'setAnimationDuration', 'setAnimationFrames', 'renameAnimation',
-      'removeAnimation', 'keyBoneFrame', 'keySlotDisplayFrame', 'keySlotColorFrame', 'keySlotVisibleFrame',
+      'removeAnimation', 'keyBoneFrame', 'keyConstraintFrame', 'keySlotDisplayFrame', 'keySlotColorFrame', 'keySlotVisibleFrame',
       'keyDrawOrderFrame', 'keyDeformFrame', 'keySlotSubArmatureFrame', 'keyEvent', 'setEvent', 'removeEvent',
       'moveKeyframe', 'setKeyframeEasing', 'clearTrack', 'clearAnimationKeys', 'removeBoneFrame',
       'removeDeformFrame', 'copyKeyframes', 'pasteKeyframes'

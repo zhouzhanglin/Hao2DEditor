@@ -24,6 +24,39 @@ function doc(): EditorDocument {
   return useProjectStore.getState().document
 }
 
+/**
+ * 约束数值轨道里可能出现的通道（与 `CONSTRAINT_CHANNELS` 对齐）。
+ *
+ * 平铺成数组而不是按约束类型分组：`getAnimationKeys` 只回**非空**通道，
+ * AI 拿到的就是「这条约束实际打了哪些参数帧」，不用先懂类型。
+ */
+const CONSTRAINT_KEY_FIELDS = [
+  'mix',
+  'mixRotate',
+  'mixX',
+  'mixY',
+  'mixScaleX',
+  'mixScaleY',
+  'mixShearY',
+  'offsetRotate',
+  'offsetX',
+  'offsetY',
+  'offsetScaleX',
+  'offsetScaleY',
+  'offsetShearY',
+  'position',
+  'spacing',
+  'rotateMix',
+  'translateMix',
+  // 物理约束的 7 条参数曲线
+  'inertia',
+  'strength',
+  'damping',
+  'mass',
+  'wind',
+  'gravity'
+] as const
+
 function str(args: Args, key: string): string {
   const value = args[key]
   return typeof value === 'string' ? value.trim() : ''
@@ -229,22 +262,51 @@ export function registerQueryCommands(): void {
     {
       name: 'listConstraints',
       title: '列约束',
-      description: '列出全部约束：类型、被驱动的骨链、目标骨、是否启用、优先级',
+      description:
+        '列出全部约束：类型、被驱动的骨链、目标骨、是否启用、优先级；物理约束额外带影响通道 / 动力学参数 / 全局标记',
       args: {},
-      returns: 'constraints: [{ name, type, bones, target, order, enabled }]'
+      returns:
+        'constraints: [{ name, type, bones, target, order, enabled, physics?: { x, y, rotate, scaleX, shearX, inertia, strength, damping, mass, wind, gravity, mix, limit, step, scaleYMode, global: [...] } }]'
     },
     () => {
       const document = doc()
       return {
         count: document.constraints.length,
-        constraints: document.constraints.map((item) => ({
-          name: item.name,
-          type: item.type,
-          bones: [...item.bones],
-          target: item.target,
-          order: item.order,
-          enabled: item.enabled
-        }))
+        constraints: document.constraints.map((item) => {
+          const base = {
+            name: item.name,
+            type: item.type,
+            bones: [...item.bones],
+            target: item.target,
+            order: item.order,
+            enabled: item.enabled
+          }
+          if (item.type !== 'physics') return base
+          return {
+            ...base,
+            physics: {
+              x: item.x,
+              y: item.y,
+              rotate: item.rotate,
+              scaleX: item.scaleX,
+              shearX: item.shearX,
+              inertia: item.inertia,
+              strength: item.strength,
+              damping: item.damping,
+              mass: item.mass,
+              wind: item.wind,
+              gravity: item.gravity,
+              mix: item.mix,
+              limit: item.limit,
+              step: item.step,
+              scaleYMode: item.scaleYMode,
+              // 哪些参数改由动画的「全局物理轨道」驱动
+              global: (
+                ['inertia', 'strength', 'damping', 'mass', 'wind', 'gravity', 'mix'] as const
+              ).filter((key) => item[`${key}Global`])
+            }
+          }
+        })
       }
     }
   )
@@ -300,9 +362,11 @@ export function registerQueryCommands(): void {
       args: {
         animation: { type: 'string', description: '动画名（可选，默认当前编辑动画）' },
         bone: { type: 'string', description: '只查这根骨骼的轨道（可选）' },
-        slot: { type: 'string', description: '只查这个插槽的轨道（可选）' }
+        slot: { type: 'string', description: '只查这个插槽的轨道（可选）' },
+        constraint: { type: 'string', description: '只查这条约束的数值轨道（可选，物理约束的关键帧也在这里）' }
       },
-      returns: 'animation / duration / bones[{ bone, channel, keys:[{time,value,easing}] }] / slots[...] / deforms[...] / drawOrder[...]'
+      returns:
+        'animation / duration / bones[...] / slots[...] / deforms[...] / drawOrder[...] / constraints[{ constraint, mix, inertia, strength, damping, mass, wind, gravity, ... }]'
     },
     (args) => {
       const document = doc()
@@ -313,6 +377,7 @@ export function registerQueryCommands(): void {
       }
       const boneFilter = str(args, 'bone')
       const slotFilter = str(args, 'slot')
+      const constraintFilter = str(args, 'constraint')
       return {
         animation: anim.name,
         duration: anim.duration,
@@ -357,7 +422,19 @@ export function registerQueryCommands(): void {
               offsets: frame.offsets.length > 16 ? `${frame.offsets.length} 个数字` : [...frame.offsets]
             }))
           })),
-        drawOrder: anim.drawOrder.map((frame) => ({ time: frame.time, order: [...frame.order] }))
+        drawOrder: anim.drawOrder.map((frame) => ({ time: frame.time, order: [...frame.order] })),
+        // 约束数值轨道（物理约束的 7 条参数曲线也在这里；只列非空通道）
+        constraints: anim.constraints
+          .filter((track) => !constraintFilter || track.constraint === constraintFilter)
+          .map((track) => {
+            const channels = track as unknown as Record<string, Array<{ time: number; value: number; easing: number }> | string>
+            const out: Record<string, unknown> = { constraint: track.constraint }
+            for (const key of CONSTRAINT_KEY_FIELDS) {
+              const list = channels[key]
+              if (Array.isArray(list) && list.length > 0) out[key] = frames(list)
+            }
+            return out
+          })
       }
     }
   )

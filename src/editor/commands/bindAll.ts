@@ -506,7 +506,7 @@ export function registerBindAllCommands(): void {
       name: 'setOverlay',
       title: '切换叠加层',
       description:
-        '显示 / 隐藏视口叠加层：bones = 骨骼骨架，constraints = 约束手柄（IK / 变换 / 路径）。与视口右上角的「骨骼 / 约束」开关等效。visible 不传 = 切换',
+        '显示 / 隐藏视口叠加层：bones = 骨骼骨架，constraints = 约束手柄（IK / 变换 / 路径 / 物理）。与视口右上角的「骨骼 / 约束」开关等效。visible 不传 = 切换',
       args: {
         key: { type: 'string', description: '开关哪一层', values: ['bones', 'constraints'], required: true },
         visible: { type: 'boolean', description: 'true = 显示，false = 隐藏；不传 = 切换' }

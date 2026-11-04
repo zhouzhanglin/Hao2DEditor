@@ -1,6 +1,11 @@
 import type { AuthoringBone, AuthoringAttachment, EditorDocument } from '@core/model/authoring'
 import { createAuthoringAnim, createAuthoringBone, createAuthoringSlot, rootBoneName } from '@core/model/authoring'
-import { createIkConstraint, createPathConstraint, createTransformConstraint } from '@core/model/constraints'
+import {
+  createIkConstraint,
+  createPathConstraint,
+  createPhysicsConstraint,
+  createTransformConstraint
+} from '@core/model/constraints'
 import { BlendMode } from '@core/model/types'
 import { getActiveScene } from '../activeScene'
 import { moveBone, moveSlot } from './hierarchyCommands'
@@ -239,7 +244,7 @@ export function setSlotHost(doc: EditorDocument, slotName: string, boneName: str
 // ---------------- 约束 ----------------
 
 export interface AddConstraintOptions {
-  kind: 'ik' | 'transform' | 'path'
+  kind: 'ik' | 'transform' | 'path' | 'physics'
   name?: string
   /** 被驱动的骨链，父 → 子顺序（给反了会自动翻转）；transform / path 只用第一根当宿主 */
   bones?: string[]
@@ -270,10 +275,23 @@ export function addConstraint(doc: EditorDocument, options: AddConstraintOptions
   for (const name of picked) requireBone(doc, name, '被驱动骨骼')
 
   if (kind !== 'ik') {
-    // 变换 / 路径的宿主是第一根被驱动骨；来源骨 / 路径骨在属性面板里再选
+    // 变换 / 路径 / 物理：宿主是第一根被驱动骨（物理只作用这一根）
     const host = picked[0] ?? rootBoneName(doc.bones)
     if (!host) throw new Error(t('骨架里还没有骨骼：先用 addBone 建一根'))
     requireBone(doc, host, '宿主骨骼')
+    if (kind === 'physics') {
+      // 物理约束没有目标点：只挂在单根骨骼上（Spine 的 physics constraint 同语义）
+      const name = uniqueName(doc.constraints.map((item) => item.name), options.name?.trim() || 'physics')
+      doc.constraints.push({
+        ...createPhysicsConstraint(),
+        name,
+        order: doc.constraints.length,
+        enabled: true,
+        bones: [host],
+        target: ''
+      })
+      return { name, kind, bones: [host], target: '' }
+    }
     if (options.target) requireBone(doc, options.target, '目标骨骼')
     const name = uniqueName(doc.constraints.map((item) => item.name), options.name?.trim() || kind)
     const creator = kind === 'transform' ? createTransformConstraint : createPathConstraint

@@ -2467,4 +2467,67 @@ export const en: Record<string, string> = {
   '视口还没就绪：等编辑器画完一帧再导出': 'The viewport is not ready yet: let the editor render one frame, then export',
   '浏览器模式不支持导出视频（请在桌面版里导出）':
     'Exporting video is not available in the browser build (use the desktop app)',
+
+  // ── 物理约束 ──────────────────────────────────────────────────────────
+  '惯性': 'Inertia',
+  '强度': 'Strength',
+  '阻尼': 'Damping',
+  '质量': 'Mass',
+  '风力': 'Wind',
+  '重力': 'Gravity',
+  '幅度上限': 'Limit',
+  '步长(秒)': 'Step (s)',
+  'scaleY 模式': 'scaleY mode',
+  '不处理': 'Ignore',
+  '等比': 'Uniform',
+  '体积': 'Volume',
+  '物理影响通道': 'Physics influence channels',
+  '物理动力学': 'Physics dynamics',
+  '全局参数（*Global）': 'Global parameters (*Global)',
+  '勾选后该参数改由动画的「全局物理轨道」驱动（Spine 的 physics[""]）；否则用上面的本地值。':
+    'When checked, this parameter is driven by the animation\'s global physics track (Spine\'s physics[""]); otherwise the local value above is used.',
+  '这 5 个是影响权重（0~1），不是位移量或角度：0 = 该通道完全不生效。一般先只调「旋转」；位移 / X 缩放会带动整条子骨，斜切目前按额外旋转折算。':
+    'These 5 are influence weights (0-1), not offsets or angles: 0 means the channel has no effect. Usually start with Rotate only; translation / X scale move the whole child chain, and shear is currently folded into rotation.',
+  ' · 物理约束只作用于这根骨骼（弹簧 / 惯性仿真）':
+    ' · physics constraints only affect this bone (spring / inertia simulation)',
+  '修改物理影响通道': 'Change physics influence channels',
+  '修改物理参数': 'Change physics parameters',
+  '修改物理全局参数': 'Change physics global parameters',
+  '修改物理 scaleY 模式': 'Change physics scaleY mode',
+  '新建物理约束': 'New physics constraint',
+  '添加物理约束': 'Add physics constraint',
+  '先选中要被驱动的骨骼，再新建变换 / 路径 / 物理约束':
+    'Select the bone to drive first, then create a transform / path / physics constraint',
+  '弹簧 / 惯性仿真：让这根骨在运动时滞后、甩出与回弹':
+    'Spring / inertia simulation: the bone lags, overshoots and springs back while moving',
+  '弹簧 / 惯性仿真：需要先选中被驱动的骨骼':
+    'Spring / inertia simulation: select the bone to drive first',
+  '惯性 {0} · 强度 {1} · 阻尼 {2}': 'Inertia {0} · Strength {1} · Damping {2}',
+  '显示 / 隐藏约束手柄（IK / 变换 / 路径 / 物理）':
+    'Show / hide constraint handles (IK / transform / path / physics)',
+  '选中物理约束「{0}」：惯性 / 强度 / 阻尼等在检查器「约束」页与视口参数条里编辑':
+    'Selected physics constraint "{0}": edit inertia / strength / damping in the inspector Constraints page or the viewport parameter bar',
+  '该约束没有「{0}」这条通道': 'This constraint has no channel "{0}"',
+  '「{0}」没有「{1}」这条通道': '"{0}" has no channel "{1}"',
+  '{0} 约束的 channel 只能是 {1}，收到 {2}':
+    'Channel for a {0} constraint must be {1}, got {2}',
+  '只有 IK / 物理约束能改驱动骨（变换 / 路径约束的第一根就是宿主骨）':
+    'Only IK / physics constraints can change the driven bones (for transform / path the first bone is the host)',
+  '物理约束只作用一根骨骼：bones 请只给一个骨骼名':
+    'Physics constraints affect a single bone: pass exactly one bone name',
+  '已给约束 {0} 的 {1} 在 {2} 秒打了一帧': 'Keyed {1} of constraint {0} at {2}s',
+  '（物理参数）': ' (physics parameter)',
+  '约束名': 'Constraint name',
+  '数值通道名': 'Channel name',
+  '该通道在这一帧的值': 'Value of the channel at this frame',
+  '打约束帧': 'Key constraint frame',
+  'kind 只能是 ik / transform / path / physics，收到 {0}':
+    'kind must be ik / transform / path / physics, got {0}',
+  'step 必须大于 0（秒），收到 {0}': 'step must be greater than 0 (seconds), got {0}',
+  'mass 必须大于 0，收到 {0}': 'mass must be greater than 0, got {0}',
+  'scaleYMode 只能是 0（不处理）/ 1（等比）/ 2（体积），收到 {0}':
+    'scaleYMode must be 0 (ignore) / 1 (uniform) / 2 (volume), got {0}',
+  'global 只能是 {0} 的子集，收到 {1}': 'global must be a subset of {0}, got {1}',
+  '.hao2d 目前只能导出 IK / 物理约束：已丢弃 {0} 个变换 / 路径约束（{1}），Unity 侧不会有这些约束':
+    '.hao2d can only export IK / physics constraints: dropped {0} transform / path constraints ({1}); the Unity side will not have them',
 }

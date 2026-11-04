@@ -2,6 +2,7 @@ import {
   clearAnimation,
   clearTrack,
   keyBoneFrame,
+  keyConstraintFrame,
   keyDeformFrame,
   keyDrawOrderFrame,
   keySlotColorFrame,
@@ -105,6 +106,37 @@ export function registerAnimCommands(): void {
       return changed(
         result,
         t('已给骨骼 {0} 的 {1} 在 {2} 秒打了一帧', [result.bone, result.channel, result.time])
+      )
+    }
+  )
+
+  defineWrite(
+    {
+      name: 'keyConstraintFrame',
+      title: '打约束帧',
+      description:
+        '给约束的数值通道打一帧。物理约束的通道是 mix / inertia / strength / damping / mass / wind / gravity；IK 是 mix；变换 / 路径用各自的混合通道。同一时间点重复打即覆盖，单位是秒',
+      args: {
+        animation: { type: 'string', description: '动画名；不传则用当前编辑动画' },
+        constraint: { type: 'string', description: '约束名', required: true },
+        channel: { type: 'string', description: '数值通道名', required: true },
+        time: { type: 'number', description: '时间点（秒）', required: true },
+        value: { type: 'number', description: '该通道在这一帧的值', required: true }
+      },
+      returns: '{ animation, constraint, channel, time, value }',
+      example: { constraint: 'hair-back', channel: 'inertia', time: 0.5, value: 0.6 }
+    },
+    (draft, args) => {
+      const result = keyConstraintFrame(draft, {
+        animation: optText(args, 'animation'),
+        constraint: need(args, 'constraint'),
+        channel: need(args, 'channel'),
+        time: needNum(args, 'time'),
+        value: needNum(args, 'value')
+      })
+      return changed(
+        result,
+        t('已给约束 {0} 的 {1} 在 {2} 秒打了一帧', [result.constraint, result.channel, result.time])
       )
     }
   )

@@ -253,9 +253,9 @@ export function registerSkeletonCommands(): void {
       name: 'addConstraint',
       title: '新建约束',
       description:
-        '新建 IK / 变换 / 路径约束。IK 的 bones 要给「父 → 子」连续的骨链（顺序反了会自动翻转）；不传 target 会自动新建一根 IK 节点骨摆在链尾末端',
+        '新建 IK / 变换 / 路径 / 物理约束。IK 的 bones 要给「父 → 子」连续的骨链（顺序反了会自动翻转），不传 target 会自动新建一根 IK 节点骨摆在链尾末端；物理约束只挂单根骨骼（弹簧 / 惯性仿真，用 setConstraint 调参数）',
       args: {
-        kind: { type: 'string', description: '约束类型', required: true, values: ['ik', 'transform', 'path'] },
+        kind: { type: 'string', description: '约束类型', required: true, values: ['ik', 'transform', 'path', 'physics'] },
         name: { type: 'string', description: '约束名；不传则用类型名，重名自动加序号' },
         bones: { type: 'array', description: '被驱动的骨链，父 → 子顺序（字符串数组）' },
         target: { type: 'string', description: '目标骨骼名（IK 目标 / 变换来源骨 / 路径骨）' },
@@ -266,8 +266,8 @@ export function registerSkeletonCommands(): void {
     },
     (draft, args) => {
       const kind = need(args, 'kind')
-      if (kind !== 'ik' && kind !== 'transform' && kind !== 'path') {
-        throw new Error(t('kind 只能是 ik / transform / path，收到 {0}', kind))
+      if (kind !== 'ik' && kind !== 'transform' && kind !== 'path' && kind !== 'physics') {
+        throw new Error(t('kind 只能是 ik / transform / path / physics，收到 {0}', kind))
       }
       const result = addConstraint(
         draft,
@@ -297,13 +297,35 @@ export function registerSkeletonCommands(): void {
     {
       name: 'setConstraint',
       title: '设置约束',
-      description: '改约束的启用状态 / 目标骨 / 优先级（计算顺序）。IK 也可以重设骨链',
+      description:
+        '改约束的启用状态 / 目标骨 / 优先级（计算顺序）。IK 可以重设骨链；物理约束可以改 5 个影响通道、7 个动力学参数、limit / step / scaleYMode 与「由全局轨道驱动」的标记',
       args: {
         constraint: { type: 'string', description: '约束名', required: true },
         enabled: { type: 'boolean', description: '是否启用' },
         target: { type: 'string', description: '新的目标骨骼名' },
         order: { type: 'number', description: '优先级（越小越先算）' },
-        bones: { type: 'array', description: 'IK 的新骨链，父 → 子顺序（字符串数组）' }
+        bones: { type: 'array', description: 'IK 的新骨链（父 → 子）或物理约束的唯一宿主骨（字符串数组）' },
+        // ---- 物理：影响通道（0~1 权重，0 = 该通道不生效） ----
+        x: { type: 'number', description: '物理：X 位移影响权重 0~1' },
+        y: { type: 'number', description: '物理：Y 位移影响权重 0~1' },
+        rotate: { type: 'number', description: '物理：旋转影响权重 0~1（最常用）' },
+        scaleX: { type: 'number', description: '物理：X 缩放影响权重 0~1' },
+        shearX: { type: 'number', description: '物理：斜切影响权重 0~1（运行期折算成旋转）' },
+        // ---- 物理：动力学 ----
+        inertia: { type: 'number', description: '物理：惯性（越大越跟丢目标）' },
+        strength: { type: 'number', description: '物理：回正强度' },
+        damping: { type: 'number', description: '物理：阻尼 0~1（越大越快停）' },
+        mass: { type: 'number', description: '物理：质量（> 0）' },
+        wind: { type: 'number', description: '物理：风力' },
+        gravity: { type: 'number', description: '物理：重力' },
+        mix: { type: 'number', description: '物理：总权重 0~1' },
+        limit: { type: 'number', description: '物理：单帧位移幅度上限（世界单位）' },
+        step: { type: 'number', description: '物理：固定仿真步长（秒，默认 1/60）' },
+        scaleYMode: { type: 'number', description: '物理：0 = 不处理 scaleY / 1 = 等比 / 2 = 体积' },
+        global: {
+          type: 'array',
+          description: '物理：这些参数改由动画的全局物理轨道驱动（inertia/strength/damping/mass/wind/gravity/mix 的子集）'
+        }
       },
       returns: '{ constraint, changedFields: [...] }'
     },
@@ -334,17 +356,81 @@ export function registerSkeletonCommands(): void {
       }
       const bones = optTextList(args, 'bones')
       if (bones !== undefined) {
-        if (constraint.type !== 'ik') {
-          throw new Error(t('只有 IK 约束能改骨链（变换 / 路径约束的第一根就是宿主骨）'))
+        if (constraint.type === 'physics') {
+          // 物理只作用单根骨骼：给多根直接报错，别静默取第一根
+          if (bones.length !== 1) {
+            throw new Error(t('物理约束只作用一根骨骼：bones 请只给一个骨骼名'))
+          }
+          if (!draft.bones.some((bone) => bone.name === bones[0])) {
+            throw new Error(t('骨骼不存在：{0}（用 listBones 查现有骨骼名）', bones[0]))
+          }
+          constraint.bones = [bones[0]]
+          fields.push('bones')
+        } else {
+          if (constraint.type !== 'ik') {
+            throw new Error(t('只有 IK / 物理约束能改驱动骨（变换 / 路径约束的第一根就是宿主骨）'))
+          }
+          const chain = asBoneChain(draft, bones)
+          if (chain.length === 0) {
+            throw new Error(
+              t('IK 骨链必须「父 → 子」连续：{0} 不构成一条链', bones.join(' / '))
+            )
+          }
+          constraint.bones = chain
+          fields.push('bones')
         }
-        const chain = asBoneChain(draft, bones)
-        if (chain.length === 0) {
-          throw new Error(
-            t('IK 骨链必须「父 → 子」连续：{0} 不构成一条链', bones.join(' / '))
-          )
+      }
+
+      if (constraint.type === 'physics') {
+        // 5 个影响通道 + 7 个动力学参数 + limit / step：都是暴露给 AI 的直接可调项
+        const numbers: Array<[string, number | undefined]> = [
+          ['x', optNum(args, 'x')],
+          ['y', optNum(args, 'y')],
+          ['rotate', optNum(args, 'rotate')],
+          ['scaleX', optNum(args, 'scaleX')],
+          ['shearX', optNum(args, 'shearX')],
+          ['inertia', optNum(args, 'inertia')],
+          ['strength', optNum(args, 'strength')],
+          ['damping', optNum(args, 'damping')],
+          ['mass', optNum(args, 'mass')],
+          ['wind', optNum(args, 'wind')],
+          ['gravity', optNum(args, 'gravity')],
+          ['mix', optNum(args, 'mix')],
+          ['limit', optNum(args, 'limit')],
+          ['step', optNum(args, 'step')]
+        ]
+        for (const [field, value] of numbers) {
+          if (value === undefined) continue
+          if (field === 'step' && value <= 0) {
+            throw new Error(t('step 必须大于 0（秒），收到 {0}', value))
+          }
+          if (field === 'mass' && value <= 0) {
+            throw new Error(t('mass 必须大于 0，收到 {0}', value))
+          }
+          ;(constraint as unknown as Record<string, number>)[field] = value
+          fields.push(field)
         }
-        constraint.bones = chain
-        fields.push('bones')
+        const scaleYMode = optNum(args, 'scaleYMode')
+        if (scaleYMode !== undefined) {
+          if (scaleYMode !== 0 && scaleYMode !== 1 && scaleYMode !== 2) {
+            throw new Error(t('scaleYMode 只能是 0（不处理）/ 1（等比）/ 2（体积），收到 {0}', scaleYMode))
+          }
+          constraint.scaleYMode = scaleYMode
+          fields.push('scaleYMode')
+        }
+        const global = optTextList(args, 'global')
+        if (global !== undefined) {
+          const allowed = ['inertia', 'strength', 'damping', 'mass', 'wind', 'gravity', 'mix'] as const
+          for (const name of global) {
+            if (!(allowed as readonly string[]).includes(name)) {
+              throw new Error(t('global 只能是 {0} 的子集，收到 {1}', [allowed.join(' / '), name]))
+            }
+          }
+          for (const name of allowed) {
+            ;(constraint as unknown as Record<string, boolean>)[`${name}Global`] = global.includes(name)
+          }
+          fields.push('global')
+        }
       }
       requireSomeField(fields)
       return changed(

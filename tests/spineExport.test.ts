@@ -87,7 +87,7 @@ describe('导出结果能被官方 spine-core 加载', () => {
 
   it('transform 约束写 source + properties + 4.x 偏移字段名', () => {
     const out = buildSpineJson(importJson(json))
-    const tc = (out.constraints ?? []).find((c) => c.name === 'tc') as Record<string, unknown>
+    const tc = (out.constraints ?? []).find((c) => c.name === 'tc') as unknown as Record<string, unknown>
     expect(tc.source).toBe('target')
     // 偏移是 3.8/4.3 共用的 rotation / x / y，不是 4.0 那套 offsetRotation
     expect(tc.rotation).toBeCloseTo(30, 6)
@@ -249,7 +249,7 @@ describe('导出一律为 Spine 4.3 格式', () => {
       expect(raw.translateMix).toBeUndefined()
       if (raw.type === 'transform') expect(raw.target).toBeUndefined()
     }
-    const tc = (out.constraints ?? []).find((c) => c.name === 'tc') as Record<string, unknown>
+    const tc = (out.constraints ?? []).find((c) => c.name === 'tc') as unknown as Record<string, unknown>
     expect(tc.source).toBe('target')
   })
 

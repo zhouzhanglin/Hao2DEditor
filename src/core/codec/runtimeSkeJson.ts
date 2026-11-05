@@ -93,6 +93,12 @@ export interface RuntimeSkeJson {
   defaultSkin?: string
   /** v3 起：运行期是否跑物理仿真 */
   runtimePhysics?: boolean
+  /**
+   * 运行期是否求解 IK / transform / path 约束（缺省 true）。
+   * 从 Spine 导入且动画已烘焙（atlasText 交给官方 runtime bake）时为 false：
+   * 约束效果已经写进骨骼轨道，运行期再解一遍就会和编辑器不一致。
+   */
+  runtimeIK?: boolean
   /** v3 起：骨架级风向 / 重力方向（默认 1,0,0,1） */
   windX?: number
   windY?: number
@@ -173,6 +179,8 @@ export function serializeRuntimeSke(
     defaultSkin: asset.defaultSkin,
     // v3：物理仿真开关与骨架级方向向量
     runtimePhysics: asset.runtimePhysics,
+    // v3：运行期约束开关（Spine 烘焙资源为 false，避免预览重复求解）
+    runtimeIK: asset.runtimeIK,
     windX: asset.windX,
     windY: asset.windY,
     gravityX: asset.gravityX,

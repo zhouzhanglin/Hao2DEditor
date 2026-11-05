@@ -413,6 +413,10 @@ function buildConstraints(asset: RuntimeAsset): SpineJson['constraints'] {
   const out: Array<Record<string, unknown>> = []
   const sorted = sortConstraints(asset.constraints)
   for (const c of sorted) {
+    // runtimeIK=false：IK / transform / path 的效果已经烘焙进骨骼轨道，运行期一条都不再解
+    // （player.ts 也这么跳过）。这里再导出约束，官方 Spine 运行时会二次求解，姿势就和编辑器对不上。
+    // 物理是独立系统，仍然照常导出。
+    if (!asset.runtimeIK && c.type !== 'physics') continue
     if (c.type === 'ik') {
       out.push({
         type: 'ik',
@@ -870,6 +874,8 @@ function buildConstraintTimelines(asset: RuntimeAsset, animation: AnimData): Pic
   const ik: SpineAnimationJson['ik'] = {}
   const transform: SpineAnimationJson['transform'] = {}
   const path: SpineAnimationJson['path'] = {}
+  // 约束已烘焙（runtimeIK=false）：连同约束的时间轴一起不要写，免得引用不存在的约束
+  if (!asset.runtimeIK) return { ik, transform, path }
   for (const track of animation.constraints) {
     const c = asset.constraints[track.constraintIndex]
     if (!c) continue

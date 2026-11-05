@@ -193,7 +193,8 @@ export function assetFromJson(ske: RuntimeSkeJson, atlas: RuntimeAtlasJson | nul
     bindposes: Float32Array.from(ske.bindposes ?? []),
     textureNames: [...(ske.textureNames ?? [])],
     defaultSkinIndex: 0,
-    runtimeIK: true,
+    // 旧文件没有这个字段时按 true 处理；Spine 烘焙资源导出时会写成 false
+    runtimeIK: ske.runtimeIK !== false,
     runtimePhysics: ske.runtimePhysics !== false,
     windX: num(ske.windX, 1),
     windY: num(ske.windY, 0),

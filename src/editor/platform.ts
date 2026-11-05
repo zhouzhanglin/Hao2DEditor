@@ -11,6 +11,7 @@ import type {
   SkillInstallReport,
   SpinePreviewInfo,
   SpinePreviewSession,
+  ThreejsPreviewSession,
   VideoExportOptions
 } from '@shared/ipcTypes'
 
@@ -74,9 +75,12 @@ export interface Platform {
    */
   startSpinePreview(session: SpinePreviewSession): Promise<IpcResult<SpinePreviewInfo>>
   startHao2dPreview(session: Hao2dPreviewSession): Promise<IpcResult<SpinePreviewInfo>>
+  /** three.js 运行库预览（同一份预览服务，只是页面与渲染库不同） */
+  startThreejsPreview(session: ThreejsPreviewSession): Promise<IpcResult<SpinePreviewInfo>>
   /** 停止预览服务：断开连接、释放端口与内存里的资源 */
   stopSpinePreview(): Promise<IpcResult<void>>
   stopHao2dPreview(): Promise<IpcResult<void>>
+  stopThreejsPreview(): Promise<IpcResult<void>>
   /** 用系统默认浏览器打开链接（在线预览面板的「在浏览器打开」；起预览后也走这一条） */
   openExternal(url: string): Promise<void>
   onMenuCommand(cb: (command: string) => void): () => void
@@ -255,6 +259,20 @@ class ElectronPlatform implements Platform {
 
   stopHao2dPreview(): Promise<IpcResult<void>> {
     return this.bridge.stopHao2dPreview()
+  }
+
+  async startThreejsPreview(session: ThreejsPreviewSession): Promise<IpcResult<SpinePreviewInfo>> {
+    const call = this.bridge.startThreejsPreview as
+      | ((s: ThreejsPreviewSession) => Promise<IpcResult<SpinePreviewInfo>>)
+      | undefined
+    if (typeof call !== 'function') {
+      return { ok: false, error: t('预览服务未就绪：请完全退出并重新启动编辑器（主进程还是旧版本）') }
+    }
+    return call.call(this.bridge, session)
+  }
+
+  stopThreejsPreview(): Promise<IpcResult<void>> {
+    return this.bridge.stopThreejsPreview()
   }
 
   async openExternal(url: string): Promise<void> {
@@ -520,6 +538,14 @@ class MemoryPlatform implements Platform {
   }
 
   async stopHao2dPreview(): Promise<IpcResult<void>> {
+    return { ok: true, data: undefined }
+  }
+
+  async startThreejsPreview(): Promise<IpcResult<SpinePreviewInfo>> {
+    return { ok: false, error: t('浏览器模式没有本地预览服务，请在桌面版里使用') }
+  }
+
+  async stopThreejsPreview(): Promise<IpcResult<void>> {
     return { ok: true, data: undefined }
   }
 

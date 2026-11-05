@@ -5,7 +5,16 @@ import qrcode from 'qrcode-generator'
 import { getPlatform, stripExtension } from '@editor/platform'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSettingsStore } from '@editor/store/settingsStore'
-import { buildHao2dPreviewBundles, listFiles, prepareRuntimeExport, writeHao2dExport, writeRuntimeExport } from '@editor/services/exportService'
+import {
+  buildHao2dPreviewBundles,
+  listFiles,
+  prepareRuntimeExport,
+  THREEJS_DEMO_FILE,
+  THREEJS_RUNTIME_FILE,
+  writeHao2dExport,
+  writeRuntimeExport,
+  writeThreejsExport
+} from '@editor/services/exportService'
 import { saveProject } from '@editor/services/projectIo'
 import { buildSpineBundles, sanitize, writeSpineExport } from '@editor/services/spineExport'
 import type { PageSource, RuntimeExportPlan } from '@editor/services/exportService'
@@ -15,10 +24,10 @@ import type { SpinePreviewInfo } from '@shared/ipcTypes'
 import { collectHao2dWarnings } from '@core/codec/hao2dWriter'
 import { loadImageElement } from '@render/imageLoader'
 import { useDialogDrag } from './dialogDrag'
-import { t } from '@i18n'
+import { getLocale, t } from '@i18n'
 
-/** 三套导出目标：自定义运行时数据 / 给 Unity 的 .hao2d / Spine 4.3 骨骼数据 */
-export type ExportMode = 'runtime' | 'unity' | 'spine'
+/** 导出目标：自定义运行时数据 / 给 Unity 的 .hao2d / Spine 4.3 / Three.js 运行库 */
+export type ExportMode = 'runtime' | 'unity' | 'spine' | 'threejs'
 
 export interface ExportDialogProps {
   /** 导出目标：自定义运行时数据 / 给 Unity 的 .hao2d（含图集与材质） */
@@ -34,9 +43,9 @@ const MAX_PREVIEW_HEIGHT = 320
 const SCALE_PRESETS = [0.25, 0.5, 0.75, 1]
 const SIZE_PRESETS = [1024, 2048, 4096]
 
-/** 三种导出模式的标题；文案随语言切换，故是函数 */
+/** 导出模式的标题；文案随语言切换，故是函数 */
 function modeTitle(mode: ExportMode): string {
-  return t({ runtime: '导出运行时数据', unity: '导出 Unity', spine: '导出 Spine' }[mode])
+  return t({ runtime: '导出运行时数据', unity: '导出 Unity', spine: '导出 Spine', threejs: '导出 Three.js' }[mode])
 }
 
 /** 二维码的显示边长（按整数格 + 设备像素绘制，缩放后依然锐利） */
@@ -122,8 +131,8 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   const [browserHint, setBrowserHint] = useState('')
   /** 二维码里放的地址：默认第一个局域网地址，多网卡时可切换 */
   const [qrUrl, setQrUrl] = useState('')
-  /** 当前预览的运行库种类：spine（官方）或 hao2d（项目自带的 pixi 运行库），用于停止时调对通道 */
-  const [previewKind, setPreviewKind] = useState<'spine' | 'hao2d'>('spine')
+  /** 当前预览的运行库种类：spine / hao2d(pixi) / threejs，用于停止时调对通道 */
+  const [previewKind, setPreviewKind] = useState<'spine' | 'hao2d' | 'threejs'>('spine')
   const qrRef = useRef<HTMLCanvasElement | null>(null)
 
   // 编译 + 打包 + UV 重映射（纯计算，不写盘）：改缩放 / 页尺寸后立刻重算预览。
@@ -292,8 +301,8 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     setPreviewError('')
     setBrowserHint('')
     try {
-      if (mode === 'runtime') {
-        await startHao2dPreviewInternal()
+      if (mode === 'runtime' || mode === 'threejs') {
+        await startRuntimePreviewInternal(mode === 'threejs' ? 'threejs' : 'hao2d')
         return
       }
       const previewPlan = prepareRuntimeExport({
@@ -314,6 +323,8 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
       const result = await getPlatform().startSpinePreview(
         {
           title: projectName || 'Hao2D',
+          // 预览页由主进程直出，语言要跟着编辑器走
+          locale: getLocale(),
           pages: first.pages.map((page) => ({ name: page.name, bytes: page.bytes })),
           skeletons: bundles.map((bundle, index) => ({
             id: `s${index}`,
@@ -355,7 +366,11 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     }
   }
 
-  const startHao2dPreviewInternal = async (): Promise<void> => {
+  /**
+   * hao2d / three.js 两种运行库共用同一份预览包（ske/atlas 文本 + 图集页字节）：
+   * 只有预览会话的 `kind` 与 IPC 通道不同，主进程据此切页面与渲染运行库。
+   */
+  const startRuntimePreviewInternal = async (kind: 'hao2d' | 'threejs'): Promise<void> => {
     const previewPlan = prepareRuntimeExport({
       scale,
       maxSize,
@@ -367,24 +382,27 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
       setPreviewError(t('没有可预览的骨架'))
       return
     }
-    const result = await getPlatform().startHao2dPreview(
-      {
-        kind: 'hao2d',
-        title: projectName || 'Hao2D',
-        pages: pack.pages,
-        skeletons: pack.skeletons.map((skeleton) => ({
-          id: skeleton.id,
-          name: skeleton.name,
-          json: skeleton.skeText,
-          atlas: skeleton.atlasText,
-          animations: skeleton.animations,
-          skins: skeleton.skins,
-          defaultAnimation: skeleton.defaultAnimation,
-          defaultSkin: skeleton.defaultSkin,
-          nested: skeleton.nested
-        }))
-      }
-    )
+    const payload = {
+      title: projectName || 'Hao2D',
+      // 预览页由主进程直出，语言要跟着编辑器走
+      locale: getLocale(),
+      pages: pack.pages,
+      skeletons: pack.skeletons.map((skeleton) => ({
+        id: skeleton.id,
+        name: skeleton.name,
+        json: skeleton.skeText,
+        atlas: skeleton.atlasText,
+        animations: skeleton.animations,
+        skins: skeleton.skins,
+        defaultAnimation: skeleton.defaultAnimation,
+        defaultSkin: skeleton.defaultSkin,
+        nested: skeleton.nested
+      }))
+    }
+    const result =
+      kind === 'threejs'
+        ? await getPlatform().startThreejsPreview({ ...payload, kind: 'threejs' })
+        : await getPlatform().startHao2dPreview({ ...payload, kind: 'hao2d' })
     if (!result.ok) {
       setPreviewError(result.error)
       onStatus?.(t('预览失败：{0}', result.error))
@@ -392,21 +410,26 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
     }
     setPreview(result.data)
     setPreviewWarnings(pack.warnings)
-    setPreviewKind('hao2d')
+    setPreviewKind(kind)
     setQrUrl(result.data.lanUrls[0] ?? result.data.url)
     await openPreviewInBrowser(result.data.url)
     onStatus?.(
       result.data.lanUrls.length > 0
-        ? t('预览已启动（hao2d 运行时）：手机扫码，或访问 {0}', result.data.lanUrls[0])
+        ? t('预览已启动（{0} 运行时）：手机扫码，或访问 {1}', [
+            kind === 'threejs' ? 'three.js' : 'hao2d',
+            result.data.lanUrls[0]
+          ])
         : t('预览已启动，但没找到局域网地址（手机可能连不上）')
     )
   }
 
   const stopPreview = async (): Promise<void> => {
     const result =
-      previewKind === 'hao2d'
-        ? await getPlatform().stopHao2dPreview()
-        : await getPlatform().stopSpinePreview()
+      previewKind === 'threejs'
+        ? await getPlatform().stopThreejsPreview()
+        : previewKind === 'hao2d'
+          ? await getPlatform().stopHao2dPreview()
+          : await getPlatform().stopSpinePreview()
     setPreview(null)
     setQrUrl('')
     setPreviewWarnings([])
@@ -458,7 +481,9 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
           ? await writeSpineExport(dir, plan, { atlasTxt })
           : mode === 'unity'
             ? await writeHao2dExport(dir, plan)
-            : await writeRuntimeExport(dir, plan)
+            : mode === 'threejs'
+              ? await writeThreejsExport(dir, plan)
+              : await writeRuntimeExport(dir, plan)
       onStatus?.(result.message)
       // 有存档：把这次选的图集缩放写进工程文件，下次导出默认沿用（不重选）
       if (projectPath) {
@@ -483,7 +508,7 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
   const pagePlan = previewPlanOf(pageSource, pageInfo)
   /** 除当前二维码之外的其他局域网地址（多网卡时可切换，别的网段手机未必连得上） */
   const otherLanUrls = preview ? preview.lanUrls.filter((url) => url !== qrUrl) : []
-  const canPreview = (mode === 'spine' || mode === 'runtime') && getPlatform().isElectron
+  const canPreview = (mode === 'spine' || mode === 'runtime' || mode === 'threejs') && getPlatform().isElectron
 
   return createPortal(
     // 预览面板是可展开的，窗口矮的时候弹窗会变高：所以这里让遮罩可滚动，别把内容顶出屏幕
@@ -595,6 +620,19 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
                 pages.length,
                 pages.length
               ])}
+              {copyPages > 0
+                ? t('；其中 {0} 张本来就是图集（原图整页复制，不重打包、不重编码）', copyPages)
+                : ''}
+            </span>
+          ) : mode === 'threejs' ? (
+            <span className="hao-label">
+              {t('导出时会在所选目录内新建')} <span className="text-accent">{plan.stem}/</span>{' '}
+              {t('文件夹（目录、图集名与图集页名都用项目名「')}
+              <span className="text-accent">{projectName}</span>
+              {t('」），产物都放在里面：')}
+              {listFiles(plan.skeletons.map((entry) => entry.fileName))} /{' '}
+              {t('共用 {0}', plan.atlasName)} / {t('{0} 张图集页', pages.length)} /{' '}
+              {THREEJS_RUNTIME_FILE} / {THREEJS_DEMO_FILE}
               {copyPages > 0
                 ? t('；其中 {0} 张本来就是图集（原图整页复制，不重打包、不重编码）', copyPages)
                 : ''}
@@ -881,11 +919,15 @@ export default function ExportDialog({ mode, onClose, onStatus }: ExportDialogPr
 
         {/* 底部操作 */}
         <div className="flex shrink-0 items-center gap-2 border-t border-line bg-ink-700/60 px-2.5 py-2">
-          {/* 在线预览：本地起个网页，用 spine 官方 JS 运行时播放，手机扫码也能看 */}
+          {/* 在线预览：本地起个网页，按导出模式选 spine / pixi / three.js 运行库，手机扫码也能看 */}
           {canPreview ? (
             <button
               type="button"
-              title={t('在浏览器里用 spine 官方运行时播放这个角色（可切换骨架 / 皮肤 / 动画，手机扫码也能看）')}
+              title={
+                mode === 'spine'
+                  ? t('在浏览器里用 spine 官方运行时播放这个角色（可切换骨架 / 皮肤 / 动画，手机扫码也能看）')
+                  : t('在浏览器里用项目自带运行库播放这个角色（可切换骨架 / 皮肤 / 动画，手机扫码也能看）')
+              }
               className="hao-btn hao-btn-accent h-[24px] shrink-0 gap-1.5 px-3 font-semibold"
               disabled={previewBusy}
               onClick={() => void startPreview()}

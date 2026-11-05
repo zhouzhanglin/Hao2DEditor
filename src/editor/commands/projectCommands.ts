@@ -14,7 +14,12 @@ import {
   openProjectAt,
   saveProject
 } from '../services/projectIo'
-import { prepareRuntimeExport, writeHao2dExport, writeRuntimeExport } from '../services/exportService'
+import {
+  prepareRuntimeExport,
+  writeHao2dExport,
+  writeRuntimeExport,
+  writeThreejsExport
+} from '../services/exportService'
 import { writeSpineExport } from '../services/spineExport'
 import { clearWeightClipboard, renameSkin } from './authoringCommands'
 import { keyEventFrame } from './animationCommands'
@@ -641,12 +646,12 @@ export function registerProjectCommands(): void {
       name: 'exportProject',
       title: '导出工程',
       description:
-        '把工程导出到磁盘（**不弹对话框**）。runtime = 自定义运行时数据，unity = .hao2d + 图集 + 材质，spine = Spine 4.3 的 json + atlas + 图集页。目录不传则用工程文件所在目录',
+        '把工程导出到磁盘（**不弹对话框**）。runtime = 自定义运行时数据，unity = .hao2d + 图集 + 材质，spine = Spine 4.3 的 json + atlas + 图集页，threejs = 运行时数据 + three.js 版运行库（只含 hao2d，需宿主提供 three）+ 示例页。目录不传则用工程文件所在目录',
       args: {
         mode: {
           type: 'string',
           description: '导出目标',
-          values: ['runtime', 'unity', 'spine'],
+          values: ['runtime', 'unity', 'spine', 'threejs'],
           default: 'runtime'
         },
         dir: { type: 'string', description: '输出目录（绝对路径）；不传 = 工程文件所在目录' },
@@ -665,8 +670,8 @@ export function registerProjectCommands(): void {
     },
     async (args) => {
       const rawMode = optText(args, 'mode') ?? 'runtime'
-      if (rawMode !== 'runtime' && rawMode !== 'unity' && rawMode !== 'spine') {
-        throw new Error(t('mode 只能是 runtime / unity / spine，收到 {0}', rawMode))
+      if (rawMode !== 'runtime' && rawMode !== 'unity' && rawMode !== 'spine' && rawMode !== 'threejs') {
+        throw new Error(t('mode 只能是 runtime / unity / spine / threejs，收到 {0}', rawMode))
       }
       const mode = rawMode
       const store = useProjectStore.getState()
@@ -697,7 +702,9 @@ export function registerProjectCommands(): void {
           ? await writeSpineExport(dir, plan, { atlasTxt })
           : mode === 'unity'
             ? await writeHao2dExport(dir, plan)
-            : await writeRuntimeExport(dir, plan)
+            : mode === 'threejs'
+              ? await writeThreejsExport(dir, plan)
+              : await writeRuntimeExport(dir, plan)
       if (!result.ok) throw new Error(result.message)
       return {
         changed: false,

@@ -75,6 +75,13 @@ export const en: Record<string, string> = {
   '导出 Unity': 'Export Unity',
   '导出给 Unity 的 .hao2d + 图集 png + 材质 (Ctrl+Shift+E)': 'Export .hao2d for Unity + atlas png + materials (Ctrl+Shift+E)',
   '导出 Spine': 'Export Spine',
+  '导出 Three.js': 'Export Three.js',
+  '导出运行时数据 + three.js 版运行库（hao2d-three.js，只含 hao2d，需宿主提供 three）与示例页，可在导出弹窗里预览':
+    'Export runtime data + the three.js-side runtime (hao2d-three.js, hao2d only; host provides three) and a demo page; preview it in the export dialog',
+  '预览已启动（{0} 运行时）：手机扫码，或访问 {1}':
+    'Preview started ({0} runtime): scan the QR code on your phone, or visit {1}',
+  '在浏览器里用项目自带运行库播放这个角色（可切换骨架 / 皮肤 / 动画，手机扫码也能看）':
+    'Play this character with the built-in runtime (switch skeleton / skin / animation; phone QR code supported)',
   '导出 Spine 4.3 骨骼数据：{名称}.json + {名称}.atlas + 图集 png (Ctrl+Alt+E)': 'Export Spine 4.3 skeleton data: {name}.json + {name}.atlas + atlas png (Ctrl+Alt+E)',
   '最近打开的工程': 'Recently opened projects',
   '关闭最近列表': 'Close recent list',
@@ -1639,7 +1646,7 @@ export const en: Record<string, string> = {
   '图层「{0}」导出 PNG 失败': 'Failed to export layer "{0}" as PNG',
   'Hao2D: 文件头不匹配（0x{0}），不是 .hao2d 资源':
     'Hao2D: file header mismatch (0x{0}); this is not a .hao2d asset',
-  'Hao2D: 不支持的数据版本 {0}（支持 5 / 6 / 7 / 8 / {1}），请重新导出':
+  'Hao2D: 不支持的数据版本 {0}（支持 5 / 6 / 7 / 8 / 9 / {1}），请重新导出':
     'Hao2D: unsupported data version {0} (supports 5 / 6 / 7 / 8 / {1}); please re-export',
 
   // ── 遮罩绘制 / 编辑提示 ───────────────────────────────────────────────
@@ -1973,6 +1980,8 @@ export const en: Record<string, string> = {
   '已删除事件帧「{0}」': 'Deleted event frame "{0}"',
 
   // 导出 / 撤销
+  'mode 只能是 runtime / unity / spine / threejs，收到 {0}':
+    'mode must be runtime / unity / spine / threejs; received {0}',
   'mode 只能是 runtime / unity / spine，收到 {0}':
     'mode must be runtime / unity / spine; received {0}',
   '没有导出目录：给 exportProject 传 dir，或先把工程存到磁盘（saveProject）':

@@ -573,6 +573,9 @@ export default function App() {
         case 'project:exportSpine':
           setExportMode('spine')
           return
+        case 'project:exportThreejs':
+          setExportMode('threejs')
+          return
         case 'project:exportVideo':
           setVideoExportOpen(true)
           return

@@ -5,7 +5,9 @@ import {
   startPreviewSession,
   stopPreviewSession,
   startHao2dPreview,
-  stopHao2dPreview
+  stopHao2dPreview,
+  startThreejsPreview,
+  stopThreejsPreview
 } from './previewServer'
 import { commandServerInfo } from './commandServer'
 import { markRendererReady } from './openRequests'
@@ -26,6 +28,7 @@ import type {
   OpenDialogOptions,
   SaveDialogOptions,
   SpinePreviewSession,
+  ThreejsPreviewSession,
   VideoExportOptions
 } from '@shared/ipcTypes'
 
@@ -98,6 +101,12 @@ export function registerIpcHandlers(): void {
     fs.safe(() => startHao2dPreview(session))
   )
   ipcMain.handle(IPC.hao2dPreviewStop, () => fs.safe(() => stopHao2dPreview()))
+
+  // 在线预览：three.js 版 hao2d 运行库（数据与 hao2d 预览一致，页面 / 渲染运行库不同）
+  ipcMain.handle(IPC.threejsPreviewStart, (_e, session: ThreejsPreviewSession) =>
+    fs.safe(() => startThreejsPreview(session))
+  )
+  ipcMain.handle(IPC.threejsPreviewStop, () => fs.safe(() => stopThreejsPreview()))
 
   // 在线预览的「在浏览器打开」：只放行 http(s)，别让渲染层的字符串借系统去执行别的东西
   ipcMain.handle(IPC.openExternal, (_e, url: string) => fs.safe(() => openExternal(url)))

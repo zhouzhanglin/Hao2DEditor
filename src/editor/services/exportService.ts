@@ -18,6 +18,9 @@ import type { ImageAtlasRegion } from '@core/model/types'
 import type { RuntimeAsset } from '@core/model/asset'
 import { findLinkedMeshParent } from '@core/model/asset'
 import { t } from '@i18n'
+// 随 App 分发的那一份 three.js 运行库（resources/runtimes/hao2d-three.js，由 build:runtimes 生成）：
+// 导出 Three.js 时直接把同一份文本落盘，保证「导出包」与「安装包 resources/runtimes」一字不差
+import threejsRuntimeSource from '../../../resources/runtimes/hao2d-three.js?raw'
 import { encodeAtlasPages, loadImageBitmap } from './pngEncoder'
 import type { PageEncodePlan } from './pngEncoder'
 import {
@@ -492,15 +495,26 @@ export function prepareRuntimeExport(options: RuntimeExportOptions): RuntimeExpo
   }
 }
 
+/** 随「导出 Three.js」一起落盘的单文件运行库（只含 hao2d 功能，three 由宿主提供） */
+export const THREEJS_RUNTIME_FILE = 'hao2d-three.js'
+export const THREEJS_DEMO_FILE = 'demo.html'
+
+export interface RuntimeWriteOptions {
+  /** 额外附带的运行库文件（导出 Three.js 时用它把可运行库一起交付） */
+  runtimeLibrary?: { fileName: string; source: string; demo?: string }
+}
+
 /**
  * 把准备好的产物写进 `<dir>/<stem>/`。
  *
  * 单独建一层子文件夹：用户选中的目录往往还有别的东西，产出的 json + 若干 png
  * 混在里头既难分辨、也容易和别的工程撞名；整包文件夹可以直接拷进游戏工程。
+ * `options.runtimeLibrary` 用于「导出 Three.js」：同一份数据 + 一份可直接 `<script>` 引用的运行库。
  */
 export async function writeRuntimeExport(
   dir: string,
-  plan: RuntimeExportPlan
+  plan: RuntimeExportPlan,
+  options: RuntimeWriteOptions = {}
 ): Promise<ExportResult> {
   const platform = getPlatform()
   const doc = useProjectStore.getState().document
@@ -548,22 +562,124 @@ export async function writeRuntimeExport(
     if (!bytes || bytes.length === 0) return
     files.push({ path: joinPath(outDir, file), bytes })
   })
+  // 「导出 Three.js」额外交付运行库与一个可直接跑的示例页（数据仍与运行时导出完全一样）
+  if (options.runtimeLibrary) {
+    files.push({ path: joinPath(outDir, options.runtimeLibrary.fileName), text: options.runtimeLibrary.source })
+    if (options.runtimeLibrary.demo) {
+      files.push({ path: joinPath(outDir, THREEJS_DEMO_FILE), text: options.runtimeLibrary.demo })
+    }
+  }
 
   await platform.writeBatch(files)
   await platform.revealInFolder(joinPath(outDir, plan.skeletons[0]?.fileName ?? plan.atlasName))
   useProjectStore.getState().setWarnings(warnings)
 
+  const summary = t('已导出到 {0}/：{1} / {2} / {3} 张图集页', [
+    baseName(outDir),
+    listFiles(plan.skeletons.map((entry) => entry.fileName)),
+    plan.atlasName,
+    plan.pageFiles.length
+  ])
   return {
     ok: true,
-    message: t('已导出到 {0}/：{1} / {2} / {3} 张图集页', [
-      baseName(outDir),
-      listFiles(plan.skeletons.map((entry) => entry.fileName)),
-      plan.atlasName,
-      plan.pageFiles.length
-    ]),
+    message: options.runtimeLibrary
+      ? `${summary} / ${options.runtimeLibrary.fileName}${options.runtimeLibrary.demo ? ` / ${THREEJS_DEMO_FILE}` : ''}`
+      : summary,
     warnings,
     files: files.map((file) => baseName(file.path))
   }
+}
+
+/**
+ * 「导出 Three.js」：与「导出运行时数据」同一份 ske / atlas / 图集页，
+ * 另附一份只含 hao2d 功能的运行库 `hao2d-three.js`（three 由宿主提供）和一个示例页 `demo.html`。
+ * 产物目录可以直接作为静态站点起服务（示例页用 fetch 读同目录文件，file:// 下会被 CORS 拦）。
+ */
+export function writeThreejsExport(dir: string, plan: RuntimeExportPlan): Promise<ExportResult> {
+  return writeRuntimeExport(dir, plan, {
+    runtimeLibrary: {
+      fileName: THREEJS_RUNTIME_FILE,
+      source: threejsRuntimeSource,
+      demo: threejsDemoHtml(plan)
+    }
+  })
+}
+
+/**
+ * 导出包自带的极简示例：演示 createStage 与 IHao2DView 换装 API 的最少调用。
+ *
+ * 注意 `hao2d-three.js` 只含 hao2d 功能（three 由宿主提供）：示例页优先用页面已有的
+ * `window.THREE`，没有才从 CDN 取一份；离线部署请把 importmap 换成本地 three 构建。
+ */
+function threejsDemoHtml(plan: RuntimeExportPlan): string {
+  const skeFile = plan.skeletons[0]?.fileName ?? ''
+  const payload = JSON.stringify({
+    ske: skeFile,
+    atlas: plan.atlasName,
+    defaultSkin: plan.skeletons[0]?.asset.defaultSkin ?? '',
+    nested: plan.skeletons.flatMap((entry) =>
+      entry.nested.map((item) => ({ file: item.file, armatureName: item.armatureName }))
+    )
+  })
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8" />
+<title>Hao2D · Three.js 运行库示例</title>
+<style>html,body{margin:0;height:100%;background:#101218;color:#e7eaf0;font:14px sans-serif}
+canvas{display:block;width:100vw;height:100vh}
+#hint{position:fixed;left:16px;top:16px;padding:10px 14px;border-radius:8px;background:#1b1f2a;color:#9aa3b5}</style></head>
+<body><canvas id="stage"></canvas><pre id="hint">正在加载 three.js…</pre>
+<!--
+  hao2d-three.js 只含 hao2d 功能，three.js 由宿主提供：
+  下面默认从 CDN 取 three；离线部署请改成自己的本地 three 构建，并先挂到 window.THREE。
+  用静态服务器打开本页（如 npx serve .），fetch 才能读到同目录数据。
+-->
+<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.170.0/build/three.module.js"}}</script>
+<script type="module">
+function loadScript(src) {
+  return new Promise(function (resolve, reject) {
+    var s = document.createElement('script')
+    s.src = src
+    s.onload = resolve
+    s.onerror = function () { reject(new Error('无法加载 ' + src)) }
+    document.head.appendChild(s)
+  })
+}
+
+async function main() {
+  var data = ${payload}
+  // 页面已有 THREE（游戏工程里通常已经引了）就直接用；没有才从 CDN 拉
+  if (!window.THREE) window.THREE = await import('three')
+  await loadScript('${THREEJS_RUNTIME_FILE}')
+
+  var text = async function (name) { return (await fetch(name)).text() }
+  var atlas = JSON.parse(await text(data.atlas))
+  var pages = await Promise.all(atlas.pages.map(async function (page) {
+    return { name: page.image, bytes: new Uint8Array(await (await fetch(page.image)).arrayBuffer()) }
+  }))
+  var nested = []
+  for (var item of data.nested) {
+    nested.push({ armatureName: item.armatureName, skeText: await text(item.file) })
+  }
+  var stage = await Hao2dThreeRuntime.createStage({
+    canvas: document.getElementById('stage'),
+    pages: pages, skeText: await text(data.ske), atlasText: await text(data.atlas),
+    defaultSkin: data.defaultSkin, nested: nested
+  })
+  document.getElementById('hint').remove()
+  stage.resize(innerWidth, innerHeight)
+  stage.fit()
+  window.hao2dThree = { stage: stage, view: stage.view }
+  // 例：stage.view.setSkin('default') / stage.view.setSlotAttachment('slot', 'attachment')
+  addEventListener('resize', function () { stage.resize(innerWidth, innerHeight) })
+}
+
+main().catch(function (err) {
+  document.getElementById('hint').textContent =
+    '加载失败：' + (err && err.message ? err.message : err) +
+    '（hao2d-three.js 只含 hao2d 功能，需要先提供全局 THREE；离线部署请把 three 换成本地构建）'
+})
+</script></body></html>
+`
 }
 
 /** 导出给 Unity Hao2D 运行时使用的 .hao2d（v5），并给出能力差异告警 */

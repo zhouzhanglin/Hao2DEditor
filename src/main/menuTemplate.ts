@@ -77,6 +77,7 @@ export function buildMenuTemplate(options: MenuTemplateOptions): MenuItemConstru
       item(labels.exportRuntime, 'project:exportRuntime', 'CmdOrCtrl+E'),
       item(labels.exportHao2d, 'project:exportHao2d', 'CmdOrCtrl+Shift+E'),
       item(labels.exportSpine, 'project:exportSpine', 'CmdOrCtrl+Alt+E'),
+      item(labels.exportThreejs, 'project:exportThreejs'),
       item(labels.exportVideo, 'project:exportVideo'),
       { type: 'separator' },
       ...(isMac ? [] : ([...settingsItems, { type: 'separator' }] as MenuItemConstructorOptions[])),

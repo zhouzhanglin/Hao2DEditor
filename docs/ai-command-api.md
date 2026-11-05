@@ -128,7 +128,7 @@ POST /batch
    - 皮肤：`addSkin` / `renameSkin` / `removeSkin` / `setActiveSkin`（换装动画配合 `keySlotDisplayFrame`）。`renameSkin` **不能与已有皮肤重名**，`default` 不可改名 / 不可删；改名会连带更新变形（FFD）轨道的皮肤归属、链接网格的源皮肤与当前皮肤
    - 换装链接网格（一套几何 + 多套皮肤换贴图）→ `createLinkedMesh {slot, source, sourceSkin?, skin?, name?, image?}`：几何 / 权重取自同插槽的源网格，自己只决定贴图与 UV；附件名与源同名 = 覆盖该插槽的显示，异名 = 追加 display。`setLinkedMeshSource`（改源）/ `setLinkedMeshImage`（只改这一条的图并重算 UV）/ `unlinkLinkedMesh`（复制几何成独立网格）。`keyDeformFrame` 对链接网格按**源网格点数**校验 offsets，可用 `skin` 指定附件所在皮肤
    - 播放与事件帧：`setTime`（播放头）、`setPlaying`（播放 / 暂停）、`keyEvent` / `setEvent` / `removeEvent`（时间轴最上面的事件轨）
-   - 导出：`exportProject`（`mode` = `runtime` / `unity` / `spine`，写盘到 `dir`，**不弹对话框**）；图集缩放持久偏好 → `setExportScale`
+   - 导出：`exportProject`（`mode` = `runtime` / `unity` / `spine` / `threejs`，写盘到 `dir`，**不弹对话框**；`threejs` 会额外附上 `hao2d-three.js` 运行库与 `demo.html`，运行库只含 hao2d 功能、three 由宿主提供）；图集缩放持久偏好 → `setExportScale`
    - 撤销 / 重做：`undo` / `redo`（等价 Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z）
    - 工程重命名：`setProjectName`（窗口标题与导出标题用它；保存后写进工程文件，**不**重命名磁盘文件）
    - 相机（只移动视口、不改数据）：`focusNode`（聚焦骨骼 / 插槽 / 附件 / 约束，等同层级树双击）/ `panViewport`（按屏幕像素平移）/ `setViewportZoom`（缩放）/ `centerViewport`（把世界坐标点移到视口中心）

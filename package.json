@@ -9,10 +9,12 @@
     "dev": "electron-vite dev",
     "dev:web": "vite --config vite.web.config.ts",
     "build:hao2d-runtime": "node scripts/build-hao2d-runtime.mjs",
+    "build:threejs-runtime": "node scripts/build-threejs-runtime.mjs",
+    "build:runtimes": "node scripts/build-runtimes.mjs",
     "copy-vendor": "node scripts/copy-vendor.mjs",
-    "predev": "node scripts/copy-vendor.mjs",
+    "predev": "node scripts/copy-vendor.mjs && npm run build:runtimes",
     "prebuild": "node scripts/copy-vendor.mjs",
-    "build": "npm run build:hao2d-runtime && electron-vite build",
+    "build": "npm run build:hao2d-runtime && npm run build:threejs-runtime && npm run build:runtimes && electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "gen:skill-docs": "vite-node --config vitest.config.ts scripts/gen-skill-commands.mjs",
@@ -46,15 +48,18 @@
     "@types/node": "^22.9.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/three": "^0.170.0",
     "@types/ws": "^8.18.2",
     "@vitejs/plugin-react": "^4.3.3",
     "autoprefixer": "^10.4.20",
     "electron": "^30.5.1",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
+    "esbuild": "^0.21.5",
     "postcss": "^8.5.0",
     "tailwindcss": "3.4.17",
     "tailwindcss-animate": "^1.0.7",
+    "three": "^0.170.0",
     "typescript": "^5.6.3",
     "vite": "^5.4.10",
     "vitest": "^2.1.5"
@@ -81,6 +86,10 @@
       {
         "from": "resources/ffmpeg",
         "to": "ffmpeg"
+      },
+      {
+        "from": "resources/runtimes",
+        "to": "runtimes"
       }
     ],
     "artifactName": "Hao2D.Editor-${version}-${os}-${arch}.${ext}",

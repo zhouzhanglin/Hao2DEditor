@@ -1,17 +1,17 @@
 import { Application, Container } from 'pixi.js'
 import { loadRuntime } from '@core/runtime/loader'
 import { buildRuntimeMaps } from '@core/model/asset'
-import type { RuntimeAsset } from '@core/model/asset'
+import type { RuntimeAsset, RuntimeMaps } from '@core/model/asset'
 import { Skeleton } from '@core/model/skeleton'
 import { AnimationPlayer } from '@core/anim/player'
 import { RUNTIME_PPU } from '@core/codec/runtimeSkeJson'
-import { decomposeTrs } from '@core/math/matrix'
-import { NestRuntime } from '@core/nesting/nestRuntime'
 import { TextureStore } from '@render/material'
 import { SkeletonView } from '@render/skeletonView'
+import { Hao2dViewCore } from './hao2dViewCore'
+import type { Hao2dRenderAdapter, NestedChildLayer } from './hao2dViewCore'
 
 /**
- * hao2d 的 pixi 运行库（预览页用）。
+ * hao2d 的 pixi 运行库（预览页与 `resources/runtimes/hao2d-pixi.js` 共用）。
  *
  * 把项目里「hao2d 的 pixi 计算方式」（解码 / 加载 / 播放 / 渲染）原样搬到浏览器：
  * 由 `scripts/build-hao2d-runtime.mjs` 用 esbuild 打包成 IIFE（`hao2dRuntime.generated.js`）。
@@ -19,14 +19,17 @@ import { SkeletonView } from '@render/skeletonView'
  * 运行时从全局 `PIXI` 取，pixi 由预览页用独立的 `<script src="pixi.js">` 单独加载
  * （与 spine 预览把 spine-core 单独加载同思路）。
  *
+ * 插槽换装 / 显隐 / 显示下标 / 嵌套子骨架这些「与渲染无关」的逻辑和 three 版共用
+ * `hao2dViewCore.ts`（语义对齐 Unity 的 `IHao2DView.cs`），本文件只提供 pixi 的渲染适配器。
+ *
  * 相机变换完全复刻编辑器 `render/viewport.ts`：世界容器 `scale.set(zoom, -zoom)`（y 轴向上），
  * 世界原点落在视口中心 + 偏移。
  *
  * **世界尺度与 spine 预览页（app.js）严格一致**：spine 预览吃的是导出的 spine JSON，
  * 那边的坐标全部乘过 `RUNTIME_PPU`（见 spineExport.ts 的 `x * RUNTIME_PPU`），即世界单位 = 像素；
- * 而这里用的 MeshBuilder 输出的是**内部单位**（1 单位 = ppu 像素）。所以网格容器要额外乘 ppu，
+ * 而这里用的 MeshBuilder 输出的是**内部单位**（1 单位 = ppu 像素）。所以根容器要额外乘 ppu，
  * 否则取景 zoom 会小 ppu 倍（表现为角色比 spine 预览小一大截、滚轮放大到顶也涨不上去、
- * 棋盘格疏密对不上）——见 createStage 里 `view.container.scale.set(ppu, ppu)`。
+ * 棋盘格疏密对不上）——由 `PixiViewCore` 构造时按 ppu 缩放根容器。
  */
 
 export interface PageInput {
@@ -47,6 +50,9 @@ export interface StageInput {
 }
 
 export interface Hao2dStage {
+  /** IHao2DView 能力：换装 / 显隐 / 显示下标 / 嵌套子骨架 */
+  readonly view: PixiHao2dView
+  readonly skeleton: Skeleton
   app: Application
   world: Container
   animations: string[]
@@ -60,7 +66,7 @@ export interface Hao2dStage {
   resume(): void
   seek(seconds: number): void
   setProgress(normalized: number): void
-  setSkin(name: string): void
+  setSkin(name: string): boolean
   setLoop(loop: boolean): void
   setSpeed(scale: number): void
   readonly duration: number
@@ -97,6 +103,96 @@ function readPpu(skeText: string): number {
   }
 }
 
+interface PixiViewOptions {
+  asset: RuntimeAsset
+  skeleton: Skeleton
+  player: AnimationPlayer
+  maps: RuntimeMaps
+  textures: TextureStore
+  nestedAssets: Map<string, RuntimeAsset>
+  ppu: number
+  skinName: string
+  isRoot: boolean
+}
+
+/** pixi 的渲染适配器：视图核心只认「节点 + 局部变换 + 嵌套层」，其余由这里接 */
+class PixiRenderAdapter implements Hao2dRenderAdapter<SkeletonView> {
+  constructor(private readonly textures: TextureStore) {}
+
+  create(asset: RuntimeAsset, skinName: string): SkeletonView {
+    return new SkeletonView(asset, this.textures, skinName)
+  }
+
+  node(view: SkeletonView): Container {
+    return view.container
+  }
+
+  setRootScale(node: unknown, ppu: number): void {
+    ;(node as Container).scale.set(ppu, ppu)
+  }
+
+  setLocalTransform(
+    node: unknown,
+    x: number,
+    y: number,
+    rotationDeg: number,
+    scaleX: number,
+    scaleY: number
+  ): void {
+    const container = node as Container
+    container.position.set(x, y)
+    container.rotation = (rotationDeg * Math.PI) / 180
+    container.scale.set(scaleX, scaleY)
+  }
+
+  setVisible(node: unknown, visible: boolean): void {
+    ;(node as Container).visible = visible
+  }
+
+  isVisible(node: unknown): boolean {
+    return (node as Container).visible
+  }
+
+  removeFromParent(node: unknown): void {
+    ;(node as Container).removeFromParent()
+  }
+
+  setNestedViews(view: SkeletonView, layers: readonly NestedChildLayer<SkeletonView>[]): void {
+    view.setNestedViews(
+      layers.map((layer) => ({ layer: layer.layer, order: layer.order, container: layer.view.container }))
+    )
+  }
+}
+
+/** pixi 版视图：核心逻辑在 Hao2dViewCore，这里只补 pixi 的根容器与渲染适配器 */
+export class PixiHao2dView extends Hao2dViewCore<SkeletonView> {
+  constructor(options: PixiViewOptions) {
+    super({
+      asset: options.asset,
+      skeleton: options.skeleton,
+      player: options.player,
+      maps: options.maps,
+      skinName: options.skinName,
+      isRoot: options.isRoot,
+      ppu: options.ppu,
+      nestedAssets: options.nestedAssets,
+      adapter: new PixiRenderAdapter(options.textures),
+      createChild: (init) =>
+        new PixiHao2dView({
+          ...init,
+          textures: options.textures,
+          nestedAssets: options.nestedAssets,
+          ppu: options.ppu,
+          isRoot: false
+        })
+    })
+  }
+
+  get container(): Container {
+    return this.mountNode as Container
+  }
+}
+
 export async function createStage(input: StageInput): Promise<Hao2dStage> {
   const loaded = loadRuntime(input.skeText, input.atlasText)
   const asset = loaded.asset
@@ -115,9 +211,17 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
     }
   }
 
-  const maps = buildRuntimeMaps(asset, '')
+  const animations = asset.animations.map((animation) => animation.name)
+  const skins = asset.skins.map((skin) => skin.name)
+  const defaultAnimation = animations[0] ?? ''
+  // 导出包里带的是「导出时的默认皮肤」（可能不是 skins[0]，例如当前在 goblin 皮肤上编辑）
+  const defaultSkin =
+    input.defaultSkin && skins.includes(input.defaultSkin) ? input.defaultSkin : skins[0] ?? ''
+
+  const maps = buildRuntimeMaps(asset, defaultSkin)
   const skeleton = new Skeleton(asset)
   skeleton.applyRuntimeMaps(maps)
+  const player = new AnimationPlayer(asset, skeleton)
 
   const textures = new TextureStore()
   const blobUrls: string[] = []
@@ -148,126 +252,29 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
 
   const ppu = readPpu(input.skeText)
   const world = new Container()
-  const view = new SkeletonView(asset, textures, '')
-  // 内部单位 → 像素：补上这层缩放后，世界坐标的数值才和导出的 spine JSON 一致
-  // （spine 预览的取景 zoom、棋盘格、缩放限位都是按「世界单位 = 像素」算的）
-  view.container.scale.set(ppu, ppu)
+  const view = new PixiHao2dView({
+    asset,
+    skeleton,
+    player,
+    maps,
+    textures,
+    nestedAssets,
+    ppu,
+    skinName: defaultSkin,
+    isRoot: true
+  })
   world.addChild(view.container)
   app.stage.addChild(world)
-
-  const player = new AnimationPlayer(asset, skeleton)
-
-  /*
-   * 嵌套骨架的视图树：每层一个 `NestRuntime` + 若干子 `SkeletonView`。
-   * 用递归结构而不是单层，是因为子骨架自己也可能是别人的父骨架（A 挂 B、B 挂 C）。
-   */
-  interface NestLayer {
-    nest: NestRuntime | null
-    views: Map<string, { view: SkeletonView; time: number; child: NestLayer }>
-  }
-  function createNestLayer(skin: string): NestLayer {
-    return {
-      nest:
-        nestedAssets.size > 0
-          ? new NestRuntime((name) => {
-              const target = nestedAssets.get(name)
-              return target ? { asset: target, skinName: skin } : null
-            }, skin)
-          : null,
-      views: new Map()
-    }
-  }
-  function destroyLayer(layer: NestLayer): void {
-    for (const entry of layer.views.values()) {
-      entry.view.container.removeFromParent()
-      entry.view.destroy()
-      destroyLayer(entry.child)
-    }
-    layer.views.clear()
-  }
-  function syncLayer(
-    layer: NestLayer,
-    source: RuntimeAsset,
-    sk: Skeleton,
-    pl: AnimationPlayer,
-    host: SkeletonView
-  ): void {
-    if (!layer.nest) return
-    const instances = layer.nest.update(source, sk, pl, host.result?.nestAnchors)
-    const live = new Set<string>()
-    const layers: Array<{ layer: number; order: number; container: Container }> = []
-    for (const instance of instances) {
-      live.add(instance.key)
-      let entry = layer.views.get(instance.key)
-      if (!entry || entry.view.runtimeAsset !== instance.asset) {
-        if (entry) {
-          entry.view.container.removeFromParent()
-          entry.view.destroy()
-          destroyLayer(entry.child)
-        }
-        entry = {
-          view: new SkeletonView(instance.asset, textures, activeSkin),
-          time: Number.NaN,
-          child: createNestLayer(activeSkin)
-        }
-        layer.views.set(instance.key, entry)
-      }
-      const parts = decomposeTrs(instance.matrix)
-      entry.view.container.position.set(parts.x, parts.y)
-      entry.view.container.rotation = (parts.rotation * Math.PI) / 180
-      entry.view.container.scale.set(parts.scaleX, parts.scaleY)
-      entry.view.container.visible = instance.visible
-      const tint = entry.view.meshBuilder.tint
-      const next = instance.tint
-      if (tint.r !== next.r || tint.g !== next.g || tint.b !== next.b || tint.a !== next.a) {
-        entry.view.setTint({ r: next.r, g: next.g, b: next.b, a: next.a })
-      }
-      if (!(Math.abs(entry.time - instance.childTime) <= 1e-9)) {
-        entry.view.markDirty()
-        entry.time = instance.childTime
-      }
-      entry.view.update(instance.skeleton)
-      syncLayer(entry.child, instance.asset, instance.skeleton, instance.player, entry.view)
-      layers.push({ layer: instance.layer, order: instance.order, container: entry.view.container })
-    }
-    for (const [key, entry] of [...layer.views]) {
-      if (live.has(key)) continue
-      entry.view.container.removeFromParent()
-      entry.view.destroy()
-      destroyLayer(entry.child)
-      layer.views.delete(key)
-    }
-    host.setNestedViews(layers)
-  }
-  const animations = asset.animations.map((animation) => animation.name)
-  const skins = asset.skins.map((skin) => skin.name)
-  const defaultAnimation = animations[0] ?? ''
-  // 导出包里带的是「导出时的默认皮肤」（可能不是 skins[0]，例如当前在 goblin 皮肤上编辑）
-  const defaultSkin =
-    input.defaultSkin && skins.includes(input.defaultSkin) ? input.defaultSkin : skins[0] ?? ''
-  /** 当前生效的叠加皮肤：子骨架视图与它们自己的皮肤合并都要跟着它走 */
-  let activeSkin = defaultSkin
-  let rootLayer = createNestLayer(activeSkin)
 
   let zoom = 1
   let offsetX = 0
   let offsetY = 0
-  let speed = 1
-  let playing = true
-  let dirty = true
   /** 用户自己拖过 / 缩过：之后视口尺寸变化不再自动取景（与 spine 预览的 touched 同语义） */
   let touched = false
   /** 还欠一次「按内容取景」：挂载时包围盒若退化，等首帧几何变有效再补上 */
   let autoFit = true
   let last = 0
   let destroyed = false
-
-  if (defaultSkin) {
-    view.setSkin(defaultSkin)
-    // 皮肤不只影响 mesh 分组：`slotDisplayIndex` / `slotAttIndex` 也要按合并后的皮肤重建，
-    // 否则只在当前皮肤里存在的 display（例如 goblin 皮肤里的嵌套骨架）会保持 -1 而不渲染
-    skeleton.applyRuntimeMaps(buildRuntimeMaps(asset, defaultSkin))
-  }
 
   function viewWidth(): number {
     return app.renderer.screen.width
@@ -295,7 +302,6 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
     offsetX += dx
     offsetY += dy
     applyCamera()
-    dirty = true
   }
 
   function zoomAt(factor: number, sx: number, sy: number): void {
@@ -307,16 +313,15 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
     offsetX += (after.x - before.x) * zoom
     offsetY -= (after.y - before.y) * zoom
     applyCamera()
-    dirty = true
   }
 
-  /** 当前几何的包围盒，换算成像素单位的世界坐标（与 spine 预览同一把尺子） */
+  /** 当前几何的包围盒（像素单位；与 spine 预览同一把尺子） */
   function worldBounds(): { minX: number; minY: number; maxX: number; maxY: number } | null {
     // 直接用 MeshBuilder 算出来的真实顶点包围盒（skeleton 世界坐标系，y 轴向上，单位是内部单位），
     // 这是编辑器视口取景用的同一份数据，比 pixi 的 getLocalBounds 对自定义 Mesh 更可靠。
-    const b = view.result?.bounds
-    if (!b) return null
-    return { minX: b.minX * ppu, minY: b.minY * ppu, maxX: b.maxX * ppu, maxY: b.maxY * ppu }
+    const b = view.bounds
+    if (b.maxX - b.minX < 1e-6 || b.maxY - b.minY < 1e-6) return null
+    return b
   }
 
   function fit(): void {
@@ -324,7 +329,7 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
     touched = false
     const b = worldBounds()
     // 包围盒无效时**什么都不改**（spine 预览的 fitView 也是直接 return），留着让首帧兜底再取景一次
-    if (!b || b.maxX - b.minX < 1e-6 || b.maxY - b.minY < 1e-6) return
+    if (!b) return
     autoFit = false
     // 与 spine 预览一致：以角色包围盒中心取景、四周留 1.12 倍边距，且**不做缩放限位**
     //（spine 的 fitView 也不限位，限位只作用于滚轮 / 双指）
@@ -337,7 +342,6 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
     offsetX = -cx * zoom
     offsetY = cy * zoom
     applyCamera()
-    dirty = true
   }
 
   function resize(width: number, height: number): void {
@@ -348,29 +352,22 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
     // 免得按旧视口算出来的缩放让角色跑出视野
     if (touched) applyCamera()
     else fit()
-    dirty = true
   }
 
   function frame(now: number): void {
     if (destroyed) return
     const delta = last ? Math.min((now - last) / 1000, 0.1) : 0
     last = now
-    if (playing) {
-      player.update(delta * speed)
-      view.markDirty()
-    }
-    view.update(skeleton)
-    syncLayer(rootLayer, asset, skeleton, player, view)
+    // root 自己推进时间，嵌套子骨架由父级 NestRuntime 驱动（与 three 版同一套核心）
+    view.update(delta)
     // 首帧兜底：挂载时包围盒退化（空骨架 / 几何未就绪）就等有效几何再取景一次。
     // 用户碰过相机（touched）后不再兜底，避免把调好的视角冲掉
     if (autoFit && !touched) {
       const b = worldBounds()
-      if (b && b.maxX - b.minX > 1e-6 && b.maxY - b.minY > 1e-6) fit()
+      if (b) fit()
     }
-    if (playing || dirty) {
-      app.render()
-      dirty = false
-    }
+    // 每帧渲染：换装 / 显隐 / 换肤都直接作用于几何，暂停时也要能反映出来
+    app.render()
     requestAnimationFrame(frame)
   }
 
@@ -383,12 +380,13 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
    * 初始缩放与角色初始位置因此和 spine 预览完全重合，不会再出现「动画第 0 帧的外扩/位移
    * 把取景带偏」。
    */
-  skeleton.updateFk()
-  view.update(skeleton)
-  if (defaultAnimation) player.play(defaultAnimation, true)
+  view.buildSetupPose()
+  if (defaultAnimation) view.play(defaultAnimation, true)
   requestAnimationFrame(frame)
 
   return {
+    view,
+    skeleton: view.skeleton,
     app,
     world,
     animations,
@@ -396,66 +394,43 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
     defaultAnimation,
     defaultSkin,
     play(name?: string, loop = true) {
-      player.play(name ?? defaultAnimation, loop)
-      playing = true
-      dirty = true
+      view.play(name ?? defaultAnimation, loop)
     },
     crossFade(name: string, duration = 0.2, loop = true) {
-      player.crossFade(name, duration, loop)
-      playing = true
-      dirty = true
+      view.crossFade(name, duration, loop)
     },
     stop() {
-      player.stop()
-      playing = false
-      dirty = true
+      view.stop()
     },
     pause() {
-      playing = false
-      dirty = true
+      view.pause()
     },
     resume() {
-      playing = true
-      dirty = true
+      view.resume()
     },
     seek(seconds: number) {
-      player.seek(seconds)
-      dirty = true
+      view.seek(seconds)
     },
     setProgress(normalized: number) {
-      player.seek(player.duration * Math.max(0, Math.min(1, normalized)))
-      dirty = true
+      view.setProgress(normalized)
     },
     setSkin(name: string) {
-      view.setSkin(name)
-      // 与编辑器同一套：换肤后重建运行期映射（基底皮肤 + 叠加皮肤），再按当前时间重采样显示通道
-      skeleton.applyRuntimeMaps(buildRuntimeMaps(asset, name))
-      player.seek(player.time)
-      view.markDirty()
-      /*
-       * 子骨架视图按「当前皮肤」建自己的运行期映射（基底皮肤 + 叠加皮肤）：
-       * 换皮肤后必须重建，否则子骨架仍停在上一套皮肤的附件上（部件错位 / 消失）。
-       */
-      activeSkin = name || defaultSkin
-      destroyLayer(rootLayer)
-      view.setNestedViews([])
-      rootLayer = createNestLayer(activeSkin)
-      dirty = true
+      return view.setSkin(name)
     },
     setLoop(loop: boolean) {
-      player.loop = loop
+      view.setLoop(loop)
     },
     setSpeed(scale: number) {
-      speed = scale
+      view.setSpeed(scale)
     },
     get duration() {
-      return player.duration
+      return view.duration
     },
     get time() {
-      return player.time
+      return view.time
     },
     get playing() {
-      return playing
+      return view.playing
     },
     get zoom() {
       return zoom
@@ -473,7 +448,7 @@ export async function createStage(input: StageInput): Promise<Hao2dStage> {
     screenToWorld,
     destroy() {
       destroyed = true
-      destroyLayer(rootLayer)
+      view.destroy()
       blobUrls.forEach((url) => URL.revokeObjectURL(url))
       textures.clear()
       try {

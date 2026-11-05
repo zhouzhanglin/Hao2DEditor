@@ -67,6 +67,12 @@ function exportActions() {
       hint: t('导出 Spine 4.3 骨骼数据：{名称}.json + {名称}.atlas + 图集 png (Ctrl+Alt+E)')
     },
     {
+      command: 'project:exportThreejs',
+      label: t('导出 Three.js'),
+      icon: Package,
+      hint: t('导出运行时数据 + three.js 版运行库（hao2d-three.js，只含 hao2d，需宿主提供 three）与示例页，可在导出弹窗里预览')
+    },
+    {
       command: 'project:exportVideo',
       label: t('导出视频'),
       icon: Film,

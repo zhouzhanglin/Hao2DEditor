@@ -67,6 +67,10 @@
   .row button { flex: 1; }
   label.check { display: flex; align-items: center; gap: 8px; color: var(--muted); }
   label.check input { width: 18px; height: 18px; accent-color: var(--accent); }
+  .sub { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .sub-title { font-size: 12px; color: var(--accent); font-weight: 600; }
+  .sub button { min-height: 30px; padding: 5px 8px; font-size: 12px; }
+  .sub .note { font-size: 11px; color: var(--muted); word-break: break-word; }
   .hint { position: fixed; left: 12px; bottom: max(12px, env(safe-area-inset-bottom)); color: var(--muted); font-size: 12px; }
   @media (max-width: 720px) {
     #panel {
@@ -102,6 +106,31 @@
   <label class="field"><span>进度</span><input id="progress" type="range" min="0" max="1000" value="0" /><span class="value" id="timeLabel">0.00 / 0.00</span></label>
   <label class="field"><span>速度</span><input id="speed" type="range" min="10" max="250" value="100" /><span class="value" id="speedLabel">1.00×</span></label>
   <label class="check"><input id="loopCheck" type="checkbox" checked />循环播放</label>
+
+  <!-- IHao2DView 对应能力：换装 / 显隐 / 显示下标 / 嵌套子骨架 -->
+  <div class="sub">
+    <div class="sub-title">插槽 / 换装</div>
+    <label class="field"><span>插槽</span><select id="slotSelect"></select></label>
+    <label class="field"><span>附件</span><select id="attSelect"></select></label>
+    <div class="row">
+      <button id="applyAttBtn">换装</button>
+      <button id="clearAttBtn">还原</button>
+    </div>
+    <label class="check"><input id="slotVisible" type="checkbox" checked />显示该插槽</label>
+    <label class="field"><span>显示下标</span><input id="slotDisplay" type="range" min="-1" max="0" value="0" /><span class="value" id="displayLabel">0</span></label>
+    <label class="check"><input id="forceDisplay" type="checkbox" />强制覆盖动画轨道</label>
+    <div class="row">
+      <button id="applyDisplayBtn">应用下标</button>
+      <button id="clearDisplayBtn">清除覆盖</button>
+    </div>
+    <div class="note" id="apiResult">—</div>
+  </div>
+  <div class="sub">
+    <div class="sub-title">嵌套子骨架</div>
+    <label class="field"><span>子皮肤</span><select id="nestedSkinSelect"></select></label>
+    <button id="applyNestedSkinBtn">给子骨架换肤</button>
+    <div class="note" id="nestedInfo">—</div>
+  </div>
 </aside>
 
 <div class="hint">拖拽平移 · 滚轮 / 双指缩放</div>

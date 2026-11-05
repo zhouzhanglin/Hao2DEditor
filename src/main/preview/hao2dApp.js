@@ -18,6 +18,15 @@
   var speed = $('speed')
   var speedLabel = $('speedLabel')
   var loopCheck = $('loopCheck')
+  var slotSelect = $('slotSelect')
+  var attSelect = $('attSelect')
+  var slotVisible = $('slotVisible')
+  var slotDisplay = $('slotDisplay')
+  var displayLabel = $('displayLabel')
+  var forceDisplay = $('forceDisplay')
+  var apiResult = $('apiResult')
+  var nestedSkinSelect = $('nestedSkinSelect')
+  var nestedInfo = $('nestedInfo')
   var panelToggle = $('panelToggle')
   var panel = $('panel')
   var canvas = $('stage')
@@ -201,6 +210,31 @@
     return next
   }
 
+  function apiNote(message) { apiResult.textContent = message }
+
+  function currentView() { return stage && stage.view ? stage.view : null }
+
+  /** 把插槽 / 附件 / 下标 / 嵌套子骨架的当前状态同步到面板 */
+  function refreshSlotPanel() {
+    var view = currentView()
+    if (!view) return
+    var slot = slotSelect.value
+    var names = view.attachmentNames(slot)
+    var index = view.getSlotDisplayIndex(slot)
+    fillSelect(attSelect, names, index >= 0 ? (names[index] || '') : '')
+    var max = Math.max(0, names.length - 1)
+    slotDisplay.max = String(max)
+    if (Number(slotDisplay.value) !== index) slotDisplay.value = String(index)
+    displayLabel.textContent = String(index) + ' / ' + max
+    slotVisible.checked = view.skeleton.slotVisible[view.findSlotIndex(slot)] !== 0
+
+    var nested = view.getNested(slot)
+    fillSelect(nestedSkinSelect, nested ? nested.skins : [], nested ? nested.activeSkin : '')
+    nestedInfo.textContent = nested
+      ? '当前插槽有子骨架（共 ' + view.nestedCount + ' 个），可用 setNested* 操作内部插槽'
+      : '当前插槽没有子骨架（共 ' + view.nestedCount + ' 个激活）'
+  }
+
   function mount(entry) {
     if (stage) { stage.destroy(); stage = null }
     currentId = entry.id
@@ -217,17 +251,20 @@
         nested: data.nested
       }).then(function (created) {
         stage = created
+        window.hao2d = { stage: created, view: created.view }
         hideStatus()
         errorEl.hidden = true
         created.resize(window.innerWidth, window.innerHeight)
         fillSelect(animSelect, created.animations, created.defaultAnimation)
         fillSelect(skinSelect, created.skins, created.defaultSkin)
+        fillSelect(slotSelect, created.view.slotNames)
         created.setLoop(loopCheck.checked)
         created.setSpeed(Number(speed.value) / 100)
         // 与 spine 预览的加载顺序一致：先按 setup pose 取景，再启动动画
         //（反过来会让动画第 0 帧的姿势把取景带偏，和 spine 预览对不上）
         created.fit()
         created.play(created.defaultAnimation, loopCheck.checked)
+        refreshSlotPanel()
         playBtn.textContent = '暂停'
       })
     }).catch(function (err) {
@@ -284,7 +321,9 @@
   })
   skinSelect.addEventListener('change', function (event) {
     if (!stage) return
-    stage.setSkin(event.target.value)
+    var ok = stage.setSkin(event.target.value)
+    apiNote(ok ? 'SetSkin → 已切换到 ' + event.target.value : 'SetSkin → 皮肤不存在，保持当前皮肤')
+    refreshSlotPanel()
   })
   playBtn.addEventListener('click', function () {
     if (!stage) return
@@ -312,6 +351,55 @@
   loopCheck.addEventListener('change', function (event) {
     if (stage) stage.setLoop(event.target.checked)
   })
+
+  // ---- IHao2DView：换装 / 显隐 / 显示下标 / 嵌套子骨架 ----
+  slotSelect.addEventListener('change', refreshSlotPanel)
+  slotDisplay.addEventListener('input', function () {
+    displayLabel.textContent = slotDisplay.value + ' / ' + slotDisplay.max
+  })
+  $('applyAttBtn').addEventListener('click', function () {
+    var view = currentView()
+    if (!view || !attSelect.value) return
+    var ok = view.setSlotAttachment(slotSelect.value, attSelect.value)
+    apiNote('SetSlotAttachment → ' + (ok ? '成功：' + attSelect.value : '失败（插槽 / 附件不存在）'))
+    refreshSlotPanel()
+  })
+  $('clearAttBtn').addEventListener('click', function () {
+    var view = currentView()
+    if (!view) return
+    var ok = view.clearSlotAttachmentOverride(slotSelect.value)
+    apiNote('ClearSlotAttachmentOverride → ' + (ok ? '已还原' : '失败'))
+    refreshSlotPanel()
+  })
+  slotVisible.addEventListener('change', function () {
+    var view = currentView()
+    if (!view) return
+    var ok = view.setSlotVisible(slotSelect.value, slotVisible.checked)
+    apiNote('SetSlotVisible → ' + (ok ? String(slotVisible.checked) : '失败'))
+  })
+  $('applyDisplayBtn').addEventListener('click', function () {
+    var view = currentView()
+    if (!view) return
+    var index = Number(slotDisplay.value)
+    var ok = view.setSlotDisplayIndex(slotSelect.value, index, forceDisplay.checked)
+    apiNote('SetSlotDisplayIndex(' + index + (forceDisplay.checked ? ', force' : '') + ') → ' + (ok ? '成功' : '失败'))
+    refreshSlotPanel()
+  })
+  $('clearDisplayBtn').addEventListener('click', function () {
+    var view = currentView()
+    if (!view) return
+    var ok = view.clearSlotDisplayOverride(slotSelect.value)
+    apiNote('ClearSlotDisplayOverride → ' + (ok ? '已清除' : '没有强制覆盖'))
+    refreshSlotPanel()
+  })
+  $('applyNestedSkinBtn').addEventListener('click', function () {
+    var view = currentView()
+    if (!view) return
+    var ok = view.setNestedSkin(slotSelect.value, nestedSkinSelect.value)
+    apiNote('SetNestedSkin → ' + (ok ? '成功：' + nestedSkinSelect.value : '失败（没有子骨架或皮肤不存在）'))
+    refreshSlotPanel()
+  })
+
   panelToggle.addEventListener('click', function () {
     panel.hidden = !panel.hidden
   })

@@ -105,6 +105,8 @@ export const IPC = {
   spinePreviewStop: 'preview:spineStop',
   hao2dPreviewStart: 'preview:hao2dStart',
   hao2dPreviewStop: 'preview:hao2dStop',
+  threejsPreviewStart: 'preview:threejsStart',
+  threejsPreviewStop: 'preview:threejsStop',
   openExternal: 'shell:openExternal',
   aiMcpInfo: 'ai:mcpInfo',
   aiInstallMcp: 'ai:installMcp',
@@ -132,6 +134,7 @@ export type MenuCommand =
   | 'project:exportRuntime'
   | 'project:exportHao2d'
   | 'project:exportSpine'
+  | 'project:exportThreejs'
   | 'project:exportVideo'
   | 'edit:undo'
   | 'edit:redo'
@@ -170,12 +173,17 @@ export interface SpinePreviewSkeleton {
   nested?: Array<{ armatureName: string; id: string }>
 }
 
+/** 预览页语言：跟编辑器当前语言走（预览页由主进程返回，渲染层要把语言一起传过去） */
+export type PreviewLocale = 'zh-CN' | 'en'
+
 /** 交给主进程起「在线预览」的整份会话数据 */
 export interface SpinePreviewSession {
-  /** 运行库类型：spine（官方运行时）/ hao2d（项目自带的 pixi 运行库） */
-  kind?: 'spine' | 'hao2d'
+  /** 运行库类型：spine（官方运行时）/ hao2d（pixi 运行库）/ threejs（three.js 运行库） */
+  kind?: 'spine' | 'hao2d' | 'threejs'
   /** 页面标题（项目名） */
   title: string
+  /** 预览页 UI 语言；缺省按简中 */
+  locale?: PreviewLocale
   pages: SpinePreviewPage[]
   skeletons: SpinePreviewSkeleton[]
 }
@@ -184,6 +192,18 @@ export interface SpinePreviewSession {
 export interface Hao2dPreviewSession {
   kind: 'hao2d'
   title: string
+  /** 预览页 UI 语言；缺省按简中 */
+  locale?: PreviewLocale
+  pages: SpinePreviewPage[]
+  skeletons: SpinePreviewSkeleton[]
+}
+
+/** three.js 运行库预览会话：与 hao2d 预览同一份数据，页面加载 threejs-runtime.js */
+export interface ThreejsPreviewSession {
+  kind: 'threejs'
+  title: string
+  /** 预览页 UI 语言；缺省按简中 */
+  locale?: PreviewLocale
   pages: SpinePreviewPage[]
   skeletons: SpinePreviewSkeleton[]
 }
@@ -329,9 +349,12 @@ export interface HaoBridge {
   startSpinePreview(session: SpinePreviewSession): Promise<IpcResult<SpinePreviewInfo>>
   /** 起「导出运行时」预览服务：用项目里的 hao2d 计算方式 + pixi.js 渲染（同样由渲染层打开浏览器） */
   startHao2dPreview(session: Hao2dPreviewSession): Promise<IpcResult<SpinePreviewInfo>>
+  /** 起 three.js 运行库预览服务：同一份 ske/atlas 数据 + three.js 渲染 */
+  startThreejsPreview(session: ThreejsPreviewSession): Promise<IpcResult<SpinePreviewInfo>>
   /** 停止预览服务，释放端口与缓存 */
   stopSpinePreview(): Promise<IpcResult<void>>
   stopHao2dPreview(): Promise<IpcResult<void>>
+  stopThreejsPreview(): Promise<IpcResult<void>>
   /** 用系统默认程序打开 http(s) 链接（在线预览面板的「在浏览器打开」） */
   openExternal(url: string): Promise<IpcResult<void>>
   /** AI 接入：当前命令服务的 MCP 信息（是否在跑、带 token 的 MCP URL） */

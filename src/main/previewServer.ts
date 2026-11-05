@@ -3,12 +3,19 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import type { Socket } from 'node:net'
 import { randomBytes } from 'node:crypto'
 import { networkInterfaces } from 'node:os'
-import type { SpinePreviewInfo, SpinePreviewSession, Hao2dPreviewSession } from '@shared/ipcTypes'
+import type {
+  SpinePreviewInfo,
+  SpinePreviewSession,
+  Hao2dPreviewSession,
+  ThreejsPreviewSession
+} from '@shared/ipcTypes'
 import { createLogger } from './logger'
 import previewPage from './preview/page.html?raw'
 import previewApp from './preview/app.js?raw'
 import previewPageHao2d from './preview/page-hao2d.html?raw'
 import hao2dApp from './preview/hao2dApp.js?raw'
+import previewPageThreejs from './preview/page-threejs.html?raw'
+import threejsApp from './preview/threejsApp.js?raw'
 // 官方运行时直接内联进主进程包：预览页完全不依赖外网与本地 node_modules（打包后也能用）
 import spineCoreSource from '@esotericsoftware/spine-core/dist/iife/spine-core.min.js?raw'
 // pixi 单独加载（不打包进运行库）：与 spine-core 同思路，独立文件、可长期缓存。
@@ -17,6 +24,11 @@ import spineCoreSource from '@esotericsoftware/spine-core/dist/iife/spine-core.m
 import pixiSource from './preview/vendor/pixi.min.js?raw'
 // hao2d 运行库（由 scripts/build-hao2d-runtime.mjs 生成；pixi 已拆出，这里只含 hao2d 自己的计算/渲染逻辑）
 import hao2dRuntimeSource from './preview/hao2dRuntime.generated.js?raw'
+// three.js 版 hao2d 运行库（由 scripts/build-threejs-runtime.mjs 生成；three 已打包进单文件）
+// 导出弹窗写盘时直接对同一份 generated.js 用 ?raw 引入，不经过主进程
+import threejsRuntimeSource from './preview/threejsRuntime.generated.js?raw'
+// 预览页的界面文案（页面与脚本都是主进程直出的静态文本，在这里按会话语言替换）
+import { localizePreview } from './preview/previewI18n'
 
 const log = createLogger('预览')
 
@@ -29,7 +41,7 @@ const log = createLogger('预览')
 let server: Server | null = null
 let port = 0
 let token = ''
-let session: SpinePreviewSession | Hao2dPreviewSession | null = null
+let session: SpinePreviewSession | Hao2dPreviewSession | ThreejsPreviewSession | null = null
 /** 会话版本号：每替换一次会话 +1，预览页据此自动重载 */
 let revision = 0
 /** 服务关闭时要一并断开的长连接（keep-alive 会让 close 迟迟不回调） */
@@ -86,7 +98,7 @@ function versionOf(key: string, source: string): string {
 /** 把页面里的 `__XXX_V__` 占位符换成对应资源的内容指纹（结果同样缓存） */
 const pageHtmlCache = new Map<string, string>()
 
-function pageHtml(kind: 'spine' | 'hao2d'): string {
+function pageHtml(kind: 'spine' | 'hao2d' | 'threejs'): string {
   const cached = pageHtmlCache.get(kind)
   if (cached) return cached
   const html =
@@ -94,7 +106,9 @@ function pageHtml(kind: 'spine' | 'hao2d'): string {
       ? previewPageHao2d
           .replace('__PIXI_V__', versionOf('pixi', pixiSource))
           .replace('__HAO2D_RUNTIME_V__', versionOf('hao2d', hao2dRuntimeSource))
-      : previewPage.replace('__SPINE_CORE_V__', versionOf('spine', spineCoreSource))
+      : kind === 'threejs'
+        ? previewPageThreejs.replace('__THREEJS_RUNTIME_V__', versionOf('threejs', threejsRuntimeSource))
+        : previewPage.replace('__SPINE_CORE_V__', versionOf('spine', spineCoreSource))
   pageHtmlCache.set(kind, html)
   return html
 }
@@ -148,16 +162,19 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   }
 
   const rest = pathname.slice(prefix.length)
-  // spine 与 hao2d 共享同一份资源（页面 + ske/atlas 文本 + 图集页），只是渲染运行库不同
+  // 三种预览共享同一份资源（ske/atlas 文本 + 图集页），只是页面与渲染运行库不同
   const isHao2d = active.kind === 'hao2d'
+  const isThreejs = active.kind === 'threejs'
   if (rest === '' || rest === 'index.html') {
     // 页面本身不缓存，里面的运行库 URL 带内容指纹（见 pageHtml / fingerprint）
-    send(res, 200, 'text/html; charset=utf-8', pageHtml(isHao2d ? 'hao2d' : 'spine'))
+    const kind = isThreejs ? 'threejs' : isHao2d ? 'hao2d' : 'spine'
+    // 预览页是主进程直出的静态 HTML：按会话里的语言把界面文案换掉
+    send(res, 200, 'text/html; charset=utf-8', localizePreview(pageHtml(kind), active.locale))
     return
   }
   if (rest === 'spine-core.js') {
-    if (isHao2d) {
-      notFound(res, 'hao2d 预览不需要 spine 运行库')
+    if (isHao2d || isThreejs) {
+      notFound(res, '当前预览不需要 spine 运行库')
       return
     }
     // 运行库内容由构建期内联；URL 带内容指纹，可长期缓存
@@ -166,16 +183,25 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   }
   if (rest === 'hao2d-runtime.js') {
     if (!isHao2d) {
-      notFound(res, 'spine 预览不需要 hao2d 运行库')
+      notFound(res, '当前预览不需要 hao2d / pixi 运行库')
       return
     }
     // 运行库内容由构建期内联；URL 带内容指纹，可长期缓存
     send(res, 200, 'text/javascript; charset=utf-8', hao2dRuntimeSource, 'public, max-age=86400')
     return
   }
+  if (rest === 'threejs-runtime.js') {
+    if (!isThreejs) {
+      notFound(res, '当前预览不需要 three.js 运行库')
+      return
+    }
+    // three 已打包进这份运行库（单文件，离线可用）
+    send(res, 200, 'text/javascript; charset=utf-8', threejsRuntimeSource, 'public, max-age=86400')
+    return
+  }
   if (rest === 'pixi.js') {
     if (!isHao2d) {
-      notFound(res, 'spine 预览不需要 pixi 运行库')
+      notFound(res, '当前预览不需要 pixi 运行库')
       return
     }
     // pixi 单独提供（不在运行库里）；URL 带内容指纹，可长期缓存
@@ -184,7 +210,8 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   }
   if (rest === 'app.js') {
     // 页面逻辑同样是构建期内联的，但改代码要立刻生效，所以不缓存
-    send(res, 200, 'text/javascript; charset=utf-8', isHao2d ? hao2dApp : previewApp)
+    const app = isThreejs ? threejsApp : isHao2d ? hao2dApp : previewApp
+    send(res, 200, 'text/javascript; charset=utf-8', localizePreview(app, active.locale))
     return
   }
   if (rest === 'manifest.json') {
@@ -282,7 +309,9 @@ async function ensureServer(): Promise<number> {
  * 同一条路径）。主进程这一路 `shell.openExternal` 在部分 macOS 环境下会被系统静默丢掉 ——
  * 服务明明起好了、浏览器却没反应，用户只能手动点按钮，所以干脆不在这里开。
  */
-async function serveSession(next: SpinePreviewSession | Hao2dPreviewSession): Promise<SpinePreviewInfo> {
+async function serveSession(
+  next: SpinePreviewSession | Hao2dPreviewSession | ThreejsPreviewSession
+): Promise<SpinePreviewInfo> {
   if (next.skeletons.length === 0) throw new Error('没有可预览的骨架')
   session = next
   revision += 1
@@ -305,6 +334,11 @@ export async function startHao2dPreview(next: Hao2dPreviewSession): Promise<Spin
   return serveSession(next)
 }
 
+/** three.js 运行库预览：与 hao2d 预览共用一份数据，只换页面与渲染运行库 */
+export async function startThreejsPreview(next: ThreejsPreviewSession): Promise<SpinePreviewInfo> {
+  return serveSession(next)
+}
+
 /** 停止预览：断开连接并释放端口与缓存 */
 export async function stopPreviewSession(): Promise<void> {
   session = null
@@ -322,5 +356,10 @@ export async function stopPreviewSession(): Promise<void> {
 
 /** hao2d 预览与 spine 预览共用同一服务实例，停止逻辑完全一致 */
 export async function stopHao2dPreview(): Promise<void> {
+  return stopPreviewSession()
+}
+
+/** three.js 预览同样共用同一服务实例 */
+export async function stopThreejsPreview(): Promise<void> {
   return stopPreviewSession()
 }

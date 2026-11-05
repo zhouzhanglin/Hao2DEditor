@@ -11,7 +11,16 @@
 // 顺带让下面的转发按 pixi 的真实类型走（而不是 any），运行库内部也能被类型检查覆盖。
 type PixiNamespace = typeof import('pixi.js')
 
-const PIXI = (globalThis as unknown as { PIXI: PixiNamespace }).PIXI
+const globalPIXI = (globalThis as unknown as { PIXI?: PixiNamespace }).PIXI
+
+if (!globalPIXI) {
+  throw new Error(
+    '[hao2d] 没有找到全局 PIXI：hao2d-pixi.js 只包含 hao2d 功能，请先加载 pixi.js v8' +
+      '（例如 `<script src="pixi.min.js"></script>`），再加载本文件'
+  )
+}
+
+const PIXI = globalPIXI
 
 export const Application = PIXI.Application
 export const Container = PIXI.Container

@@ -4,17 +4,15 @@
 
 > 免费、轻量、跨平台的 2D 骨骼动画编辑器 · A free, lightweight 2D skeletal animation editor
 >
-> 下载链接: [百度网盘](https://pan.baidu.com/s/13h2HvBEMe7V4XfcnhCOEug?pwd=8pqe) 提取码: 8pqe
->
 > 使用手册: [wiki/index.md](wiki/index.md) （安装、界面、工具、教程、导入导出、AI 接入）
 
 ---
 
-## release 1.0.2
+## release 1.0.3
 
-- 优化ui
-- 增加导出视频功能
-- 添加本地和世界坐标轴切换
+- Support physical constraints
+- Support threejs
+- fixed RuntimeIK bug
 
 ---
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { packMaxRects } from '@core/atlas/packer'
 import { remapPageUvs } from '@core/atlas/remap'
-import { parseRuntimeAtlas, parseRuntimeSke, serializeRuntimeAtlas, serializeRuntimeSke } from '@core/codec/runtimeSkeJson'
+import { RUNTIME_PPU, parseRuntimeAtlas, parseRuntimeSke, serializeRuntimeAtlas, serializeRuntimeSke } from '@core/codec/runtimeSkeJson'
 import { assetFromJson, loadRuntime } from '@core/runtime/loader'
 import { compileDocument } from '@core/codec/compile'
 import { parseDocument } from '@core/codec/projectJson'
@@ -256,6 +256,42 @@ describe('导出准备（图集缩放）', () => {
       plan.atlas.regions.reduce((sum, region) => sum + region.width * region.height, 0)
     expect(area(tiny)).toBeLessThan(area(full))
     expect(tiny.pageFiles).toHaveLength(tiny.atlas.pages.length)
+  })
+
+  it('运行库读缩放后的产物：显示尺寸不变、UV 原样带过去（缩放不需要运行时补偿）', () => {
+    useProjectStore.getState().setDocument(documentWithImages(), null, false)
+    const full = prepareRuntimeExport({ scale: 1, maxSize: 2048 })
+    const half = prepareRuntimeExport({ scale: 0.5, maxSize: 2048 })
+    /*
+     * resources/runtimes 里的 hao2d-pixi / hao2d-three 都从 `loadRuntime` 解码：
+     * 它们只认 atlas 的页名 + ske 里已经烘焙好的归一化 UV 和附件 size，不读任何 scale 字段。
+     * 这条断言把「缩放导出物能被运行库正确消费」钉住，防止以后有人往运行时加按原尺寸反算的逻辑。
+     */
+    const decode = (plan: RuntimeExportPlan) =>
+      loadRuntime(
+        serializeRuntimeSke(plan.skeletons[0].asset, { atlasFileName: plan.atlasName, ppu: RUNTIME_PPU }),
+        serializeRuntimeAtlas(plan.atlas)
+      )
+    const a = decode(full)
+    const b = decode(half)
+    const attachments = (loaded: ReturnType<typeof loadRuntime>) =>
+      loaded.asset.skins.flatMap((skin) => skin.slots.flatMap((slot) => slot.attachments))
+
+    // 图块确实缩小了（缩放生效；页尺寸是 2 的幂，样本小的时候两档可能都是同一尺寸）
+    const regionArea = (loaded: ReturnType<typeof loadRuntime>) =>
+      loaded.atlas.regions.reduce((sum, region) => sum + region.width * region.height, 0)
+    expect(regionArea(b)).toBeLessThan(regionArea(a))
+    const sizeAndUvs = (loaded: ReturnType<typeof loadRuntime>) =>
+      attachments(loaded).map((attachment) => [attachment.size.x, attachment.size.y, attachment.uvs.length])
+    expect(sizeAndUvs(b)).toEqual(sizeAndUvs(a))
+    // UV 随缩放重映射过，且仍全部落在 0..1（能正确采样缩小后的页）
+    expect(attachments(b)[0].uvs).not.toEqual(attachments(a)[0].uvs)
+    for (const attachment of attachments(b)) {
+      for (const value of attachment.uvs) {
+        expect(value).toBeGreaterThanOrEqual(-1e-6)
+        expect(value).toBeLessThanOrEqual(1 + 1e-6)
+      }
+    }
   })
 
   it('多骨架：各自一份数据、图集共用且取名项目名；图集范围决定装哪些图', () => {

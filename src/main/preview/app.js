@@ -362,7 +362,8 @@
     return Promise.all([fetchText('s/' + id + '.json'), fetchText('s/' + id + '.atlas')]).then(function (texts) {
       var atlas = new spine.TextureAtlas(texts[1])
       var jobs = atlas.pages.map(function (page) {
-        return loadImage('pages/' + encodeURIComponent(page.name)).then(function (image) {
+        // 页名不随「图集缩放」变：带上会话版本号，避免拿旧尺寸 / 旧排版的页贴图配新 atlas
+        return loadImage('pages/' + encodeURIComponent(page.name) + '?v=' + seenRev).then(function (image) {
           page.texture = new spine.Texture(image)
         })
       })

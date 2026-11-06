@@ -159,7 +159,9 @@
             var atlas = JSON.parse(atlasText)
             var pageNames = (atlas.pages || []).map(function (page) { return page.image })
             return Promise.all(pageNames.map(function (name) {
-              return fetch(base + 'pages/' + encodeURIComponent(name))
+              // 版本号进 URL：页名不随「图集缩放」变，但重新打包后的像素与 UV 全变了。
+              // 不绕过缓存就会拿上一版的页贴图去配这一版的 UV（贴图错位 / 被裁）。
+              return fetch(base + 'pages/' + encodeURIComponent(name) + '?v=' + rev, { cache: 'no-store' })
                 .then(function (r) { return r.arrayBuffer() })
                 .then(function (buf) { return { name: name, bytes: new Uint8Array(buf) } })
             })).then(function (pages) {

@@ -75,6 +75,53 @@ test('three.js 预览：页面 / 运行库 / 页面脚本都走 three.js 那一�
   await stopPreviewSession()
 })
 
+/**
+ * 改「图集缩放」再点「更新预览」：页名不变、像素与排版全变。
+ * 以前图集页响应带 `max-age=60`，浏览器会拿旧页贴图配新 UV（贴图错位 / 被裁），
+ * 等 60 秒缓存过期才自己好。这里钉住「同名页必须立刻是新字节且不许缓存」。
+ */
+test('图集页不缓存：换了缩放后同名页能立刻取到新字节', async () => {
+  const first = await startHao2dPreview({
+    ...session,
+    pages: [{ name: 'page0.png', bytes: new Uint8Array([1, 2, 3]) }]
+  })
+  const base = first.url.endsWith('/') ? first.url : `${first.url}/`
+  const url = `${base}pages/page0.png`
+  const initial = await fetch(url)
+  expect(initial.headers.get('cache-control')).toContain('no-store')
+  expect([...new Uint8Array(await initial.arrayBuffer())]).toEqual([1, 2, 3])
+
+  const second = await startHao2dPreview({
+    ...session,
+    pages: [{ name: 'page0.png', bytes: new Uint8Array([4, 5, 6, 7]) }]
+  })
+  expect(second.url).toBe(first.url)
+  const updated = await fetch(url)
+  expect(updated.headers.get('cache-control')).toContain('no-store')
+  expect([...new Uint8Array(await updated.arrayBuffer())]).toEqual([4, 5, 6, 7])
+  // 预览页给 URL 加的 ?v=<rev> 只是绕缓存用，服务端按 pathname 取页，不能因此 404
+  const busted = await fetch(`${url}?v=7`)
+  expect(busted.status).toBe(200)
+  expect([...new Uint8Array(await busted.arrayBuffer())]).toEqual([4, 5, 6, 7])
+  await stopPreviewSession()
+})
+
+test('三种预览页取图集页都带会话版本号（绕过浏览器 / 代理缓存）', async () => {
+  const info = await startHao2dPreview(session)
+  const base = info.url.endsWith('/') ? info.url : `${info.url}/`
+  const app = await (await fetch(`${base}app.js`)).text()
+  expect(app).toContain("'pages/' + encodeURIComponent(name) + '?v=' + rev")
+
+  await startThreejsPreview({ ...session, kind: 'threejs' })
+  const threeApp = await (await fetch(`${base}app.js`)).text()
+  expect(threeApp).toContain("'pages/' + encodeURIComponent(name) + '?v=' + rev")
+
+  await startPreviewSession({ ...session, kind: 'spine' })
+  const spineApp = await (await fetch(`${base}app.js`)).text()
+  expect(spineApp).toContain("'pages/' + encodeURIComponent(page.name) + '?v=' + seenRev")
+  await stopPreviewSession()
+})
+
 test('预览页跟随编辑器语言：英文会话返回英文界面（页面 + app.js）', async () => {
   const info = await startHao2dPreview({ ...session, locale: 'en' })
   const base = info.url.endsWith('/') ? info.url : `${info.url}/`

@@ -266,7 +266,15 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
       notFound(res, `没有这张图集页：${name}`)
       return
     }
-    send(res, 200, pageMime(name), page.bytes, 'public, max-age=60')
+    /*
+     * **图集页不能缓存**：页名只跟项目名走，改「图集缩放」再点「更新预览」时 URL 一字不变，
+     * 但 PNG 的像素尺寸 / 排版和 ske 里的 UV 全都变了。以前这里的 `max-age=60` 会让浏览器
+     * 继续拿旧页贴图去配新 UV —— 表现为贴图错位 / 被裁，只有等缓存过期才自己好。
+     *
+     * 会话里的其它资源（ske / atlas / manifest / app.js）本来就走 `no-store`，这里保持一致。
+     * 预览是本机服务，几 MB 的页每次重取远比「看到错的画面」便宜。
+     */
+    send(res, 200, pageMime(name), page.bytes)
     return
   }
   notFound(res, `未知路径：${rest}`)

@@ -2,6 +2,7 @@ import * as Three from 'three'
 import { loadRuntime } from '@core/runtime/loader'
 import { buildRuntimeMaps } from '@core/model/asset'
 import type { RuntimeAsset, RuntimeMaps } from '@core/model/asset'
+import type { EventKeyframe } from '@core/model/animation'
 import { Skeleton } from '@core/model/skeleton'
 import { AnimationPlayer } from '@core/anim/player'
 import { RUNTIME_PPU } from '@core/codec/runtimeSkeJson'
@@ -122,6 +123,10 @@ export interface Hao2dView {
   setProgress(normalized: number): void
   setLoop(loop: boolean): void
   setSpeed(scale: number): void
+  /** 订阅动画帧事件（时间轴事件帧）；返回退订函数 */
+  onEvent(handler: (event: EventKeyframe) => void): () => void
+  /** 订阅「非循环动画播放结束」；返回退订函数 */
+  onFinished(handler: (animation: string) => void): () => void
   readonly duration: number
   readonly time: number
   readonly playing: boolean

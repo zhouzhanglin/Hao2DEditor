@@ -2,6 +2,7 @@ import { buildRuntimeMaps, findAttachmentIndex } from '@core/model/asset'
 import type { RuntimeAsset, RuntimeMaps } from '@core/model/asset'
 import type { Skeleton } from '@core/model/skeleton'
 import type { AnimationPlayer } from '@core/anim/player'
+import type { EventKeyframe } from '@core/model/animation'
 import { AttachmentType } from '@core/model/types'
 import type { AttachmentData, RGBA } from '@core/model/types'
 import { decomposeTrs } from '@core/math/matrix'
@@ -109,6 +110,11 @@ export class Hao2dViewCore<V extends Hao2dRenderView> {
   private synced = false
   protected destroyed = false
 
+  /** 帧事件多播出口：player 的 onEvent 是单槽，这里接管后转发给所有订阅者 */
+  private readonly eventHandlers = new Set<(event: EventKeyframe) => void>()
+  /** 「非循环动画播放结束」多播出口 */
+  private readonly completeHandlers = new Set<(animation: string) => void>()
+
   constructor(options: ViewCoreOptions<V>) {
     this.asset = options.asset
     this.skeletonState = options.skeleton
@@ -125,6 +131,27 @@ export class Hao2dViewCore<V extends Hao2dRenderView> {
     this.rootView = this.adapter.create(options.asset, options.skinName)
     if (options.isRoot) this.adapter.setRootScale(this.adapter.node(this.rootView), this.ppu)
     this.nest = this.createNest()
+
+    // 接管播放器的单槽回调并转发给订阅者（宿主工程经 view.onEvent / view.onFinished 订阅，
+    // 与 Unity 端 IHao2DView 的事件语义对齐）
+    this.playerState.onEvent = (event) => {
+      for (const handler of [...this.eventHandlers]) handler(event)
+    }
+    this.playerState.onComplete = (name) => {
+      for (const handler of [...this.completeHandlers]) handler(name)
+    }
+  }
+
+  /** 订阅动画帧事件（时间轴事件帧）；返回退订函数 */
+  onEvent(handler: (event: EventKeyframe) => void): () => void {
+    this.eventHandlers.add(handler)
+    return () => this.eventHandlers.delete(handler)
+  }
+
+  /** 订阅「非循环动画播放结束」；返回退订函数 */
+  onFinished(handler: (animation: string) => void): () => void {
+    this.completeHandlers.add(handler)
+    return () => this.completeHandlers.delete(handler)
   }
 
   /** 可直接挂到宿主场景的节点（three Group / pixi Container） */
@@ -416,6 +443,8 @@ export class Hao2dViewCore<V extends Hao2dRenderView> {
   destroy(): void {
     if (this.destroyed) return
     this.destroyed = true
+    this.eventHandlers.clear()
+    this.completeHandlers.clear()
     for (const entry of this.children.values()) entry.controller.destroy()
     this.children.clear()
     this.nest.dispose()

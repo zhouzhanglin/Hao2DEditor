@@ -36,8 +36,18 @@ export function selectionTargets(selection: Selection): Array<{ kind: KeyKind; t
   if (selection.kind === 'slot' && selection.slot) {
     return [{ kind: 'slot', target: selection.slot, attachment: '' }]
   }
-  if (selection.kind === 'attachment' && selection.slot && selection.attachment) {
-    return [{ kind: 'deform', target: selection.slot, attachment: selection.attachment }]
+  if (selection.kind === 'attachment') {
+    /*
+     * display 多选（框选 / Shift 加选）：整批都打 deform 帧，与多选骨骼同一套规则。
+     * `attachments` 为空但还留着单值时按单选兜底 —— 老调用点只写 `slot` / `attachment`。
+     */
+    const list =
+      selection.attachments.length > 0
+        ? selection.attachments
+        : selection.slot && selection.attachment
+          ? [{ slot: selection.slot, attachment: selection.attachment }]
+          : []
+    return list.map((item) => ({ kind: 'deform' as KeyKind, target: item.slot, attachment: item.attachment }))
   }
   // 约束：IK 的混合（mix）等参数是可做动画的，选中约束按 K 就给它的全部通道打帧
   if (selection.kind === 'constraint' && selection.constraint) {

@@ -1306,6 +1306,19 @@ export default function InspectorPanel({ onStatus = () => undefined }: Inspector
 
         {attachment ? (
           <FieldGroup title={t('附件 · {0}', attachment.type)}>
+            {/*
+              多选（框选 / Shift 加选）：这个页签仍是**单附件**编辑器（位置、网格、权重都只有一个目标）。
+              不说明的话，用户会以为下面改的是整批；Delete 才是真正对整批生效的动作。
+            */}
+            {selection.attachments.length > 1 ? (
+              <p className="flex items-start gap-1 text-3xs leading-[16px] text-content-lo">
+                <Grid3x3 size={11} className="mt-0.5 shrink-0" />
+                {t('共选中 {0} 个附件：这里只编辑主选中「{1}」；Delete 可一起删除', [
+                  selection.attachments.length,
+                  attachment.name
+                ])}
+              </p>
+            ) : null}
             <TextField
               label={t('名称')}
               value={attachment.name}

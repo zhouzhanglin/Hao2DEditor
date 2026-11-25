@@ -144,7 +144,7 @@ import ImportTargetDialog from '@ui/widgets/ImportTargetDialog'
 import { importPsdLayers, pickAndParsePsd, setPsdDialogOpener } from '@editor/services/psdImport'
 import type { ParsedPsd } from '@importers/psdImport'
 import { deleteSelectedTrack, keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
-import { PPU, deleteMeshVertex } from '@editor/commands/authoringCommands'
+import { PPU, deleteAttachment, deleteMeshVertex } from '@editor/commands/authoringCommands'
 import { deleteSelectedMaskPoint, undoMaskDraftPoint, undoMeshBoundaryPoint } from '@editor/tools/authoringTools'
 import { copySelection, pasteSelection, duplicateSelection } from '@editor/commands/clipboardCommands'
 import { statusWarn } from '@shared/status'
@@ -608,6 +608,31 @@ export default function App() {
           const scene = getActiveScene()
           // 遮罩工具选中控制点时，Delete / Backspace 删除该点
           if (scene && deleteSelectedMaskPoint(scene, flash)) return
+          /*
+           * 选中的 display（一个或多个）：Delete 直接删。
+           *
+           * 改的是绑定数据（附件挂在插槽 / 皮肤上），所以与层级树的删除按钮同一规则 ——
+           * Animate 态不允许，避免把绑定改动混进动画基线；整批在同一次 update 里删，
+           * 撤销时一起回来。
+           */
+          const selected = useSelectionStore.getState()
+          if (selected.kind === 'attachment' && selected.attachments.length > 0) {
+            if (useModeStore.getState().mode !== 'pose') {
+              flash(statusWarn(t('切到 Pose 状态才能删除 display（附件属于绑定数据）')))
+              return
+            }
+            const targets = [...selected.attachments]
+            useProjectStore.getState().update(t('删除附件'), (draft) => {
+              for (const item of targets) deleteAttachment(draft, item.slot, item.attachment)
+            })
+            useSelectionStore.getState().clear()
+            flash(
+              targets.length > 1
+                ? t('已删除 {0} 个附件', targets.length)
+                : t('已删除附件「{0}」', targets[0].attachment)
+            )
+            return
+          }
           flash(t('删除操作请使用层级树里的删除按钮'))
           return
         }
@@ -868,7 +893,10 @@ export default function App() {
       : selection.kind === 'slot'
         ? t('插槽「{0}」', selection.slot)
         : selection.kind === 'attachment'
-          ? t('附件「{0}」', selection.attachment)
+          ? selection.attachments.length > 1
+            ? // 多选（框选 / Shift 加选）：报个数，括号里点名主选中 —— 检查器显示的正是它
+              t('{0} 个附件（主选中「{1}」）', [selection.attachments.length, selection.attachment])
+            : t('附件「{0}」', selection.attachment)
           : selection.kind === 'constraint'
             ? t('约束「{0}」', selection.constraint)
             : // 没选中对象时状态栏留空：当前是 Pose 还是 Animate 由视口左上角的切换按钮表示，

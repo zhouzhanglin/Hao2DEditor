@@ -2030,10 +2030,10 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         onHover={(row) =>
           setDisplayHover(row ? { slot: slot.name, attachment: attachment.name, row } : null)
         }
+        // 多选：集合里有的行全部高亮（主选中不单独区分 —— 视口里的操作器已经标出来了）
         active={
           selection.kind === 'attachment' &&
-          selection.slot === slot.name &&
-          selection.attachment === attachment.name
+          selection.attachments.some((item) => item.slot === slot.name && item.attachment === attachment.name)
         }
         icon={
           // 嵌套骨架用人形图标（一眼区别于骨骼行的骨头图标），遮罩用虚线多边形，网格用网格，贴图用图片
@@ -2072,7 +2072,14 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
         // 点**前面的小图标** = 切换显示 / 隐藏（图标就是这个开关），点文字只选中不改显示
         onIconClick={() => selectDisplay(slot.name, attachment.name)}
         iconTitle={showing ? t('点击隐藏（该插槽不显示任何 display）') : t('点击显示它')}
-        onSelect={() => selection.selectAttachment(slot.name, attachment.name)}
+        // Shift / Cmd / Ctrl 点击 = 加选 / 减选（多选后可批量删除、一起看轮廓）
+        onSelect={(event) => {
+          if (event.shiftKey || event.metaKey || event.ctrlKey) {
+            selection.toggleAttachment(slot.name, attachment.name)
+          } else {
+            selection.selectAttachment(slot.name, attachment.name)
+          }
+        }}
         // Animate 态：从当前时间点开始显示它（打显示关键帧）；Pose 态：链接网格的建 / 改源 / 解链
         onContextMenu={(event) => {
           // Pose 态只有网格类附件有菜单（贴图 / 包围盒 / 遮罩这一层没有可做的事，不弹空框）

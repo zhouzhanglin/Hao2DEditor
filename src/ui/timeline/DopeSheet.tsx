@@ -389,6 +389,10 @@ export default function DopeSheet(props: DopeSheetProps) {
         : selection.kind === 'constraint'
           ? 'constraint'
           : null
+  /*
+   * 过滤目标只认**主选中**：display 多选（框选 / Shift 加选）时各个附件可能在不同插槽，
+   * 一次只滚一个轨道才不会和用户的滚动打架（K 打帧仍是整批，见 `selectionTargets`）。
+   */
   const filterTarget =
     selection.kind === 'bone'
       ? selection.bone

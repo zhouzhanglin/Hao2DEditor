@@ -31,6 +31,7 @@ import {
   attachmentGizmoFrame,
   gizmoGeometry,
   pickAttachmentPixel,
+  pickAttachmentSlotsInRect,
   pickBone,
   pickBoneHandle,
   pickGizmo,
@@ -141,6 +142,24 @@ export interface SceneViewState {
    * null = 不画轮廓。
    */
   selectedDisplay: { slot: string; attachment: string } | null
+  /**
+   * 多选的全部 display（含主选中）：逐条画轮廓，让人看得出框选到了哪些。
+   *
+   * 操作器仍只画主选中那一个（`selectedAttachment`）—— 多个 gizmo 会互相盖住且抓不准。
+   */
+  selectedDisplays: Array<{ slot: string; attachment: string }>
+  /**
+   * display 框选矩形（世界坐标）：选择 / Pose 工具在空白处左键拖框时给值，松手清空。
+   * 与顶点框选是两套（颜色不同、工具不同），互不干扰。
+   */
+  displayBox: { x0: number; y0: number; x1: number; y1: number } | null
+  /**
+   * 框选过程中的**实时预览**：当前矩形里框到的 display。拖动时逐帧更新、松手清空。
+   *
+   * 单独一个字段而不是直接改 `selectedDisplays`：后者是从「选中集合」派生的，
+   * 拿它当预览会让拖动中闪过一批「其实还没选中」的对象状态；这里只影响描边。
+   */
+  boxPreview: Array<{ slot: string; attachment: string }>
   /**
    * 鼠标底下的 display（悬停预览）：画一圈**更弱**的轮廓，点下去之前就知道会选中谁。
    * 只在选择工具下计算（其它工具点下去干的是别的事）；null = 不画。
@@ -253,6 +272,8 @@ export class EditorScene {
   private readonly brushRing = new Graphics()
   /** 顶点框选矩形：与刷子圈同一层（跟着鼠标走的临时指示） */
   private readonly vertexBox = new Graphics()
+  /** display 框选矩形（选择 / Pose 工具在空白处拖框）：颜色与顶点框选区分开 */
+  private readonly displayBox = new Graphics()
   /** 「自己绘制边界」时提示范围的图片 region 框（画在折线之下） */
   private readonly regionFrame = new Graphics()
   /** 网格子工具正在画的折线（画边界 / 自定义布线）：同样画在最上层 */
@@ -320,6 +341,9 @@ export class EditorScene {
     pendingBone: null,
     selectedAttachment: null,
     selectedDisplay: null,
+    selectedDisplays: [],
+    displayBox: null,
+    boxPreview: [],
     hoveredDisplay: null,
     weightBones: [],
     weightTargetBone: '',
@@ -350,6 +374,7 @@ export class EditorScene {
       this.gizmoStroke,
       this.brushRing,
       this.vertexBox,
+      this.displayBox,
       this.regionFrame,
       this.meshPath,
       this.maskFill,
@@ -509,6 +534,10 @@ export class EditorScene {
     if (patch.brushRing !== undefined) this.markDirty()
     // 顶点框选矩形同理：拖动中每一下都要重画
     if (patch.vertexBox !== undefined) this.markDirty()
+    // display 框选矩形（选择 / Pose 工具）：同上
+    if (patch.displayBox !== undefined) this.markDirty()
+    // 框选的实时预览：每框进 / 框出一个都要刷新描边
+    if (patch.boxPreview !== undefined) this.markDirty()
     // 网格子工具的折线同理：橡皮筋每动一下就要重画
     if (patch.pendingMeshPath !== undefined) this.markDirty()
     // 进出「自己绘制边界」要换一整帧的显示（藏网格 / 画 region 框）
@@ -1291,34 +1320,101 @@ export class EditorScene {
     // 绘制顺序靠后的在上层：从后往前找第一个命中的
     for (let i = instances.length - 1; i >= 0; i--) {
       const instance = instances[i]
-      if (!instance.visible) continue
-      const bounds = this.nestedViews.get(instance.key)?.view.result?.bounds
-      if (!bounds || !(bounds.maxX > bounds.minX) || !(bounds.maxY > bounds.minY)) continue
-      const m = instance.matrix
-      let minX = Number.POSITIVE_INFINITY
-      let minY = Number.POSITIVE_INFINITY
-      let maxX = Number.NEGATIVE_INFINITY
-      let maxY = Number.NEGATIVE_INFINITY
-      for (const [x, y] of [
-        [bounds.minX, bounds.minY],
-        [bounds.maxX, bounds.minY],
-        [bounds.maxX, bounds.maxY],
-        [bounds.minX, bounds.maxY]
-      ] as const) {
-        const wx = m[0] * x + m[4] * y + m[12]
-        const wy = m[1] * x + m[5] * y + m[13]
-        if (wx < minX) minX = wx
-        if (wx > maxX) maxX = wx
-        if (wy < minY) minY = wy
-        if (wy > maxY) maxY = wy
-      }
-      if (worldX < minX || worldX > maxX || worldY < minY || worldY > maxY) continue
+      const box = this.nestDisplayWorldBox(instance)
+      if (!box) continue
+      if (worldX < box.minX || worldX > box.maxX || worldY < box.minY || worldY > box.maxY) continue
       return {
         slot: bundle.asset.slots[instance.slotIndex]?.name ?? '',
         attachment: instance.attachmentName
       }
     }
     return null
+  }
+
+  /**
+   * 嵌套子骨架 display 的**世界 AABB**：子视图包围盒的四个角经实例矩阵变换后取轴对齐外框。
+   * 点选与框选共用这一份口径（逐像素穿透父子两级 alpha 缓存没有必要）。
+   */
+  private nestDisplayWorldBox(instance: {
+    key: string
+    visible: boolean
+    matrix: Float32Array
+  }): { minX: number; minY: number; maxX: number; maxY: number } | null {
+    if (!instance.visible) return null
+    const bounds = this.nestedViews.get(instance.key)?.view.result?.bounds
+    if (!bounds || !(bounds.maxX > bounds.minX) || !(bounds.maxY > bounds.minY)) return null
+    const m = instance.matrix
+    let minX = Number.POSITIVE_INFINITY
+    let minY = Number.POSITIVE_INFINITY
+    let maxX = Number.NEGATIVE_INFINITY
+    let maxY = Number.NEGATIVE_INFINITY
+    for (const [x, y] of [
+      [bounds.minX, bounds.minY],
+      [bounds.maxX, bounds.minY],
+      [bounds.maxX, bounds.maxY],
+      [bounds.minX, bounds.maxY]
+    ] as const) {
+      const wx = m[0] * x + m[4] * y + m[12]
+      const wy = m[1] * x + m[5] * y + m[13]
+      if (wx < minX) minX = wx
+      if (wx > maxX) maxX = wx
+      if (wy < minY) minY = wy
+      if (wy > maxY) maxY = wy
+    }
+    return { minX, minY, maxX, maxY }
+  }
+
+  /**
+   * 框选 display：矩形与附件**实际像素**相交才算命中（透明区域不算）。
+   *
+   * 为什么不用包围盒：带透明留白的美术（道具 / 特效 / 圆角图）包围盒常常盖住一大片空地，
+   * 框住空白也会选中它，和「看上去框到了」不一致。也不用「顶点落在框里」——
+   * 一块大图只有四个角有顶点，在图片中间拖个小框会一个都框不到，而那正是最常见的用法。
+   *
+   * 分两步，都是为了拖动时不卡：
+   * 1. 逐插槽 AABB **粗筛**：不可见插槽没有顶点，天然被排除；AABB 不交的直接跳过；
+   * 2. 只对候选插槽的三角形做**网格采样**，用已有的 alpha 缓存判透明（与点选同一套口径）。
+   *    采样步长约 1 屏幕像素、单个方向最多约 200 个点 —— 像素级 ≠ 逐像素：拖动时每帧都要算，
+   *    逐像素不现实；比步长还薄的透明缝隙可能漏判，肉眼不可见。
+   * 命中即停（`hitSlots`），所以常见的不透明图几乎零成本。纹理还没解码时 `alphaAt` 返回 1，
+   * 退化成几何命中（与点选一致），不会出现「图还没加载完就框不到」。
+   *
+   * 嵌套子骨架仍按子视图 AABB 判：它是一整棵子角色，逐像素要穿过父子两级 alpha 缓存，不值得。
+   */
+  pickAttachmentsInRect(
+    minX: number,
+    minY: number,
+    maxX: number,
+    maxY: number
+  ): Array<{ slot: string; attachment: string }> {
+    const bundle = this.bundle
+    const mesh = this.meshResult
+    if (!bundle || !mesh) return []
+    // 像素级命中判定放在 picking 里（纯函数，可单测）；这里只负责换算单位与取名字
+    const hitSlots = pickAttachmentSlotsInRect(mesh, { minX, minY, maxX, maxY }, {
+      step: this.viewport.pixelsToWorld(1),
+      imageOfSlot: (slotIndex) =>
+        this.attachmentAt(slotIndex, bundle.skeleton.slotDisplayIndex[slotIndex])?.textureName ?? '',
+      alphaAt: (image, u, v) => this.imageAlpha.alphaAt(image, u, v)
+    })
+    const out: Array<{ slot: string; attachment: string }> = []
+    for (const slotIndex of hitSlots) {
+      const slot = bundle.asset.slots[slotIndex]
+      if (!slot) continue
+      const attachment = this.attachmentAt(slotIndex, bundle.skeleton.slotDisplayIndex[slotIndex])
+      if (!attachment) continue
+      out.push({ slot: slot.name, attachment: attachment.name })
+    }
+    const nest = bundle.nest
+    for (const instance of nest?.instances ?? []) {
+      const box = this.nestDisplayWorldBox(instance)
+      if (!box) continue
+      if (box.maxX < minX || box.minX > maxX || box.maxY < minY || box.minY > maxY) continue
+      const slot = bundle.asset.slots[instance.slotIndex]
+      if (!slot) continue
+      out.push({ slot: slot.name, attachment: instance.attachmentName })
+    }
+    return out
   }
 
   /** 顶点对应的附件（权重显示与拾取共用） */
@@ -2105,25 +2201,42 @@ export class EditorScene {
      * 轮廓压在最下面（骨骼与操作器都盖在它之上），任何模式 / 工具下都给。
      */
     this.outlineStroke.clear()
-    const selectedDisplay = state.selectedDisplay
     const hoveredDisplay = state.hoveredDisplay
+    // 多选：选中的每条都描（主选中由操作器区分）；老调用点只给单值时退回那一个
+    const selectedDisplays =
+      state.selectedDisplays.length > 0
+        ? state.selectedDisplays
+        : state.selectedDisplay
+          ? [state.selectedDisplay]
+          : []
+    /*
+     * 框选中的实时预览也一起描：还没松手时就能看出「这一框会选中哪些」，
+     * 与已选中的合并去重后再画（加选时两者有重叠）。
+     */
+    const outlineItems = [...selectedDisplays]
+    for (const item of state.boxPreview) {
+      if (!outlineItems.some((other) => other.slot === item.slot && other.attachment === item.attachment)) {
+        outlineItems.push(item)
+      }
+    }
     const outlineVisible =
       showBoneLayer &&
       bundle !== null &&
       !boundaryDraw &&
-      (selectedDisplay !== null || hoveredDisplay !== null)
+      (outlineItems.length > 0 || hoveredDisplay !== null)
     this.outlineStroke.visible = outlineVisible
     if (outlineVisible) {
-      if (selectedDisplay) {
-        const outline = this.displayOutlinePaths(selectedDisplay.slot, selectedDisplay.attachment)
+      for (const item of outlineItems) {
+        const outline = this.displayOutlinePaths(item.slot, item.attachment)
         if (outline) drawDisplayOutline(this.outlineStroke, outline, unitPerPixel)
       }
       // 悬停预览用同一套形状计算，只是更弱、更细；正悬在已选中那个上就跳过（那圈已经够亮）
       const hoveredIsSelected =
         hoveredDisplay !== null &&
-        selectedDisplay !== null &&
-        hoveredDisplay.slot === selectedDisplay.slot &&
-        hoveredDisplay.attachment === selectedDisplay.attachment
+        // 已经画过一遍的（选中 + 框选预览）不再叠一层弱描边
+        outlineItems.some(
+          (item) => item.slot === hoveredDisplay.slot && item.attachment === hoveredDisplay.attachment
+        )
       if (hoveredDisplay && !hoveredIsSelected) {
         const outline = this.displayOutlinePaths(hoveredDisplay.slot, hoveredDisplay.attachment)
         if (outline) {
@@ -2212,6 +2325,21 @@ export class EditorScene {
         .rect(x, y, width, height)
         .fill({ color: 0x38bdf8, alpha: 0.08 })
         .stroke({ width: unitPerPixel * 1.2, color: 0x38bdf8, alpha: 0.85 })
+    }
+
+    // display 框选矩形：与顶点框选同样的画法，颜色换成强调橙，一眼分清在框什么
+    const displayBox = state.displayBox
+    this.displayBox.clear()
+    this.displayBox.visible = displayBox !== null
+    if (displayBox) {
+      const x = Math.min(displayBox.x0, displayBox.x1)
+      const y = Math.min(displayBox.y0, displayBox.y1)
+      const width = Math.abs(displayBox.x1 - displayBox.x0)
+      const height = Math.abs(displayBox.y1 - displayBox.y0)
+      this.displayBox
+        .rect(x, y, width, height)
+        .fill({ color: 0xff9f0a, alpha: 0.08 })
+        .stroke({ width: unitPerPixel * 1.2, color: 0xff9f0a, alpha: 0.9 })
     }
 
     // 网格子工具的折线（画边界 / 自定义布线）：同样是个「跟着鼠标走的光标」，画在最上层；

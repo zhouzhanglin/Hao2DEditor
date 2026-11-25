@@ -2,6 +2,7 @@
 import { create } from 'zustand'
 import type { AutoWeightMethod } from '@editor/commands/authoringCommands'
 import type { GizmoSpace } from '@render/picking'
+import { useSelectionStore } from './selectionStore'
 import { t } from '@i18n'
 
 /**
@@ -329,6 +330,19 @@ export const useToolStore = create<ToolState>((set, get) => ({
    * 见 Scene.drawOverlays）。这里的 overlay 只留给「骨架 / 约束」两个纯显示开关。
    */
   setTool: (tool) => {
+    /*
+     * 网格类工具（顶点 / 权重刷 / 遮罩）都**只作用于一个附件**：线框、顶点、权重、遮罩点都属于
+     * 「当前那个附件」。从多选状态切进来时收窄到主选中 —— 否则「到底在编谁」含糊，
+     * 用户看着四个高亮的附件，实际只有主选中那个会动。
+     *
+     * 选择 / Pose 工具不收窄：多选在它们下面是有意义的（批量删除、一起看轮廓）。
+     */
+    if (tool === 'ffd' || tool === 'weight' || tool === 'mask') {
+      const selection = useSelectionStore.getState()
+      if (selection.kind === 'attachment' && selection.attachments.length > 1) {
+        selection.selectAttachment(selection.slot, selection.attachment)
+      }
+    }
     /*
      * 换工具就放弃「等待点选骨骼」与两个子工具，免得换个工具后第一次点击被旧状态吃掉。
      * 权重刷子工具回到 `paint`（默认刷）—— 切走再回来时按下去是刷，而不是莫名其妙的框选。

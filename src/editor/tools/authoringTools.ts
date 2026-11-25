@@ -210,12 +210,22 @@ interface DragSession {
    * 松开后这个插槽会挂到新骨骼下面；没命中 / 命中锁定插槽时为空串。
    */
   createTargetSlot: string
-  /** 附件操作器：宿主骨骼索引 + 按下时的 setup 值 + 被拖轴的局部 / 世界方向 */
-  attBoneIndex: number
-  attStart: { position: Vec2; rotation: number; scale: Vec2 }
-  attAxisLocal: Vec2
+  /**
+   * 附件操作器的**作用对象**（多选 display 时整批一起动）。
+   *
+   * 每项都带「按下那一刻的宿主骨骼世界矩阵」：位置存的是**各自骨骼的局部值**，
+   * 世界位移要按各自的矩阵换算回去 —— 共用一份矩阵的话，挂在不同骨骼下的附件会拖歪。
+   */
+  attTargets: Array<{
+    slot: string
+    attachment: string
+    /** 宿主骨骼世界矩阵快照（16 个数字，同 `skeleton.world`） */
+    boneWorld: Float32Array
+    /** 按下时的 setup 值（position / rotation / scale，相对宿主骨骼） */
+    start: { position: Vec2; rotation: number; scale: Vec2 }
+  }>
+  /** 被拖轴的世界方向（单位向量）：世界空间下就是 (1,0) / (0,1) */
   attAxisWorld: Vec2
-  attAxisScale: number
   attStartAngle: number
 }
 
@@ -265,11 +275,8 @@ const IDLE: DragSession = {
   createEnd: { x: 0, y: 0 },
   createParent: '',
   createTargetSlot: '',
-  attBoneIndex: -1,
-  attStart: { position: { x: 0, y: 0 }, rotation: 0, scale: { x: 1, y: 1 } },
-  attAxisLocal: { x: 1, y: 0 },
+  attTargets: [],
   attAxisWorld: { x: 1, y: 0 },
-  attAxisScale: 1,
   attStartAngle: 0
 }
 
@@ -1053,14 +1060,32 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
     }
     if (att) {
       /*
+       * Pose 工具支持 Shift / Ctrl 加选（与选择工具一致），且不开始拖拽。
+       * **网格 / FFD 排除在外**：那里点另一个 display 是「换一个顶点要编辑的网格」，
+       * 加选对它没有意义（顶点 / 权重一次只作用于一个附件），反而会让当前网格被减掉。
+       */
+      if (tools.tool === 'pose' && (info.shift || info.ctrl)) {
+        useSelectionStore.getState().toggleAttachment(att.slot, att.attachment)
+        const after = useSelectionStore.getState()
+        host.status(
+          after.attachments.length > 0
+            ? t('已选中 {0} 个附件（主选中「{1}」）', [after.attachments.length, after.attachment])
+            : t('已取消附件选择')
+        )
+        return true
+      }
+      /*
        * 判「是不是换了个 display」必须连 `kind` 一起看：`selectBone` 出于权重刷的需要会**保留**
        * 上一个 display 的 `slot` / `attachment`（见 ViewportCanvas 的 focusMeshSlot 注释）。
        * 只比这两个字段的话，「选图片 → 点骨骼 → 再点回同一张图片」会被判成没变化而整段跳过，
        * 表现出来就是**图片选不中了**（点了几次，选中框再也不回来）。
        */
       const sel = host.selection
-      const isNew = sel.kind !== 'attachment' || att.slot !== sel.slot || att.attachment !== sel.attachment
-      if (isNew) {
+      // 按**集合成员**判：多选时点其中任意一个都不算「换了对象」，否则一次点击就把整批收窄成一个
+      const isMember =
+        sel.kind === 'attachment' &&
+        sel.attachments.some((item) => item.slot === att.slot && item.attachment === att.attachment)
+      if (!isMember) {
         useSelectionStore.getState().selectAttachment(att.slot, att.attachment)
         host.status(t('已选中附件「{0}」（{1}）：可编辑其顶点', [att.attachment, att.slot]))
         return true
@@ -1156,8 +1181,28 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
       return true
     }
     if (att) {
-      // 判重同样要连 `kind` 看，理由见上面网格工具那处：`slot` / `attachment` 会因为选中骨骼而留着旧值
-      const isNew = sel.kind !== 'attachment' || att.slot !== sel.slot || att.attachment !== sel.attachment
+      /*
+       * Shift / Ctrl + 点附件 = 加选 / 减选（与骨骼同一套规则），**且不起拖拽**：
+       * 加选一下顺手把附件挪几像素是最容易让人怀疑「手抖了」的交互。
+       * 视口的多选分支通常会先拦下这一下（见 ViewportCanvas 的 onPointerDown），
+       * 这里再兜一次：工具也可能被命令 / 测试直接调用。
+       */
+      if (info.shift || info.ctrl) {
+        useSelectionStore.getState().toggleAttachment(att.slot, att.attachment)
+        const after = useSelectionStore.getState()
+        host.status(
+          after.attachments.length > 0
+            ? t('已选中 {0} 个附件（主选中「{1}」）', [after.attachments.length, after.attachment])
+            : t('已取消附件选择')
+        )
+        return true
+      }
+      // 判重同样要连 `kind` 看，理由见上面网格工具那处：`slot` / `attachment` 会因为选中骨骼而留着旧值。
+      // 判「是不是新对象」要按**集合成员**，不能只比主选中：多选后拖其中任意一个都应整批一起动。
+      const isMember =
+        sel.kind === 'attachment' &&
+        sel.attachments.some((item) => item.slot === att.slot && item.attachment === att.attachment)
+      const isNew = !isMember
       if (isNew) useSelectionStore.getState().selectAttachment(att.slot, att.attachment)
       if (host.mode === 'pose') {
         /*
@@ -1173,7 +1218,7 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
           host.status(t('斜切不支持附件：「{0}」请用移动 / 旋转 / 缩放，或斜切它所在的骨骼', [att.attachment]))
         } else {
           beginAttachmentGizmoDrag(host, att.slot, att.attachment, 'center', mode, info.world)
-          if (isNew)
+          if (isNew) {
             host.status(
               t('已选中附件「{0}」（{1}）：拖动即可{2}', [
                 att.attachment,
@@ -1181,6 +1226,11 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
                 t(GIZMO_LABEL[mode]).toLowerCase()
               ])
             )
+          } else if (sel.attachments.length > 1) {
+            host.status(
+              t('已选中 {0} 个附件：拖动会一起{1}', [sel.attachments.length, t(GIZMO_LABEL[mode]).toLowerCase()])
+            )
+          }
         }
         return true
       }
@@ -1675,15 +1725,41 @@ function beginAttachmentGizmoDrag(
   )
   if (!frame) return false
 
-  const radians = (attachment.rotation * Math.PI) / 180
-  // 被拖轴在**骨骼局部空间**的单位方向（position 就存在这个空间里）
-  const axisLocal =
-    part === 'y'
-      ? { x: -Math.sin(radians), y: Math.cos(radians) }
-      : { x: Math.cos(radians), y: Math.sin(radians) }
-  // 同一轴的世界方向 + 该方向上的综合缩放（把世界距离换算回局部距离）
+  // 被拖轴的世界方向（单位向量）：局部空间下是附件自身的轴，世界空间下就是画面水平 / 竖直
   const axisWorld = part === 'y' ? { x: frame.px, y: frame.py } : { x: frame.dx, y: frame.dy }
-  const axisScale = part === 'y' ? frame.axisScaleB : frame.axisScaleA
+  /*
+   * 作用对象：**多选且点中的是选中项之一**时整批一起动；否则只动点中的这一个
+   *（点未选中的 display 会先把选择收窄成它，见调用方）。
+   * 锁定插槽的成员直接跳过：它们本来就不该被拖动。
+   */
+  const selection = useSelectionStore.getState()
+  const group =
+    selection.kind === 'attachment' &&
+    selection.attachments.length > 1 &&
+    selection.attachments.some((item) => item.slot === slotName && item.attachment === attachmentName)
+      ? selection.attachments
+      : [{ slot: slotName, attachment: attachmentName }]
+  const attTargets = group.flatMap((item) => {
+    if (slotLocked(item.slot)) return []
+    const targetSlot = doc.slots.find((candidate) => candidate.name === item.slot)
+    const targetAttachment = findAttachment(doc, item.slot, item.attachment)
+    const targetBoneIndex = targetSlot ? (bundle.boneIndex[targetSlot.bone] ?? -1) : -1
+    if (!targetAttachment || targetBoneIndex < 0) return []
+    return [
+      {
+        slot: item.slot,
+        attachment: item.attachment,
+        // 世界矩阵按**按下这一刻**快照：拖动中骨骼也可能在动，实时取会让位移抖动
+        boneWorld: bundle.skeleton.world.slice(targetBoneIndex * 16, targetBoneIndex * 16 + 16) as Float32Array,
+        start: {
+          position: { ...targetAttachment.position },
+          rotation: targetAttachment.rotation,
+          scale: { ...targetAttachment.scale }
+        }
+      }
+    ]
+  })
+  if (attTargets.length === 0) return false
 
   drag = {
     ...IDLE,
@@ -1695,90 +1771,72 @@ function beginAttachmentGizmoDrag(
     gizmoMode: mode,
     gizmoPart: part,
     gizmoSpace: space,
-    attBoneIndex: boneIndex,
-    attStart: {
-      position: { ...attachment.position },
-      rotation: attachment.rotation,
-      scale: { ...attachment.scale }
-    },
-    attAxisLocal: axisLocal,
+    attTargets,
     attAxisWorld: axisWorld,
-    attAxisScale: Math.max(1e-6, axisScale),
     attStartAngle: (Math.atan2(world.y - frame.oy, world.x - frame.ox) * 180) / Math.PI,
     startProject: (world.x - frame.ox) * axisWorld.x + (world.y - frame.oy) * axisWorld.y,
     startDistance: Math.hypot(world.x - frame.ox, world.y - frame.oy)
   }
-  storeHandler.begin(
-    mode === 'rotate' ? t('旋转附件') : mode === 'scale' ? t('缩放附件') : t('移动附件')
-  )
+  const label = mode === 'rotate' ? t('旋转附件') : mode === 'scale' ? t('缩放附件') : t('移动附件')
+  // 撤销栈里写清动了几项：批量拖动后看不出「这一笔撤销会退回几个」最容易误操作
+  storeHandler.begin(attTargets.length > 1 ? t('{0}（{1} 个附件）', [label, attTargets.length]) : label)
   return true
 }
 
 /** 附件操作器拖拽：把指针变化写回附件的 setup 值（position / rotation / scale，相对宿主骨骼） */
 function dragAttachmentGizmo(host: ToolHost, world: Vec2): void {
   const scene = host.scene
-  const bundle = scene.runtime
-  if (!bundle) return
+  if (!scene.runtime) return
   const rx = world.x - drag.origin.x
   const ry = world.y - drag.origin.y
   const mode = drag.gizmoMode
   const part = drag.gizmoPart
-  const start = drag.attStart
+  const targets = drag.attTargets
+  if (targets.length === 0) return
 
-  let position = start.position
-  let rotation = start.rotation
-  let scale = start.scale
-
-  if (mode === 'rotate') {
-    const angle = (Math.atan2(ry, rx) * 180) / Math.PI
-    rotation = start.rotation + (angle - drag.attStartAngle)
-  } else if (mode === 'scale') {
-    // 世界空间下 `attAxisWorld` 就是世界轴：拖动量按世界方向量，写回仍是附件自己的 scale.x / y。
-    // 附件只有一个旋转、没有斜切通道，所以「沿世界轴非等比拉」在这里取的是同一轴的近似。
-    scale = { x: start.scale.x, y: start.scale.y }
-    const project = rx * drag.attAxisWorld.x + ry * drag.attAxisWorld.y
-    if (part === 'x') {
-      scale.x = start.scale.x * axisFactor(project, drag.startProject)
-    } else if (part === 'y') {
-      scale.y = start.scale.y * axisFactor(project, drag.startProject)
-    } else {
-      const factor = axisFactor(Math.hypot(rx, ry), drag.startDistance)
-      scale.x = start.scale.x * factor
-      scale.y = start.scale.y * factor
+  /*
+   * 先把「与目标无关」的那个量算出来，再逐个目标写回：
+   * - 旋转：同一个角度增量，各自绕自己原位转（不绕共同圆心公转 —— 吸附 / 摆件时更可预期）；
+   * - 缩放：同一个因子，乘到各自的 scale（附件没有斜切通道，沿世界轴非等比只能是近似）；
+   * - 平移：同一个**世界位移**，按各自宿主骨骼矩阵换算回局部位置（各按自己骨骼的轴走会散开）。
+   */
+  const rotationDelta = (Math.atan2(ry, rx) * 180) / Math.PI - drag.attStartAngle
+  const project = rx * drag.attAxisWorld.x + ry * drag.attAxisWorld.y
+  let factorX = 1
+  let factorY = 1
+  if (mode === 'scale') {
+    if (part === 'x') factorX = axisFactor(project, drag.startProject)
+    else if (part === 'y') factorY = axisFactor(project, drag.startProject)
+    else {
+      factorX = axisFactor(Math.hypot(rx, ry), drag.startDistance)
+      factorY = factorX
     }
-  } else {
-    // 位置存在**宿主骨骼局部空间**里；拖中心 = 自由移动，拖轴 = 只沿该轴
-    const boneWorld = bundle.skeleton.world.slice(drag.attBoneIndex * 16, drag.attBoneIndex * 16 + 16)
-    const moveWorld = drag.gizmoSpace === 'world' && part !== 'center'
-    if (part === 'center' || moveWorld) {
-      /*
-       * 自由移动，或**世界空间**下的单轴移动：都先拿世界位移，再换算回宿主骨骼局部空间。
-       * 世界空间下多一步「只保留世界轴分量」—— 轴是画面水平 / 竖直的，附件就只沿那个方向走。
-       */
-      let offset = { x: world.x - drag.startWorld.x, y: world.y - drag.startWorld.y }
-      if (moveWorld) {
-        const axis = part === 'y' ? { x: 0, y: 1 } : { x: 1, y: 0 }
-        const along = offset.x * axis.x + offset.y * axis.y
-        offset = { x: axis.x * along, y: axis.y * along }
-      }
-      const delta = mulVector(invert(boneWorld), offset)
-      position = { x: start.position.x + delta.x, y: start.position.y + delta.y }
-    } else {
-      const project = rx * drag.attAxisWorld.x + ry * drag.attAxisWorld.y
-      const along = (project - drag.startProject) / drag.attAxisScale
-      position = {
-        x: start.position.x + drag.attAxisLocal.x * along,
-        y: start.position.y + drag.attAxisLocal.y * along
-      }
-    }
+  }
+  let offset = { x: world.x - drag.startWorld.x, y: world.y - drag.startWorld.y }
+  if (mode === 'move' && part !== 'center') {
+    // 拖轴：只保留该世界轴方向的位移（局部空间的轴也先化成世界方向）
+    const along = project - drag.startProject
+    offset = { x: drag.attAxisWorld.x * along, y: drag.attAxisWorld.y * along }
   }
 
   useProjectStore.getState().updateSilent((draft) => {
-    patchAttachment(draft, drag.slot, drag.attachment, (attachment) => {
-      attachment.position = position
-      attachment.rotation = rotation
-      attachment.scale = scale
-    })
+    for (const target of targets) {
+      const start = target.start
+      if (mode === 'rotate') {
+        patchAttachment(draft, target.slot, target.attachment, (attachment) => {
+          attachment.rotation = start.rotation + rotationDelta
+        })
+      } else if (mode === 'scale') {
+        patchAttachment(draft, target.slot, target.attachment, (attachment) => {
+          attachment.scale = { x: start.scale.x * factorX, y: start.scale.y * factorY }
+        })
+      } else {
+        const delta = mulVector(invert(target.boneWorld), offset)
+        patchAttachment(draft, target.slot, target.attachment, (attachment) => {
+          attachment.position = { x: start.position.x + delta.x, y: start.position.y + delta.y }
+        })
+      }
+    }
   })
   const after = useProjectStore.getState()
   scene.setDocument(after.document, host.selection.skin)

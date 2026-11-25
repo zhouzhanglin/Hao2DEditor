@@ -1075,6 +1075,27 @@ export const en: Record<string, string> = {
   '框选：矩形里没有顶点（选择没有变化）': 'Box select: no vertices inside the rectangle (selection unchanged)',
   '已框选 {0} 个顶点（共 {1} 个）：之后只刷这些顶点的权重，点空白处取消选择':
     'Box-selected {0} vertices ({1} in total): painting now only affects these — click empty space to clear',
+  // ── 多选 display（框选 / Shift 加选） ──
+  '已选中 {0} 个附件（主选中「{1}」）': 'Selected {0} displays (primary "{1}")',
+  '已选中 {0} 个附件（主选中「{1}」；Shift / Cmd 点击可加选 / 减选）':
+    'Selected {0} displays (primary "{1}"; Shift / Cmd click to add or remove)',
+  '已取消附件选择': 'Display selection cleared',
+  '{0} 个附件（主选中「{1}」）': '{0} displays (primary "{1}")',
+  '框选 display：拖出矩形，松手选中框内的附件':
+    'Box select displays: drag a rectangle, release to select the attachments inside',
+  '框选 display（Shift：加进当前选择）：拖出矩形，松手选中框内的附件':
+    'Box select displays (Shift: add to current selection): drag a rectangle, release to select the attachments inside',
+  '框选到 {0} 个附件（共选中 {1} 个）': 'Box-selected {0} displays ({1} selected in total)',
+  '框选：矩形里没有附件': 'Box select: no displays inside the rectangle',
+  '框选：框到的 {0} 个附件所在插槽已锁定，未选中':
+    'Box select: the slots of {0} matched displays are locked, nothing selected',
+  '切到 Pose 状态才能删除 display（附件属于绑定数据）':
+    'Switch to Pose to delete displays (attachments are binding data)',
+  '已删除 {0} 个附件': 'Deleted {0} displays',
+  '共选中 {0} 个附件：这里只编辑主选中「{1}」；Delete 可一起删除':
+    '{0} displays selected: this panel only edits the primary "{1}"; Delete removes them all',
+  '已选中 {0} 个附件：拖动会一起{1}': 'Selected {0} displays: dragging will {1} them together',
+  '{0}（{1} 个附件）': '{0} ({1} displays)',
   '刷过的顶点权重归一到 1；关掉就只改目标骨骼，权重和可能不等于 1':
     'Normalize painted vertex weights to 1; when off, only the target bone changes and the weight sum may not equal 1',
   'Strength = 一笔能刷到的权重上限；Feather = 边缘衰减占笔刷半径的比例（0 = 硬边）；按住修饰键临时改方向：Alt=减少 / Shift=覆盖 / Ctrl=平滑 / Ctrl+Shift=生长':

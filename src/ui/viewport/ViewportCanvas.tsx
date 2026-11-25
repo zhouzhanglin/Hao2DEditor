@@ -442,6 +442,8 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
           selection.kind === 'attachment' && selection.slot && selection.attachment
             ? { slot: selection.slot, attachment: selection.attachment }
             : null,
+        // 多选：框选 / Shift 加选到的每一条都描轮廓（操作器仍只画主选中）
+        selectedDisplays: selection.kind === 'attachment' ? selection.attachments : [],
         /*
          * 悬停轮廓平时由 pointermove 直接写（频率远高于帧率，不该走 React 状态）。
          * 这里只做一件事：**工具不是选择工具时清掉** —— 否则切工具会留下一圈卡住的悬停预览。
@@ -572,12 +574,26 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
      * 互不打架（工具按下必接管，不先记一笔的话骨骼怎么都点不中）。
      */
     boneClick: { bone: string; clientX: number; clientY: number } | null
+    /**
+     * 选择 / Pose 工具在**空白处**按下时记的一笔：拖动超过阈值就变成「框选 display」，
+     * 没拖动则仍是一次点击（松手清空选择）。世界坐标按下时就算好，拖动中只更新另一个角。
+     */
+    box: {
+      clientX: number
+      clientY: number
+      startWorld: { x: number; y: number }
+      /** Shift / Cmd / Ctrl 按下：框到的并进现有选择 */
+      additive: boolean
+      /** 已经拖过阈值（false = 还可能是单击） */
+      dragging: boolean
+    } | null
   }>({
     panning: false,
     lastX: 0,
     lastY: 0,
     insert: null,
-    boneClick: null
+    boneClick: null,
+    box: null
   })
 
   /** 每次事件都从 store 现取状态，避免拖拽过程中持有过期快照 */
@@ -711,7 +727,14 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       }
       // 中键仍然平移视口：绑骨骼时经常要挪一下视角，去找被网格 / 其它骨骼挡住的骨骼
       if (event.button === 1) {
-        pointer.current = { panning: true, lastX: event.clientX, lastY: event.clientY, insert: null, boneClick: null }
+        pointer.current = {
+          panning: true,
+          lastX: event.clientX,
+          lastY: event.clientY,
+          insert: null,
+          boneClick: null,
+          box: null
+        }
         event.currentTarget.setPointerCapture(event.pointerId)
         return
       }
@@ -818,7 +841,8 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
           clientY: event.clientY,
           rect: event.currentTarget.getBoundingClientRect()
         },
-        boneClick: null
+        boneClick: null,
+        box: null
       }
       event.currentTarget.setPointerCapture(event.pointerId)
       event.preventDefault()
@@ -827,7 +851,14 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     // 平移视口只认中键。右键不再参与平移（绑定骨骼状态下它是「结束绑定」，
     // 平时则什么都不做），避免右键误拖把视口挪走。
     if (event.button === 1) {
-      pointer.current = { panning: true, lastX: event.clientX, lastY: event.clientY, insert: null, boneClick: null }
+      pointer.current = {
+        panning: true,
+        lastX: event.clientX,
+        lastY: event.clientY,
+        insert: null,
+        boneClick: null,
+        box: null
+      }
       event.currentTarget.setPointerCapture(event.pointerId)
       return
     }
@@ -884,6 +915,29 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         )
         return
       }
+      /*
+       * 骨骼没命中：点在 display 上就加选 / 减选它。
+       * 这里必须排在工具前面 —— 工具点附件会直接 `selectAttachment` 并开始拖拽，
+       * 走不到这条分支，Shift 就永远只是「替换」。
+       */
+      const display = scene.pickAttachmentAt(world.x, world.y)
+      if (display) {
+        if (slotLocked(display.slot)) {
+          onStatus(t('插槽「{0}」已锁定：在层级树里解锁后才能选中', [display.slot]))
+          return
+        }
+        useSelectionStore.getState().toggleAttachment(display.slot, display.attachment)
+        const after = useSelectionStore.getState()
+        onStatus(
+          after.attachments.length > 0
+            ? t('已选中 {0} 个附件（主选中「{1}」；Shift / Cmd 点击可加选 / 减选）', [
+                after.attachments.length,
+                after.attachment
+              ])
+            : t('已取消附件选择')
+        )
+        return
+      }
     }
 
     const host = buildHost()
@@ -922,6 +976,24 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         )
         return
       }
+      /*
+       * 选择 / Pose 工具点空白：**先不急着清空选择** —— 这一下可能是「拖框选 display」的起手。
+       * 记一笔起点并捕获指针，松手时按「有没有拖动」决定：没拖 = 清空（原语义），
+       * 拖过 4px = 框选。只有这两个工具这么做，其它工具（网格 / 权重 / 遮罩）的空白拖动
+       * 各自有语义（框选顶点 / 刷权重 / 画多边形），不能抢。
+       */
+      const activeTool = useToolStore.getState().tool
+      if (activeTool === 'select' || activeTool === 'pose') {
+        pointer.current.box = {
+          clientX: event.clientX,
+          clientY: event.clientY,
+          startWorld: { ...world },
+          additive: multiSelect,
+          dragging: false
+        }
+        event.currentTarget.setPointerCapture(event.pointerId)
+        return
+      }
       selection.clear()
       onStatus(t('已取消选择'))
     }
@@ -958,6 +1030,50 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     }
     const world = toWorld(event)
     if (!world) return
+
+    /*
+     * display 框选：先过 4px 阈值再拉框 —— 阈值内仍是「点击」，松手会按点击处理（清空选择），
+     * 这样「点空白取消选择」的老手感不会被几像素抖动变成一次空框选。
+     */
+    const box = p.box
+    if (box) {
+      if (!box.dragging && Math.hypot(event.clientX - box.clientX, event.clientY - box.clientY) <= 4) return
+      if (!box.dragging) {
+        box.dragging = true
+        // 拉框时换十字光标，并收掉悬停预览（那一圈会跟着鼠标跑，和选框叠在一起看不清）
+        if (event.currentTarget.style.cursor !== 'crosshair') event.currentTarget.style.cursor = 'crosshair'
+        scene.setViewState({ hoveredDisplay: null })
+        onStatus(
+          box.additive
+            ? t('框选 display（Shift：加进当前选择）：拖出矩形，松手选中框内的附件')
+            : t('框选 display：拖出矩形，松手选中框内的附件')
+        )
+      }
+      /*
+       * 边拉框边算「这一框会选中谁」：不松手也能看到命中项的描边。
+       * 加选时把已选中的并进来（松手后就是同一批），锁定插槽照旧跳过。
+       */
+      const hits = scene
+        .pickAttachmentsInRect(
+          Math.min(box.startWorld.x, world.x),
+          Math.min(box.startWorld.y, world.y),
+          Math.max(box.startWorld.x, world.x),
+          Math.max(box.startWorld.y, world.y)
+        )
+        .filter((item) => !slotLocked(item.slot))
+      const preview = box.additive ? [...useSelectionStore.getState().attachments] : []
+      for (const hit of hits) {
+        if (!preview.some((item) => item.slot === hit.slot && item.attachment === hit.attachment)) {
+          preview.push(hit)
+        }
+      }
+      scene.setViewState({
+        displayBox: { x0: box.startWorld.x, y0: box.startWorld.y, x1: world.x, y1: world.y },
+        boxPreview: preview
+      })
+      scene.markDirty()
+      return
+    }
 
     // 遮罩工具：画草稿时橡皮筋跟着鼠标；没有草稿也给十字光标
     if (useToolStore.getState().tool === 'mask') {
@@ -1172,6 +1288,51 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         onStatus(t('插入顶点改的是绑定网格：请切到 Pose 状态'))
       } else {
         insertMeshVertexAt(pending.clientX, pending.clientY, pending.rect)
+      }
+    }
+    /*
+     * display 框选：松手结算。
+     * - 没拖过阈值 = 一次普通点击空白 → 按老语义清空选择；
+     * - 拖过阈值 = 框选，命中按「世界包围盒与矩形相交」算（见 Scene.pickAttachmentsInRect），
+     *   Shift 拖框把命中项并进现有选择；锁定插槽跳过并说明。
+     */
+    const box = pointer.current.box
+    pointer.current.box = null
+    if (box) {
+      const scene = sceneRef.current
+      // 指针被系统取消（触摸被抢 / 窗口失焦）：只收掉选框与预览，不改选择
+      if (event.type === 'pointercancel') {
+        scene?.setViewState({ displayBox: null, boxPreview: [] })
+        scene?.markDirty()
+      } else if (!box.dragging) {
+        useSelectionStore.getState().clear()
+        onStatus(t('已取消选择'))
+      } else if (scene) {
+        const rect = event.currentTarget.getBoundingClientRect()
+        const end = scene.viewport.screenToWorld(event.clientX - rect.left, event.clientY - rect.top)
+        // 选框和实时预览一起收掉：接下来由选中集合自己画描边
+        scene.setViewState({ displayBox: null, boxPreview: [] })
+        const hits = scene.pickAttachmentsInRect(
+          Math.min(box.startWorld.x, end.x),
+          Math.min(box.startWorld.y, end.y),
+          Math.max(box.startWorld.x, end.x),
+          Math.max(box.startWorld.y, end.y)
+        )
+        const locked = hits.filter((item) => slotLocked(item.slot))
+        const usable = hits.filter((item) => !slotLocked(item.slot))
+        // 拉框期间换成了十字光标，松手恢复（下一次 pointermove 也会按悬停重新设一遍）
+        if (event.currentTarget.style.cursor !== 'default') event.currentTarget.style.cursor = 'default'
+        const selection = useSelectionStore.getState()
+        selection.selectAttachments(box.additive ? [...selection.attachments, ...usable] : usable)
+        const total = useSelectionStore.getState().attachments.length
+        onStatus(
+          usable.length > 0
+            ? t('框选到 {0} 个附件（共选中 {1} 个）', [usable.length, total])
+            : locked.length > 0
+              ? t('框选：框到的 {0} 个附件所在插槽已锁定，未选中', locked.length)
+              : t('框选：矩形里没有附件')
+        )
+        scene.markDirty()
       }
     }
     const host = buildHost()

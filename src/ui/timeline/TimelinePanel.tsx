@@ -28,7 +28,8 @@ import {
   keyEventNow,
   keyframeNow,
   keySlotSubArmatureNow,
-  removeSelectedKeys
+  removeSelectedKeys,
+  selectionTargets
 } from '@editor/timeline/actions'
 import type { KeyKind, KeySelector, TimelineTrack } from '@editor/timeline/model'
 import DopeSheet, { markTimelineSelection } from './DopeSheet'
@@ -558,28 +559,10 @@ export default function TimelinePanel({ onStatus = () => undefined }: TimelinePa
   )
 }
 
-/** 把当前选中对象映射为可打关键帧的目标 */
-function selectionTargets(selection: ReturnType<typeof useSelectionStore.getState>): Array<{
-  kind: KeyKind
-  target: string
-  attachment: string
-}> {
-  // 多选：整批骨骼都算目标（按 K 一次给所有选中骨骼打帧）
-  if (selection.kind === 'bone' && selection.bones.length > 0) {
-    return selection.bones.map((name) => ({ kind: 'bone' as KeyKind, target: name, attachment: '' }))
-  }
-  if (selection.kind === 'slot' && selection.slot) {
-    return [{ kind: 'slot', target: selection.slot, attachment: '' }]
-  }
-  if (selection.kind === 'attachment' && selection.slot && selection.attachment) {
-    return [{ kind: 'deform', target: selection.slot, attachment: selection.attachment }]
-  }
-  // 约束：与「打关键帧」按钮 / K 键走同一套目标映射（IK 的 mix 是可做动画的）
-  if (selection.kind === 'constraint' && selection.constraint) {
-    return [{ kind: 'constraint', target: selection.constraint, attachment: '' }]
-  }
-  return []
-}
+/*
+ * 打帧目标映射直接用 `@editor/timeline/actions` 里那一份（原先这里复制了一份单附件版本，
+ * 于是「按 K 给整批选中 display 打帧」只在一边生效 —— 两处必须同源，别各写一份）。
+ */
 
 /**
  * 点击轨道 → 在场景里同步选中对应对象。

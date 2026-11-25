@@ -437,6 +437,112 @@ export interface AttachmentPixelOptions {
  *
  * 重叠命中时取**最后绘制**的那个（视觉上最上层的），与「点到的就是看到的」一致。
  */
+export interface RectPickOptions extends AttachmentPixelOptions {
+  /** 采样网格步长（世界单位，≈1 个屏幕像素由调用方换算） */
+  step: number
+  /** 单方向最多采样点数：框很大时自动放大步长，避免拖动时每帧扫几万个点（默认 200） */
+  maxSamplesPerAxis?: number
+}
+
+/**
+ * 框选附件（**像素级**）：矩形里只要落着一个**不透明像素**就算命中。
+ *
+ * 与 `pickAttachmentPixel` 同一套口径（重心坐标插值 UV → 采样 alpha）：
+ * - 只看**实际图形**，不看包围盒 —— 带透明留白的美术（道具 / 特效 / 圆角图），
+ *   框住空白不会把它选进来；
+ * - 只采样「三角形 AABB ∩ 矩形」这一块，命中即停（每个插槽最多判定到第一个不透明像素），
+ *   所以常见的不透明图几乎零成本；
+ * - 步长约 1 屏幕像素，单方向最多 `maxSamplesPerAxis` 点：像素级 ≠ 逐像素，
+ *   拖动时每帧都要算，比步长还薄的缝隙会漏判（肉眼不可见）；
+ * - 纹理未就绪时 `alphaAt` 返回 1 → 退化成几何命中，不会出现「图没加载完就框不到」。
+ *
+ * 返回**命中顺序**（= 绘制顺序）的插槽下标；调用方拿最后一个当主选中就是视觉最上层那个。
+ */
+export function pickAttachmentSlotsInRect(
+  result: MeshBuildResult | null,
+  rect: { minX: number; minY: number; maxX: number; maxY: number },
+  options: RectPickOptions
+): number[] {
+  if (!result || result.vertexCount === 0) return []
+  const { minX, minY, maxX, maxY } = rect
+  const threshold = options.alphaThreshold ?? 0.03
+  const maxPerAxis = options.maxSamplesPerAxis ?? 200
+  const positions = result.positions
+  const uvs = result.uvs
+  const sourceSlot = result.sourceSlot
+
+  // 逐插槽 AABB 粗筛：先排除掉整块都不在框里的（不可见插槽没有顶点，天然被排除）
+  const boxes = new Map<number, { minX: number; minY: number; maxX: number; maxY: number }>()
+  for (let i = 0; i < result.vertexCount; i++) {
+    const slotIndex = sourceSlot[i]
+    if (slotIndex < 0) continue
+    const x = positions[i * 2]
+    const y = positions[i * 2 + 1]
+    const box = boxes.get(slotIndex)
+    if (!box) {
+      boxes.set(slotIndex, { minX: x, minY: y, maxX: x, maxY: y })
+      continue
+    }
+    if (x < box.minX) box.minX = x
+    if (x > box.maxX) box.maxX = x
+    if (y < box.minY) box.minY = y
+    if (y > box.maxY) box.maxY = y
+  }
+  const candidates = new Set<number>()
+  for (const [slotIndex, box] of boxes) {
+    if (box.maxX < minX || box.minX > maxX || box.maxY < minY || box.minY > maxY) continue
+    candidates.add(slotIndex)
+  }
+  if (candidates.size === 0) return []
+
+  const baseStep = Math.max(options.step, (maxX - minX) / maxPerAxis, (maxY - minY) / maxPerAxis, 1e-6)
+  const hitSlots = new Set<number>()
+  for (const group of result.groups) {
+    const indices = group.indices
+    for (let t = 0; t + 2 < group.indexCount; t += 3) {
+      const i0 = indices[t]
+      const i1 = indices[t + 1]
+      const i2 = indices[t + 2]
+      const slotIndex = sourceSlot[i0]
+      if (slotIndex < 0 || !candidates.has(slotIndex) || hitSlots.has(slotIndex)) continue
+      const x0 = positions[i0 * 2]
+      const y0 = positions[i0 * 2 + 1]
+      const x1 = positions[i1 * 2]
+      const y1 = positions[i1 * 2 + 1]
+      const x2 = positions[i2 * 2]
+      const y2 = positions[i2 * 2 + 1]
+      // 三角形 AABB ∩ 矩形 = 真正要采样的范围
+      const sx = Math.max(minX, Math.min(x0, x1, x2))
+      const ex = Math.min(maxX, Math.max(x0, x1, x2))
+      const sy = Math.max(minY, Math.min(y0, y1, y2))
+      const ey = Math.min(maxY, Math.max(y0, y1, y2))
+      if (sx > ex || sy > ey) continue
+      const denom = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+      if (Math.abs(denom) < 1e-12) continue
+      // 采样点取格子中心；范围比步长还小时缩到 2 个点，避免「框到一角却一个点都没采到」
+      const stepX = Math.min(baseStep, Math.max((ex - sx) / 2, 1e-5))
+      const stepY = Math.min(baseStep, Math.max((ey - sy) / 2, 1e-5))
+      const image = options.imageOfSlot(slotIndex)
+      let hit = false
+      for (let y = sy + stepY * 0.5; y <= ey + 1e-9 && !hit; y += stepY) {
+        for (let x = sx + stepX * 0.5; x <= ex + 1e-9; x += stepX) {
+          const w0 = ((y1 - y2) * (x - x2) + (x2 - x1) * (y - y2)) / denom
+          const w1 = ((y2 - y0) * (x - x2) + (x0 - x2) * (y - y2)) / denom
+          const w2 = 1 - w0 - w1
+          if (w0 < 0 || w1 < 0 || w2 < 0) continue
+          const u = uvs[i0 * 2] * w0 + uvs[i1 * 2] * w1 + uvs[i2 * 2] * w2
+          const v = uvs[i0 * 2 + 1] * w0 + uvs[i1 * 2 + 1] * w1 + uvs[i2 * 2 + 1] * w2
+          if (image && options.alphaAt(image, u, v) < threshold) continue
+          hit = true
+          break
+        }
+      }
+      if (hit) hitSlots.add(slotIndex)
+    }
+  }
+  return [...hitSlots]
+}
+
 export function pickAttachmentPixel(
   result: MeshBuildResult | null,
   x: number,

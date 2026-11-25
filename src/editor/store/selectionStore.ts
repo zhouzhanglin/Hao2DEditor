@@ -19,6 +19,16 @@ export type SelectedObject =
   | { kind: 'slot'; name: string }
   | { kind: 'display'; slot: string; name: string }
 
+/**
+ * 一个 display 的定位（插槽 + 附件）。
+ *
+ * 跨插槽也能比较：同名附件可能同时出现在多个插槽里，只按附件名比会认错。
+ */
+export interface AttachmentRef {
+  slot: string
+  attachment: string
+}
+
 export interface Selection {
   kind: SelectionKind
   /** 主选中骨骼名（检查器、操作器轴心、父子挂载点这些「单目标」入口读它） */
@@ -34,8 +44,16 @@ export interface Selection {
   slot: string
   /** 皮肤名 */
   skin: string
-  /** 附件名 */
+  /** 附件名（**主选中**；多选时就是最后点中的那个） */
   attachment: string
+  /**
+   * 选中的附件集合（含主选中，顺序 = 点选顺序）。
+   *
+   * 与 `bones` 同一套约定：单选时就是一项；多选时 `attachment` / `slot` 仍指向**主选中**，
+   * 检查器、附件操作器、打帧条这些单目标入口继续读那两个字段，不用各自改成集合。
+   * `kind !== 'attachment'` 时为空数组。
+   */
+  attachments: AttachmentRef[]
   /** 约束名 */
   constraint: string
   /** 选中的网格顶点（共享顶点缓冲下标） */
@@ -74,6 +92,10 @@ export interface SelectionState extends Selection {
   toggleBone: (name: string) => void
   selectSlot: (name: string) => void
   selectAttachment: (slot: string, attachment: string) => void
+  /** 直接把集合替换成这几个附件（主选中 = 最后一个）；空数组等于取消选择 */
+  selectAttachments: (items: readonly AttachmentRef[]) => void
+  /** 多选点击（Shift / Cmd / Ctrl）：已在集合里就移出，否则追加并成为主选中 */
+  toggleAttachment: (slot: string, attachment: string) => void
   selectConstraint: (name: string) => void
   selectVertices: (vertices: number[]) => void
   clear: () => void
@@ -86,6 +108,7 @@ const EMPTY: Selection = {
   slot: '',
   skin: '',
   attachment: '',
+  attachments: [],
   constraint: '',
   vertices: [],
   vertex: -1
@@ -96,7 +119,14 @@ function toSelectedObjects(state: Selection): SelectedObject[] {
   if (state.kind === 'bone') return state.bones.map((name) => ({ kind: 'bone', name }))
   if (state.kind === 'slot') return state.slot ? [{ kind: 'slot', name: state.slot }] : []
   if (state.kind === 'attachment') {
-    return state.attachment ? [{ kind: 'display', slot: state.slot, name: state.attachment }] : []
+    // 集合是唯一真相；`attachments` 为空但还留着 `attachment` 时（老调用方只写单值）按单选兜底
+    const list =
+      state.attachments.length > 0
+        ? state.attachments
+        : state.attachment
+          ? [{ slot: state.slot, attachment: state.attachment }]
+          : []
+    return list.map((item) => ({ kind: 'display', slot: item.slot, name: item.attachment }))
   }
   return []
 }
@@ -104,6 +134,14 @@ function toSelectedObjects(state: Selection): SelectedObject[] {
 /** 逐项比两个数组是否同内容（`bones` / `vertices` 都是短数组，直接比即可） */
 function sameItems<T>(a: readonly T[], b: readonly T[]): boolean {
   return a.length === b.length && a.every((item, index) => item === b[index])
+}
+
+/** display 是对象（插槽 + 附件），不能按引用比 —— 拆成两个字段逐个对 */
+function sameAttachmentRefs(a: readonly AttachmentRef[], b: readonly AttachmentRef[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((item, index) => item.slot === b[index].slot && item.attachment === b[index].attachment)
+  )
 }
 
 /**
@@ -120,7 +158,8 @@ function sameObjectSelection(a: Selection, b: Selection): boolean {
     a.constraint === b.constraint &&
     a.vertex === b.vertex &&
     sameItems(a.bones, b.bones) &&
-    sameItems(a.vertices, b.vertices)
+    sameItems(a.vertices, b.vertices) &&
+    sameAttachmentRefs(a.attachments, b.attachments)
   )
 }
 
@@ -189,6 +228,13 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
       }
       // 切到非骨骼对象（插槽 / 附件 / 约束 / 无）时集合一律清空，否则叠加层还画着上一批骨骼
       if (partial.kind !== undefined && partial.kind !== 'bone') next.bones = []
+      // 附件的单值 / 集合同理：只给主选中就按单选处理，切走时清空
+      if (partial.attachments === undefined && partial.attachment !== undefined) {
+        next.attachments = partial.attachment
+          ? [{ slot: partial.slot ?? state.slot, attachment: partial.attachment }]
+          : []
+      }
+      if (partial.kind !== undefined && partial.kind !== 'attachment') next.attachments = []
       /*
        * 切换主选中对象时清掉顶点选择，避免跨对象残留 —— 但**本次显式给了顶点**就照给的来：
        * 权重工具「点顶点」正是这种调用（kind 从 bone 变成 attachment，同时给出新顶点），
@@ -210,6 +256,8 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
         kind: 'bone',
         bone: name,
         bones: name ? [name] : [],
+        // 换到骨骼就清掉附件集合：留着会让「上次框选的 display」在叠加层里阴魂不散
+        attachments: [],
         vertices: keep ? state.vertices : [],
         vertex: keep ? state.vertex : -1
       })
@@ -225,6 +273,7 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
         kind: unique.length > 0 ? 'bone' : 'none',
         bone: unique.length > 0 ? unique[unique.length - 1] : '',
         bones: unique,
+        attachments: [],
         vertices: [],
         vertex: -1
       })
@@ -238,13 +287,14 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
       const has = state.bones.includes(name)
       const bones = has ? state.bones.filter((item) => item !== name) : [...state.bones, name]
       if (bones.length === 0) {
-        return commit(state, { kind: 'none', bone: '', bones: [], vertices: [], vertex: -1 })
+        return commit(state, { kind: 'none', bone: '', bones: [], attachments: [], vertices: [], vertex: -1 })
       }
       return commit(state, {
         kind: 'bone',
         // 新加进来的那根成为主选中；移出的若是主选中，就退回集合里最后一根
         bone: has && state.bone !== name ? state.bone : bones[bones.length - 1],
         bones,
+        attachments: [],
         vertices: [],
         vertex: -1
       })
@@ -253,23 +303,89 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
 
   selectSlot: (name) => {
     clearTrackFocus()
-    set((state) => commit(state, { kind: 'slot', slot: name, bones: [], vertices: [], vertex: -1 }))
+    set((state) =>
+      commit(state, { kind: 'slot', slot: name, bones: [], attachments: [], vertices: [], vertex: -1 })
+    )
   },
 
-  selectAttachment: (slot, attachment) =>
+  selectAttachment: (slot, attachment) => {
+    clearTrackFocus()
     set((state) =>
       commit(state, {
         kind: 'attachment',
         slot,
         attachment,
+        // 单选 = 集合只剩这一项（多选后普通点一下就是「收窄到这个」）
+        attachments: attachment ? [{ slot, attachment }] : [],
         bones: [],
         vertices: [],
         vertex: -1
       })
-    ),
+    )
+  },
+
+  selectAttachments: (items) => {
+    clearTrackFocus()
+    // 去重（同一 display 可能被框选两次）+ 丢掉空项；顺序 = 点选顺序，最后一个当主选中
+    const unique: AttachmentRef[] = []
+    for (const item of items) {
+      if (!item || !item.attachment) continue
+      if (unique.some((other) => other.slot === item.slot && other.attachment === item.attachment)) continue
+      unique.push({ slot: item.slot, attachment: item.attachment })
+    }
+    const primary = unique[unique.length - 1]
+    set((state) =>
+      commit(state, {
+        kind: unique.length > 0 ? 'attachment' : 'none',
+        slot: primary?.slot ?? '',
+        attachment: primary?.attachment ?? '',
+        attachments: unique,
+        bones: [],
+        vertices: [],
+        vertex: -1
+      })
+    )
+  },
+
+  toggleAttachment: (slot, attachment) => {
+    clearTrackFocus()
+    if (!attachment) return
+    set((state) => {
+      const has = state.attachments.some((item) => item.slot === slot && item.attachment === attachment)
+      const list = has
+        ? state.attachments.filter((item) => !(item.slot === slot && item.attachment === attachment))
+        : [...state.attachments, { slot, attachment }]
+      if (list.length === 0) {
+        return commit(state, {
+          kind: 'none',
+          slot: '',
+          attachment: '',
+          attachments: [],
+          bones: [],
+          vertices: [],
+          vertex: -1
+        })
+      }
+      // 移出的若是主选中，就退回集合里最后一个（与 toggleBone 同一套规则）
+      const primary = has && state.attachment !== attachment ? state.attachment : list[list.length - 1].attachment
+      const primarySlot =
+        has && state.attachment !== attachment ? state.slot : list[list.length - 1].slot
+      return commit(state, {
+        kind: 'attachment',
+        slot: primarySlot,
+        attachment: primary,
+        attachments: list,
+        bones: [],
+        vertices: [],
+        vertex: -1
+      })
+    })
+  },
 
   selectConstraint: (name) =>
-    set((state) => commit(state, { kind: 'constraint', constraint: name, bones: [], vertices: [], vertex: -1 })),
+    set((state) =>
+      commit(state, { kind: 'constraint', constraint: name, bones: [], attachments: [], vertices: [], vertex: -1 })
+    ),
 
   // 框选只拿得到共享缓冲下标，没有「附件内下标」→ 单选标记一律清掉
   selectVertices: (vertices) => set((state) => commit(state, { vertices, vertex: -1 })),

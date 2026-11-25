@@ -208,9 +208,11 @@ export default function SlotOrderPanel({ onStatus = () => undefined }: { onStatu
         {layers.map((name, index) => {
           const slot = rowByName(document, name)
           if (!slot) return null
-          // 选中 display（附件）时也高亮它所属的插槽：两处选择是同一个对象
+          // 选中 display（附件）时也高亮它所属的插槽：两处选择是同一个对象。
+          // 多选跨插槽时，凡是有选中 display 的插槽都亮（否则只有主选中那个插槽亮，像是漏选）
           const active =
-            (selection.kind === 'slot' || selection.kind === 'attachment') && selection.slot === name
+            (selection.kind === 'slot' && selection.slot === name) ||
+            (selection.kind === 'attachment' && selection.attachments.some((item) => item.slot === name))
           return (
             <div
               key={name}

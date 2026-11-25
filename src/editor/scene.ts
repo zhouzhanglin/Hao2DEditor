@@ -34,6 +34,8 @@ import {
   pickAttachmentSlotsInRect,
   pickBone,
   pickBoneHandle,
+  pickBonesInRect as pickBonesInRectPure,
+  pickConstraintsInRect as pickConstraintsInRectPure,
   pickGizmo,
   pickGizmoFrame,
   pickShearEdge,
@@ -160,6 +162,11 @@ export interface SceneViewState {
    * 拿它当预览会让拖动中闪过一批「其实还没选中」的对象状态；这里只影响描边。
    */
   boxPreview: Array<{ slot: string; attachment: string }>
+  /**
+   * 框选**骨骼**过程中的实时预览（骨骼名）：框选一次只能选一种类型，
+   * 骨骼模式的拖动中把命中的骨骼先按「选中」画出来（与 display 的 `boxPreview` 同一用途）。
+   */
+  boxPreviewBones: string[]
   /**
    * 鼠标底下的 display（悬停预览）：画一圈**更弱**的轮廓，点下去之前就知道会选中谁。
    * 只在选择工具下计算（其它工具点下去干的是别的事）；null = 不画。
@@ -344,6 +351,7 @@ export class EditorScene {
     selectedDisplays: [],
     displayBox: null,
     boxPreview: [],
+    boxPreviewBones: [],
     hoveredDisplay: null,
     weightBones: [],
     weightTargetBone: '',
@@ -536,8 +544,8 @@ export class EditorScene {
     if (patch.vertexBox !== undefined) this.markDirty()
     // display 框选矩形（选择 / Pose 工具）：同上
     if (patch.displayBox !== undefined) this.markDirty()
-    // 框选的实时预览：每框进 / 框出一个都要刷新描边
-    if (patch.boxPreview !== undefined) this.markDirty()
+    // 框选的实时预览：每框进 / 框出一个都要刷新描边（骨骼模式同理）
+    if (patch.boxPreview !== undefined || patch.boxPreviewBones !== undefined) this.markDirty()
     // 网格子工具的折线同理：橡皮筋每动一下就要重画
     if (patch.pendingMeshPath !== undefined) this.markDirty()
     // 进出「自己绘制边界」要换一整帧的显示（藏网格 / 画 region 框）
@@ -1417,6 +1425,47 @@ export class EditorScene {
     return out
   }
 
+  /**
+   * 框选骨骼：骨骼**线段**与矩形相交即命中（见 `pickBonesInRect` 的口径）。
+   *
+   * 锁定骨骼跳过：与视口点选一致（点锁定的骨骼只会得到一句提示，不会进选中集合）。
+   * 骨骼层关掉时返回空 —— 看不见的骨骼不该被框进来。
+   */
+  pickBonesInRect(minX: number, minY: number, maxX: number, maxY: number): string[] {
+    const bundle = this.bundle
+    if (!bundle || !this.viewState.overlay.bones) return []
+    const out: string[] = []
+    for (const index of pickBonesInRectPure(bundle.skeleton, { minX, minY, maxX, maxY })) {
+      const name = bundle.asset.bones[index]?.name ?? ''
+      if (!name) continue
+      if (bundle.sourceDocument.bones.some((bone) => bone.name === name && bone.locked)) continue
+      out.push(name)
+    }
+    return out
+  }
+
+  /**
+   * 框选约束：标记锚点落在矩形（外扩一个标记半径）内即命中。
+   *
+   * 「约束」叠加层关掉时返回空 —— 与「看不见就不该被选中」同一原则。
+   */
+  pickConstraintsInRect(minX: number, minY: number, maxX: number, maxY: number): string[] {
+    const bundle = this.bundle
+    if (!bundle || !this.viewState.overlay.constraints) return []
+    const pad = this.viewport.pixelsToWorld(10)
+    const out: string[] = []
+    for (const index of pickConstraintsInRectPure(
+      bundle.skeleton,
+      bundle.asset.constraints,
+      { minX, minY, maxX, maxY },
+      pad
+    )) {
+      const name = bundle.asset.constraints[index]?.name ?? ''
+      if (name) out.push(name)
+    }
+    return out
+  }
+
   /** 顶点对应的附件（权重显示与拾取共用） */
   attachmentAt(slotIndex: number, displayIndex: number): AttachmentData | null {
     return this.view?.meshBuilder.attachmentAt(slotIndex, displayIndex) ?? null
@@ -2141,6 +2190,11 @@ export class EditorScene {
         if (index >= 0) selectedBoneIndices.add(index)
       }
       if (selectedIndex >= 0) selectedBoneIndices.add(selectedIndex)
+      // 框选骨骼的实时预览：先按「选中」画出来，松手前就能看出会选中哪几根
+      for (const name of state.boxPreviewBones) {
+        const index = bundle.boneIndex[name] ?? -1
+        if (index >= 0) selectedBoneIndices.add(index)
+      }
     }
     /*
      * 选中网格绑定的骨骼：名字 → 索引（已被删除的骨骼自动略过），并按它在「权重骨骼列表」

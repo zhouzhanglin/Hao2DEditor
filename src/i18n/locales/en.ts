@@ -1083,8 +1083,21 @@ export const en: Record<string, string> = {
   '{0} 个附件（主选中「{1}」）': '{0} displays (primary "{1}")',
   '框选 display：拖出矩形，松手选中框内的附件':
     'Box select displays: drag a rectangle, release to select the attachments inside',
-  '框选 display（Shift：加进当前选择）：拖出矩形，松手选中框内的附件':
-    'Box select displays (Shift: add to current selection): drag a rectangle, release to select the attachments inside',
+  'Shift：加进当前选择': 'Shift: add to current selection',
+  '框选骨骼：拖出矩形，松手选中框内的骨骼':
+    'Box select bones: drag a rectangle, release to select the bones inside',
+  '框选约束：拖出矩形，松手选中框内的约束':
+    'Box select constraints: drag a rectangle, release to select the constraints inside',
+  '框选：先框到什么就框哪一类（骨骼 / 约束 / display）':
+    'Box select: whatever gets framed first decides the type (bones / constraints / displays)',
+  '框选到 {0} 根骨骼（共选中 {1} 根）': 'Box-selected {0} bones ({1} selected in total)',
+  '框选：矩形里没有骨骼': 'Box select: no bones inside the rectangle',
+  '框选到 {0} 个约束（共选中 {1} 个）': 'Box-selected {0} constraints ({1} selected in total)',
+  '框选：矩形里没有约束': 'Box select: no constraints inside the rectangle',
+  '切到 Pose 状态才能删除约束（约束属于绑定数据）':
+    'Switch to Pose to delete constraints (constraints are binding data)',
+  '已删除 {0} 个约束': 'Deleted {0} constraints',
+  '{0} 个约束（主选中「{1}」）': '{0} constraints (primary "{1}")',
   '框选到 {0} 个附件（共选中 {1} 个）': 'Box-selected {0} displays ({1} selected in total)',
   '框选：矩形里没有附件': 'Box select: no displays inside the rectangle',
   '框选：框到的 {0} 个附件所在插槽已锁定，未选中':

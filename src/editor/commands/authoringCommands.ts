@@ -1495,6 +1495,18 @@ export function deleteAttachment(doc: EditorDocument, slotName: string, attachme
 }
 
 /**
+ * 删除一条约束，并清掉所有动画里对应的约束轨道。
+ *
+ * 约束属于绑定数据：轨道留着指向已删约束会让时间轴出现「选不中、也删不掉」的行。
+ */
+export function deleteConstraint(doc: EditorDocument, name: string): void {
+  doc.constraints = doc.constraints.filter((item) => item.name !== name)
+  for (const animation of doc.animations) {
+    animation.constraints = animation.constraints.filter((track) => track.constraint !== name)
+  }
+}
+
+/**
  * 权重刷：以世界坐标为中心、radius 为半径，对目标附件顶点刷权重的权重（模式见 BrushMode）。
  *
  * 笔刷手感按 **Spine Weights 工具**：

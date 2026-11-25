@@ -60,6 +60,7 @@ import {
   addImageDisplay,
   createRegionFromImage,
   deleteAttachment,
+  deleteConstraint,
   deleteBone,
   deleteSlot,
   resolveAttachment,
@@ -2182,12 +2183,19 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
       depth={depth}
       label={constraint.name}
       title={constraintRowTitle(constraint)}
-      active={selection.kind === 'constraint' && selection.constraint === constraint.name}
+      // 多选（视口框选 / Shift 点击）时集合里有的行全部高亮
+      active={selection.kind === 'constraint' && selection.constraints.includes(constraint.name)}
       // 约束没有拖动负载，双击聚焦的目标只能显式给（骨骼 / 插槽 / display 都由负载推导）
       focusTarget={{ kind: 'constraint', name: constraint.name }}
       icon={CONSTRAINT_ICON[constraint.type] ?? <Link2 size={11} />}
       // 行尾描述（IK N 骨 / 类型名）不写：类型由图标表达，骨骼链在悬浮说明里，删掉后名字不再被截断
-      onSelect={() => selection.selectConstraint(constraint.name)}
+      onSelect={(event) => {
+        if (event.shiftKey || event.metaKey || event.ctrlKey) {
+          selection.toggleConstraint(constraint.name)
+        } else {
+          selection.selectConstraint(constraint.name)
+        }
+      }}
       onContextMenu={(event) =>
         openMenu(event, { kind: 'constraint', name: constraint.name, bone: constraint.bones[0] ?? '' })
       }
@@ -2554,12 +2562,8 @@ export default function HierarchyTree({ onStatus }: HierarchyTreeProps) {
 }
 
 function removeConstraint(update: (label: string, mutate: (draft: EditorDocument) => void) => void, name: string): void {
-  update(t('删除约束'), (draft) => {
-    draft.constraints = draft.constraints.filter((c) => c.name !== name)
-    for (const animation of draft.animations) {
-      animation.constraints = animation.constraints.filter((t) => t.constraint !== name)
-    }
-  })
+  // 与视口 Delete / 批量删除共用同一份实现（含「清掉动画里的约束轨道」）
+  update(t('删除约束'), (draft) => deleteConstraint(draft, name))
 }
 
 function groupBones(bones: readonly AuthoringBone[]): Map<string, AuthoringBone[]> {

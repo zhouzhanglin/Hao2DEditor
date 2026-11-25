@@ -144,7 +144,7 @@ import ImportTargetDialog from '@ui/widgets/ImportTargetDialog'
 import { importPsdLayers, pickAndParsePsd, setPsdDialogOpener } from '@editor/services/psdImport'
 import type { ParsedPsd } from '@importers/psdImport'
 import { deleteSelectedTrack, keyframeNow, removeSelectedKeys } from '@editor/timeline/actions'
-import { PPU, deleteAttachment, deleteMeshVertex } from '@editor/commands/authoringCommands'
+import { PPU, deleteAttachment, deleteConstraint, deleteMeshVertex } from '@editor/commands/authoringCommands'
 import { deleteSelectedMaskPoint, undoMaskDraftPoint, undoMeshBoundaryPoint } from '@editor/tools/authoringTools'
 import { copySelection, pasteSelection, duplicateSelection } from '@editor/commands/clipboardCommands'
 import { statusWarn } from '@shared/status'
@@ -616,6 +616,23 @@ export default function App() {
            * 撤销时一起回来。
            */
           const selected = useSelectionStore.getState()
+          /*
+           * 选中的约束（一个或多个）：Delete 直接删。约束同样属于绑定数据，
+           * 与层级树的删除按钮同一规则 —— Animate 态不允许；整批一次 update，撤销一起回来。
+           */
+          if (selected.kind === 'constraint' && selected.constraints.length > 0) {
+            if (useModeStore.getState().mode !== 'pose') {
+              flash(statusWarn(t('切到 Pose 状态才能删除约束（约束属于绑定数据）')))
+              return
+            }
+            const names = [...selected.constraints]
+            useProjectStore.getState().update(t('删除约束'), (draft) => {
+              for (const name of names) deleteConstraint(draft, name)
+            })
+            useSelectionStore.getState().clear()
+            flash(names.length > 1 ? t('已删除 {0} 个约束', names.length) : t('已删除约束「{0}」', names[0]))
+            return
+          }
           if (selected.kind === 'attachment' && selected.attachments.length > 0) {
             if (useModeStore.getState().mode !== 'pose') {
               flash(statusWarn(t('切到 Pose 状态才能删除 display（附件属于绑定数据）')))
@@ -898,7 +915,9 @@ export default function App() {
               t('{0} 个附件（主选中「{1}」）', [selection.attachments.length, selection.attachment])
             : t('附件「{0}」', selection.attachment)
           : selection.kind === 'constraint'
-            ? t('约束「{0}」', selection.constraint)
+            ? selection.constraints.length > 1
+              ? t('{0} 个约束（主选中「{1}」）', [selection.constraints.length, selection.constraint])
+              : t('约束「{0}」', selection.constraint)
             : // 没选中对象时状态栏留空：当前是 Pose 还是 Animate 由视口左上角的切换按钮表示，
               // 这里再写一遍只是重复
               ''

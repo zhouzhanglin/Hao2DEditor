@@ -1,4 +1,5 @@
 import type { Skeleton } from '@core/model/skeleton'
+import type { Constraint } from '@core/model/constraints'
 import type { MeshBuildResult } from '@core/skin/meshBuilder'
 import type { AttachmentData } from '@core/model/types'
 
@@ -334,6 +335,102 @@ export function pickBone(skeleton: Skeleton, x: number, y: number, tolerance: nu
     }
   }
   return best
+}
+
+/** 屏幕矩形（世界坐标，y 向上为正）；框选骨骼 / 约束 / 附件共用 */
+export interface RectArea {
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+}
+
+/** 线段与矩形是否相交（端点落在矩形内，或与任一条边相交） */
+function segmentHitsRect(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  rect: RectArea
+): boolean {
+  const inside = (x: number, y: number): boolean =>
+    x >= rect.minX && x <= rect.maxX && y >= rect.minY && y <= rect.maxY
+  if (inside(x0, y0) || inside(x1, y1)) return true
+  const cross = (ox: number, oy: number, px: number, py: number, qx: number, qy: number): number =>
+    (px - ox) * (qy - oy) - (py - oy) * (qx - ox)
+  const intersects = (
+    ax: number,
+    ay: number,
+    bx: number,
+    by: number,
+    cx: number,
+    cy: number,
+    dx: number,
+    dy: number
+  ): boolean => {
+    const d1 = cross(cx, cy, dx, dy, ax, ay)
+    const d2 = cross(cx, cy, dx, dy, bx, by)
+    const d3 = cross(ax, ay, bx, by, cx, cy)
+    const d4 = cross(ax, ay, bx, by, dx, dy)
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
+  }
+  const { minX, minY, maxX, maxY } = rect
+  return (
+    intersects(x0, y0, x1, y1, minX, minY, maxX, minY) ||
+    intersects(x0, y0, x1, y1, maxX, minY, maxX, maxY) ||
+    intersects(x0, y0, x1, y1, maxX, maxY, minX, maxY) ||
+    intersects(x0, y0, x1, y1, minX, maxY, minX, minY)
+  )
+}
+
+/**
+ * 框选骨骼：骨骼**线段**（原点 → 末端）与矩形相交即命中。
+ *
+ * 与点选同一口径：末端按**不含剪切的旋转角**算（剪切只作用于蒙皮 / 附件，骨骼本体不跟着歪），
+ * 长度近似为 0 的骨骼退化成「原点落在矩形里」。
+ */
+export function pickBonesInRect(skeleton: Skeleton, rect: RectArea): number[] {
+  const out: number[] = []
+  for (let i = 0; i < skeleton.boneCount; i++) {
+    const o = i * 16
+    const bx = skeleton.world[o + 12]
+    const by = skeleton.world[o + 13]
+    const scale = Math.hypot(skeleton.world[o], skeleton.world[o + 1])
+    const angle = (unshearedWorldRot(skeleton, i) * Math.PI) / 180
+    const tip = Math.max(skeleton.asset.bones[i].length, 0.0001) * scale
+    const tx = bx + Math.cos(angle) * tip
+    const ty = by + Math.sin(angle) * tip
+    if (segmentHitsRect(bx, by, tx, ty, rect)) out.push(i)
+  }
+  return out
+}
+
+/**
+ * 框选约束：标记**锚点**落在矩形（外扩 `pad`）内即命中。
+ *
+ * 锚点与视口里画的标记一致：IK / 变换 / 路径 = 目标骨（准星画在那），物理 = 被约束骨骼
+ * （圆环画在原点）。`pad` 就是标记本身的半径 —— 标记是个图形，框碰到边缘也该算。
+ */
+export function pickConstraintsInRect(
+  skeleton: Skeleton,
+  constraints: readonly Constraint[],
+  rect: RectArea,
+  pad: number
+): number[] {
+  const out: number[] = []
+  for (let i = 0; i < constraints.length; i++) {
+    const constraint = constraints[i]
+    if (!constraint.enabled) continue
+    const boneIndex =
+      constraint.type === 'physics' ? (constraint.boneIndices[0] ?? -1) : constraint.targetBoneIndex
+    if (boneIndex < 0 || boneIndex >= skeleton.boneCount) continue
+    const x = skeleton.boneWorldX(boneIndex)
+    const y = skeleton.boneWorldY(boneIndex)
+    if (x < rect.minX - pad || x > rect.maxX + pad) continue
+    if (y < rect.minY - pad || y > rect.maxY + pad) continue
+    out.push(i)
+  }
+  return out
 }
 
 /** 顶点拾取：在共享顶点缓冲里找最近的顶点 */

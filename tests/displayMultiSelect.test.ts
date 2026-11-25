@@ -96,6 +96,33 @@ describe('display 多选（selection.attachments）', () => {
     ])
   })
 
+  it('K 打帧目标覆盖整批选中 display 之外，约束集合也遵循同一套约定', () => {
+    // 约束多选：框选 / Shift 点击都写进 `constraints`，单值 `constraint` 仍是主选中
+    useSelectionStore.getState().selectConstraints(['a', 'b', 'a'])
+    let state = useSelectionStore.getState()
+    expect(state.kind).toBe('constraint')
+    expect(state.constraints).toEqual(['a', 'b'])
+    expect(state.constraint).toBe('b')
+
+    useSelectionStore.getState().toggleConstraint('c')
+    state = useSelectionStore.getState()
+    expect(state.constraints).toEqual(['a', 'b', 'c'])
+    expect(state.constraint).toBe('c')
+
+    // 点单条 = 收敛成单选
+    useSelectionStore.getState().selectConstraint('a')
+    state = useSelectionStore.getState()
+    expect(state.constraints).toEqual(['a'])
+    expect(state.constraint).toBe('a')
+
+    // 切到骨骼 / display 时集合清空（避免叠加层 / 状态栏残留）
+    useSelectionStore.getState().selectBone('root')
+    expect(useSelectionStore.getState().constraints).toEqual([])
+    useSelectionStore.getState().selectConstraints(['x'])
+    useSelectionStore.getState().selectAttachment('slot', 'att')
+    expect(useSelectionStore.getState().constraints).toEqual([])
+  })
+
   it('K 打帧目标覆盖整批选中 display', () => {
     useSelectionStore
       .getState()

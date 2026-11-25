@@ -90,6 +90,14 @@ export interface ViewportCanvasProps {
   onStatus: (text: string) => void
 }
 
+/**
+ * 框选这一次拖动锁定的对象类型。
+ *
+ * 一次拖动只框一种：显示 / 骨骼 / 约束的对象集合与整批操作语义都不同，
+ * 混在一个框里选出来之后「拖动它们」到底动谁就说不清了。
+ */
+type BoxSelectMode = 'display' | 'bone' | 'constraint'
+
 /** pixi 画布挂载：创建 EditorScene，订阅 store 投喂状态，处理平移 / 缩放 / 拾取 */
 export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
@@ -586,6 +594,11 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       additive: boolean
       /** 已经拖过阈值（false = 还可能是单击） */
       dragging: boolean
+      /**
+       * 这一次拖动**只框哪一类**：按下时按当前选中决定（选着 display 就只框 display……）；
+       * 什么都没选时为 `null`，由「先框到什么」在拖动中定下来，之后整次拖动不再变。
+       */
+      mode: BoxSelectMode | null
     } | null
   }>({
     panning: false,
@@ -984,12 +997,30 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
        */
       const activeTool = useToolStore.getState().tool
       if (activeTool === 'select' || activeTool === 'pose') {
+        /*
+         * 一次拖动只框一种类型，按**当前选中**决定：
+         * - 选着 display → 只框 display（骨骼 / 约束排除）；
+         * - 选着骨骼 → 只框骨骼；
+         * - 选着约束 → 只框约束；
+         * - 什么都没选 → 交给拖动过程：先框到什么就框哪一类（见 onPointerMove）。
+         * 这样「框选」不会在同一个框里混着选三种东西，导致下一步的整批操作语义不明。
+         */
+        const current = useSelectionStore.getState()
+        const mode: BoxSelectMode | null =
+          current.kind === 'attachment' && current.attachments.length > 0
+            ? 'display'
+            : current.kind === 'bone' && current.bones.length > 0
+              ? 'bone'
+              : current.kind === 'constraint' && current.constraint
+                ? 'constraint'
+                : null
         pointer.current.box = {
           clientX: event.clientX,
           clientY: event.clientY,
           startWorld: { ...world },
           additive: multiSelect,
-          dragging: false
+          dragging: false,
+          mode
         }
         event.currentTarget.setPointerCapture(event.pointerId)
         return
@@ -1038,38 +1069,73 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     const box = p.box
     if (box) {
       if (!box.dragging && Math.hypot(event.clientX - box.clientX, event.clientY - box.clientY) <= 4) return
+      const rect = {
+        minX: Math.min(box.startWorld.x, world.x),
+        minY: Math.min(box.startWorld.y, world.y),
+        maxX: Math.max(box.startWorld.x, world.x),
+        maxY: Math.max(box.startWorld.y, world.y)
+      }
       if (!box.dragging) {
         box.dragging = true
         // 拉框时换十字光标，并收掉悬停预览（那一圈会跟着鼠标跑，和选框叠在一起看不清）
         if (event.currentTarget.style.cursor !== 'crosshair') event.currentTarget.style.cursor = 'crosshair'
         scene.setViewState({ hoveredDisplay: null })
-        onStatus(
-          box.additive
-            ? t('框选 display（Shift：加进当前选择）：拖出矩形，松手选中框内的附件')
-            : t('框选 display：拖出矩形，松手选中框内的附件')
-        )
+        const hint =
+          box.mode === 'bone'
+            ? t('框选骨骼：拖出矩形，松手选中框内的骨骼')
+            : box.mode === 'constraint'
+              ? t('框选约束：拖出矩形，松手选中框内的约束')
+              : box.mode === 'display'
+                ? t('框选 display：拖出矩形，松手选中框内的附件')
+                : t('框选：先框到什么就框哪一类（骨骼 / 约束 / display）')
+        onStatus(box.additive ? t('{0}（{1}）', [hint, t('Shift：加进当前选择')]) : hint)
       }
       /*
-       * 边拉框边算「这一框会选中谁」：不松手也能看到命中项的描边。
-       * 加选时把已选中的并进来（松手后就是同一批），锁定插槽照旧跳过。
+       * 边拉框边算「这一框会选中谁」：不松手也能看到命中项的高亮。
+       * 只算本次锁定的那一类；还没定类型时按**点选优先级**（骨骼 > 约束 > 图片）取第一个非空的，
+       * 定下后整次拖动不再变 —— 同一个框里混选三种对象，下一步的整批操作没法解释。
        */
-      const hits = scene
-        .pickAttachmentsInRect(
-          Math.min(box.startWorld.x, world.x),
-          Math.min(box.startWorld.y, world.y),
-          Math.max(box.startWorld.x, world.x),
-          Math.max(box.startWorld.y, world.y)
-        )
-        .filter((item) => !slotLocked(item.slot))
-      const preview = box.additive ? [...useSelectionStore.getState().attachments] : []
-      for (const hit of hits) {
-        if (!preview.some((item) => item.slot === hit.slot && item.attachment === hit.attachment)) {
-          preview.push(hit)
+      let mode = box.mode
+      let bones: string[] = []
+      let constraints: string[] = []
+      let displays: Array<{ slot: string; attachment: string }> = []
+      const collect = (): void => {
+        bones = mode === null || mode === 'bone' ? scene.pickBonesInRect(rect.minX, rect.minY, rect.maxX, rect.maxY) : []
+        constraints =
+          mode === 'constraint' || (mode === null && bones.length === 0)
+            ? scene.pickConstraintsInRect(rect.minX, rect.minY, rect.maxX, rect.maxY)
+            : []
+        displays =
+          mode === 'display' || (mode === null && bones.length === 0 && constraints.length === 0)
+            ? scene
+                .pickAttachmentsInRect(rect.minX, rect.minY, rect.maxX, rect.maxY)
+                .filter((item) => !slotLocked(item.slot))
+            : []
+      }
+      collect()
+      if (mode === null) {
+        if (bones.length > 0) mode = 'bone'
+        else if (constraints.length > 0) mode = 'constraint'
+        else if (displays.length > 0) mode = 'display'
+        // 定下类型后按该类重算一遍，别把「试探」阶段别的类型的命中留在预览里
+        if (mode !== null) {
+          box.mode = mode
+          collect()
+        }
+      }
+      // display 加选时把已选中的并进来（松手后就是同一批）
+      const displayPreview = mode === 'display' && box.additive ? [...useSelectionStore.getState().attachments] : []
+      if (mode === 'display') {
+        for (const hit of displays) {
+          if (!displayPreview.some((item) => item.slot === hit.slot && item.attachment === hit.attachment)) {
+            displayPreview.push(hit)
+          }
         }
       }
       scene.setViewState({
         displayBox: { x0: box.startWorld.x, y0: box.startWorld.y, x1: world.x, y1: world.y },
-        boxPreview: preview
+        boxPreview: displayPreview,
+        boxPreviewBones: mode === 'bone' ? bones : []
       })
       scene.markDirty()
       return
@@ -1302,36 +1368,59 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
       const scene = sceneRef.current
       // 指针被系统取消（触摸被抢 / 窗口失焦）：只收掉选框与预览，不改选择
       if (event.type === 'pointercancel') {
-        scene?.setViewState({ displayBox: null, boxPreview: [] })
+        scene?.setViewState({ displayBox: null, boxPreview: [], boxPreviewBones: [] })
         scene?.markDirty()
       } else if (!box.dragging) {
         useSelectionStore.getState().clear()
         onStatus(t('已取消选择'))
       } else if (scene) {
-        const rect = event.currentTarget.getBoundingClientRect()
-        const end = scene.viewport.screenToWorld(event.clientX - rect.left, event.clientY - rect.top)
-        // 选框和实时预览一起收掉：接下来由选中集合自己画描边
-        scene.setViewState({ displayBox: null, boxPreview: [] })
-        const hits = scene.pickAttachmentsInRect(
-          Math.min(box.startWorld.x, end.x),
-          Math.min(box.startWorld.y, end.y),
-          Math.max(box.startWorld.x, end.x),
-          Math.max(box.startWorld.y, end.y)
-        )
-        const locked = hits.filter((item) => slotLocked(item.slot))
-        const usable = hits.filter((item) => !slotLocked(item.slot))
+        const bounds = event.currentTarget.getBoundingClientRect()
+        const end = scene.viewport.screenToWorld(event.clientX - bounds.left, event.clientY - bounds.top)
+        const minX = Math.min(box.startWorld.x, end.x)
+        const minY = Math.min(box.startWorld.y, end.y)
+        const maxX = Math.max(box.startWorld.x, end.x)
+        const maxY = Math.max(box.startWorld.y, end.y)
+        // 选框和实时预览一起收掉：接下来由选中集合自己画高亮
+        scene.setViewState({ displayBox: null, boxPreview: [], boxPreviewBones: [] })
         // 拉框期间换成了十字光标，松手恢复（下一次 pointermove 也会按悬停重新设一遍）
         if (event.currentTarget.style.cursor !== 'default') event.currentTarget.style.cursor = 'default'
         const selection = useSelectionStore.getState()
-        selection.selectAttachments(box.additive ? [...selection.attachments, ...usable] : usable)
-        const total = useSelectionStore.getState().attachments.length
-        onStatus(
-          usable.length > 0
-            ? t('框选到 {0} 个附件（共选中 {1} 个）', [usable.length, total])
-            : locked.length > 0
-              ? t('框选：框到的 {0} 个附件所在插槽已锁定，未选中', locked.length)
-              : t('框选：矩形里没有附件')
-        )
+        if (box.mode === 'bone') {
+          const hits = scene.pickBonesInRect(minX, minY, maxX, maxY)
+          selection.selectBones(box.additive ? [...selection.bones, ...hits] : hits)
+          const total = useSelectionStore.getState().bones.length
+          onStatus(
+            hits.length > 0
+              ? t('框选到 {0} 根骨骼（共选中 {1} 根）', [hits.length, total])
+              : t('框选：矩形里没有骨骼')
+          )
+        } else if (box.mode === 'constraint') {
+          const hits = scene.pickConstraintsInRect(minX, minY, maxX, maxY)
+          selection.selectConstraints(box.additive ? [...selection.constraints, ...hits] : hits)
+          const total = useSelectionStore.getState().constraints.length
+          onStatus(
+            hits.length > 0
+              ? t('框选到 {0} 个约束（共选中 {1} 个）', [hits.length, total])
+              : t('框选：矩形里没有约束')
+          )
+        } else if (box.mode === 'display') {
+          const hits = scene.pickAttachmentsInRect(minX, minY, maxX, maxY)
+          const locked = hits.filter((item) => slotLocked(item.slot))
+          const usable = hits.filter((item) => !slotLocked(item.slot))
+          selection.selectAttachments(box.additive ? [...selection.attachments, ...usable] : usable)
+          const total = useSelectionStore.getState().attachments.length
+          onStatus(
+            usable.length > 0
+              ? t('框选到 {0} 个附件（共选中 {1} 个）', [usable.length, total])
+              : locked.length > 0
+                ? t('框选：框到的 {0} 个附件所在插槽已锁定，未选中', locked.length)
+                : t('框选：矩形里没有附件')
+          )
+        } else {
+          // 整次拖动什么都没框到：按「点空白」处理
+          selection.clear()
+          onStatus(t('已取消选择'))
+        }
         scene.markDirty()
       }
     }

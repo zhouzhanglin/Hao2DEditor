@@ -54,8 +54,15 @@ export interface Selection {
    * `kind !== 'attachment'` 时为空数组。
    */
   attachments: AttachmentRef[]
-  /** 约束名 */
+  /** 约束名（**主选中**；多选时就是最后框到的那个） */
   constraint: string
+  /**
+   * 选中的约束集合（含主选中，顺序 = 框选 / 点选顺序）。
+   *
+   * 与 `bones` / `attachments` 同一套约定：单目标入口（检查器、视口参数条）继续读
+   * `constraint` 这个单值字段。`kind !== 'constraint'` 时为空数组。
+   */
+  constraints: string[]
   /** 选中的网格顶点（共享顶点缓冲下标） */
   vertices: number[]
   /**
@@ -97,6 +104,10 @@ export interface SelectionState extends Selection {
   /** 多选点击（Shift / Cmd / Ctrl）：已在集合里就移出，否则追加并成为主选中 */
   toggleAttachment: (slot: string, attachment: string) => void
   selectConstraint: (name: string) => void
+  /** 直接把约束集合替换成这几个（主选中 = 最后一个）；空数组等于取消选择 */
+  selectConstraints: (names: readonly string[]) => void
+  /** 多选点击（Shift / Cmd / Ctrl）：已在集合里就移出，否则追加并成为主选中 */
+  toggleConstraint: (name: string) => void
   selectVertices: (vertices: number[]) => void
   clear: () => void
 }
@@ -110,6 +121,7 @@ const EMPTY: Selection = {
   attachment: '',
   attachments: [],
   constraint: '',
+  constraints: [],
   vertices: [],
   vertex: -1
 }
@@ -159,7 +171,8 @@ function sameObjectSelection(a: Selection, b: Selection): boolean {
     a.vertex === b.vertex &&
     sameItems(a.bones, b.bones) &&
     sameItems(a.vertices, b.vertices) &&
-    sameAttachmentRefs(a.attachments, b.attachments)
+    sameAttachmentRefs(a.attachments, b.attachments) &&
+    sameItems(a.constraints, b.constraints)
   )
 }
 
@@ -186,6 +199,15 @@ function commit(
 ): SelectionState {
   // 标成 `SelectionState`（而不是 `Selection`）：里面要带上 action 方法，否则返回类型不成立
   const next: SelectionState = { ...state, ...patch }
+  /*
+   * 集合与 `kind` 必须一致：切走就把另两种对象的集合清空。
+   * 放在 commit 里统一做，而不是让每个写入口各自记得 —— 漏一处就会出现
+   * 「选中骨骼，但叠加层还画着上一批 display」这类幽灵高亮。
+   * 注意只清集合，单值字段（`slot` / `attachment`）故意保留：权重刷要靠它记住要刷的网格。
+   */
+  if (next.kind !== 'bone') next.bones = []
+  if (next.kind !== 'attachment') next.attachments = []
+  if (next.kind !== 'constraint') next.constraints = []
   /*
    * 对象选中一变，资源面板里选中的那批图片就作废 —— 两处选中不能同时亮着，
    * 「点了骨骼，图片还选着」就是这里补上的。
@@ -235,6 +257,11 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
           : []
       }
       if (partial.kind !== undefined && partial.kind !== 'attachment') next.attachments = []
+      // 约束同理：单值 = 单选；切走时清空集合
+      if (partial.constraints === undefined && partial.constraint !== undefined) {
+        next.constraints = partial.constraint ? [partial.constraint] : []
+      }
+      if (partial.kind !== undefined && partial.kind !== 'constraint') next.constraints = []
       /*
        * 切换主选中对象时清掉顶点选择，避免跨对象残留 —— 但**本次显式给了顶点**就照给的来：
        * 权重工具「点顶点」正是这种调用（kind 从 bone 变成 attachment，同时给出新顶点），
@@ -382,10 +409,71 @@ export const useSelectionStore = create<SelectionState>((set, get) => ({
     })
   },
 
-  selectConstraint: (name) =>
+  selectConstraint: (name) => {
+    clearTrackFocus()
     set((state) =>
-      commit(state, { kind: 'constraint', constraint: name, bones: [], attachments: [], vertices: [], vertex: -1 })
-    ),
+      commit(state, {
+        kind: 'constraint',
+        constraint: name,
+        constraints: name ? [name] : [],
+        bones: [],
+        attachments: [],
+        vertices: [],
+        vertex: -1
+      })
+    )
+  },
+
+  selectConstraints: (names) => {
+    clearTrackFocus()
+    const unique: string[] = []
+    for (const name of names) {
+      if (!name || unique.includes(name)) continue
+      unique.push(name)
+    }
+    set((state) =>
+      commit(state, {
+        kind: unique.length > 0 ? 'constraint' : 'none',
+        constraint: unique[unique.length - 1] ?? '',
+        constraints: unique,
+        bones: [],
+        attachments: [],
+        vertices: [],
+        vertex: -1
+      })
+    )
+  },
+
+  toggleConstraint: (name) => {
+    clearTrackFocus()
+    if (!name) return
+    set((state) => {
+      const has = state.constraints.includes(name)
+      const list = has ? state.constraints.filter((item) => item !== name) : [...state.constraints, name]
+      if (list.length === 0) {
+        return commit(state, {
+          kind: 'none',
+          constraint: '',
+          constraints: [],
+          bones: [],
+          attachments: [],
+          vertices: [],
+          vertex: -1
+        })
+      }
+      // 移出的若是主选中，就退回集合里最后一个（与 toggleBone / toggleAttachment 同一套规则）
+      const primary = has && state.constraint !== name ? state.constraint : list[list.length - 1]
+      return commit(state, {
+        kind: 'constraint',
+        constraint: primary,
+        constraints: list,
+        bones: [],
+        attachments: [],
+        vertices: [],
+        vertex: -1
+      })
+    })
+  },
 
   // 框选只拿得到共享缓冲下标，没有「附件内下标」→ 单选标记一律清掉
   selectVertices: (vertices) => set((state) => commit(state, { vertices, vertex: -1 })),

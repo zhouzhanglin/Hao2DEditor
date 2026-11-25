@@ -1124,7 +1124,8 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
   // （bone 工具已经在上面按「画骨骼」处理并 return，走到这里的只剩选择工具与 Pose 工具）
   if ((tools.tool === 'select' || tools.tool === 'pose') && tools.gizmo === 'shear') {
     const edge = scene.pickShearEdgeAt(info.world.x, info.world.y)
-    const selectedName = scene.state.selectedBone
+    // 选中 display 时斜切借用它的宿主骨骼（见 Scene.shearBoneName）：否则剪图片时整个工具「消失」
+    const selectedName = scene.shearBoneName()
     if (edge && selectedName && !boneLocked(selectedName)) {
       if (beginShearBoxDrag(host, selectedName, edge, info.world)) return true
     }
@@ -1215,7 +1216,25 @@ export function toolPointerDown(host: ToolHost, info: PointerInfo): boolean {
          */
         const mode = host.tools.gizmo
         if (mode === 'shear') {
-          host.status(t('斜切不支持附件：「{0}」请用移动 / 旋转 / 缩放，或斜切它所在的骨骼', [att.attachment]))
+          /*
+           * 斜切掰的是**骨骼的两条局部轴**，附件本身没有斜切通道。
+           * 所以点 display 时直接把选中切到它的宿主骨骼 —— 包围盒随即出现、可以接着拖，
+           * 比只弹一句「不支持附件」有用（此前这里什么都不会发生，看着像工具没了）。
+           */
+          const slotBone = useProjectStore
+            .getState()
+            .document.slots.find((slot) => slot.name === att.slot)?.bone
+          if (slotBone) {
+            useSelectionStore.getState().selectBone(slotBone)
+            host.status(
+              t('斜切作用于骨骼：已选中「{0}」所在的骨骼「{1}」，拖包围盒的边即可斜切', [
+                att.attachment,
+                slotBone
+              ])
+            )
+          } else {
+            host.status(t('斜切不支持附件：「{0}」请用移动 / 旋转 / 缩放，或斜切它所在的骨骼', [att.attachment]))
+          }
         } else {
           beginAttachmentGizmoDrag(host, att.slot, att.attachment, 'center', mode, info.world)
           if (isNew) {

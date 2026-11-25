@@ -402,6 +402,15 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
           }
         }
       }
+      /*
+       * 斜切的目标骨：选中 display 时用它所在的骨骼。
+       * 斜切掰的是骨骼的两条局部轴，附件没有斜切通道；不这么做的话，选中图片后切到斜切
+       * 画面上什么都不出现，看起来像工具消失了（见 Scene.shearBoneName）。
+       */
+      const shearBone =
+        selection.kind === 'attachment' && selection.slot
+          ? (useProjectStore.getState().document.slots.find((item) => item.name === selection.slot)?.bone ?? '')
+          : ''
       // 选中网格所绑定的骨骼：叠加层用高亮色画出来（权重骨骼列表里有哪几根就画哪几根）
       let weightBones: string[] = []
       if (selectedAttachmentData?.type === 'mesh') weightBones = weightBonesOf(selectedAttachmentData)
@@ -445,6 +454,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         weightTargetBone: weightTargetBoneFor(tools.tool, selection),
         selectedVertices: selection.vertices,
         selectedAttachment,
+        shearBone,
         // 选中 display 的轮廓：与操作器不同，**任何模式 / 工具下都给**（动画态也要看得出选的是谁）
         selectedDisplay:
           selection.kind === 'attachment' && selection.slot && selection.attachment

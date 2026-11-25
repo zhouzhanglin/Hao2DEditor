@@ -1780,6 +1780,8 @@ export const en: Record<string, string> = {
     'Selected attachment "{0}" ({1}): drag to {2}',
   '已选中附件「{0}」（{1}）：位置属于绑定数据，切到 Pose 态才能拖动':
     'Selected attachment "{0}" ({1}): position is setup data, switch to Pose to drag it',
+  '斜切作用于骨骼：已选中「{0}」所在的骨骼「{1}」，拖包围盒的边即可斜切':
+    'Shear applies to bones: selected the bone "{1}" that "{0}" is attached to — drag the box edges to shear',
   '斜切不支持附件：「{0}」请用移动 / 旋转 / 缩放，或斜切它所在的骨骼':
     'Shear does not apply to attachments: use move / rotate / scale for "{0}", or shear its bone',
   '斜切骨骼「{0}」：拖动斜切包围盒的边（上下边横向拖 / 左右边纵向拖）':

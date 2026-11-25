@@ -137,6 +137,11 @@ export interface SceneViewState {
    */
   selectedAttachment: { boneIndex: number; position: { x: number; y: number }; rotation: number } | null
   /**
+   * 斜切的目标骨骼：选中 display 时是它所在的骨骼（斜切掰的是骨骼轴，附件没有斜切通道）。
+   * 空串 = 没有「借来的骨骼」，斜切用 `selectedBone`。
+   */
+  shearBone: string
+  /**
    * 选中的 display（插槽名 + 附件名）：叠加层沿对象**真实形状**画一圈轮廓。
    *
    * 与 `selectedAttachment`（操作器）分开，是因为两者可见条件不同：轮廓在任何
@@ -347,6 +352,7 @@ export class EditorScene {
     showGizmo: true,
     pendingBone: null,
     selectedAttachment: null,
+    shearBone: '',
     selectedDisplay: null,
     selectedDisplays: [],
     displayBox: null,
@@ -1700,10 +1706,22 @@ export class EditorScene {
    * 之所以在骨骼局部空间求包围盒：shearX / shearY 作用在骨骼的局部轴上，
    * 画的时候再乘骨骼世界矩阵，包围盒就会跟着斜切一起歪 —— 这正是用户要看到的反馈。
    */
+  /**
+   * 斜切作用在哪根骨骼上：选中骨骼时就是它；选中 **display** 时用它所在的骨骼。
+   *
+   * 原因：斜切掰的是骨骼的两条局部轴，附件本身没有斜切通道。但「选中图片后切到斜切，
+   * 画面上什么都不出现」会让人以为工具坏了 —— 图片挂在骨头上，掰那根骨头本来就是
+   * 「让图片斜一点」唯一可行的办法（提示语里写的也是这条路）。
+   */
+  shearBoneName(): string {
+    // 选中 display 时由 ViewportCanvas 算好宿主骨骼（`shearBone`），否则退回选中的骨骼
+    return this.viewState.shearBone || this.viewState.selectedBone
+  }
+
   shearBoxAt(): ShearBox | null {
     const bundle = this.bundle
     if (!bundle) return null
-    const index = bundle.boneIndex[this.viewState.selectedBone] ?? -1
+    const index = bundle.boneIndex[this.shearBoneName()] ?? -1
     if (index < 0) return null
     const local = this.shearBoxLocal(index)
     if (!local) return null
@@ -2306,29 +2324,36 @@ export class EditorScene {
     this.gizmoFill.clear()
     const attachmentGizmo = state.selectedAttachment
     const showGizmo =
-      showBoneLayer && bundle !== null && state.showGizmo && (selectedIndex >= 0 || attachmentGizmo !== null)
+      showBoneLayer &&
+      bundle !== null &&
+      state.showGizmo &&
+      // 斜切还要算上「借来的宿主骨」：选中 display 时没有骨骼选中、也没有附件操作器，
+      // 只按前两个条件判会让包围盒整个不显示 —— 那正是「斜切好像没有了一样」的由来
+      (selectedIndex >= 0 || attachmentGizmo !== null || (state.gizmo === 'shear' && state.shearBone !== ''))
     this.gizmoStroke.visible = showGizmo
     this.gizmoFill.visible = showGizmo
     if (showGizmo && bundle) {
-      if (attachmentGizmo) {
-        // 附件操作器：斜切不支持附件，其余模式照常（中心橙色区分骨骼）
-        if (state.gizmo !== 'shear') {
-          const frame = attachmentGizmoFrame(
-            bundle.skeleton,
-            attachmentGizmo.boneIndex,
-            attachmentGizmo.position,
-            attachmentGizmo.rotation,
-            unitPerPixel * GIZMO_AXIS_LENGTH,
-            state.gizmoSpace
-          )
-          if (frame) {
-            drawAttachmentGizmo(this.gizmoStroke, this.gizmoFill, frame, state.gizmo, unitPerPixel)
-          }
-        }
-      } else if (state.gizmo === 'shear') {
-        // 斜切不用小坐标轴，改成包围盒：鼠标在边上拖动即可变形
+      if (state.gizmo === 'shear') {
+        /*
+         * 斜切**优先**：它不用小坐标轴，改成骨骼的包围盒（鼠标在边上拖动即可变形）。
+         * 放在附件操作器之前，是因为选中 display 时也要画出宿主骨骼的这个盒子
+         * （见 `shearBoneName`）—— 否则切到斜切后画面一片空白，看着像工具没有了。
+         */
         const box = this.shearBoxAt()
         if (box) drawShearBox(this.gizmoStroke, this.gizmoFill, box.corners, unitPerPixel)
+      } else if (attachmentGizmo) {
+        // 附件操作器（中心橙色区分骨骼）：斜切不走这里，已在上面的分支处理
+        const frame = attachmentGizmoFrame(
+          bundle.skeleton,
+          attachmentGizmo.boneIndex,
+          attachmentGizmo.position,
+          attachmentGizmo.rotation,
+          unitPerPixel * GIZMO_AXIS_LENGTH,
+          state.gizmoSpace
+        )
+        if (frame) {
+          drawAttachmentGizmo(this.gizmoStroke, this.gizmoFill, frame, state.gizmo, unitPerPixel)
+        }
       } else {
         drawBoneGizmo(
           this.gizmoStroke,

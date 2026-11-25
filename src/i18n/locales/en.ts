@@ -1264,6 +1264,8 @@ export const en: Record<string, string> = {
   '修改 setup 附件': 'Edit setup attachment',
   '可见（关键帧）': 'Visible (keyframe)',
   '可见': 'Visible',
+  '染色': 'Tint',
+  '可被选中': 'Selectable',
   '关键帧：切换可见性': 'Keyframe: toggle visibility',
   '修改插槽可见性': 'Edit slot visibility',
   '附件': 'Attachment',

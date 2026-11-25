@@ -78,6 +78,11 @@ import type { OverlayState } from './store/toolStore'
 
 export interface SceneViewState {
   overlay: OverlayState
+  /**
+   * 各类对象是否**可被选中**（点选 / 框选）。与 `overlay` 的可见性独立：
+   * 能否点中 = 可见 && 可选（见 `isPickable`）。
+   */
+  selectable: { display: boolean; bones: boolean; constraints: boolean }
   /** 舞台参考图（背景，仅编辑器用）：null = 没设置；贴图由 ViewportCanvas 异步喂进来 */
   stage: StageImage | null
   /**
@@ -330,7 +335,8 @@ export class EditorScene {
   private readonly axesRange = { minX: NaN, minY: NaN, maxX: NaN, maxY: NaN, width: NaN }
   private viewState: SceneViewState = {
     // 网格 / FFD / 权重显示都不看开关：按选中项、工具与权重刷自动决定
-    overlay: { bones: true, constraints: true },
+    overlay: { display: true, bones: true, constraints: true },
+    selectable: { display: true, bones: true, constraints: true },
     stage: null,
     focusMeshSlot: '',
     editMeshSlot: '',
@@ -694,7 +700,8 @@ export class EditorScene {
       entry.view.container.position.set(parts.x, parts.y)
       entry.view.container.rotation = (parts.rotation * Math.PI) / 180
       entry.view.container.scale.set(parts.scaleX, parts.scaleY)
-      entry.view.container.visible = instance.visible
+      // 实例自身可见 && 全局 display 开关（两处都要，否则关掉图片后子骨架还亮着）
+      entry.view.container.visible = instance.visible && this.viewState.overlay.display
 
       // 染色 = 子骨架自身（插槽色 × 附件色）× 视口整体染色；值没变就别标脏
       const tint = entry.view.meshBuilder.tint
@@ -987,12 +994,25 @@ export class EditorScene {
     this.viewport.render()
   }
 
+  /**
+   * 某一类对象现在**能不能点中**：既要可见、也要勾了「可选」。
+   *
+   * 两个开关独立：看得见但不想点到（对着背景调骨骼时锁住图片）是常见需求；
+   * 而关掉显示时如果还能点中，「点空白处选中看不见的图片」就说不通了。
+   */
+  private isPickable(kind: 'bone' | 'display' | 'constraint'): boolean {
+    const { overlay, selectable } = this.viewState
+    if (kind === 'bone') return overlay.bones && selectable.bones
+    if (kind === 'constraint') return overlay.constraints && selectable.constraints
+    return overlay.display && selectable.display
+  }
+
   pickBoneAt(worldX: number, worldY: number): BoneHit | null {
     if (!this.bundle) return null
-    // 骨骼层关掉时**不按骨骼体拾取**：看不见的骨骼点中了也不知道点的是谁（正是「准星选不中」
-    // 的根因 —— 准星旁边压着看不见的骨骼体，永远抢在约束兜底前面）。此时骨架里唯一可点的
-    // 记号就是「约束」层上的目标准星，见下面的兜底
-    if (this.viewState.overlay.bones) {
+    // 骨骼层关掉（或勾了不可选）时**不按骨骼体拾取**：看不见的骨骼点中了也不知道点的是谁
+    //（正是「准星选不中」的根因 —— 准星旁边压着看不见的骨骼体，永远抢在约束兜底前面）。
+    // 此时骨架里唯一可点的记号就是「约束」层上的目标准星，见下面的兜底
+    if (this.isPickable('bone')) {
       const hit = pickBone(this.bundle.skeleton, worldX, worldY, this.viewport.pixelsToWorld(8))
       if (hit) return hit
     }
@@ -1020,7 +1040,7 @@ export class EditorScene {
    * 点圆环外侧那一圈（以及右侧弹簧折线附近）就是选中约束本身。
    */
   pickPhysicsConstraintAt(worldX: number, worldY: number): { name: string; boneIndex: number } | null {
-    if (!this.bundle || !this.viewState.overlay.constraints) return null
+    if (!this.bundle || !this.isPickable('constraint')) return null
     const tolerance = this.viewport.pixelsToWorld(10)
     // 弹簧折线画在圆环右侧，再往外留一段可点区域（否则只有圆环能点，弹簧看着像装饰）
     const springReach = this.viewport.pixelsToWorld(10 + 6 * 6 + 6)
@@ -1052,7 +1072,7 @@ export class EditorScene {
    * 公开给工具层用：准星要排在附件拾取前面（IK 节点常压在角色图片上）
    */
   constraintTargetIndexAt(worldX: number, worldY: number): number {
-    if (!this.bundle || !this.viewState.overlay.constraints) return -1
+    if (!this.bundle || !this.isPickable('constraint')) return -1
     const tolerance = this.viewport.pixelsToWorld(10)
     let best = -1
     let bestDistance = tolerance
@@ -1081,7 +1101,7 @@ export class EditorScene {
    * 此时骨架里唯一可点的是「约束」准星（见 pickBoneAt 的兜底），选中后走 gizmo 拖拽
    */
   pickBoneHandleAt(worldX: number, worldY: number): BoneHandleHit | null {
-    if (!this.bundle || !this.viewState.overlay.bones) return null
+    if (!this.bundle || !this.isPickable('bone')) return null
     return pickBoneHandle(
       this.bundle.skeleton,
       worldX,
@@ -1300,7 +1320,8 @@ export class EditorScene {
    */
   pickAttachmentAt(worldX: number, worldY: number): { slot: string; attachment: string } | null {
     const bundle = this.bundle
-    if (!bundle) return null
+    // display 隐藏或勾了「不可选」时点不中：否则会点空白处选中看不见的图片
+    if (!bundle || !this.isPickable('display')) return null
     // 嵌套骨架先判：它是一整块子角色，点进去应该选中「骨架」display 本身
     const nested = this.pickNestDisplayAt(worldX, worldY)
     if (nested) return nested
@@ -1403,7 +1424,8 @@ export class EditorScene {
   ): Array<{ slot: string; attachment: string }> {
     const bundle = this.bundle
     const mesh = this.meshResult
-    if (!bundle || !mesh) return []
+    // display 隐藏或不可选时一个都不框（与点选同一口径）
+    if (!bundle || !mesh || !this.isPickable('display')) return []
     // 像素级命中判定放在 picking 里（纯函数，可单测）；这里只负责换算单位与取名字
     const hitSlots = pickAttachmentSlotsInRect(mesh, { minX, minY, maxX, maxY }, {
       step: this.viewport.pixelsToWorld(1),
@@ -1439,7 +1461,7 @@ export class EditorScene {
    */
   pickBonesInRect(minX: number, minY: number, maxX: number, maxY: number): string[] {
     const bundle = this.bundle
-    if (!bundle || !this.viewState.overlay.bones) return []
+    if (!bundle || !this.isPickable('bone')) return []
     const out: string[] = []
     for (const index of pickBonesInRectPure(bundle.skeleton, { minX, minY, maxX, maxY })) {
       const name = bundle.asset.bones[index]?.name ?? ''
@@ -1457,7 +1479,7 @@ export class EditorScene {
    */
   pickConstraintsInRect(minX: number, minY: number, maxX: number, maxY: number): string[] {
     const bundle = this.bundle
-    if (!bundle || !this.viewState.overlay.constraints) return []
+    if (!bundle || !this.isPickable('constraint')) return []
     const pad = this.viewport.pixelsToWorld(10)
     const out: string[] = []
     for (const index of pickConstraintsInRectPure(
@@ -2196,6 +2218,16 @@ export class EditorScene {
     // 骨骼本体与约束是**两个独立开关**，但共用同一对绘制层：
     // 「骨骼」关掉、「约束」仍开时这一层还要留着画约束手柄，只是跳过骨骼本体。
     // 曾经用 `bones || constraints` 当作骨骼自身的可见条件，于是关掉「骨骼」后骨架仍在屏幕上。
+    /*
+     * display 显示开关：直接隐藏内容层（骨骼 / 约束是独立叠加层，互不影响）。
+     * 关掉后只剩骨架与约束，摆动画时不会被图片挡住；嵌套子骨架一起隐藏。
+     */
+    const showDisplay = state.overlay.display
+    if (this.view) this.view.container.visible = showDisplay
+    for (const instance of bundle?.nest?.instances ?? []) {
+      const entry = this.nestedViews.get(instance.key)
+      if (entry) entry.view.container.visible = showDisplay && instance.visible
+    }
     const showSkeleton = state.overlay.bones && bundle !== null
     const showConstraints = state.overlay.constraints && bundle !== null
     const showBoneLayer = showSkeleton || showConstraints
@@ -2293,6 +2325,8 @@ export class EditorScene {
     }
     const outlineVisible =
       showBoneLayer &&
+      // 图片整层关掉时不必再画选中框：框里什么都没有
+      state.overlay.display &&
       bundle !== null &&
       !boundaryDraw &&
       (outlineItems.length > 0 || hoveredDisplay !== null)

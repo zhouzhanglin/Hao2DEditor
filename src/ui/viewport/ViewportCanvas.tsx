@@ -435,6 +435,8 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
           : ''
       scene.setViewState({
         overlay: tools.overlay,
+        // 「可见」与「可选」是两套开关：拾取规则 = 可见 && 可选（见 Scene.isPickable）
+        selectable: tools.selectable,
         gizmo: tools.gizmo,
         // 本地 / 世界空间：视口据此决定小坐标轴的朝向与拖动的换算方向
         gizmoSpace: tools.gizmoSpace,

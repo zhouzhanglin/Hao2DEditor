@@ -996,8 +996,10 @@ export default function App() {
               <ViewportOverlays
                 zoom={zoom}
                 overlay={tools.overlay}
+                selectable={tools.selectable}
                 space={tools.gizmoSpace}
                 onToggleOverlay={tools.toggleOverlay}
+                onToggleSelectable={tools.toggleSelectable}
                 onSetSpace={tools.setGizmoSpace}
                 onFitViewport={() => handleCommand('view:fitViewport')}
               />

@@ -245,6 +245,21 @@ export function boundaryRedrawWarning(): string {
  * 手动开全局的那几个反而是负担：复杂角色会铺满线条与顶点（这正是它们被移除的原因）。
  */
 export interface OverlayState {
+  /** display（附件）是否绘制出来：关掉只剩骨骼与约束，方便对着动画看骨架 */
+  display: boolean
+  bones: boolean
+  constraints: boolean
+}
+
+/**
+ * 各类型对象是否**可被选中**（点选 / 框选）。
+ *
+ * 与 `overlay`（可见性）是两件事：可以「看得见但不想点到」（对着背景调整骨骼时锁住图片），
+ * 也可以「看不见因此也点不到」。实际能否点中 = 可见 && 可选（见 `Scene.isPickable`），
+ * 这样关掉显示时不会出现「点空白处选中了看不见的图片」。
+ */
+export interface SelectableState {
+  display: boolean
   bones: boolean
   constraints: boolean
 }
@@ -256,6 +271,8 @@ export interface ToolState {
   /** 小坐标轴的坐标空间：本地（沿骨骼朝向）/ 世界（对齐世界 X / Y），默认本地 */
   gizmoSpace: GizmoSpace
   overlay: OverlayState
+  /** 各类对象是否可被选中（与 `overlay` 的可见性独立，见 `SelectableState`） */
+  selectable: SelectableState
   brush: BrushState
   /** 网格创建的栅格细分数量（Region 转网格） */
   gridDivisions: number
@@ -291,6 +308,8 @@ export interface ToolState {
   setWeightSubtool: (subtool: WeightSubtool) => void
   setOverlay: (overlay: OverlayState) => void
   toggleOverlay: (key: keyof OverlayState) => void
+  setSelectable: (key: keyof SelectableState, value: boolean) => void
+  toggleSelectable: (key: keyof SelectableState) => void
   setBrush: (brush: Partial<BrushState>) => void
   setTrim: (trim: Partial<WeightTrimState>) => void
   setAutoMethod: (value: AutoWeightMethod) => void
@@ -303,7 +322,9 @@ export const useToolStore = create<ToolState>((set, get) => ({
   gizmo: 'move',
   // 默认本地：轴跟着骨骼朝向走，摆姿态时最符合直觉（世界空间是想对齐画面时才切）
   gizmoSpace: 'local',
-  overlay: { bones: true, constraints: true },
+  overlay: { display: true, bones: true, constraints: true },
+  // 默认三类都能选：开箱即用的行为与加这个开关之前完全一致
+  selectable: { display: true, bones: true, constraints: true },
   /*
    * 笔刷参数（Mode / Size / Strength / Feather / Normalize），面板见属性最下面的「权重刷」一栏。
    * - Size 40px = 0.4 世界单位（视口里的圈就是它）；
@@ -367,6 +388,8 @@ export const useToolStore = create<ToolState>((set, get) => ({
   setGizmoSpace: (gizmoSpace) => set({ gizmoSpace }),
   setOverlay: (overlay) => set({ overlay }),
   toggleOverlay: (key) => set({ overlay: { ...get().overlay, [key]: !get().overlay[key] } }),
+  setSelectable: (key, value) => set({ selectable: { ...get().selectable, [key]: value } }),
+  toggleSelectable: (key) => set({ selectable: { ...get().selectable, [key]: !get().selectable[key] } }),
   setBrush: (brush) => set({ brush: { ...get().brush, ...brush } }),
   // 夹在合法区间：上限 1~4（运行时只有 4 槽），阈值 0~100%
   setTrim: (trim) => {

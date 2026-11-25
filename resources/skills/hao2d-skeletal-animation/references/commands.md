@@ -9,7 +9,7 @@
 
 参数写法：`名字`*(类型) 表示必填；`名字`?(类型=默认值) 表示可选；`'a'|'b'` 表示取值枚举。
 
-共 137 条命令，分 11 组。
+共 138 条命令，分 11 组。
 
 ## 状态与查询（开工前、收工后）
 
@@ -198,7 +198,8 @@
 | `duplicateSelection` | — | 复制当前选择并立即粘贴（骨骼 / 插槽新副本，改名加序号）。依赖当前选择，配合 setSelection 使用 | { count } |
 | `pasteNodes` | — | 把剪贴板里的节点粘贴到当前选择之下（粘贴骨骼时挂到选中骨骼下；粘贴插槽时挂到选中骨骼 / 插槽所在骨骼） | { count } |
 | `setOnionSkin` | `enabled`?(boolean) true = 开，false = 关；不传 = 切换 | 显示 / 隐藏时间轴的洋葱皮（前后帧骨骼姿态）。enabled 不传 = 切换 | { onionSkin } |
-| `setOverlay` | `key`*('bones'\|'constraints') 开关哪一层<br>`visible`?(boolean) true = 显示，false = 隐藏；不传 = 切换 | 显示 / 隐藏视口叠加层：bones = 骨骼骨架，constraints = 约束手柄（IK / 变换 / 路径 / 物理）。与视口右上角的「骨骼 / 约束」开关等效。visible 不传 = 切换 | { overlay: { bones, constraints } } |
+| `setOverlay` | `key`*('display'\|'bones'\|'constraints') 开关哪一层<br>`visible`?(boolean) true = 显示，false = 隐藏；不传 = 切换 | 显示 / 隐藏视口里的某一层：display = 图片（附件），bones = 骨骼骨架，constraints = 约束手柄（IK / 变换 / 路径 / 物理）。等价于视口右上角「选项」矩阵里对应行的「可见」列。visible 不传 = 切换 | { overlay: { display, bones, constraints } } |
+| `setSelectable` | `kind`*('display'\|'bones'\|'constraints') 哪一类对象<br>`selectable`?(boolean) true = 可被点选 / 框选，false = 不可选；不传 = 切换 | 设置视口里某一类对象能否被点选 / 框选：display = 图片（附件），bones = 骨骼，constraints = 约束。等价于视口右上角「选项」矩阵里对应行的「可被选中」列。注意：**实际能否点中 = 可见 && 可选** —— 层被隐藏时即使勾了可选也点不中（配合 setOverlay）。selectable 不传 = 切换 | { selectable: { display, bones, constraints } } |
 | `setSelection` | `kind`*('none'\|'bone'\|'slot'\|'attachment'\|'constraint') 选什么<br>`name`?(string) 骨骼 / 插槽 / 约束名<br>`bones`?(array) 骨骼名数组（多选；给了就用它，否则用 name）<br>`slot`?(string) 附件所在插槽（kind=attachment 时必给）<br>`attachment`?(string) 附件名（kind=attachment 时必给） | 改变编辑器里当前选中的对象（骨骼 / 插槽 / 附件 / 约束 / 取消选择）。copyNodes、pasteNodes 等依赖「当前选择」的操作要先用它定位 | { kind, bone, bones, slot, attachment, constraint } |
 | `setSmartFilter` | `enabled`?(boolean) true = 开，false = 关；不传 = 切换 | 只显示当前选中对象（骨骼 / 插槽 / 约束）的时间轴轨道。先用 setSelection 选中对象再开过滤才有效。enabled 不传 = 切换 | { smartFilter } |
 | `setTimelineZoom` | `zoom`*(number) 缩放倍数（0.5 ~ 2） | 设置时间轴时间缩放：1 = 完整适配动画长度；越大时间轴越长、关键帧越松散（逐帧精修），最小 0.5、最大 2。超范围会自动夹住 | { zoom } |

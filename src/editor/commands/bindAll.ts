@@ -35,6 +35,13 @@ import { t } from '@i18n'
  * 需要「保持全局位姿」的移动依赖视口里的世界矩阵：窗口没就绪时降级为普通换父级并如实说明。
  */
 
+/**
+ * 视口「选项」矩阵里的三类对象（与 `OverlayState` / `SelectableState` 的键一致）。
+ *
+ * 值存 i18n **原文**而不是提前翻译：`t()` 在命令执行时求值，语言切换后才不会留着旧文字。
+ */
+const VIEW_KIND_LABELS = { display: '图片', bones: '骨骼', constraints: '约束' } as const
+
 // ---------------- 层级移动 ----------------
 
 /** 视口里的骨骼世界矩阵；视口没就绪时返回 null（移动命令会降级：只换父级，不保持全局位姿） */
@@ -504,17 +511,22 @@ export function registerBindAllCommands(): void {
     {
       kind: 'read',
       name: 'setOverlay',
-      title: '切换叠加层',
+      title: '切换叠加层显示',
       description:
-        '显示 / 隐藏视口叠加层：bones = 骨骼骨架，constraints = 约束手柄（IK / 变换 / 路径 / 物理）。与视口右上角的「骨骼 / 约束」开关等效。visible 不传 = 切换',
+        '显示 / 隐藏视口里的某一层：display = 图片（附件），bones = 骨骼骨架，constraints = 约束手柄（IK / 变换 / 路径 / 物理）。等价于视口右上角「选项」矩阵里对应行的「可见」列。visible 不传 = 切换',
       args: {
-        key: { type: 'string', description: '开关哪一层', values: ['bones', 'constraints'], required: true },
+        key: {
+          type: 'string',
+          description: '开关哪一层',
+          values: ['display', 'bones', 'constraints'],
+          required: true
+        },
         visible: { type: 'boolean', description: 'true = 显示，false = 隐藏；不传 = 切换' }
       },
-      returns: '{ overlay: { bones, constraints } }'
+      returns: '{ overlay: { display, bones, constraints } }'
     },
     (args) => {
-      const key = needOneOf(args, 'key', ['bones', 'constraints'] as const)
+      const key = needOneOf(args, 'key', ['display', 'bones', 'constraints'] as const)
       const tools = useToolStore.getState()
       const next = optBool(args, 'visible') ?? !tools.overlay[key]
       tools.setOverlay({ ...tools.overlay, [key]: next })
@@ -523,8 +535,42 @@ export function registerBindAllCommands(): void {
         changed: false,
         data: { overlay: { ...overlay } },
         message: overlay[key]
-          ? t('「{0}」叠加层已显示', key === 'bones' ? t('骨骼') : t('约束'))
-          : t('「{0}」叠加层已隐藏', key === 'bones' ? t('骨骼') : t('约束'))
+          ? t('「{0}」叠加层已显示', t(VIEW_KIND_LABELS[key]))
+          : t('「{0}」叠加层已隐藏', t(VIEW_KIND_LABELS[key]))
+      }
+    }
+  )
+
+  defineAction(
+    {
+      kind: 'read',
+      name: 'setSelectable',
+      title: '设置对象是否可被选中',
+      description:
+        '设置视口里某一类对象能否被点选 / 框选：display = 图片（附件），bones = 骨骼，constraints = 约束。等价于视口右上角「选项」矩阵里对应行的「可被选中」列。注意：**实际能否点中 = 可见 && 可选** —— 层被隐藏时即使勾了可选也点不中（配合 setOverlay）。selectable 不传 = 切换',
+      args: {
+        kind: {
+          type: 'string',
+          description: '哪一类对象',
+          values: ['display', 'bones', 'constraints'],
+          required: true
+        },
+        selectable: { type: 'boolean', description: 'true = 可被点选 / 框选，false = 不可选；不传 = 切换' }
+      },
+      returns: '{ selectable: { display, bones, constraints } }'
+    },
+    (args) => {
+      const kind = needOneOf(args, 'kind', ['display', 'bones', 'constraints'] as const)
+      const tools = useToolStore.getState()
+      const next = optBool(args, 'selectable') ?? !tools.selectable[kind]
+      tools.setSelectable(kind, next)
+      const selectable = useToolStore.getState().selectable
+      return {
+        changed: false,
+        data: { selectable: { ...selectable } },
+        message: next
+          ? t('「{0}」现在可被选中', t(VIEW_KIND_LABELS[kind]))
+          : t('「{0}」现在不可被选中', t(VIEW_KIND_LABELS[kind]))
       }
     }
   )

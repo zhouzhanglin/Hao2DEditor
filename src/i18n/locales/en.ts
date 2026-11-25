@@ -1266,6 +1266,8 @@ export const en: Record<string, string> = {
   '可见': 'Visible',
   '染色': 'Tint',
   '可被选中': 'Selectable',
+  '「{0}」现在可被选中': '"{0}" is now selectable',
+  '「{0}」现在不可被选中': '"{0}" is no longer selectable',
   '关键帧：切换可见性': 'Keyframe: toggle visibility',
   '修改插槽可见性': 'Edit slot visibility',
   '附件': 'Attachment',

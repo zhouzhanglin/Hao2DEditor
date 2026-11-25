@@ -106,7 +106,7 @@ const GROUPS = [
   {
     title: '编辑器界面与剪贴板（AI 少用）',
     names: [
-      'setSelection', 'setOverlay', 'setOnionSkin', 'setSmartFilter', 'setTimelineZoom', 'copyNodes',
+      'setSelection', 'setOverlay', 'setSelectable', 'setOnionSkin', 'setSmartFilter', 'setTimelineZoom', 'copyNodes',
       'pasteNodes', 'duplicateSelection', '__catalog'
     ]
   }

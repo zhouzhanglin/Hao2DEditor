@@ -44,6 +44,7 @@ const GROUPS = [
     names: [
       'newProject', 'createProject', 'openProject', 'saveProject', 'setProjectName', 'importImages',
       'importImage', 'splitAtlas', 'importSpine', 'importDragonBones', 'replaceImage', 'deleteImage',
+      'addSkeleton', 'duplicateSkeleton', 'removeSkeleton', 'renameSkeleton', 'setActiveSkeleton',
       'setExportScale'
     ]
   },

@@ -63,6 +63,14 @@ export interface ProjectState {
    */
   appendSkeletons: (skeletons: EditorDocument[]) => number
   /**
+   * 复制一个骨架（含骨骼 / 插槽 / 皮肤 / 约束 / 动画 / 编辑器偏好），切到副本。
+   *
+   * 图片池是全工程共享的，不会被复制；副本名自动加 `_2` / `_3` 后缀避开重名。
+   * 副本内部的嵌套 display 保持指向原目标骨架（引用的是“谁”，不是“那份数据”）。
+   * 返回新下标与用于状态栏的提示。
+   */
+  duplicateSkeleton: (index: number) => { ok: boolean; index: number; message: string }
+  /**
    * 删除某个骨架（至少保留一个）。
    *
    * 被别的骨架嵌套引用（有 armature display 的 `subArmature` 指向它）时**拒绝删除**，
@@ -529,6 +537,57 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       ...syncFlags(get())
     })
     return index
+  },
+
+  duplicateSkeleton: (index) => {
+    const state = get()
+    const at = clampIndex(index, state.skeletons.length)
+    const source = state.skeletons[at]
+    if (!source) return { ok: false, index: state.activeSkeleton, message: t('没有可复制的骨架') }
+
+    const copy = cloneDocument(source)
+    repairAnimationDurations(copy)
+    repairDisplayNames(copy)
+    repairEvents(copy)
+    // 图片池共享：副本只复制骨架数据，不复制图片（也不复制磁盘文件）
+    copy.images = state.document.images
+
+    const base = source.armatureName
+    let name = `${base}_2`
+    let suffix = 3
+    const taken = state.skeletons.map((skeleton) => skeleton.armatureName)
+    while (taken.includes(name)) {
+      name = `${base}_${suffix++}`
+    }
+    copy.armatureName = name
+    // 副本在自己内部引用旧名字的嵌套 display 要跟着改名（指向别的骨架的引用保持不变）
+    for (const skin of copy.skins) {
+      for (const slot of skin.slots) {
+        for (const attachment of slot.attachments) {
+          if (attachment.type === 'armature' && attachment.subArmature === base) {
+            attachment.subArmature = name
+          }
+        }
+      }
+    }
+
+    history.push('复制骨架', snapshotOf(state))
+    const list = [...state.skeletons, copy]
+    const nested = sanitizeNestRefs(list)
+    const newIndex = list.length - 1
+    set({
+      document: list[newIndex],
+      skeletons: list,
+      activeSkeleton: newIndex,
+      dirty: true,
+      warnings: nested.warnings.length > 0 ? nested.warnings : state.warnings,
+      ...syncFlags(state)
+    })
+    return {
+      ok: true,
+      index: newIndex,
+      message: t('已复制骨架「{0}」为「{1}」（皮肤 / 动画一起复制，图片池共享）', [base, name])
+    }
   },
 
   removeSkeleton: (index) => {

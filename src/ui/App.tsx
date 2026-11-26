@@ -346,6 +346,20 @@ export default function App() {
     flash(t('已新建骨架「{0}」：图片池与其它骨架共享', name))
   }, [flash, resetForSkeletonChange])
 
+  const duplicateSkeleton = useCallback(
+    (index: number) => {
+      const result = useProjectStore.getState().duplicateSkeleton(index)
+      if (!result.ok) {
+        flash(statusWarn(result.message))
+        return
+      }
+      // 复制后 store 已经切到副本：和切换 / 新建一样清掉旧骨架的选中 / 动画 / 视口状态
+      resetForSkeletonChange()
+      flash(result.message)
+    },
+    [flash, resetForSkeletonChange]
+  )
+
   const renameSkeleton = useCallback(
     (index: number, name: string) => {
       useProjectStore.getState().renameSkeleton(index, name)
@@ -958,6 +972,7 @@ export default function App() {
           <SkeletonBar
             onSwitch={switchSkeleton}
             onAdd={addSkeleton}
+            onDuplicate={duplicateSkeleton}
             onRename={renameSkeleton}
             onRemove={removeSkeleton}
             onStatus={flash}

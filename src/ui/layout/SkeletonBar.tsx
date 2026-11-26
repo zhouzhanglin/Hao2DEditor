@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { Copy, Pencil, Plus, Trash2 } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import ContextMenu from '@ui/widgets/ContextMenu'
 import type { ContextMenuItem } from '@ui/widgets/ContextMenu'
@@ -10,6 +10,7 @@ interface SkeletonBarProps {
   /** 切换骨架：清选中 / 停播 / 重置视口这些收尾由外面做（这里只点一下） */
   onSwitch: (index: number) => void
   onAdd: () => void
+  onDuplicate: (index: number) => void
   onRename: (index: number, name: string) => void
   onRemove: (index: number) => void
   onStatus: (message: string) => void
@@ -25,7 +26,7 @@ interface SkeletonBarProps {
  * 列表订阅的是**名字拼出的签名**而不是 `skeletons` 数组本身 —— 后者每次编辑都会换新引用
  * （`update` 里替换了当前骨架），逐个渲染时会让这一行跟着每次拖拽重渲染。
  */
-export default function SkeletonBar({ onSwitch, onAdd, onRename, onRemove, onStatus }: SkeletonBarProps) {
+export default function SkeletonBar({ onSwitch, onAdd, onDuplicate, onRename, onRemove, onStatus }: SkeletonBarProps) {
   const signature = useProjectStore((state) => state.skeletons.map((skeleton) => skeleton.armatureName).join('\u0000'))
   const active = useProjectStore((state) => state.activeSkeleton)
   const names = signature.length > 0 ? signature.split('\u0000') : ['']
@@ -81,8 +82,8 @@ export default function SkeletonBar({ onSwitch, onAdd, onRename, onRemove, onSta
             draggable={!isActive}
             title={
               isActive
-                ? t('{0}（当前骨架；双击重命名；右键重命名 / 删除）', name)
-                : t('{0}（拖到骨骼行 / 插槽行 / 视口 = 嵌套；双击重命名；右键重命名 / 删除）', name)
+                ? t('{0}（当前骨架；双击重命名；右键复制 / 重命名 / 删除）', name)
+                : t('{0}（拖到骨骼行 / 插槽行 / 视口 = 嵌套；双击重命名；右键复制 / 重命名 / 删除）', name)
             }
             onDragStart={(event) => {
               if (isActive) {
@@ -124,6 +125,13 @@ export default function SkeletonBar({ onSwitch, onAdd, onRename, onRemove, onSta
           title={names[menu.index]}
           items={
             [
+              {
+                key: 'duplicate',
+                label: t('复制'),
+                icon: <Copy size={11} />,
+                hint: t('复制整个骨架（骨骼 / 插槽 / 皮肤 / 动画一起复制，图片池共享）'),
+                onSelect: () => onDuplicate(menu.index)
+              },
               {
                 key: 'rename',
                 label: t('重命名'),

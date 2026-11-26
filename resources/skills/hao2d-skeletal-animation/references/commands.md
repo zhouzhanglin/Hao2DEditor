@@ -9,7 +9,7 @@
 
 参数写法：`名字`*(类型) 表示必填；`名字`?(类型=默认值) 表示可选；`'a'|'b'` 表示取值枚举。
 
-共 138 条命令，分 11 组。
+共 139 条命令，分 11 组。
 
 ## 状态与查询（开工前、收工后）
 
@@ -38,16 +38,21 @@
 
 | 命令 | 参数 | 说明 | 返回 |
 | --- | --- | --- | --- |
+| `addSkeleton` | `name`?(string) 骨架名；不传用「骨架 N」 | 新建一个空骨架（含根骨骼 root）并切过去。图片池与其它骨架共享 | { name, activeSkeleton, count } |
 | `createProject` | `name`*(string) 项目名（不能为空，也用于工程文件名）<br>`dir`*(string) 保存目录（绝对路径）<br>`frameRate`?(number) 帧率 24 / 30 / 60；不传用 30 | 新建工程并**立刻写出**工程文件到 dir 目录下（文件名为 <name>.hao2dproj）。新工程图片池是空的，随后的图片靠 importImage / splitAtlas 等补 | { projectName, path, next } |
 | `deleteImage` | `image`*(string) 图片名（用 listImages 查）<br>`force`?(boolean=false) 有附件引用时也照删 | 从图片池删掉一张图。仍被附件引用时默认拒绝执行，确认要删就带 force: true（引用它的附件会退化成纯色，附件本身保留） | { image, references } |
+| `duplicateSkeleton` | `index`?(number) 骨架下标；不传 = 当前骨架 | 复制整个骨架并切到副本：骨骼 / 插槽 / 皮肤 / 约束 / 动画 / 编辑器偏好全部深拷贝，名字自动加 _2 后缀（占用则 _3…）。图片池仍全工程共享，不复制磁盘图片；不传 index 则复制当前骨架 | { index, name, count, source } |
 | `importDragonBones` | `jsonPath`*(string) DragonBones 骨骼 JSON 的绝对路径 | 按路径导入 DragonBones 骨骼 JSON（**整份替换**当前文档，不弹「新建工程 / 并入当前工程」确认框）。同目录的 texture_*.json 图集会被自动收集 | { bones, slots, animations } |
 | `importImage` | `data`?(string) 图片字节：base64 或 dataURL（与 path 二选一）<br>`path`?(string) 本地图片绝对路径（与 data 二选一）<br>`name`?(string) 图片名（不含目录与扩展名）；不传用原文件名<br>`ext`?(string) data 模式下的格式（png/jpg/jpeg/webp/gif），不传从 dataURL 推断或默认 png | 把一张图片写进工程目录的 images/ 并登记到图片池，供 addDisplay 做成附件。图片来源二选一：data（base64 或 dataURL）/ path（本地绝对路径）。工程需先保存或创建（确定 images/ 目录）。name 不传用原文件名自动命名，重名自动加序号 | { name, width, height, path } |
 | `importImages` | `paths`*(array) 图片绝对路径数组（png / jpg / webp / gif / bmp） | 把多张外部图片按路径登记进图片池（自动去重）。要单张带内容导入用 importImage（支持 dataURL / base64） | { added, total, next } |
 | `importSpine` | `jsonPath`*(string) Spine 骨骼 JSON 的绝对路径 | 按路径导入 Spine 骨骼 JSON（**整份替换**当前文档，不弹「新建工程 / 并入当前工程」确认框）。同目录需有 .atlas 图集文件，会被自动读取 | { bones, slots, animations } |
 | `newProject` | — | 新建一个**空白**工程（默认项目名 + 一根根骨骼 root），但不写盘、不留保存路径；要落盘请接着调 saveProject，或直接用 createProject | { projectName, path } |
 | `openProject` | `path`*(string) 工程文件绝对路径 | 打开指定路径的工程文件（按内容解析，不看后缀）。失败时不会动当前文档 | { path, skeletons } |
+| `removeSkeleton` | `index`?(number) 骨架下标；不传 = 当前骨架 | 删除指定下标的骨架（至少保留一个）。不传 index 则删当前骨架。**被别的骨架嵌套引用时删不掉**：先删掉父骨架里指向它的嵌套 display（或 setNestedArmature 换成别的骨架） | { count, activeSkeleton } |
+| `renameSkeleton` | `index`?(number) 骨架下标；不传 = 当前骨架<br>`name`*(string) 新名字 | 改某个骨架的 armatureName（不影响项目名 / 导出目录名）。不传 index 则改当前骨架 | { index, name } |
 | `replaceImage` | `image`*(string) 图片名<br>`path`*(string) 新的图片文件路径<br>`width`*(number) 新图宽度（像素）<br>`height`*(number) 新图高度（像素） | 把图片池里某张图的来源换成另一个文件并更新尺寸（名字不变，所有附件引用自动跟随）。width / height 是**像素尺寸**，要自己量好再传 | { image, path, width, height } |
 | `saveProject` | `path`?(string) 另存到的文件路径；不传则写回当前工程路径 | 把工程写到磁盘（图片会一并复制到 <工程目录>/images/）。工程已有保存路径时直接写回；否则用 path 指定目标文件。**不会弹保存对话框** | { path, warnings } |
+| `setActiveSkeleton` | `index`*(number) 骨架下标 | 切换当前编辑的骨架（只换引用，不动数据），并清空针对旧骨架的选中 / 时间轴状态 | { name, activeSkeleton } |
 | `setExportScale` | `scale`*(number) 缩放（0.25 ~ 1，>0） | 写入导出图集缩放（纯偏好，保存工程时落地） | { scale } |
 | `setProjectName` | `name`*(string) 新的工程名（不能为空） | 改工程名（窗口标题与导出标题用它，保存时写进工程文件）。**不会**重命名磁盘上的工程文件 | { projectName } |
 | `splitAtlas` | `name`*(string) 图集图片名 | 把图集页（loose=false，即用 Spine / DragonBones 导入带来的整页图集）按记录的区域拆成独立碎图，写到 <图集名>_split/，并让所有引用它的附件改指碎图。图集图片名用 listImages 查 | { message } |
@@ -148,11 +153,7 @@
 
 | 命令 | 参数 | 说明 | 返回 |
 | --- | --- | --- | --- |
-| `addSkeleton` | `name`?(string) 骨架名；不传用「骨架 N」 | 新建一个空骨架（含根骨骼 root）并切过去。图片池与其它骨架共享 | { name, activeSkeleton, count } |
 | `nestArmature` | `slot`*(string) 目标插槽名<br>`armature`*(string) 被引用的骨架名（必须是工程里的另一个骨架）<br>`name`?(string) 新 display 的名字；缺省用骨架名（重名自动加序号）<br>`skin`?(string) 皮肤名；不传用当前皮肤 | 把工程里的另一个骨架作为 display 挂到指定插槽上（同工程按名字引用，不复制数据），并切换为当前显示项。会拒绝自引用 / 循环引用 / 超深 | { slot, attachment } |
-| `removeSkeleton` | `index`?(number) 骨架下标；不传 = 当前骨架 | 删除指定下标的骨架（至少保留一个）。不传 index 则删当前骨架。**被别的骨架嵌套引用时删不掉**：先删掉父骨架里指向它的嵌套 display（或 setNestedArmature 换成别的骨架） | { count, activeSkeleton } |
-| `renameSkeleton` | `index`?(number) 骨架下标；不传 = 当前骨架<br>`name`*(string) 新名字 | 改某个骨架的 armatureName（不影响项目名 / 导出目录名）。不传 index 则改当前骨架 | { index, name } |
-| `setActiveSkeleton` | `index`*(number) 骨架下标 | 切换当前编辑的骨架（只换引用，不动数据），并清空针对旧骨架的选中 / 时间轴状态 | { name, activeSkeleton } |
 | `setNestedArmature` | `slot`*(string) 插槽名<br>`attachment`*(string) 嵌套骨架 display 名<br>`armature`?(string) 引用哪个骨架（同工程里的骨架名；空串 = 断开引用）<br>`animation`?(string) setup 默认播放的子动画名；空串 = setup 姿态<br>`playTimes`?(number) 播放次数：0 或负数 = 无限循环（每轮从 offset 起播）；正数 = 播几次后定格<br>`offset`?(number) 起始偏移（秒）<br>`speed`?(number) 倍速，1 = 原速 | 改嵌套骨架 display 的引用与默认播放参数：引用骨架名 / 默认子动画 / 播放次数（0=循环）/ 起始偏移 / 倍速。只对 type=armature 的 display 有效 | { slot, attachment, changedFields } |
 
 ## 遮罩（Spine Clipping）

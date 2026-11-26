@@ -382,6 +382,15 @@ export const en: Record<string, string> = {
   '复制 MCP 地址': 'Copy MCP address',
   '已复制': 'Copied',
   '复制': 'Copy',
+  '复制整个骨架（骨骼 / 插槽 / 皮肤 / 动画一起复制，图片池共享）':
+    'Duplicate the whole skeleton (bones / slots / skins / animations; image pool shared)',
+  '已复制骨架「{0}」为「{1}」（皮肤 / 动画一起复制，图片池共享）':
+    'Duplicated skeleton "{0}" as "{1}" (skins and animations copied; image pool shared)',
+  '没有可复制的骨架': 'No skeleton to duplicate',
+  '{0}（当前骨架；双击重命名；右键复制 / 重命名 / 删除）':
+    '{0} (current skeleton; double-click to rename; right-click to duplicate / rename / delete)',
+  '{0}（拖到骨骼行 / 插槽行 / 视口 = 嵌套；双击重命名；右键复制 / 重命名 / 删除）':
+    '{0} (drag onto a bone / slot row or the viewport to nest; double-click to rename; right-click to duplicate / rename / delete)',
   '安装中…': 'Installing…',
   '一键安装到 AI 客户端': 'One-click install to AI clients',
   '安装结果': 'Installation result',

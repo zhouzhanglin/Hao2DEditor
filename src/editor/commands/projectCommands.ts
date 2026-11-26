@@ -294,6 +294,44 @@ export function registerProjectCommands(): void {
 
   defineAction(
     {
+      name: 'duplicateSkeleton',
+      title: '复制骨架',
+      description:
+        '复制整个骨架并切到副本：骨骼 / 插槽 / 皮肤 / 约束 / 动画 / 编辑器偏好全部深拷贝，名字自动加 _2 后缀（占用则 _3…）。图片池仍全工程共享，不复制磁盘图片；不传 index 则复制当前骨架',
+      args: { index: { type: 'number', description: '骨架下标；不传 = 当前骨架' } },
+      returns: '{ index, name, count, source }'
+    },
+    async (args) => {
+      const store = useProjectStore.getState()
+      const index = optNum(args, 'index') ?? store.activeSkeleton
+      if (index < 0 || index >= store.skeletons.length) {
+        throw new Error(
+          t('骨架下标越界：{0}（现有 {1} 个，用 getProjectState 查）', [
+            index,
+            store.skeletons.length
+          ])
+        )
+      }
+      const source = store.skeletons[index]?.armatureName ?? String(index)
+      const result = store.duplicateSkeleton(index)
+      if (!result.ok) throw new Error(result.message)
+      // 与 UI 右键复制一致：清掉针对旧骨架的选中 / 动画 / 视口状态
+      resetForSkeletonChange()
+      const after = useProjectStore.getState()
+      return changed(
+        {
+          index: after.activeSkeleton,
+          name: after.document.armatureName,
+          count: after.skeletons.length,
+          source
+        },
+        result.message
+      )
+    }
+  )
+
+  defineAction(
+    {
       name: 'removeSkeleton',
       title: '删除骨架',
       description:

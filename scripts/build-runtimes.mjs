@@ -19,12 +19,14 @@ import { transform } from 'esbuild'
  * `minifyIdentifiers: false` 是必须的：顶层 `Hao2dRuntime` / `Hao2dThreeRuntime` 是对外全局契约，
  * 一旦被压缩器改名就全废了。
  *
- * package.json 的 extraResources 会把这个目录放进安装包的 resources/runtimes。
+ * 版本号来自 `resources/runtimes/versions.json`（pixi / three 各自一份），**不是** package.json
+ * 的编辑器版本：只有运行库代码变了才升自己的版本。package.json 的 extraResources 会把这个目录
+ * 放进安装包的 resources/runtimes。
  */
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const previewDir = resolve(root, 'src/main/preview')
 const outDir = resolve(root, 'resources/runtimes')
-const version = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')).version
+const versions = JSON.parse(readFileSync(resolve(outDir, 'versions.json'), 'utf8'))
 
 const MINIFY = {
   loader: 'js',
@@ -58,13 +60,14 @@ async function compress(code) {
 const pixiSource = readRequired(resolve(previewDir, 'hao2dRuntime.generated.js'), 'pixi 版 hao2d 运行库')
 const threeSource = readRequired(resolve(previewDir, 'threejsCore.generated.js'), 'three.js 版 hao2d 运行库')
 
-const banner = (file, globalName, externals, api, license) =>
-  `/*! Hao2D ${file} v${version} | minified hao2d-only runtime, ${externals} NOT bundled | ` +
+const banner = (file, version, globalName, externals, api, license) =>
+  `/*! Hao2D ${file} runtime v${version} | minified hao2d-only runtime, ${externals} NOT bundled | ` +
   `requires global ${externals} (load it first) | ` +
-  `${globalName}.${api} | ${license} */\n`
+  `${globalName}.${api} / RUNTIME_VERSION | ${license} */\n`
 
 const pixiBanner = banner(
   'hao2d-pixi.js',
+  versions.pixi,
   'Hao2dRuntime',
   'PIXI',
   'createStage({canvas,pages,skeText,atlasText}) -> stage.play(name,loop)',
@@ -72,6 +75,7 @@ const pixiBanner = banner(
 )
 const threeBanner = banner(
   'hao2d-three.js',
+  versions.three,
   'Hao2dThreeRuntime',
   'THREE',
   'createStage(...) / createView(...) / IHao2DView APIs',

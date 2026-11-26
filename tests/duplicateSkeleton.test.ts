@@ -1,5 +1,11 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { createAuthoringAnim, createEmptyDocument } from '@core/model/authoring'
+import {
+  createAuthoringAnim,
+  createAuthoringAttachment,
+  createAuthoringBone,
+  createAuthoringSlot,
+  createEmptyDocument
+} from '@core/model/authoring'
 import type { EditorDocument } from '@core/model/authoring'
 import { installCommands } from '@editor/commands'
 import { executeCommand } from '@editor/commands/registry'
@@ -8,9 +14,14 @@ import { useProjectStore } from '@editor/store/projectStore'
 /** 骨架复制：骨骼 / 皮肤 / 动画全部深拷贝，图片池共享，名字不撞车 */
 function sourceDoc(): EditorDocument {
   const doc = createEmptyDocument('Hero')
-  doc.bones.push({ name: 'arm', parent: 'root', length: 10, rotation: 0, x: 5, y: 0, scaleX: 1, scaleY: 1, shearX: 0, shearY: 0, inheritRotation: true, inheritScale: true })
-  doc.slots.push({ name: 'weapon', bone: 'arm', attachment: 'knife', zOrder: 0, color: { r: 1, g: 1, b: 1, a: 1 } })
-  doc.skins[0].slots.push({ slot: 'weapon', attachments: [{ type: 'region', name: 'knife', image: 'knife.png', width: 10, height: 10, position: { x: 0, y: 0 }, rotation: 0, scale: { x: 1, y: 1 } }] })
+  doc.bones.push(createAuthoringBone({ name: 'arm', parent: 'root', length: 10, localPosition: { x: 5, y: 0 } }))
+  doc.slots.push(createAuthoringSlot({ name: 'weapon', bone: 'arm', attachment: 'knife' }))
+  doc.skins[0].slots.push({
+    slot: 'weapon',
+    attachments: [
+      createAuthoringAttachment({ name: 'knife', type: 'region', image: 'knife.png', size: { x: 10, y: 10 } })
+    ]
+  })
   doc.animations.push(createAuthoringAnim('attack', 1))
   return doc
 }

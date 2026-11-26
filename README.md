@@ -50,7 +50,7 @@
 | `hao2d-pixi.js` | `Hao2dRuntime` | 宿主先加载 pixi.js v8，提供全局 `PIXI` |
 | `hao2d-three.js` | `Hao2dThreeRuntime` | 宿主先加载 three.js，提供全局 `THREE` |
 
-两份文件都是 minified 单文件；编辑器里「导出运行时数据」/「导出 Three.js」会产出配套的 `*_ske.json`、`*_atlas.json` 和图集页。
+两份文件都是 minified 单文件；版本号各自记录在 `resources/runtimes/versions.json`，与编辑器 `package.json` 的版本独立 —— 只有运行库代码更新时才升对应版本。运行时全局对象也暴露 `RUNTIME_VERSION`，宿主可据此核对加载的是哪一份；编辑器里「导出运行时数据」/「导出 Three.js」会产出配套的 `*_ske.json`、`*_atlas.json` 和图集页。
 
 「导出 Three.js」附带的 `demo.html` 同样只含 hao2d 逻辑：页面优先使用已有的 `window.THREE`，没有才从 CDN 取 three；离线部署时请把 three 换成本地构建，并确保在加载 `hao2d-three.js` 之前挂好全局 `THREE`。
 

@@ -1,8 +1,10 @@
 import { build } from 'esbuild'
+import { readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const versions = JSON.parse(readFileSync(resolve(root, 'resources/runtimes/versions.json'), 'utf8'))
 
 const alias = {
   '@core': resolve(root, 'src/core'),
@@ -22,7 +24,11 @@ const common = {
   globalName: 'Hao2dThreeRuntime',
   platform: 'browser',
   target: 'es2020',
-  define: { 'process.env.NODE_ENV': '"production"' },
+  define: {
+    'process.env.NODE_ENV': '"production"',
+    // three 版运行库版本独立于编辑器版本（见 resources/runtimes/versions.json）
+    __HAO2D_RUNTIME_VERSION__: JSON.stringify(versions.three)
+  },
   minify: true,
   legalComments: 'none',
   logLevel: 'info'

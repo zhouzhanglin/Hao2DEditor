@@ -3,6 +3,9 @@
 [← 返回目录](index.md) ｜ 上一篇：[33 教程 4：K 动画](33-tutorial-animate.md) ｜ 下一篇：[40 导入详解](40-import-formats.md)
 
 > 目标：把角色导出成可用的运行时数据，并确认产物齐全、贴图正确。
+>
+> 随安装包分发的 `hao2d-pixi.js` / `hao2d-three.js` 有**自己的版本号**（`resources/runtimes/versions.json`），
+> 与编辑器版本独立；只有运行库代码更新才升版本。宿主可读取全局对象的 `RUNTIME_VERSION` 核对加载的是哪一份。
 
 ![导出运行时](assets/dialog-export-runtime.png)
 

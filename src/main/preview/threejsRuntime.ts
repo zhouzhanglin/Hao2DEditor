@@ -10,6 +10,7 @@ import { ThreeSkeletonView, loadThreeTextures } from './threejsView'
 import type { NestedLayerView, PageInput, ThreeTextureStore } from './threejsView'
 import { Hao2dViewCore } from './hao2dViewCore'
 import type { Hao2dRenderAdapter, NestedChildLayer } from './hao2dViewCore'
+export { RUNTIME_VERSION } from './runtimeVersion'
 
 /**
  * three.js 版 Hao2D 运行库（由 `scripts/build-threejs-runtime.mjs` 打成 IIFE，

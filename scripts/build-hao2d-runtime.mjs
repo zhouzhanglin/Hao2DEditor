@@ -1,8 +1,10 @@
 import { build } from 'esbuild'
+import { readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const versions = JSON.parse(readFileSync(resolve(root, 'resources/runtimes/versions.json'), 'utf8'))
 
 const alias = {
   '@core': resolve(root, 'src/core'),
@@ -27,7 +29,11 @@ await build({
   target: 'es2019',
   outfile: resolve(root, 'src/main/preview/hao2dRuntime.generated.js'),
   alias,
-  define: { 'process.env.NODE_ENV': '"production"' },
+  define: {
+    'process.env.NODE_ENV': '"production"',
+    // 运行库版本独立于 package.json.version（见 resources/runtimes/versions.json）
+    __HAO2D_RUNTIME_VERSION__: JSON.stringify(versions.pixi)
+  },
   minify: true,
   legalComments: 'none',
   logLevel: 'info'

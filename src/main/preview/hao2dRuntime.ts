@@ -9,6 +9,7 @@ import { TextureStore } from '@render/material'
 import { SkeletonView } from '@render/skeletonView'
 import { Hao2dViewCore } from './hao2dViewCore'
 import type { Hao2dRenderAdapter, NestedChildLayer } from './hao2dViewCore'
+export { RUNTIME_VERSION } from './runtimeVersion'
 
 /**
  * hao2d 的 pixi 运行库（预览页与 `resources/runtimes/hao2d-pixi.js` 共用）。

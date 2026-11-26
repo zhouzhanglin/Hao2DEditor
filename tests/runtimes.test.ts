@@ -8,6 +8,11 @@ const pkg = JSON.parse(read('package.json')) as {
   scripts: Record<string, string>
   build: { extraResources: Array<{ from: string; to: string }> }
 }
+/** 运行库自己的版本号（与 package.json 的编辑器版本无关） */
+const runtimeVersions = JSON.parse(read('resources/runtimes/versions.json')) as {
+  pixi: string
+  three: string
+}
 
 /** 与 scripts/build-runtimes.mjs 一致的压缩参数（minifyIdentifiers 必须关掉，否则全局契约被改名） */
 const MINIFY = {
@@ -85,5 +90,24 @@ describe('随 App 分发的 hao2d-only 压缩运行库（resources/runtimes）',
     expect(pkg.scripts['build:runtimes']).toBe('node scripts/build-runtimes.mjs')
     expect(pkg.scripts.build).toContain('build:runtimes')
     expect(pkg.build.extraResources).toContainEqual({ from: 'resources/runtimes', to: 'runtimes' })
+  })
+
+  it('版本号来自运行库自己的清单，不跟编辑器 package.json 版本走', () => {
+    expect(runtimeVersions.pixi).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(runtimeVersions.three).toMatch(/^\d+\.\d+\.\d+$/)
+    expect(read('resources/runtimes/hao2d-pixi.js').split('\n')[0]).toContain(`runtime v${runtimeVersions.pixi}`)
+    expect(read('resources/runtimes/hao2d-three.js').split('\n')[0]).toContain(`runtime v${runtimeVersions.three}`)
+
+    const script = read('scripts/build-runtimes.mjs')
+    expect(script).toContain('resources/runtimes/versions.json')
+    expect(script).not.toContain("readFileSync(resolve(root, 'package.json')")
+    expect(read('scripts/build-hao2d-runtime.mjs')).toContain('__HAO2D_RUNTIME_VERSION__')
+    expect(read('scripts/build-threejs-runtime.mjs')).toContain('__HAO2D_RUNTIME_VERSION__')
+    expect(read('src/main/preview/hao2dRuntime.ts')).toContain("export { RUNTIME_VERSION }")
+    expect(read('src/main/preview/threejsRuntime.ts')).toContain("export { RUNTIME_VERSION }")
+
+    // 运行时全局对象也带版本，宿主可以打印核对加载的是哪一份
+    expect(read('src/main/preview/hao2dRuntime.generated.js')).toContain('RUNTIME_VERSION')
+    expect(read('src/main/preview/threejsRuntime.generated.js')).toContain('RUNTIME_VERSION')
   })
 })

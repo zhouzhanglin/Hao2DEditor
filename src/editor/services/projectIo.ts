@@ -20,6 +20,7 @@ import { dbTextureNames, parseDbTextureJson } from '@importers/dragonBonesAtlas'
 import { detectSkeletonFormat, isDbTextureJson } from '@importers/detect'
 import { registerLooseImages } from '@importers/looseImages'
 import { ASSET_DIR, copyAssets, planAssetCopies, resolveImagePaths } from './projectAssets'
+import { rebaseAssetFolderSnapshot } from './assetFolderSync'
 import { openPsdDialog, parsePsdAt } from './psdImport'
 import type { AtlasRegion, PageSizes } from '@importers/uv'
 import { DEFAULT_PROJECT_NAME, useProjectStore } from '../store/projectStore'
@@ -479,6 +480,8 @@ export async function saveProject(saveAs: boolean): Promise<IoResult> {
   // 图片随工程走：先复制到 images/，工程文件里用相对路径写入
   const plan = planAssetCopies(store.document.images, dirName(path))
   const copied = await copyAssets(plan.copies, platform, platform)
+  // 自己刚写进 images/ 的新副本不要被 watcher 当成「外部新增」
+  await rebaseAssetFolderSnapshot(joinPath(dirName(path), ASSET_DIR))
 
   /*
    * 当前皮肤以**选中态**为准落盘：切皮肤是静默改（不进撤销记录），而撤销 / 重做会把文档里的

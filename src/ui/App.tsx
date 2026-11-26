@@ -22,6 +22,7 @@ import PanelShell from './widgets/PanelShell'
 import { pickAnimationForAnimate, useModeStore } from '@editor/store/modeStore'
 import type { EditorMode } from '@editor/store/modeStore'
 import { useProjectStore } from '@editor/store/projectStore'
+import { installAssetFolderSync } from '@editor/services/assetFolderSync'
 import { executeCommand } from '@editor/commands'
 import { createSampleDocument } from '@core/sample'
 import { useSelectionStore } from '@editor/store/selectionStore'
@@ -257,6 +258,12 @@ export default function App() {
     setHint(message)
     window.setTimeout(() => setHint(undefined), 2600)
   }, [])
+
+  /**
+   * 外部 `images/` 变化 → 资源池自动对账（新增 / 修改 / 删除）。
+   * 监视器挂在主进程，渲染层只负责比对与更新文档；浏览器模式没有监视器时是空操作。
+   */
+  useEffect(() => installAssetFolderSync((text) => flash(text)), [flash])
 
   /** 拖拽左侧分隔条：向上拖（delta < 0）把面板拉高，并记住高度 */
   const resizeAssetPanel = useCallback((delta: number) => {

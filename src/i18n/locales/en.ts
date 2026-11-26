@@ -475,6 +475,8 @@ export const en: Record<string, string> = {
   '已用「{0}」替换「{1}」（{2}×{3}）': 'Replaced "{1}" with "{0}" ({2}×{3})',
   '拆分「{0}」失败：{1}': 'Failed to split "{0}": {1}',
   '替换图片…': 'Replace image…',
+  '打开图片所在目录，并选中这张图片': 'Open the folder containing the image and select it',
+  '图片「{0}」没有可定位的磁盘路径': 'Image "{0}" has no file path to reveal',
   '选一张新图，保持原名（引用它的附件自动跟随）':
     'Pick a new image and keep the name (attachments referencing it follow automatically)',
   '从工程移除该图片（被引用的附件退化为纯色）':
@@ -1521,6 +1523,7 @@ export const en: Record<string, string> = {
   '{0} 张图片已复制到 {1}/': '{0} image(s) copied to {1}/',
   '{0} 张图片已在工程内': '{0} image(s) already inside the project',
   '已保存到 {0}': 'Saved to {0}',
+  'images/ 已同步：新增 {0} 张、修改 {1} 张、删除 {2} 张': 'images/ synchronized: {0} added, {1} modified, {2} removed',
   '正在打开工程…': 'Opening project…',
   '（后缀已升级为 .{0}）': ' (extension upgraded to .{0})',
   '（{0}）': ' ({0})',

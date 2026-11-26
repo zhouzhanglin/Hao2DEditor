@@ -3,6 +3,7 @@ import path from 'node:path'
 import { createLogger } from './logger'
 import { registerSchemes, registerProtocolHandlers } from './protocol'
 import { registerIpcHandlers } from './ipc'
+import { closeAssetWatcher } from './assetWatcher'
 import { buildAppMenu } from './menu'
 import { setLocale, systemLocale } from './i18n'
 import { startCommandServer, stopCommandServer } from './commandServer'
@@ -166,6 +167,7 @@ app.on('will-quit', () => {
   void stopCommandServer()
   // 还开着的视频导出会话：杀掉子进程，别留下孤儿 ffmpeg
   cancelAllVideoExports()
+  closeAssetWatcher()
 })
 
 app.on('window-all-closed', () => {

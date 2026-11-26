@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { AuthoringImage, EditorDocument } from '@core/model/authoring'
 import { ROOT_BONE_NAME, createAuthoringBone, createEmptyDocument } from '@core/model/authoring'
+import { registerLooseImages } from '@importers/looseImages'
 import { History } from '../history'
 import type { ProjectSnapshot } from '../history'
 import { applyAtlasSplit, deleteImage, replaceImage } from '../commands/authoringCommands'
@@ -84,6 +85,12 @@ export interface ProjectState {
    * 只动文档：剪裁 / 编码 / 写盘在 `services/atlasSplit.ts`，磁盘上的原图集文件不删
    * （只是从工程里移除，用户想删自己删）。
    */
+  /** 外部 `images/` 变化：一次对账同步（新增 / 修改 / 删除），共享资源池、跨骨架生效 */
+  syncImagesFromFolder: (changes: {
+    added: readonly AuthoringImage[]
+    modified: readonly { name: string; info: { path: string; width: number; height: number } }[]
+    removed: readonly string[]
+  }) => void
   splitAtlas: (plan: AtlasSplitPlan, images: readonly AuthoringImage[]) => void
   /** 切换当前编辑的骨架 */
   setActiveSkeleton: (index: number) => void
@@ -634,6 +641,41 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const list = state.skeletons.map((skeleton) => {
       const draft = cloneDocument(skeleton)
       replaceImage(draft, name, info)
+      return draft
+    })
+    const withPool = shareImages(list, state.activeSkeleton)
+    set({
+      document: withPool[state.activeSkeleton],
+      skeletons: withPool,
+      dirty: true,
+      ...syncFlags(state)
+    })
+  },
+
+  syncImagesFromFolder: ({ added, modified, removed }) => {
+    const state = get()
+    if (added.length === 0 && modified.length === 0 && removed.length === 0) return
+    history.push('同步 images/ 目录', snapshotOf(state))
+    /*
+     * 外部改文件是显式的资源编辑：一次对账只压一条撤销，跨所有骨架同步
+     *（与 removeImages / replaceImage 一致；图片池共享，附件引用要清也要改）。
+     */
+    const list = state.skeletons.map((skeleton) => {
+      const draft = cloneDocument(skeleton)
+      for (const name of removed) deleteImage(draft, name)
+      for (const item of modified) {
+        replaceImage(draft, item.name, { path: item.info.path, width: item.info.width, height: item.info.height })
+      }
+      if (added.length > 0) {
+        const { images } = registerLooseImages(added, draft.images)
+        draft.images = images.map((image) => ({
+          name: image.name,
+          path: image.path,
+          width: image.width,
+          height: image.height,
+          loose: image.loose ?? true
+        }))
+      }
       return draft
     })
     const withPool = shareImages(list, state.activeSkeleton)

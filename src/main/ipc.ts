@@ -11,6 +11,7 @@ import {
 } from './previewServer'
 import { commandServerInfo } from './commandServer'
 import { markRendererReady } from './openRequests'
+import { closeAssetWatcher, watchAssetsDir } from './assetWatcher'
 import { installMcpIntoClients } from './aiClientConfig'
 import { installSkillToClients, openSkillsFolder, skillsInfo } from './aiSkills'
 import { normalizeLocale, setLocale } from './i18n'
@@ -71,6 +72,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.imageInfo, (_e, paths: string[]) => fs.safe(() => fs.imageInfo(paths)))
   ipcMain.handle(IPC.registerAssetRoot, (_e, dir: string) =>
     fs.safe(() => fs.registerAssetRootFor(dir))
+  )
+  ipcMain.handle(IPC.assetsWatch, (_e, dir: string | null) =>
+    fs.safe(() => watchAssetsDir(dir))
   )
 
   ipcMain.handle(IPC.recentList, () => fs.safe(() => fs.recentList()))

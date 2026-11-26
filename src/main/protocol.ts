@@ -36,7 +36,9 @@ function decodePath(url: string): string {
   const stripped = url.slice(`${FILE_SCHEME}://`.length)
   const slash = stripped.indexOf('/')
   const payload = slash >= 0 ? stripped.slice(slash + 1) : stripped
-  return Buffer.from(decodeURIComponent(payload), 'base64url').toString('utf8')
+  // fileUrl(path, revision) 用 ?v= 绕开浏览器缓存；编码的只是路径，查询串要丢掉
+  const encoded = payload.split('?')[0]
+  return Buffer.from(decodeURIComponent(encoded), 'base64url').toString('utf8')
 }
 
 function isInsideRoots(target: string): boolean {

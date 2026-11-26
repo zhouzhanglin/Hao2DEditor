@@ -52,6 +52,13 @@ export interface DirEntry {
   relativePath: string
   isDirectory: boolean
   size: number
+  /** 最近修改时间（毫秒）；资源目录对账靠它 + size 判定「内容变了」 */
+  mtimeMs: number
+}
+
+/** 主进程监视的资源目录发生变化（具体变化由渲染层重新 listDir 对账，避免事件风暴） */
+export interface AssetsChangedPayload {
+  dir: string
 }
 
 export interface BatchFile {
@@ -92,6 +99,10 @@ export const IPC = {
   stat: 'fs:stat',
   imageInfo: 'fs:imageInfo',
   registerAssetRoot: 'assets:registerRoot',
+  /** 开始 / 停止监视 `<工程目录>/images`（null = 停） */
+  assetsWatch: 'assets:watch',
+  /** 主进程 → 渲染层：监视目录发生变化 */
+  assetsChanged: 'assets:changed',
   recentList: 'recent:list',
   recentAdd: 'recent:add',
   recentRemove: 'recent:remove',
@@ -332,6 +343,9 @@ export interface HaoBridge {
   imageInfo(paths: string[]): Promise<IpcResult<ImageInfo[]>>
   /** 把目录登记为可被 hao2d-file:// 读取的资源根（导入碎图时调用） */
   registerAssetRoot(dir: string): Promise<IpcResult<void>>
+  /** 监视 / 停止监视资源目录；返回取消监听的函数 */
+  watchAssetsDir(dir: string | null): Promise<IpcResult<void>>
+  onAssetsChanged(cb: (payload: AssetsChangedPayload) => void): () => void
   recentList(): Promise<IpcResult<string[]>>
   recentAdd(path: string): Promise<IpcResult<void>>
   /** 从最近列表移除一条（工程换名 / 后缀迁移后，旧路径不该继续留在列表里） */
@@ -339,7 +353,13 @@ export interface HaoBridge {
   revealInFolder(path: string): Promise<IpcResult<void>>
   setTitle(title: string): Promise<IpcResult<void>>
   /** 把绝对路径转成渲染层可直接加载的 URL */
-  fileUrl(path: string): string
+  /**
+   * 文件系统图片 → 可显示 URL。
+   *
+   * `revision` 只用于**内容变了但路径没变**时绕开浏览器缓存（每次外部修改 +1）；
+   * 不传就是原 URL，既有调用点不需要改。
+   */
+  fileUrl(path: string, revision?: number): string
   /**
    * 起本地在线预览服务（spine.js 运行时网页）；返回手机可扫码的地址。
    *

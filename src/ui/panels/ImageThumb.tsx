@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
 import { ImageOff } from 'lucide-react'
 import { getPlatform } from '@editor/platform'
+import { imageRevision, subscribeImageRevisions } from '@editor/services/assetFolderSync'
 import type { AuthoringImage } from '@core/model/authoring'
 import { t } from '@i18n'
 
@@ -13,7 +14,13 @@ const PREVIEW_MARGIN = 8
 
 /** 图片文件 → 可显示的 URL（Electron 走 hao2d-file://，浏览器走 blob:） */
 function useImageUrl(path: string): string {
-  return useMemo(() => (path ? getPlatform().fileUrl(path) : ''), [path])
+  // path 没变但磁盘内容被外部改过时 revision +1，<img> 换个 URL 才不会显示缓存里的旧像素
+  const revision = useSyncExternalStore(
+    subscribeImageRevisions,
+    () => imageRevision(path),
+    () => 0
+  )
+  return useMemo(() => (path ? getPlatform().fileUrl(path, revision) : ''), [path, revision])
 }
 
 /** 列表行里的小缩略图：棋盘打底，透明图也能看清边界 */

@@ -44,13 +44,17 @@ export interface Platform {
   deleteFile(path: string): Promise<boolean>
   imageInfo(paths: string[]): Promise<ImageInfo[]>
   registerAssetRoot(dir: string): Promise<void>
+  /** 监视 / 停止监视资源目录（浏览器模式为空实现） */
+  watchAssetsDir(dir: string | null): Promise<void>
+  /** 资源目录变化事件（浏览器模式为空实现） */
+  onAssetsChanged(cb: (payload: { dir: string }) => void): () => void
   recentList(): Promise<string[]>
   recentAdd(path: string): Promise<void>
   /** 从最近列表移除一条（工程改名 / 后缀迁移后旧路径会变成死链） */
   recentRemove(path: string): Promise<void>
   revealInFolder(path: string): Promise<void>
   setTitle(title: string): Promise<void>
-  fileUrl(path: string): string
+  fileUrl(path: string, revision?: number): string
   /**
    * 渲染层用来把图片变成纹理的 URL。
    *
@@ -181,6 +185,14 @@ class ElectronPlatform implements Platform {
     unwrap(await this.bridge.registerAssetRoot(dir), undefined)
   }
 
+  async watchAssetsDir(dir: string | null): Promise<void> {
+    unwrap(await this.bridge.watchAssetsDir(dir), undefined)
+  }
+
+  onAssetsChanged(cb: (payload: { dir: string }) => void): () => void {
+    return this.bridge.onAssetsChanged(cb)
+  }
+
   recentList(): Promise<string[]> {
     return this.bridge.recentList().then((r) => unwrap(r, []))
   }
@@ -201,8 +213,8 @@ class ElectronPlatform implements Platform {
     unwrap(await this.bridge.setTitle(title), undefined)
   }
 
-  fileUrl(path: string): string {
-    return this.bridge.fileUrl(path)
+  fileUrl(path: string, revision?: number): string {
+    return this.bridge.fileUrl(path, revision)
   }
 
   /** 读文件字节 → 同源 blob:（缓存，同一张图只读一次） */
@@ -369,6 +381,7 @@ class MemoryPlatform implements Platform {
   readonly platform = 'browser'
 
   private files = new Map<string, Uint8Array>()
+  private fileTimes = new Map<string, number>()
   private blobs = new Map<string, string>()
   private roots = new Set<string>(['mem:/'])
   private recents: string[] = []
@@ -418,10 +431,12 @@ class MemoryPlatform implements Platform {
 
   async writeText(path: string, text: string): Promise<void> {
     this.files.set(path, new TextEncoder().encode(text))
+    this.fileTimes.set(path, Date.now())
   }
 
   async writeBinary(path: string, bytes: Uint8Array): Promise<void> {
     this.files.set(path, bytes)
+    this.fileTimes.set(path, Date.now())
   }
 
   async writeBatch(files: BatchFile[]): Promise<void> {
@@ -444,7 +459,14 @@ class MemoryPlatform implements Platform {
       if (!key.startsWith(prefix)) continue
       const rest = key.slice(prefix.length)
       if (rest.length === 0) continue
-      out.push({ path: key, name: rest, relativePath: rest, isDirectory: false, size: bytes.length })
+      out.push({
+        path: key,
+        name: rest,
+        relativePath: rest,
+        isDirectory: false,
+        size: bytes.length,
+        mtimeMs: this.fileTimes.get(key) ?? Date.now()
+      })
     }
     return out
   }
@@ -456,10 +478,13 @@ class MemoryPlatform implements Platform {
   /** 内存文件系统：直接摘掉条目，blob URL 一并回收 */
   async deleteFile(path: string): Promise<boolean> {
     const existed = this.files.delete(path)
-    const blob = this.blobs.get(path)
-    if (blob) {
-      URL.revokeObjectURL(blob)
-      this.blobs.delete(path)
+    this.fileTimes.delete(path)
+    // 同一路径可能有多个 revision 的 blob，全部回收
+    for (const [key, blob] of [...this.blobs]) {
+      if (key === path || key.startsWith(`${path}|v`)) {
+        URL.revokeObjectURL(blob)
+        this.blobs.delete(key)
+      }
     }
     return existed
   }
@@ -476,6 +501,14 @@ class MemoryPlatform implements Platform {
 
   async registerAssetRoot(dir: string): Promise<void> {
     this.roots.add(dir)
+  }
+
+  async watchAssetsDir(_dir: string | null): Promise<void> {
+    // 内存文件系统没有外部进程改文件，无需监视
+  }
+
+  onAssetsChanged(_cb: (payload: { dir: string }) => void): () => void {
+    return () => undefined
   }
 
   async recentList(): Promise<string[]> {
@@ -498,14 +531,16 @@ class MemoryPlatform implements Platform {
     if (typeof document !== 'undefined') document.title = title
   }
 
-  fileUrl(path: string): string {
-    const cached = this.blobs.get(path)
+  fileUrl(path: string, revision = 0): string {
+    // 内容变了但路径没变时靠 revision 生成新 blob，避免浏览器一直显示旧图
+    const key = revision > 0 ? `${path}|v${revision}` : path
+    const cached = this.blobs.get(key)
     if (cached) return cached
     const bytes = this.files.get(path)
     if (!bytes) return ''
     const blob = new Blob([bytes as unknown as BlobPart])
     const url = URL.createObjectURL(blob)
-    this.blobs.set(path, url)
+    this.blobs.set(key, url)
     return url
   }
 
@@ -522,6 +557,16 @@ class MemoryPlatform implements Platform {
 
   async pathForDroppedFile(file: File): Promise<string> {
     return this.storeFile(file)
+  }
+
+  /** 内存模式：写文件也要记 mtime，资源目录对账靠它识别「内容变了」 */
+  private storeFile(file: File): Promise<string> {
+    const path = `mem:/${this.counter++}/${file.name}`
+    return file.arrayBuffer().then((buffer) => {
+      this.files.set(path, new Uint8Array(buffer))
+      this.fileTimes.set(path, Date.now())
+      return path
+    })
   }
 
   /** 浏览器模式没有主进程，起不了本地服务（dev:web 里忽略这个功能） */
@@ -613,12 +658,6 @@ class MemoryPlatform implements Platform {
     return { ok: true, data: undefined }
   }
 
-  private async storeFile(file: File): Promise<string> {
-    const path = `mem:/${++this.counter}_${file.name}`
-    const buf = await file.arrayBuffer()
-    this.files.set(path, new Uint8Array(buf))
-    return path
-  }
 }
 
 async function measureImage(bytes: Uint8Array): Promise<{ width: number; height: number }> {

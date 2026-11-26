@@ -39,6 +39,7 @@ const bridge: HaoBridge = {
   deleteFile: (p: string) => invoke<boolean>(IPC.deleteFile, p),
   imageInfo: (paths: string[]) => invoke<ImageInfo[]>(IPC.imageInfo, paths),
   registerAssetRoot: (dir: string) => invoke<void>(IPC.registerAssetRoot, dir),
+  watchAssetsDir: (dir: string | null) => invoke<void>(IPC.assetsWatch, dir),
   recentList: () => invoke<string[]>(IPC.recentList),
   recentAdd: (path: string) => invoke<void>(IPC.recentAdd, path),
   recentRemove: (path: string) => invoke<void>(IPC.recentRemove, path),
@@ -70,9 +71,10 @@ const bridge: HaoBridge = {
   systemLocale: () => invoke<string>(IPC.i18nSystemLocale),
   setAppLocale: (locale: string) => invoke<void>(IPC.i18nSetLocale, locale),
 
-  fileUrl: (absPath: string): string => {
+  fileUrl: (absPath: string, revision?: number): string => {
     const encoded = xorEncode(absPath)
-    return `${FILE_SCHEME}://local/${encoded}`
+    const suffix = revision ? `?v=${revision}` : ''
+    return `${FILE_SCHEME}://local/${encoded}${suffix}`
   },
 
   onMenuCommand: (cb: (command: MenuCommand) => void) => {
@@ -84,6 +86,14 @@ const bridge: HaoBridge = {
   },
 
   consumeOpenRequests: () => invoke<string[]>(IPC.consumeOpenRequests),
+
+  onAssetsChanged: (cb: (payload: { dir: string }) => void) => {
+    const listener = (_e: unknown, payload: { dir: string }): void => cb(payload)
+    ipcRenderer.on(IPC.assetsChanged, listener)
+    return () => {
+      ipcRenderer.off(IPC.assetsChanged, listener)
+    }
+  },
 
   onOpenProjectRequest: (cb: (path: string) => void) => {
     const listener = (_e: unknown, p: string): void => cb(p)

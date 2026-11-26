@@ -208,7 +208,8 @@ async function walk(
         name: entry.name,
         relativePath: relative(root, full),
         isDirectory: true,
-        size: 0
+        size: 0,
+        mtimeMs: 0
       })
       if (recursive) await walk(root, full, recursive, out, depth + 1)
     } else if (entry.isFile()) {
@@ -218,7 +219,8 @@ async function walk(
         name: entry.name,
         relativePath: relative(root, full),
         isDirectory: false,
-        size: st?.size ?? 0
+        size: st?.size ?? 0,
+        mtimeMs: st?.mtimeMs ?? 0
       })
     }
   }

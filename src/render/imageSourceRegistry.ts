@@ -39,6 +39,11 @@ export class ImageSourceRegistry {
     this.loaded.set(image.name, image.path)
   }
 
+  /** 内容变了但路径没变：丢掉记账，让下一次 loadTextures 重新读文件 */
+  forget(name: string): void {
+    this.loaded.delete(name)
+  }
+
   clear(): void {
     this.loaded.clear()
   }

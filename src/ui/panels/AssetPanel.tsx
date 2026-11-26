@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { ImagePlus, Layers, Loader2, Package, Pencil, Plus, RefreshCw, Scissors, Trash2 } from 'lucide-react'
+import { FolderOpen, ImagePlus, Layers, Loader2, Package, Pencil, Plus, RefreshCw, Scissors, Trash2 } from 'lucide-react'
 import { useProjectStore } from '@editor/store/projectStore'
 import { useSelectionStore } from '@editor/store/selectionStore'
 import { getPlatform } from '@editor/platform'
@@ -146,6 +146,16 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
     onStatus?.(t('已用「{0}」替换「{1}」（{2}×{3}）', [info.path, name, info.width, info.height]))
   }
 
+  /** 在系统文件管理器里打开图片所在目录并选中该文件 */
+  const handleRevealImage = async (name: string): Promise<void> => {
+    const image = document.images.find((item) => item.name === name)
+    if (!image?.path) {
+      onStatus?.(t('图片「{0}」没有可定位的磁盘路径', name))
+      return
+    }
+    await getPlatform().revealInFolder(image.path)
+  }
+
   /** 图集拆碎图：图集里的每块子图各写一张 png，引用它的附件改用碎图，图集条目从工程移除 */
   const handleSplitAtlas = async (name: string): Promise<void> => {
     if (splitting) return
@@ -265,7 +275,7 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
    *
    * - **多选时只给「删除」**：替换 / 其它逐项操作在多选语义下都要问「对哪一张」，
    *   留着反而要先想一下；删除则天然作用在整组上（一次撤销）。
-   * - 单选时保持原来的「替换 + 删除」两项。
+   * - 单选时给出「在文件夹中显示 / 替换 / 删除」。
    */
   const imageMenuItems = (name: string): ContextMenuItem[] => {
     const targets = selectedSet.has(name) && selected.length > 1 ? selected : [name]
@@ -282,6 +292,13 @@ export default function AssetPanel({ onImport, onStatus }: AssetPanelProps) {
       ]
     }
     return [
+      {
+        key: 'reveal',
+        label: t('在文件夹中显示'),
+        icon: <FolderOpen size={12} />,
+        hint: t('打开图片所在目录，并选中这张图片'),
+        onSelect: () => void handleRevealImage(name)
+      },
       {
         key: 'replace',
         label: t('替换图片…'),

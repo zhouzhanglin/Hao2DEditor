@@ -167,6 +167,14 @@ export const en: Record<string, string> = {
   '切换界面语言；首次启动会按系统语言自动选择': 'Switch the interface language; on first launch it follows the system language',
   '简体中文': '简体中文',
   'English': 'English',
+  '渲染质量': 'Render quality',
+  '高清（默认）': 'High (default)',
+  '均衡': 'Balanced',
+  '省电': 'Power saving',
+  '切换视口渲染质量：降低像素密度与帧率可以明显减少 GPU 占用':
+    'Switch viewport render quality: lower pixel density and frame rate noticeably reduce GPU usage',
+  '只影响编辑器视口的清晰度与帧率；不进工程、不影响导出，改完立即生效。':
+    'Affects only editor viewport sharpness and frame rate; not saved into the project, not affecting exports, applies immediately.',
   '在 atlas 文件名后追加 .txt，写成 xxx.atlas.txt（Spine 编辑器默认导出的形态，spine-unity 也认）': 'Append .txt to the atlas filename, e.g. xxx.atlas.txt (the Spine editor default export form; spine-unity also accepts it)',
   'Spine 导出：atlas 名追加 .txt': 'Spine export: append .txt to atlas name',
   '勾选后所有 Spine 导出都写成 {0}（全局生效，跨工程保留）': 'When checked, all Spine exports are written as {0} (applies globally, persists across projects)',

@@ -427,6 +427,16 @@ export class EditorScene {
   }
 
   /**
+   * 全局设置 → 视口渲染分辨率（「渲染质量」档位）。
+   *
+   * 仅改画布 backing store 密度，不动相机 / 文档；渲染循环里的帧率上限由
+   * `ViewportCanvas` 按同一份设置档位处理。
+   */
+  setRenderResolution(maxDevicePixelRatio: number): void {
+    this.viewport.setRenderResolution(maxDevicePixelRatio)
+  }
+
+  /**
    * 拖动中的颜色预览：`{ 插槽名: '#RRGGBBAA' }`，只改运行期（文档 / 历史 / 面板都不动）。
    *
    * 配合 `previewStore`：拖动期间颜色只写这里，于是不再每帧深拷贝文档、不再重建运行期、

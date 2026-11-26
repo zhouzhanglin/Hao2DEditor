@@ -309,6 +309,23 @@ export class Viewport {
     this.render()
   }
 
+  /**
+   * 改画布 backing store 的像素密度（渲染质量档位用）。
+   *
+   * 逻辑尺寸不变（`renderer.width/height` 仍是 CSS 像素），只改 `resolution`；
+   * Pixi 的 canvas/source 会按新分辨率重建纹理，所以要立刻重画一帧。
+   * `antialias` 属于 WebGL 上下文属性，运行中改不了，仍是初始化时的设定。
+   */
+  setRenderResolution(maxDevicePixelRatio: number): void {
+    if (!this.isReady) return
+    const dpr = Math.max(1, globalThis.devicePixelRatio || 1)
+    const resolution = Math.max(1, Math.min(maxDevicePixelRatio, dpr))
+    if (Math.abs(this.app.renderer.resolution - resolution) < 0.01) return
+    this.app.renderer.resize(this.width, this.height, resolution)
+    this.applyCamera()
+    this.render()
+  }
+
   render(): void {
     if (!this.isReady) return
     this.app.render()

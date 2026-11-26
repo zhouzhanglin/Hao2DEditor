@@ -10,6 +10,43 @@ import type { BoneOverlayStyle } from '@render/overlays/boneStyle'
  */
 const SETTINGS_KEY = 'hao2d:settings'
 
+/**
+ * 视口渲染质量（不改文档、不影响导出，只决定画布像素密度与帧率上限）。
+ *
+ * - `high`：Retina 上最多 2× 像素，保持 rAF 原速（默认，观感最好，GPU 占用也最高）；
+ * - `balanced`：固定 1× 像素，帧率不封顶；
+ * - `power`：固定 1× 像素且最多 60fps，用于高刷屏上省电 / 降 GPU。
+ *
+ * 抗锯齿（MSAA）是 WebGL 上下文创建时的属性，运行中改不了，因此三档都沿用初始化时的
+ * `antialias: true`；主要收益来自 backing store 像素数与刷新频率。
+ */
+export type RenderQuality = 'high' | 'balanced' | 'power'
+
+export interface RenderQualityProfile {
+  /** 渲染分辨率上限：`resolution = min(maxDevicePixelRatio, devicePixelRatio)` */
+  maxDevicePixelRatio: number
+  /** 帧率上限；`null` = 不额外限制（跟随屏幕刷新） */
+  maxFps: number | null
+}
+
+/** 渲染质量档位 → 具体参数（纯函数，测试与视口共用同一份口径） */
+export function renderQualityProfile(quality: RenderQuality): RenderQualityProfile {
+  switch (quality) {
+    case 'balanced':
+      return { maxDevicePixelRatio: 1, maxFps: null }
+    case 'power':
+      return { maxDevicePixelRatio: 1, maxFps: 60 }
+    case 'high':
+    default:
+      return { maxDevicePixelRatio: 2, maxFps: null }
+  }
+}
+
+/** localStorage / 老存档里的坏值兜底：未知档位一律回默认「高」 */
+function sanitizeRenderQuality(value: unknown): RenderQuality {
+  return value === 'high' || value === 'balanced' || value === 'power' ? value : 'high'
+}
+
 /** 全局设置字段（以后加新选项直接往这里加） */
 export interface GlobalSettings {
   /** Spine 导出时图集文件名追加 `.txt`（`xxx.atlas.txt`）；Spine 编辑器导出的形态，spine-unity 也认 */
@@ -31,13 +68,16 @@ export interface GlobalSettings {
    * 需要把工程共享给没装 Skill 的同事、或要换机器时，再在这里打开。
    */
   aiSkillAlwaysCopyProject: boolean
+  /** 视口渲染质量（默认 `high`；见 `renderQualityProfile`） */
+  renderQuality: RenderQuality
 }
 
 const DEFAULT_SETTINGS: GlobalSettings = {
   spineAtlasTxt: false,
   boneStyle: { ...DEFAULT_BONE_STYLE },
   aiSkillInProject: true,
-  aiSkillAlwaysCopyProject: false
+  aiSkillAlwaysCopyProject: false,
+  renderQuality: 'high'
 }
 
 function loadSettings(): GlobalSettings {
@@ -52,7 +92,9 @@ function loadSettings(): GlobalSettings {
     return {
       ...DEFAULT_SETTINGS,
       ...parsed,
-      boneStyle: sanitizeBoneStyle({ ...DEFAULT_BONE_STYLE, ...parsed.boneStyle })
+      boneStyle: sanitizeBoneStyle({ ...DEFAULT_BONE_STYLE, ...parsed.boneStyle }),
+      // 顶层字段也别信手改的 localStorage：档位不认识就退回默认「高」
+      renderQuality: sanitizeRenderQuality(parsed.renderQuality)
     }
   } catch {
     return { ...DEFAULT_SETTINGS, boneStyle: { ...DEFAULT_BONE_STYLE } }
@@ -98,6 +140,8 @@ export interface SettingsStore extends GlobalSettings {
   setAiSkillInProject: (value: boolean) => void
   /** 客户端已装同版本时，是否仍然复制到工程 */
   setAiSkillAlwaysCopyProject: (value: boolean) => void
+  /** 视口渲染质量（即时生效，跨工程保留） */
+  setRenderQuality: (value: RenderQuality) => void
 }
 
 export const useSettingsStore = create<SettingsStore>((set, get) => ({
@@ -123,5 +167,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   setAiSkillAlwaysCopyProject: (value) => {
     set({ aiSkillAlwaysCopyProject: value })
     saveSettings({ ...get(), aiSkillAlwaysCopyProject: value })
+  },
+  setRenderQuality: (value) => {
+    const renderQuality = sanitizeRenderQuality(value)
+    set({ renderQuality })
+    saveSettings({ ...get(), renderQuality })
   }
 }))

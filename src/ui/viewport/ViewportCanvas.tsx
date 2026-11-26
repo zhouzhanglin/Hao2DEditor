@@ -15,7 +15,7 @@ import { useTimelineStore } from '@editor/store/timelineStore'
 import { playheadTime, usePlayheadStore } from '@editor/store/playheadStore'
 import { publishPerf } from '@editor/store/perfStore'
 import { usePreviewStore } from '@editor/store/previewStore'
-import { useSettingsStore } from '@editor/store/settingsStore'
+import { renderQualityProfile, useSettingsStore } from '@editor/store/settingsStore'
 import {
   baseBrushMode,
   brushModeFor,
@@ -98,11 +98,23 @@ export interface ViewportCanvasProps {
  */
 type BoxSelectMode = 'display' | 'bone' | 'constraint'
 
+/**
+ * 把「渲染质量」档位落到视口：分辨率交给 `Scene`，帧率上限写进 timing 供渲染循环读取。
+ * 这里读 store 而不是收参数，是为了初始化完成 / 重挂载 / 设置变更三条路径共用同一份口径。
+ */
+function applyRenderQuality(scene: EditorScene | null, timing: { minFrameMs: number }): void {
+  const profile = renderQualityProfile(useSettingsStore.getState().renderQuality)
+  timing.minFrameMs = profile.maxFps === null ? 0 : 1000 / profile.maxFps - 0.5
+  scene?.setRenderResolution(profile.maxDevicePixelRatio)
+}
+
 /** pixi 画布挂载：创建 EditorScene，订阅 store 投喂状态，处理平移 / 缩放 / 拾取 */
 export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanvasProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const sceneRef = useRef<EditorScene | null>(null)
   const texturesRef = useRef<TextureStore | null>(null)
+  /** 渲染质量档位对应的帧间隔；设置一改就更新，渲染循环只读它 */
+  const renderTimingRef = useRef({ minFrameMs: 0 })
   /** 绑定骨骼状态下跟着鼠标走的提示图标（用 ref 直接改位置，避免每次移动都触发重渲染） */
   const bindIconRef = useRef<HTMLDivElement | null>(null)
   const pendingWeightBone = useToolStore((s) => s.pendingWeightBone)
@@ -124,6 +136,8 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
 
     void scene.init().then(() => {
       if (disposed) return
+      // 初始化完成后按存档里的档位再落一次（scene.init 用的是默认值，此时才真正可用）
+      applyRenderQuality(scene, renderTimingRef.current)
       onSceneReady(scene)
       scene.fit()
     })
@@ -155,7 +169,16 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
      * 这里把单帧错误隔离开：跳过这一帧、打出堆栈，循环继续跑。
      */
     const loop = (now: number): void => {
-      const frameMs = now - last
+      const elapsed = now - last
+      /*
+       * 「省电」档的帧率上限：跳过这一帧但**不重置 last**，下一次的 dt 才会把跳过的时间
+       * 累进去，动画速度不随帧率改变。perf 统计也只算真正执行的帧。
+       */
+      if (elapsed + 0.5 < renderTimingRef.current.minFrameMs) {
+        schedule()
+        return
+      }
+      const frameMs = elapsed
       const dt = Math.min(0.1, frameMs / 1000)
       last = now
       const startedAt = performance.now()
@@ -241,7 +264,9 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
     const schedule = (): void => {
       if (disposed) return
       if (document.visibilityState === 'hidden') {
-        timer = window.setTimeout(() => loop(performance.now()), 16)
+        // 后台定时器同样尊重「省电」档的上限（默认 16ms ≈ 62.5fps，省电档 ~16.7ms）
+        const minFrameMs = renderTimingRef.current.minFrameMs
+        timer = window.setTimeout(() => loop(performance.now()), minFrameMs > 0 ? Math.max(16, minFrameMs) : 16)
         return
       }
       raf = requestAnimationFrame(loop)
@@ -300,14 +325,16 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
   }, [])
 
   /**
-   * 全局设置（骨骼样式）→ 场景。
+   * 全局设置（骨骼样式 / 渲染质量）→ 场景。
    *
    * 与预览通道同一个套路：设置写在 settings store（高频、不进工程），
-   * 视口订阅它按需重画；不经过主 store，改动不会顺带触发文档同步那一套。
+   * 视口订阅它即时生效；不经过主 store，改动不会顺带触发文档同步那一套。
    */
   useEffect(() => {
     const apply = (): void => {
-      sceneRef.current?.setBoneStyle(useSettingsStore.getState().boneStyle)
+      const settings = useSettingsStore.getState()
+      sceneRef.current?.setBoneStyle(settings.boneStyle)
+      applyRenderQuality(sceneRef.current, renderTimingRef.current)
     }
     apply()
     return useSettingsStore.subscribe(apply)

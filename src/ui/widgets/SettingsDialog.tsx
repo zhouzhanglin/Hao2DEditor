@@ -28,6 +28,8 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
   const boneStyle = useSettingsStore((s) => s.boneStyle)
   const setBoneStyle = useSettingsStore((s) => s.setBoneStyle)
   const resetBoneStyle = useSettingsStore((s) => s.resetBoneStyle)
+  const renderQuality = useSettingsStore((s) => s.renderQuality)
+  const setRenderQuality = useSettingsStore((s) => s.setRenderQuality)
   const rootRef = useRef<HTMLDivElement | null>(null)
   /** 标题栏拖动弹窗（见 dialogDrag） */
   const { panelStyle, handleProps } = useDialogDrag()
@@ -91,6 +93,28 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
               ))}
             </select>
           </label>
+
+          {/* 渲染质量：只影响编辑器视口的清晰度 / 帧率，不进工程、不影响导出 */}
+          <section
+            className="flex flex-col gap-1 rounded-[4px] border border-line/60 px-2.5 py-2"
+            title={t('切换视口渲染质量：降低像素密度与帧率可以明显减少 GPU 占用')}
+          >
+            <label className="flex items-center gap-2">
+              <span className="hao-label w-[52px] shrink-0">{t('渲染质量')}</span>
+              <select
+                className="hao-field min-w-0 flex-1"
+                value={renderQuality}
+                onChange={(event) => setRenderQuality(event.target.value as typeof renderQuality)}
+              >
+                <option value="high">{t('高清（默认）')}</option>
+                <option value="balanced">{t('均衡')}</option>
+                <option value="power">{t('省电')}</option>
+              </select>
+            </label>
+            <span className="text-3xs leading-[15px] text-content-lo">
+              {t('只影响编辑器视口的清晰度与帧率；不进工程、不影响导出，改完立即生效。')}
+            </span>
+          </section>
 
           {/* Spine 导出：图集名追加 .txt */}
           <label

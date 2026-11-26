@@ -80,7 +80,7 @@ export interface SceneViewState {
   overlay: OverlayState
   /**
    * 各类对象是否**可被选中**（点选 / 框选）。与 `overlay` 的可见性独立：
-   * 能否点中 = 可见 && 可选（见 `isPickable`）。
+   * 能否点中 = 可见 && 可选（见 `canPick`）。
    */
   selectable: { display: boolean; bones: boolean; constraints: boolean }
   /** 舞台参考图（背景，仅编辑器用）：null = 没设置；贴图由 ViewportCanvas 异步喂进来 */
@@ -1000,7 +1000,7 @@ export class EditorScene {
    * 两个开关独立：看得见但不想点到（对着背景调骨骼时锁住图片）是常见需求；
    * 而关掉显示时如果还能点中，「点空白处选中看不见的图片」就说不通了。
    */
-  private isPickable(kind: 'bone' | 'display' | 'constraint'): boolean {
+  canPick(kind: 'bone' | 'display' | 'constraint'): boolean {
     const { overlay, selectable } = this.viewState
     if (kind === 'bone') return overlay.bones && selectable.bones
     if (kind === 'constraint') return overlay.constraints && selectable.constraints
@@ -1012,7 +1012,7 @@ export class EditorScene {
     // 骨骼层关掉（或勾了不可选）时**不按骨骼体拾取**：看不见的骨骼点中了也不知道点的是谁
     //（正是「准星选不中」的根因 —— 准星旁边压着看不见的骨骼体，永远抢在约束兜底前面）。
     // 此时骨架里唯一可点的记号就是「约束」层上的目标准星，见下面的兜底
-    if (this.isPickable('bone')) {
+    if (this.canPick('bone')) {
       const hit = pickBone(this.bundle.skeleton, worldX, worldY, this.viewport.pixelsToWorld(8))
       if (hit) return hit
     }
@@ -1040,7 +1040,7 @@ export class EditorScene {
    * 点圆环外侧那一圈（以及右侧弹簧折线附近）就是选中约束本身。
    */
   pickPhysicsConstraintAt(worldX: number, worldY: number): { name: string; boneIndex: number } | null {
-    if (!this.bundle || !this.isPickable('constraint')) return null
+    if (!this.bundle || !this.canPick('constraint')) return null
     const tolerance = this.viewport.pixelsToWorld(10)
     // 弹簧折线画在圆环右侧，再往外留一段可点区域（否则只有圆环能点，弹簧看着像装饰）
     const springReach = this.viewport.pixelsToWorld(10 + 6 * 6 + 6)
@@ -1072,7 +1072,7 @@ export class EditorScene {
    * 公开给工具层用：准星要排在附件拾取前面（IK 节点常压在角色图片上）
    */
   constraintTargetIndexAt(worldX: number, worldY: number): number {
-    if (!this.bundle || !this.isPickable('constraint')) return -1
+    if (!this.bundle || !this.canPick('constraint')) return -1
     const tolerance = this.viewport.pixelsToWorld(10)
     let best = -1
     let bestDistance = tolerance
@@ -1101,7 +1101,7 @@ export class EditorScene {
    * 此时骨架里唯一可点的是「约束」准星（见 pickBoneAt 的兜底），选中后走 gizmo 拖拽
    */
   pickBoneHandleAt(worldX: number, worldY: number): BoneHandleHit | null {
-    if (!this.bundle || !this.isPickable('bone')) return null
+    if (!this.bundle || !this.canPick('bone')) return null
     return pickBoneHandle(
       this.bundle.skeleton,
       worldX,
@@ -1321,7 +1321,7 @@ export class EditorScene {
   pickAttachmentAt(worldX: number, worldY: number): { slot: string; attachment: string } | null {
     const bundle = this.bundle
     // display 隐藏或勾了「不可选」时点不中：否则会点空白处选中看不见的图片
-    if (!bundle || !this.isPickable('display')) return null
+    if (!bundle || !this.canPick('display')) return null
     // 嵌套骨架先判：它是一整块子角色，点进去应该选中「骨架」display 本身
     const nested = this.pickNestDisplayAt(worldX, worldY)
     if (nested) return nested
@@ -1425,7 +1425,7 @@ export class EditorScene {
     const bundle = this.bundle
     const mesh = this.meshResult
     // display 隐藏或不可选时一个都不框（与点选同一口径）
-    if (!bundle || !mesh || !this.isPickable('display')) return []
+    if (!bundle || !mesh || !this.canPick('display')) return []
     // 像素级命中判定放在 picking 里（纯函数，可单测）；这里只负责换算单位与取名字
     const hitSlots = pickAttachmentSlotsInRect(mesh, { minX, minY, maxX, maxY }, {
       step: this.viewport.pixelsToWorld(1),
@@ -1461,7 +1461,7 @@ export class EditorScene {
    */
   pickBonesInRect(minX: number, minY: number, maxX: number, maxY: number): string[] {
     const bundle = this.bundle
-    if (!bundle || !this.isPickable('bone')) return []
+    if (!bundle || !this.canPick('bone')) return []
     const out: string[] = []
     for (const index of pickBonesInRectPure(bundle.skeleton, { minX, minY, maxX, maxY })) {
       const name = bundle.asset.bones[index]?.name ?? ''
@@ -1479,7 +1479,7 @@ export class EditorScene {
    */
   pickConstraintsInRect(minX: number, minY: number, maxX: number, maxY: number): string[] {
     const bundle = this.bundle
-    if (!bundle || !this.isPickable('constraint')) return []
+    if (!bundle || !this.canPick('constraint')) return []
     const pad = this.viewport.pixelsToWorld(10)
     const out: string[] = []
     for (const index of pickConstraintsInRectPure(
@@ -2324,8 +2324,11 @@ export class EditorScene {
       }
     }
     const outlineVisible =
-      showBoneLayer &&
-      // 图片整层关掉时不必再画选中框：框里什么都没有
+      /*
+       * **不看 `showBoneLayer`**：那是「骨骼 / 约束」两个开关的合并结果，而描边标的是**图片**。
+       * 以前挂上去，导致关掉骨骼 + 约束后选中图片看不见任何轮廓 —— 层级树里明明选上了，
+       * 视口一片安静，看着像「没选中」。只看图片层自己是否可见就够了。
+       */
       state.overlay.display &&
       bundle !== null &&
       !boundaryDraw &&
@@ -2358,12 +2361,16 @@ export class EditorScene {
     this.gizmoFill.clear()
     const attachmentGizmo = state.selectedAttachment
     const showGizmo =
-      showBoneLayer &&
       bundle !== null &&
       state.showGizmo &&
-      // 斜切还要算上「借来的宿主骨」：选中 display 时没有骨骼选中、也没有附件操作器，
-      // 只按前两个条件判会让包围盒整个不显示 —— 那正是「斜切好像没有了一样」的由来
-      (selectedIndex >= 0 || attachmentGizmo !== null || (state.gizmo === 'shear' && state.shearBone !== ''))
+      /*
+       * 骨骼操作器跟着骨骼层（看不见的骨骼不该有手柄浮在空气里）；
+       * **附件操作器与「借来的宿主骨」斜切框不跟**：它们属于图片，图片看得见就该能拖。
+       * 以前整个条件都挂在 `showBoneLayer` 上，关掉骨骼 + 约束后选中图片既没描边也没坐标轴。
+       */
+      (attachmentGizmo !== null ||
+        (state.gizmo === 'shear' && state.shearBone !== '') ||
+        (showBoneLayer && selectedIndex >= 0))
     this.gizmoStroke.visible = showGizmo
     this.gizmoFill.visible = showGizmo
     if (showGizmo && bundle) {

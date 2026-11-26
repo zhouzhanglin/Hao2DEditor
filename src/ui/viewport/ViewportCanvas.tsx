@@ -435,7 +435,7 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
           : ''
       scene.setViewState({
         overlay: tools.overlay,
-        // 「可见」与「可选」是两套开关：拾取规则 = 可见 && 可选（见 Scene.isPickable）
+        // 「可见」与「可选」是两套开关：拾取规则 = 可见 && 可选（见 Scene.canPick）
         selectable: tools.selectable,
         gizmo: tools.gizmo,
         // 本地 / 世界空间：视口据此决定小坐标轴的朝向与拖动的换算方向
@@ -1012,10 +1012,12 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
         /*
          * 一次拖动只框一种类型，按**当前选中**决定：
          * - 选着 display → 只框 display（骨骼 / 约束排除）；
-         * - 选着骨骼 → 只框骨骼；
+         * - 选着骨骼 → 只框骨骼（**哪怕骨骼层关着、框不到，也不改类型**）；
          * - 选着约束 → 只框约束；
          * - 什么都没选 → 交给拖动过程：先框到什么就框哪一类（见 onPointerMove）。
+         *
          * 这样「框选」不会在同一个框里混着选三种东西，导致下一步的整批操作语义不明。
+         * 锁定类型当前不可见 / 不可选时，不悄悄换类型，而是在提示里说明「本次框选不会命中」。
          */
         const current = useSelectionStore.getState()
         const mode: BoxSelectMode | null =
@@ -1100,7 +1102,17 @@ export default function ViewportCanvas({ onSceneReady, onStatus }: ViewportCanva
               : box.mode === 'display'
                 ? t('框选 display：拖出矩形，松手选中框内的附件')
                 : t('框选：先框到什么就框哪一类（骨骼 / 约束 / display）')
-        onStatus(box.additive ? t('{0}（{1}）', [hint, t('Shift：加进当前选择')]) : hint)
+        /*
+         * 锁定类型当前不可见 / 不可选时**不改类型**（按用户定的规则），但要说明原因 ——
+         * 否则「拖了半天一个都没选中」会像功能坏了。
+         */
+        const blockedHint =
+          box.mode !== null && !scene.canPick(box.mode) ? t('（这一类当前不可见或不可选，本次框选不会命中）') : ''
+        onStatus(
+          box.additive
+            ? t('{0}（{1}）', [hint + blockedHint, t('Shift：加进当前选择')])
+            : hint + blockedHint
+        )
       }
       /*
        * 边拉框边算「这一框会选中谁」：不松手也能看到命中项的高亮。

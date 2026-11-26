@@ -1084,6 +1084,8 @@ export const en: Record<string, string> = {
   '框选 display：拖出矩形，松手选中框内的附件':
     'Box select displays: drag a rectangle, release to select the attachments inside',
   'Shift：加进当前选择': 'Shift: add to current selection',
+  '（这一类当前不可见或不可选，本次框选不会命中）':
+    ' (this kind is currently hidden or not selectable, so this box select will not hit anything)',
   '框选骨骼：拖出矩形，松手选中框内的骨骼':
     'Box select bones: drag a rectangle, release to select the bones inside',
   '框选约束：拖出矩形，松手选中框内的约束':

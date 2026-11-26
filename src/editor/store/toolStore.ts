@@ -255,7 +255,7 @@ export interface OverlayState {
  * 各类型对象是否**可被选中**（点选 / 框选）。
  *
  * 与 `overlay`（可见性）是两件事：可以「看得见但不想点到」（对着背景调整骨骼时锁住图片），
- * 也可以「看不见因此也点不到」。实际能否点中 = 可见 && 可选（见 `Scene.isPickable`），
+ * 也可以「看不见因此也点不到」。实际能否点中 = 可见 && 可选（见 `Scene.canPick`），
  * 这样关掉显示时不会出现「点空白处选中了看不见的图片」。
  */
 export interface SelectableState {
